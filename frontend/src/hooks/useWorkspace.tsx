@@ -11,6 +11,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Outlet } from "react-router";
 import type { DocNode, Team } from "@/api";
@@ -40,7 +41,10 @@ interface WorkspaceState {
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null);
 
-export function WorkspaceProvider() {
+// Usable two ways: as a react-router layout route (mobile — renders <Outlet/>),
+// or as a plain wrapper around children (desktop shell). Backward compatible:
+// with no children it behaves exactly as before.
+export function WorkspaceProvider({ children }: { children?: ReactNode }) {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [teamsError, setTeamsError] = useState<string | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(true);
@@ -129,9 +133,7 @@ export function WorkspaceProvider() {
   };
 
   return (
-    <WorkspaceContext value={value}>
-      <Outlet />
-    </WorkspaceContext>
+    <WorkspaceContext value={value}>{children ?? <Outlet />}</WorkspaceContext>
   );
 }
 
