@@ -1,0 +1,1521 @@
+openapi: 3.0.0
+info:
+  title: micro-agent-teams backend API
+  version: "0.2"
+servers:
+  - url: "http://localhost:8080"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Authenticated health check (minimal example endpoint)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                  message:
+                    type: string
+                required:
+                  - code
+                  - message
+
+  # -- Chat threads ---------------------------------------------------------
+
+  /chat:
+    get:
+      tags: [chat]
+      operationId: listChats
+      summary: >
+        List the current user's chats, each enriched with its members and its last
+        message, most-recent activity first (everything the chat list needs in one call).
+      parameters:
+        - name: page_start
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListChatsResponse"
+    post:
+      tags: [chat]
+      operationId: createThread
+      summary: Create a thread (caller becomes owner)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateThreadRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thread"
+
+  /chat/{id}:
+    get:
+      tags: [chat]
+      operationId: getThread
+      summary: Get thread detail plus members
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadDetail"
+    patch:
+      tags: [chat]
+      operationId: renameThread
+      summary: Rename a thread (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameThreadRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thread"
+    delete:
+      tags: [chat]
+      operationId: dissolveThread
+      summary: Dissolve a thread (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Dissolved
+
+  # -- Messages ------------------------------------------------------------
+
+  /chat/{id}/messages:
+    get:
+      tags: [chat]
+      operationId: listMessages
+      summary: List messages with cursor pagination (member+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: page_start
+          in: query
+          description: id of the first message on the page (cursor)
+          schema:
+            type: integer
+            format: int64
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListMessagesResponse"
+    post:
+      tags: [chat]
+      operationId: postMessage
+      summary: Post a message to a thread (member+); persisted then broadcast via WebSocket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostMessageRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+
+
+  /chat/{id}/members:
+    get:
+      tags: [chat]
+      operationId: listThreadMembers
+      summary: List a thread's members
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThreadMember"
+    post:
+      tags: [chat]
+      operationId: addThreadMember
+      summary: Add a member to a thread (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMemberRequest"
+      responses:
+        "204":
+          description: Added
+
+  /chat/{id}/members/{userId}:
+    delete:
+      tags: [chat]
+      operationId: removeThreadMember
+      summary: Remove a member from a thread (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Removed
+    patch:
+      tags: [chat]
+      operationId: changeThreadMemberRole
+      summary: Change a thread member's role (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRoleRequest"
+      responses:
+        "204":
+          description: Role changed
+
+  # -- Teams ----------------------------------------------------------------
+
+  /team:
+    get:
+      tags: [team]
+      operationId: listTeams
+      summary: List teams the current user is a member of
+      parameters:
+        - name: role
+          in: query
+          description: Only teams where the caller has this role (OWNER/ADMIN/MEMBER)
+          schema:
+            type: string
+        - name: page_start
+          in: query
+          description: id of the first team on the page (cursor)
+          schema:
+            type: integer
+            format: int64
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTeamsResponse"
+    post:
+      tags: [team]
+      operationId: createTeam
+      summary: Create a team (caller becomes owner)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+
+  /team/{id}:
+    get:
+      tags: [team]
+      operationId: getTeam
+      summary: Get team detail plus members
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamDetail"
+    patch:
+      tags: [team]
+      operationId: renameTeam
+      summary: Rename a team (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameTeamRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+    delete:
+      tags: [team]
+      operationId: deleteTeam
+      summary: Delete a team (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Deleted
+
+  /team/{id}/members:
+    get:
+      tags: [team]
+      operationId: listTeamMembers
+      summary: List a team's members
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamMember"
+    post:
+      tags: [team]
+      operationId: addTeamMember
+      summary: Add a member to a team (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddTeamMemberRequest"
+      responses:
+        "204":
+          description: Added
+
+  /team/{id}/members/{userId}:
+    patch:
+      tags: [team]
+      operationId: changeMemberRole
+      summary: Change a member's role (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRoleRequest"
+      responses:
+        "204":
+          description: Role changed
+    delete:
+      tags: [team]
+      operationId: removeTeamMember
+      summary: Remove a member from a team (admin+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Removed
+
+  # -- Documents (a team's git tree; no document table) ---------------------
+
+  # -- A team's machines (ownership binding only; enumerate via GET /machine?teamId=) --
+
+  /team/{id}/machine:
+    post:
+      tags: [team]
+      operationId: bindTeamMachine
+      summary: Associate a machine with this team. The model is symmetric and owner-less.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BindMachineRequest"
+      responses:
+        "204":
+          description: Bound
+  /team/{id}/machine/{machineId}:
+    delete:
+      tags: [team]
+      operationId: unbindTeamMachine
+      summary: Disassociate a machine from this team
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: machineId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Unbound
+
+  /team/{id}/document:
+    get:
+      tags: [team]
+      operationId: getDocument
+      summary: >
+        Read a team's document tree, one file, its history or a diff — selected by query
+        flags rather than separate endpoints (future views = new flags).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: path
+          in: query
+          description: Repo-relative logical path; empty means the repo root
+          schema:
+            type: string
+            default: ""
+        - name: recursive
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: content
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: history
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: diff
+          in: query
+          description: Commit sha to diff against
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocNode"
+    put:
+      tags: [team]
+      operationId: writeDocument
+      summary: Create or overwrite a file (raw text body)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocNode"
+    patch:
+      tags: [team]
+      operationId: moveDocument
+      summary: Move / rename a file or folder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveDocumentRequest"
+      responses:
+        "200":
+          description: Moved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocNode"
+    delete:
+      tags: [team]
+      operationId: deleteDocument
+      summary: Delete a file or folder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # -- Machines (an enrolled host running our CLI; knows nothing of agents) --------
+  # One enumeration API + composable filters -- never one endpoint per query shape.
+
+  /machine:
+    get:
+      tags: [machine]
+      operationId: listMachines
+      summary: >
+        Machines visible to the caller, narrowed by any combination of the filters below.
+        Adding a way to slice machines means adding a filter here, never a new endpoint.
+      parameters:
+        - name: teamId
+          in: query
+          description: Only machines associated with this team
+          schema:
+            type: integer
+            format: int64
+        - name: online
+          in: query
+          description: Only machines whose control channel is (dis)connected right now
+          schema:
+            type: boolean
+        - name: page_start
+          in: query
+          schema:
+            type: string
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListMachinesResponse"
+  /machine/{id}:
+    get:
+      tags: [machine]
+      operationId: getMachine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Machine"
+    patch:
+      tags: [machine]
+      operationId: renameMachine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameMachineRequest"
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Machine"
+    delete:
+      tags: [machine]
+      operationId: forgetMachine
+      summary: Forget the machine entirely (revokes its token; it must re-enroll)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Forgotten
+  /machine/enroll/start:
+    post:
+      tags: [machine]
+      operationId: startEnrollment
+      summary: Public. A machine with no token mints a pending code for a human to approve.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartEnrollmentRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartEnrollmentResponse"
+  /machine/enroll/poll:
+    post:
+      tags: [machine]
+      operationId: pollEnrollment
+      summary: Public. The machine polls until a human approves, then receives its token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PollEnrollmentRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollEnrollmentResponse"
+  /machine/enroll/approve:
+    post:
+      tags: [machine]
+      operationId: approveEnrollment
+      summary: A logged-in human approves a pending code and picks the teams it serves.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveEnrollmentRequest"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Machine"
+
+  # -- Agents (one application that runs on a machine) -----------------------------
+
+  /agent:
+    get:
+      tags: [agent]
+      operationId: listAgents
+      summary: >
+        Agents visible to the caller, narrowed by any combination of the filters below --
+        this is the only agent enumeration (avatar presence is userId=..., a group's agents
+        is threadId=...). `sid` is present only when the caller may watch the live screen.
+      parameters:
+        - name: userId
+          in: query
+          description: Only these agent users. Non-agents simply do not come back.
+          schema:
+            type: array
+            items:
+              type: integer
+              format: int64
+          style: form
+          explode: false
+        - name: threadId
+          in: query
+          description: Only agents that are members of this chat thread
+          schema:
+            type: integer
+            format: int64
+        - name: teamId
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: machineId
+          in: query
+          schema:
+            type: string
+        - name: online
+          in: query
+          schema:
+            type: boolean
+        - name: page_start
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAgentsResponse"
+    post:
+      tags: [agent]
+      operationId: openAgent
+      summary: Open an agent (a fresh agent user + its driven screen) on a machine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAgentRequest"
+      responses:
+        "201":
+          description: Opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenedAgent"
+  /agent/{userId}:
+    delete:
+      tags: [agent]
+      operationId: closeAgent
+      summary: Close an agent and its screen
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Closed
+  /agent/note:
+    post:
+      tags: [agent]
+      operationId: postNote
+      summary: >
+        The agent tool-door. A screen's CLI runs `microteams api post-note`, authenticated by its
+        machine token plus the per-screen token, and the note lands in chat as the agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostNoteRequest"
+      responses:
+        "200":
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+
+
+components:
+  schemas:
+    # -- Shared with existing code -----------------------------------------
+
+    User:
+      type: object
+      required:
+        - avatarId
+        - id
+        - intro
+        - nickname
+        - username
+      properties:
+        avatarId:
+          description: avatar id
+          type: integer
+          format: int64
+        id:
+          description: user id
+          format: int64
+          minimum: 1
+          type: integer
+        intro:
+          default: This user has not set an introduction yet.
+          description: short bio
+          type: string
+        nickname:
+          description: nickname
+          type: string
+        username:
+          description: username
+          type: string
+    Page:
+      type: object
+      description: pagination info
+      required:
+        - page_start
+        - page_size
+        - has_prev
+        - has_more
+      properties:
+        page_start:
+          type: integer
+          format: int64
+          description: id of the first item on this page
+        page_size:
+          type: integer
+          description: items per page
+        has_prev:
+          type: boolean
+          description: whether a previous page exists
+        prev_start:
+          type: integer
+          format: int64
+          description: id of the first item on the previous page
+        has_more:
+          type: boolean
+          description: whether a next page exists
+        next_start:
+          type: integer
+          format: int64
+          description: id of the first item on the next page
+    ApproveType:
+      description: approve status
+      enum:
+        - APPROVED
+        - DISAPPROVED
+        - NONE
+
+    # -- Chat schemas (schema: microteams, per MILESTONE-2-PLAN.md §3.1) ---------
+
+    ListChatsResponse:
+      type: object
+      required:
+        - chats
+        - page
+      properties:
+        chats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatSummary"
+        page:
+          $ref: "#/components/schemas/Page"
+
+    # A chat as the list shows it: who is in it and what was said last.
+    ChatSummary:
+      type: object
+      required:
+        - id
+        - title
+        - members
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMember"
+        lastMessage:
+          $ref: "#/components/schemas/ChatLastMessage"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last activity (last message time, else the chat's creation time)
+
+    ChatMember:
+      type: object
+      required:
+        - userId
+        - nickname
+      properties:
+        userId:
+          type: integer
+          format: int64
+        nickname:
+          type: string
+        avatarId:
+          type: integer
+
+    ChatLastMessage:
+      type: object
+      required:
+        - content
+        - senderId
+        - createdAt
+      properties:
+        content:
+          type: string
+        senderId:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
+
+    ListMessagesResponse:
+      type: object
+      required:
+        - messages
+        - page
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        page:
+          $ref: "#/components/schemas/Page"
+
+    Thread:
+      type: object
+      description: Chat thread (group or direct)
+      required:
+        - id
+        - createdAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ThreadDetail:
+      type: object
+      required:
+        - thread
+        - members
+      properties:
+        thread:
+          $ref: "#/components/schemas/Thread"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThreadMember"
+
+    ThreadMember:
+      type: object
+      description: A user's membership in a thread
+      required:
+        - id
+        - threadId
+        - userId
+        - role
+        - joinedAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        threadId:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        role:
+          type: string
+          enum: [MEMBER, ADMIN, OWNER]
+          description: 0=MEMBER, 1=ADMIN, 2=OWNER
+          minimum: 0
+          maximum: 2
+        joinedAt:
+          type: string
+          format: date-time
+        nickname:
+          description: >
+            The member's display name, carried here so a thread view can paint its members
+            without a second lookup (ChatMember carries the same for the chat list).
+          type: string
+        avatarId:
+          description: The member's avatar; absent if they have none.
+          type: integer
+          format: int64
+
+    Message:
+      type: object
+      description: A chat message in a thread
+      required:
+        - id
+        - threadId
+        - senderId
+        - content
+        - type
+        - createdAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        threadId:
+          type: integer
+          format: int64
+        senderId:
+          type: integer
+          format: int64
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        editedAt:
+          type: string
+          format: date-time
+
+    # -- Request bodies ----------------------------------------------------
+
+    CreateThreadRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        memberIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    RenameThreadRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+
+    PostMessageRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+
+    AddMemberRequest:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: integer
+          format: int64
+        role:
+          type: string
+          enum: [MEMBER, ADMIN, OWNER]
+
+    ChangeRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [OWNER, ADMIN, MEMBER]
+
+    # -- Teams -------------------------------------------------------------
+
+    ListTeamsResponse:
+      type: object
+      required:
+        - teams
+        - page
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Team"
+        page:
+          $ref: "#/components/schemas/Page"
+
+    Team:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TeamDetail:
+      type: object
+      required: [team, members]
+      properties:
+        team:
+          $ref: "#/components/schemas/Team"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"
+
+    TeamMember:
+      type: object
+      required: [userId, role]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        nickname:
+          type: string
+        role:
+          type: string
+          enum: [OWNER, ADMIN, MEMBER]
+
+    CreateTeamRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+
+    RenameTeamRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+
+    AddTeamMemberRequest:
+      type: object
+      required:
+        - userId
+        - role
+      properties:
+        userId:
+          type: integer
+          format: int64
+        role:
+          type: string
+          enum: [OWNER, ADMIN, MEMBER]
+
+
+    # -- Documents ---------------------------------------------------------
+
+    # One node of a team's git document tree. Recursive: a folder carries children.
+    # Optional fields appear only when the matching query flag asked for them.
+    DocNode:
+      type: object
+      required:
+        - path
+        - isFolder
+      properties:
+        path:
+          type: string
+        isFolder:
+          type: boolean
+        commitSha:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocNode"
+        content:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocCommit"
+        diff:
+          type: string
+
+    DocCommit:
+      type: object
+      required:
+        - sha
+        - message
+        - author
+        - timestamp
+      properties:
+        sha:
+          type: string
+        message:
+          type: string
+        author:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    MoveDocumentRequest:
+      type: object
+      required:
+        - newPath
+      properties:
+        newPath:
+          type: string
+
+    # -- Machines -----------------------------------------------------------
+
+    ListMachinesResponse:
+      type: object
+      required: [machines, page]
+      properties:
+        machines:
+          type: array
+          items:
+            $ref: "#/components/schemas/Machine"
+        page:
+          $ref: "#/components/schemas/Page"
+
+    Machine:
+      type: object
+      description: An enrolled host running our CLI. It hosts screens; it knows nothing of agents.
+      required: [id, name, online, teamIds]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        online:
+          type: boolean
+          description: Whether its control channel is connected right now
+        teamIds:
+          type: array
+          description: The teams it serves. Symmetric and owner-less -- a machine may serve many.
+          items:
+            type: integer
+            format: int64
+        createdAt:
+          type: string
+          format: date-time
+
+    RenameMachineRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+
+    BindMachineRequest:
+      type: object
+      required: [machineId]
+      properties:
+        machineId:
+          type: string
+
+    StartEnrollmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The machine's self-reported hostname
+
+    StartEnrollmentResponse:
+      type: object
+      required: [code, approveUrl]
+      properties:
+        code:
+          type: string
+        approveUrl:
+          type: string
+
+    PollEnrollmentRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+
+    PollEnrollmentResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: pending | approved
+        machineId:
+          type: string
+        token:
+          type: string
+          description: The durable machine token, returned once on approval
+
+    ApproveEnrollmentRequest:
+      type: object
+      required: [code, teamIds]
+      properties:
+        code:
+          type: string
+        teamIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    # -- Agents -------------------------------------------------------------
+
+    ListAgentsResponse:
+      type: object
+      required: [agents, page]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        page:
+          $ref: "#/components/schemas/Page"
+
+    Agent:
+      type: object
+      description: >
+        An agent is a user that software drives. It is not necessarily backed by a screen --
+        machineId/sid are absent for one that is not, or that is not live right now.
+      required: [userId, nickname, online]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        nickname:
+          type: string
+        avatarId:
+          type: integer
+          format: int64
+        online:
+          type: boolean
+        machineId:
+          type: string
+        sid:
+          type: string
+          description: The live screen id -- present only if the caller may watch it
+        teamId:
+          type: integer
+          format: int64
+        driver:
+          type: string
+          description: Which driver runs it (claude, codex, ...)
+        vars:
+          type: object
+          description: >
+            Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens).
+            Opaque to the machine layer; the UI reads what it recognises.
+          additionalProperties: true
+
+    OpenAgentRequest:
+      type: object
+      required: [machineId, teamId]
+      properties:
+        machineId:
+          type: string
+        teamId:
+          type: integer
+          format: int64
+        nickname:
+          type: string
+        cwd:
+          type: string
+        driver:
+          type: string
+          description: Defaults to the server's default driver (claude)
+
+    OpenedAgent:
+      type: object
+      required: [agentUserId, sid, machineId, screenToken]
+      properties:
+        agentUserId:
+          type: integer
+          format: int64
+        sid:
+          type: string
+        machineId:
+          type: string
+        screenToken:
+          type: string
+
+    PostNoteRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        thread_id:
+          type: integer
+          format: int64
+          description: Defaults to the thread the agent was last spoken to in

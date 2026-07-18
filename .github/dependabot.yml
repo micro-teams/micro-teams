@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: 'maven'
+    directory: '/backend'
+    schedule:
+      interval: 'daily'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'daily'
+
+  - package-ecosystem: 'devcontainers'
+    directory: '/backend'
+    schedule:
+      interval: 'daily'
+
+  - package-ecosystem: 'npm'
+    directory: '/frontend'
+    schedule:
+      interval: 'daily'

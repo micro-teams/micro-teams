@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+  merge_group:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+          cache-dependency-path: backend/pom.xml
+          # backend/.gitignore excludes settings.xml/toolchains.xml relative to
+          # backend/ (this repo's original layout before it moved into a
+          # monorepo subdirectory) — point setup-java there too, or the
+          # spotless "uncommitted changes" check below sees them as untracked.
+          settings-path: ${{ github.workspace }}/backend
+
+      # Our tests are integration tests: they need a real Postgres (with the "microteams"
+      # schema) and the real cheese-auth service (users are created + logged in
+      # through it). One script brings both up, mirroring the local setup.
+      - name: Start dependencies (Postgres + cheese-auth)
+        run: ./scripts/dependency-start.sh
+
+      # application.properties already matches the services the script starts
+      # (localhost:5432/postgres, jwt-secret=test-secret, legacy-url=:8091). Only
+      # override what differs in CI: create the schema on first run, and keep the
+      # git document repos in the runner's temp dir.
+      - name: Build with Maven
+        run: ./mvnw install
+        env:
+          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
+
+      - name: Check uncommitted changes to ensure format applied
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            git status
+            echo "There are uncommitted changes. Please run './mvnw spotless:apply' and commit the changes."
+            exit 1
+          else
+            echo "No uncommitted changes."
+          fi
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: backend/target/*.jar
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: backend/target/site/jacoco

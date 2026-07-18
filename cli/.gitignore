@@ -1,0 +1,9 @@
+# built binary
+/microteams
+# local connector config (holds device credentials) — never commit
+/config.json
+/*.local.json
+
+# built binary (local)
+/microteams
+/microteams

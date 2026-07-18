@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <!-- Project Configuration -->
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.4.2</version>
+        <relativePath/>
+    </parent>
+
+    <!-- Project Info -->
+    <groupId>app.microteams</groupId>
+    <artifactId>backend</artifactId>
+    <version>0.9.2</version>
+    <name>backend</name>
+    <description>Backend for the MicroTeams web application</description>
+    <url/>
+    <licenses>
+        <license/>
+    </licenses>
+    <developers>
+        <developer/>
+    </developers>
+    <scm>
+        <connection/>
+        <developerConnection/>
+        <tag/>
+        <url/>
+    </scm>
+    <properties>
+        <java.version>21</java.version>
+        <kotlin.version>2.1.10</kotlin.version>
+    </properties>
+
+    <!-- Project Dependencies -->
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-reflect</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-test-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-kotlin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>javax.servlet</groupId>
+            <artifactId>servlet-api</artifactId>
+            <version>2.5</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>javax.validation</groupId>
+            <artifactId>validation-api</artifactId>
+            <version>2.0.1.Final</version>
+        </dependency>
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>2.2.52</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-models</artifactId>
+            <version>2.2.52</version>
+        </dependency>
+        <dependency>
+            <groupId>com.ninja-squad</groupId>
+            <artifactId>springmockk</artifactId>
+            <version>4.0.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>at.favre.lib</groupId>
+            <artifactId>bcrypt</artifactId>
+            <version>0.10.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>4.6.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jersey.core</groupId>
+            <artifactId>jersey-client</artifactId>
+            <version>3.1.10</version>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jersey.media</groupId>
+            <artifactId>jersey-media-json-jackson</artifactId>
+            <version>3.1.10</version>
+        </dependency>
+        <!--
+          Pinned to 3.1.10 to match jersey-client / jersey-hk2 / jersey-media-json-jackson above.
+          A dependabot bump to 4.0.2 dragged in jersey-common 4.x, whose
+          org.glassfish.jersey.innate.spi.MessageBodyWorkersSettable does not exist in the 3.1.10
+          client — every request then died with NoClassDefFoundError. Keep all Jersey artifacts on
+          one version.
+        -->
+        <dependency>
+            <groupId>org.glassfish.jersey.media</groupId>
+            <artifactId>jersey-media-multipart</artifactId>
+            <version>3.1.10</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jersey.inject</groupId>
+            <artifactId>jersey-hk2</artifactId>
+            <version>3.1.10</version>
+        </dependency>
+        <dependency>
+            <groupId>org.parboiled</groupId>
+            <artifactId>parboiled-java</artifactId>
+            <version>1.4.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.ow2.asm</groupId>
+            <artifactId>asm</artifactId>
+            <version>9.7.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aallam.openai</groupId>
+            <artifactId>openai-client-jvm</artifactId>
+            <version>4.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-client-java-jvm</artifactId>
+            <version>3.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-batch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.batch</groupId>
+            <artifactId>spring-batch-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>7.7.0.202606012155-r</version>
+        </dependency>
+    </dependencies>
+
+    <!-- Build Configuration -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <configuration>
+                    <args>
+                        <arg>-Xjsr305=strict</arg>
+                    </args>
+                    <compilerPlugins>
+                        <plugin>spring</plugin>
+                        <plugin>jpa</plugin>
+                        <plugin>all-open</plugin>
+                    </compilerPlugins>
+                    <!--
+                      `spring` opens @Component/@Transactional classes and `jpa` only adds a no-arg
+                      constructor to @Entity classes — NEITHER opens @Entity/@MappedSuperclass. A
+                      Kotlin class and its `val` getters are final by default, so an entity reached
+                      through a lazy to-one (User/Avatar via UserProfile) cannot be given the
+                      runtime proxy subclass Hibernate needs, and the SessionFactory fails to build
+                      with "Getter methods of lazy classes cannot be final". Opening the JPA
+                      annotations here is what actually makes entities proxyable.
+                    -->
+                    <pluginOptions>
+                        <option>all-open:annotation=jakarta.persistence.Entity</option>
+                        <option>all-open:annotation=jakarta.persistence.MappedSuperclass</option>
+                        <option>all-open:annotation=jakarta.persistence.Embeddable</option>
+                    </pluginOptions>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-allopen</artifactId>
+                        <version>${kotlin.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-noarg</artifactId>
+                        <version>2.1.10</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>7.10.0</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>../MicroTeams-API.yml</inputSpec>
+                            <generatorName>kotlin-spring</generatorName>
+                            <skipIfSpecIsUnchanged>true</skipIfSpecIsUnchanged>
+                            <modelNameSuffix>DTO</modelNameSuffix>
+                            <configOptions>
+                                <java8>true</java8>
+                                <interfaceOnly>true</interfaceOnly>
+                                <modelPackage>app.microteams.model</modelPackage>
+                                <apiPackage>app.microteams.api</apiPackage>
+                                <useBeanValidation>true</useBeanValidation>
+                                <exceptionHandler>false</exceptionHandler>
+                                <!--                                <reactive>true</reactive>-->
+                            </configOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>delete-create-sql</id>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <phase>package</phase>
+                        <configuration>
+                            <target>
+                                <!-- Delete the old CREATE.sql file and create a new one. -->
+                                <delete file="CREATE.sql"/>
+                                <echo append="true" file="CREATE.sql">---------------------------------------------------------------------------${line.separator}</echo>
+                                <echo append="true" file="CREATE.sql">--                        DO NOT MODIFY THIS FILE                        --${line.separator}</echo>
+                                <echo append="true" file="CREATE.sql">--                                                                       --${line.separator}</echo>
+                                <echo append="true" file="CREATE.sql">-- The following content is generated by JPA according to entity classes --${line.separator}</echo>
+                                <echo append="true" file="CREATE.sql">---------------------------------------------------------------------------${line.separator}</echo>
+                                <java failonerror="true" fork="true" jar="target/${project.build.finalName}.jar">
+                                    <!-- Disable web application type to avoid port conflict. -->
+                                    <arg value="--spring.main.web-application-type=NONE"/>
+                                    <!-- See: https://www.datanucleus.org/products/accessplatform_6_0/jakarta/persistence.html#schema-generation -->
+                                    <arg value="--spring.jpa.properties.jakarta.persistence.schema-generation.scripts.action=create"/>
+                                    <arg value="--spring.jpa.properties.jakarta.persistence.schema-generation.scripts.create-target=CREATE.sql"/>
+                                    <arg value="--spring.jpa.properties.jakarta.persistence.schema-generation.scripts.create-source=metadata"/>
+                                    <!-- Stop application after creating the CREATE.sql file. -->
+                                    <arg value="--application.shutdown-on-startup=true"/>
+                                    <!-- Avoid long logs -->
+                                    <arg value="--logging.level.root=WARN"/>
+                                </java>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-generated-api</id>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <phase>generate-sources</phase>
+                        <configuration>
+                            <target>
+                                <!-- Copy the generated API files to the correct package. -->
+                                <delete dir="src/main/kotlin/app/microteams/api"/>
+                                <delete dir="src/main/kotlin/app/microteams/model"/>
+                                <copy todir="src/main/kotlin/app/microteams/api">
+                                    <fileset dir="target/generated-sources/openapi/src/main/kotlin/app/microteams/api"/>
+                                </copy>
+                                <copy todir="src/main/kotlin/app/microteams/model">
+                                    <fileset dir="target/generated-sources/openapi/src/main/kotlin/app/microteams/model"/>
+                                </copy>
+                                <delete file="src/main/kotlin/app/microteams/model/000_IMPORTANT_NOTICE.md"/>
+                                <echo append="true" file="src/main/kotlin/app/microteams/model/000_IMPORTANT_NOTICE.md"># All files in this directory are generated!${line.separator}${line.separator}</echo>
+                                <echo append="true" file="src/main/kotlin/app/microteams/model/000_IMPORTANT_NOTICE.md">All files in this directory are generated, including this markdown, so DO NOT MODIFY them!${line.separator}${line.separator}</echo>
+                                <echo append="true" file="src/main/kotlin/app/microteams/model/000_IMPORTANT_NOTICE.md">If you want to modify the API, modify the OpenAPI specification file and run ```./mvnw install``` again.${line.separator}${line.separator}</echo>
+                                <copy file="src/main/kotlin/app/microteams/model/000_IMPORTANT_NOTICE.md" todir="src/main/kotlin/app/microteams/api"/>
+                                <delete dir="target/generated-sources/openapi"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <spring.jpa.hibernate.ddl-auto>update</spring.jpa.hibernate.ddl-auto>
+                        <spring.jpa.show-sql>false</spring.jpa.show-sql>
+                        <application.warn-audit-failure>false</application.warn-audit-failure>
+                        <logging.level.root>WARN</logging.level.root>
+                    </systemPropertyVariables>
+                    <argLine>${argLine} -XX:+EnableDynamicAgentLoading</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>2.44.2</version>
+                <configuration>
+                    <java>
+                        <googleJavaFormat/>
+                    </java>
+                    <kotlin>
+                        <ktfmt>
+                            <style>KOTLINLANG</style>
+                        </ktfmt>
+                    </kotlin>
+                    <pom>
+                        <sortPom>
+                            <nrOfIndentSpace>4</nrOfIndentSpace>
+                            <expandEmptyElements>false</expandEmptyElements>
+                        </sortPom>
+                    </pom>
+                    <sql>
+                        <includes>
+                            <include>CREATE.sql</include>
+                        </includes>
+                        <dbeaver/>
+                    </sql>
+                    <markdown>
+                        <includes>
+                            <include>**/*.md</include>
+                        </includes>
+                    </markdown>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>Format generated sources</id>
+                        <goals>
+                            <goal>apply</goal>
+                        </goals>
+                        <phase>generate-sources</phase>
+                    </execution>
+                    <execution>
+                        <id>Format CREATE.sql</id>
+                        <goals>
+                            <goal>apply</goal>
+                        </goals>
+                        <phase>package</phase>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.15</version>
+                <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-report</id>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+        <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
+        <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
+    </build>
+
+</project>
