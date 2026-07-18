@@ -8,6 +8,7 @@ import { useLocation } from "react-router";
 import { DesktopRail } from "@/desktop/DesktopRail";
 import { ChatsDesktop } from "@/desktop/ChatsDesktop";
 import { DocsDesktop } from "@/desktop/DocsDesktop";
+import { TeamsManageDesktop } from "@/desktop/TeamsManageDesktop";
 import { ProfileDesktop } from "@/desktop/ProfileDesktop";
 
 export type Section = "chats" | "docs" | "profile";
@@ -21,12 +22,16 @@ function sectionOf(pathname: string): Section {
 export function DesktopShell() {
   const { pathname } = useLocation();
   const section = sectionOf(pathname);
+  // Team management is a docs-section sub-surface (rail stays on "docs").
+  const managing = pathname.startsWith("/teams/manage");
 
   return (
     <div className="bg-background text-foreground flex h-svh w-full overflow-hidden">
       <DesktopRail section={section} />
       <main className="flex min-w-0 flex-1">
-        {section === "docs" ? (
+        {managing ? (
+          <TeamsManageDesktop />
+        ) : section === "docs" ? (
           <DocsDesktop />
         ) : section === "profile" ? (
           <ProfileDesktop />
