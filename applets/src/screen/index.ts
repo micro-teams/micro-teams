@@ -1,27 +1,37 @@
-// claude.js — the applet that drives a Claude Code screen.
+// The applet that drives a Claude Code screen.
 //
-// All domain knowledge lives here, derived from what Claude Code actually paints
-// (verified against real v2.1.x screens). The hosting `microteams` CLI has no idea it
-// is watching an AI; it only offers a terminal, variables, and functions.
+// All domain knowledge lives here, derived from what Claude Code actually paints (verified against
+// real v2.1.x screens). The hosting `microteams` CLI has no idea it is watching an AI; it only
+// offers a terminal, variables, and functions (see ../runtime/host.d.ts).
 //
-// 热重载安全：hub.reload_driver 把这份源码发给 `script.load`，而 runtime.LoadScript
-// 每次重载都会新建一个全新的 goja VM（重装 API，清空 owned/watched/exposed/pending），
-// 然后再 vm.RunString 这份源码。因此顶层 const/let 每次都在一个干净的全局作用域里执行，
-// 绝不会出现「Identifier X has already been declared」。所以这里用干净的顶层写法即可，
-// 不再需要 IIFE 外壳，也不需要任何为了规避重定义而绕开 const 的怪写法。
+// This is a faithful port of the original claude.js — ONLY type annotations were added; no logic
+// was changed. esbuild bundles it to dist/claude.js (target es2016, which leaves its ES2015 syntax
+// essentially intact), and the applets build copies that into backend resources.
+//
+// 热重载安全：hub.reload_driver 把这份源码发给 `script.load`，而 runtime.LoadScript 每次重载都会
+// 新建一个全新的 goja VM（重装 API，清空 owned/watched/exposed/pending），然后再 vm.RunString。
+// 因此顶层 const/let 每次都在一个干净的全局作用域里执行，绝不会「Identifier X has already been
+// declared」。所以这里用干净的顶层写法即可，不需要 IIFE 外壳或任何为规避重定义的怪写法。
+
+interface Choice {
+  n: number
+  label: string
+}
 
 // A-class variables (this script owns; the server mirrors):
-const status = microteams.own('status', 'starting')       // starting|busy|waiting|idle|dead
-const elapsed = microteams.own('elapsed', '')             // e.g. "6m45s" — how long Claude has been working
-const tokens = microteams.own('tokens', '')               // e.g. "19.2k" — tokens used so far this turn
-const question = microteams.own('question', '')            // dialog prompt when waiting
-const choices = microteams.own('choices', [])              // [{n, label}] when waiting on a choice
-const compact = microteams.own('compact', '')              // '' | 'running' | 'done'
-const compactPct = microteams.own('compactPct', 0)         // 0..100 while compacting
-const subagents = microteams.own('subagents', 0)           // # of running Task/Agent subagents in the bottom band
+// Named statusVar (not `status`) so it doesn't collide with the DOM lib's global `status` under
+// strict tsc; the mirrored variable name is the string 'status' below, unaffected by this rename.
+const statusVar = microteams.own('status', 'starting') // starting|busy|waiting|idle|dead
+const elapsed = microteams.own('elapsed', '') // e.g. "6m45s" — how long Claude has been working
+const tokens = microteams.own('tokens', '') // e.g. "19.2k" — tokens used so far this turn
+const question = microteams.own('question', '') // dialog prompt when waiting
+const choices = microteams.own<Choice[]>('choices', []) // [{n, label}] when waiting on a choice
+const compact = microteams.own('compact', '') // '' | 'running' | 'done'
+const compactPct = microteams.own('compactPct', 0) // 0..100 while compacting
+const subagents = microteams.own('subagents', 0) // # of running Task/Agent subagents in the band
 
 // B-class variables (server owns; we observe):
-const label = microteams.watch('label')                    // human label for the screen
+const label = microteams.watch<string>('label') // human label for the screen
 label.onChange((v) => microteams.log('screen labelled: ' + v))
 
 // viewerLevel: what the human viewer is doing right now, pushed by the UI:
@@ -31,26 +41,33 @@ label.onChange((v) => microteams.log('screen labelled: ' + v))
 //   'full'    — typing: the screen is changing under the human's hands.
 // isActive() means scroll or full (unreliable to sample); isFull() also gates
 // command buffering so the driver never types over a human.
-const viewerLevel = microteams.watch('viewerLevel')
-const isActive = () => { const l = viewerLevel.get(); return l === 'scroll' || l === 'full' }
+const viewerLevel = microteams.watch<string>('viewerLevel')
+const isActive = () => {
+  const l = viewerLevel.get()
+  return l === 'scroll' || l === 'full'
+}
 const isFull = () => viewerLevel.get() === 'full'
 
 // --- keystrokes ------------------------------------------------------------
 const ESC = '\x1b'
-const UP = ESC + '[A', DOWN = ESC + '[B', ENTER = '\r', PGDN = ESC + '[6~'
+const UP = ESC + '[A',
+  DOWN = ESC + '[B',
+  ENTER = '\r',
+  PGDN = ESC + '[6~'
 // Bracketed-paste markers: wrap a body so the TUI ingests it as one atomic paste
 // (a long/multiline body pasted raw can have its embedded newlines interpreted as
 // submits). See say() / the deferred-submit countdown for why the Enter is separate.
-const PASTE_START = ESC + '[200~', PASTE_END = ESC + '[201~'
+const PASTE_START = ESC + '[200~',
+  PASTE_END = ESC + '[201~'
 
-function pickOption(n) {
-  for (let i = 0; i < 9; i++) microteams.term.write(UP)   // go firmly to the top
+function pickOption(n: number) {
+  for (let i = 0; i < 9; i++) microteams.term.write(UP) // go firmly to the top
   for (let i = 1; i < n; i++) microteams.term.write(DOWN) // step down to option n
   microteams.term.write(ENTER)
 }
 
-const clean = (l) => l.replace(/[│╭╮╰╯]/g, '')
-function parseOption(l) {
+const clean = (l: string) => l.replace(/[│╭╮╰╯]/g, '')
+function parseOption(l: string): Choice | null {
   const m = clean(l).match(/^\s*[❯>]?\s*(\d+)\.\s+(.*\S)\s*$/)
   return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null
 }
@@ -58,7 +75,7 @@ function parseOption(l) {
 // --- observe (tail only; scrollback can never trip a match) ----------------
 // Returns the directly-observable shape of the screen. The busy/idle decision
 // is made in onChange, because it depends on viewer state and history.
-function observe(screen) {
+function observe(screen: string): any {
   const lines = screen.split('\n')
   const tail = lines.slice(-16)
   const tailStr = tail.join('\n')
@@ -74,7 +91,7 @@ function observe(screen) {
   if (selIdx >= 0 && (hasFooter || trust)) {
     let start = selIdx
     while (start - 1 >= 0 && parseOption(tail[start - 1])) start--
-    const opts = []
+    const opts: Choice[] = []
     for (let i = start; i < tail.length; i++) {
       const p = parseOption(tail[i])
       if (!p || p.n !== opts.length + 1) break
@@ -82,7 +99,10 @@ function observe(screen) {
     }
     if (opts.length >= 2 && opts[0].n === 1) {
       let q = ''
-      for (let i = 0; i < start; i++) { const t = clean(tail[i]).trim(); if (t.endsWith('?')) q = t }
+      for (let i = 0; i < start; i++) {
+        const t = clean(tail[i]).trim()
+        if (t.endsWith('?')) q = t
+      }
       return { kind: 'waiting', question: q, choices: opts }
     }
   }
@@ -105,9 +125,12 @@ function observe(screen) {
   // subagent in the bottom band spins on its own row too — so counting spinner rows
   // that are NOT the foreground "esc to interrupt" line gives the running-subagent
   // count. Reads structural UI state (a spinner), not any natural-language meaning.
-  const spins = (c) => /^\s*[⠁-⣿]/.test(c)
+  const spins = (c: string) => /^\s*[⠁-⣿]/.test(c)
   const anySpinner = tail.some((l) => spins(clean(l)))
-  const bandRows = tail.filter((l) => { const c = clean(l); return spins(c) && !/esc to interrupt/.test(c) }).length
+  const bandRows = tail.filter((l) => {
+    const c = clean(l)
+    return spins(c) && !/esc to interrupt/.test(c)
+  }).length
   const working = orange || anySpinner
 
   const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail.filter((l) => l.trim()).length > 3
@@ -115,14 +138,14 @@ function observe(screen) {
 }
 
 // --- busy/idle state machine ------------------------------------------------
-let stableBusy = false   // busy/idle from the last reliable (passive) sample
-let cmdSince = false     // a command was emitted since that sample
-let wasActive = false    // to detect the active -> passive transition
+let stableBusy = false // busy/idle from the last reliable (passive) sample
+let cmdSince = false // a command was emitted since that sample
+let wasActive = false // to detect the active -> passive transition
 let trustFrames = 0
 let autoModeDone = false // Claude switched into auto-accept (⏵⏵) mode
 let tabTries = 0
 let frame = 0
-let submitIn = 0         // frames to wait after a paste before pressing Enter (0 = disarmed)
+let submitIn = 0 // frames to wait after a paste before pressing Enter (0 = disarmed)
 
 microteams.term.onChange(() => {
   frame++
@@ -155,7 +178,7 @@ microteams.term.onChange(() => {
   wasActive = active
 
   const o = observe(screen)
-  let st = o.kind, verb = ''
+  let st = o.kind
   if (o.kind === 'open') {
     let busy
     if (!active) {
@@ -171,7 +194,7 @@ microteams.term.onChange(() => {
       // command emitted since then has likely started work, so treat that as busy.
       busy = stableBusy || cmdSince
     }
-    st = busy ? 'busy' : (o.hasUI ? 'idle' : 'starting')
+    st = busy ? 'busy' : o.hasUI ? 'idle' : 'starting'
   }
 
   // One-time: cycle Claude into "auto mode" via Shift+Tab, so routine tool use —
@@ -183,12 +206,15 @@ microteams.term.onChange(() => {
   // never loop forever. Only when idle and no human is driving.
   if (!autoModeDone && st === 'idle' && !isFull()) {
     if (/auto[- ]?mode/i.test(tailStr)) autoModeDone = true
-    else if (tabTries < 12 && frame % 2 === 0) { microteams.term.write('\x1b[Z'); tabTries++ }
+    else if (tabTries < 12 && frame % 2 === 0) {
+      microteams.term.write('\x1b[Z')
+      tabTries++
+    }
   }
 
-  status.set(st)
-  question.set(o.kind === 'waiting' ? (o.question || '') : '')
-  choices.set(o.kind === 'waiting' ? (o.choices || []) : [])
+  statusVar.set(st)
+  question.set(o.kind === 'waiting' ? o.question || '' : '')
+  choices.set(o.kind === 'waiting' ? o.choices || [] : [])
   // Report how many subagents the bottom band is showing (0 when none / not open).
   subagents.set(o.kind === 'open' ? o.bandRows : 0)
 
@@ -204,14 +230,22 @@ microteams.term.onChange(() => {
       const tk = paren[1].match(/([\d.]+k?)\s*tokens/i)
       if (tk) tokens.set(tk[1])
     }
-  } else { elapsed.set(''); tokens.set('') }
+  } else {
+    elapsed.set('')
+    tokens.set('')
+  }
 
   const cm = tailStr.match(/Compacting conversation[^%]*?(\d+)\s*%/)
   if (cm || /Compacting conversation/.test(tailStr)) {
-    compact.set('running'); compactPct.set(cm ? parseInt(cm[1], 10) : 0)
+    compact.set('running')
+    compactPct.set(cm ? parseInt(cm[1], 10) : 0)
   } else if (/Compacted \(|Not enough messages to compact/i.test(tailStr)) {
-    compact.set('done'); compactPct.set(100)
-  } else { compact.set(''); compactPct.set(0) }
+    compact.set('done')
+    compactPct.set(100)
+  } else {
+    compact.set('')
+    compactPct.set(0)
+  }
 })
 
 // --- command buffering ------------------------------------------------------
@@ -219,17 +253,27 @@ microteams.term.onChange(() => {
 // keystrokes, so we queue them and flush the moment the human hands control back.
 // Every executed command marks cmdSince so the state machine treats the screen as
 // busy until the next reliable sample.
-let queue = []
-function gated(fn) {
-  return function () {
+let queue: Array<() => any> = []
+function gated(fn: (...args: any[]) => any) {
+  return function (this: any): any {
     const args = Array.prototype.slice.call(arguments)
-    const run = () => { cmdSince = true; return fn.apply(null, args) }
-    if (isFull()) { queue.push(run); return 'buffered' }
+    const run = () => {
+      cmdSince = true
+      return fn.apply(null, args)
+    }
+    if (isFull()) {
+      queue.push(run)
+      return 'buffered'
+    }
     return run()
   }
 }
 viewerLevel.onChange(() => {
-  if (!isFull() && queue.length) { const q = queue; queue = []; q.forEach((f) => f()) }
+  if (!isFull() && queue.length) {
+    const q = queue
+    queue = []
+    q.forEach((f) => f())
+  }
 })
 
 // --- functions the server may call -----------------------------------------
@@ -238,13 +282,29 @@ microteams.expose('snapshot', () => microteams.term.read())
 // by the onChange loop once the paste settles). Never write the CR in this same step:
 // for a long/multiline paste the TUI is still ingesting and the CR gets swallowed,
 // leaving the message stuck at the "[Pasted text #N +L lines]" placeholder, un-submitted.
-microteams.expose('say', gated((text) => {
-  microteams.term.write(PASTE_START + text + PASTE_END)
-  submitIn = 2
-  return true
-}))
-microteams.expose('choose', gated((n) => { pickOption(parseInt(n, 10) || 1); return true }))
-microteams.expose('compact', gated(() => { microteams.term.write('/compact'); microteams.term.write(ENTER); return true }))
+microteams.expose(
+  'say',
+  gated((text: string) => {
+    microteams.term.write(PASTE_START + text + PASTE_END)
+    submitIn = 2
+    return true
+  }),
+)
+microteams.expose(
+  'choose',
+  gated((n: any) => {
+    pickOption(parseInt(n, 10) || 1)
+    return true
+  }),
+)
+microteams.expose(
+  'compact',
+  gated(() => {
+    microteams.term.write('/compact')
+    microteams.term.write(ENTER)
+    return true
+  }),
+)
 
 microteams.call('screenReady', { driver: 'claude', version: 11 }).then((ack) => {
   microteams.log('server acked screenReady: ' + JSON.stringify(ack))

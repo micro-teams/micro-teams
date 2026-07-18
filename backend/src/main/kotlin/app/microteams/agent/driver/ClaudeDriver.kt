@@ -1,6 +1,7 @@
 /*
  *  Description: The Claude Code driver — the only place in the backend that knows Claude exists.
- *               Its applet is resources/applets/claude.js.
+ *               Its applet (claude.js) comes from the AppletStore (mounted applets-dir, or the
+ *               classpath fallback).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -9,16 +10,14 @@
 
 package app.microteams.agent.driver
 
-import org.springframework.core.io.ClassPathResource
+import app.microteams.agent.AppletStore
 import org.springframework.stereotype.Component
 
 @Component
-class ClaudeDriver : AgentDriver {
+class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
     override val name = "claude"
 
-    override val appletSource: String by lazy {
-        ClassPathResource("applets/claude.js").inputStream.bufferedReader().use { it.readText() }
-    }
+    override val appletSource: String by lazy { appletStore.require("claude.js") }
 
     /**
      * We always control Claude's session id (`--session-id` fresh / `--resume` to continue), and

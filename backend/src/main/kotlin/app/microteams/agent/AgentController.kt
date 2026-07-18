@@ -32,7 +32,6 @@ import app.microteams.machine.link.MachineHub
 import app.microteams.model.*
 import app.microteams.team.machine.TeamMachineService
 import app.microteams.team.membership.TeamService
-import app.microteams.user.RolePermissionService
 import app.microteams.user.UserProfileRepository
 import javax.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthenticationService
@@ -64,9 +63,9 @@ class AgentController(
     private val hub: MachineHub,
     private val teamService: TeamService,
     private val teamMachineService: TeamMachineService,
-    private val rolePermissionService: RolePermissionService,
     private val authorizationService: AuthorizationService,
     private val authenticationService: AuthenticationService,
+    private val agentTokenService: AgentTokenService,
 ) : AgentApi {
 
     @PostConstruct
@@ -239,51 +238,62 @@ class AgentController(
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 
-    // -- the tool door ------------------------------------------------------
+    // -- the token exchange -------------------------------------------------
 
     /**
-     * Post into a group as the calling agent. The machine token plus the per-screen token the CLI
-     * injects *is* the agent's identity, so this is @NoAuth only in the sense that there is no JWT
-     * to read: resolving that pair is authentication, and it produces a user id like any other.
+     * Exchange a screen's durable machine + per-screen tokens (headers X-Microteams-Session and
+     * X-Microteams-Screen) for a short-lived JWT that is the agent's own user token. This is the
+     * ONLY place machine+screen credentials are resolved to an agent user; from here on the agent
+     * carries an ordinary Bearer token and every other endpoint authorizes it exactly like a
+     * human's, through the matrix — there is no second authorization path.
      *
-     * Authorization then goes through the matrix as that agent — `post-message` on the thread,
-     * which needs `is-thread-member`. So "an agent may only speak in groups it belongs to" is not a
-     * rule written here; it is the same row that governs every human, and an auditor reading
-     * RolePermissionService sees it once.
+     * @NoAuth in the literal sense: there is no JWT yet — the CLI is exchanging *for* one. The
+     *   machine+screen pair is the credential, and only a screen belonging to *this* machine is
+     *   honored (AgentAttribution's cross-machine guard), so it cannot escalate across machines.
      */
     @NoAuth
-    override fun postNote(postNoteRequestDTO: PostNoteRequestDTO): ResponseEntity<MessageDTO> {
+    override fun exchangeAgentToken(): ResponseEntity<AgentTokenDTO> {
         val request =
             (RequestContextHolder.currentRequestAttributes() as ServletRequestAttributes).request
-        val machineToken =
-            request.getHeader("Authorization")?.trim()?.removePrefix("Bearer ")?.trim()
+        val machineToken = request.getHeader("X-Microteams-Session")
         val screenToken = request.getHeader("X-Microteams-Screen")
 
-        // -- authentication: which agent is calling?
         val actor = attribution.resolve(machineToken, screenToken) ?: throw InvalidTokenError()
         val screen = actor.screen ?: throw InvalidTokenError()
         val agent = agentRegistry.bySid(screen.sid) ?: throw InvalidTokenError()
+
+        val minted = agentTokenService.mint(agent.userId)
+        return ResponseEntity.ok(AgentTokenDTO(token = minted.token, expiresAt = minted.expiresAt))
+    }
+
+    // -- the tool door ------------------------------------------------------
+
+    /**
+     * Post into a group as the calling agent. The caller now presents an ordinary Bearer token —
+     * the agent's own user token from /agent/token — so authentication is the same JWT read every
+     * endpoint does (`currentAuthorization()`), with nothing agent-specific about it.
+     *
+     * It stays @NoAuth + a manual `audit` rather than a declarative @Guard for one reason:
+     * thread_id is optional and may fall back to the agent's most recent thread, which is not known
+     * until the handler runs — so the guarded resource cannot be named on the annotation.
+     * Authorization is still the ordinary matrix (`post-message` on the thread, needing
+     * `is-thread-member`), the very row that governs every human.
+     */
+    @NoAuth
+    override fun postNote(postNoteRequestDTO: PostNoteRequestDTO): ResponseEntity<MessageDTO> {
+        val auth = authorizationService.currentAuthorization()
+        val agentUserId = auth.userId
 
         val text = postNoteRequestDTO.text.trim()
         if (text.isEmpty()) throw BadRequestError("text must not be empty")
         val threadId =
             postNoteRequestDTO.threadId
-                ?: agentRegistry.lastThreadFor(agent.userId)
+                ?: agentRegistry.lastThreadFor(agentUserId)
                 ?: throw BadRequestError("no thread_id given and no recent thread for this agent")
 
-        // -- authorization: the ordinary matrix, as the agent
-        authorizationService.audit(
-            rolePermissionService.getAuthorizationForUserWithRole(agent.userId, "standard-user"),
-            "post-message",
-            "chat_message",
-            threadId,
-        )
+        authorizationService.audit(auth, "post-message", "chat_message", threadId)
         return ResponseEntity.ok(
-            messageService.postMessage(
-                threadId,
-                agent.userId,
-                PostMessageRequestDTO(content = text),
-            )
+            messageService.postMessage(threadId, agentUserId, PostMessageRequestDTO(content = text))
         )
     }
 }

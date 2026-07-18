@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Generated from ../MicroTeams-API.yml on build — never hand-edit, never commit.
+src/api/

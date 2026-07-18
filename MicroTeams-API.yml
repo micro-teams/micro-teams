@@ -868,13 +868,29 @@ paths:
       responses:
         "204":
           description: Closed
+  /agent/token:
+    post:
+      tags: [agent]
+      operationId: exchangeAgentToken
+      summary: >
+        Exchange a screen's durable machine + per-screen tokens (headers X-Microteams-Session and
+        X-Microteams-Screen) for a short-lived JWT that is the agent's own user token. The CLI
+        mints one on demand so every `microteams api` call authorizes as an ordinary user, the
+        same as a human's Bearer token -- there is no separate agent authorization path.
+      responses:
+        "200":
+          description: A short-lived agent user token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentToken"
   /agent/note:
     post:
       tags: [agent]
       operationId: postNote
       summary: >
-        The agent tool-door. A screen's CLI runs `microteams api post-note`, authenticated by its
-        machine token plus the per-screen token, and the note lands in chat as the agent.
+        The agent tool-door. A screen's CLI runs `microteams api post-note` with the agent token
+        from /agent/token, and the note lands in chat authored by the agent user.
       requestBody:
         required: true
         content:
@@ -1508,6 +1524,18 @@ components:
           type: string
         screenToken:
           type: string
+
+    AgentToken:
+      type: object
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+          description: A JWT that is the agent's own user token, sent as an Authorization Bearer header.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds after which the token is no longer valid.
 
     PostNoteRequest:
       type: object

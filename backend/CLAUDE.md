@@ -36,8 +36,10 @@ not debug by "start the jar and curl". See _Testing_.
   (team + members) and `team/documents` (the git tree) each own their entities and services —
   but the single `TeamController` in `team/` stays the only entry point.
 - Hand-written `@RestController`s are **not** an accepted escape hatch: everything expressible
-  as HTTP goes in the YAML. Only what OpenAPI genuinely cannot describe (the connector's
-  WebSocket endpoints) is registered outside it, and as handlers, not controllers.
+  as HTTP goes in the YAML. The only things registered outside it are what OpenAPI genuinely
+  cannot describe — the connector's WebSocket endpoints (as handlers, not controllers) and
+  `AgentAppletController`, which serves a JavaScript asset (`GET /agent/cli-applet`, the CLI
+  applet) rather than a business DTO.
 
 ## 2. Module layout — the map
 
@@ -45,7 +47,7 @@ not debug by "start the jar and curl". See _Testing_.
 chat/      ChatController        thread/ message/            (+ WebSocketConfig: STOMP /mt/ws)
 team/      TeamController        membership/ documents/ machine/
 machine/   MachineController     enrollment/ link/ screen/   (+ MachineWebSocketConfig: raw WS)
-agent/     AgentController       screen/ driver/             (+ AgentOpenApiController, see §1)
+agent/     AgentController       screen/ driver/             (+ AgentAppletController, see §1)
 ```
 
 The three layers that used to be one `connector` module, and why they are three:
@@ -228,9 +230,10 @@ The payoff: an auditor reads one file and sees every endpoint's rule.
   dirs, no mocks, so it's integration-style already.
 - `AgentLoopTest` proves the whole agent loop without a real Claude: a fake machine (a real
   WebSocket client) enrolls, a human opens an agent on it, a chat message must arrive as a `say`,
-  and the "agent" answers through the tool-door. It also pins `/openapi.json`'s advertised
-  tool-door path to the route that actually serves it — **nothing else catches that drift**, and
-  when it drifted, every reply from a live agent 404'd while all tests stayed green.
+  and the "agent" exchanges its machine+screen tokens for its user token (`POST /agent/token`) and
+  answers through the tool-door as an ordinary Bearer caller — proving "an agent is a user". It also
+  asserts `GET /agent/cli-applet` serves the CLI applet (the JS that defines `microteams api`), so a
+  missing/empty applet — a live agent with no tools — fails a test instead of only surfacing in prod.
 - Every new endpoint / behavior / bug fix gets an integration assertion. These tests have
   caught real bugs mocks never would: the enumerate/read auth bypass, the dropped
   `@Enumerated`, the 404/400-vs-500 error contract, the `owned` resourceType mismatch.
