@@ -149,7 +149,7 @@
         <dependency>
             <groupId>org.glassfish.jersey.media</groupId>
             <artifactId>jersey-media-json-jackson</artifactId>
-            <version>3.1.10</version>
+            <version>4.0.2</version>
         </dependency>
         <!--
           Pinned to 3.1.10 to match jersey-client / jersey-hk2 / jersey-media-json-jackson above.
