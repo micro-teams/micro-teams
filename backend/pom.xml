@@ -167,7 +167,7 @@
         <dependency>
             <groupId>org.glassfish.jersey.inject</groupId>
             <artifactId>jersey-hk2</artifactId>
-            <version>3.1.10</version>
+            <version>4.0.2</version>
         </dependency>
         <dependency>
             <groupId>org.parboiled</groupId>
