@@ -122,13 +122,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           VERSION="${GITHUB_SHA::7}"
-          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os="${t%/*}"; arch="${t#*/}"; ext=""
-            [ "$os" = windows ] && ext=".exe"
-            echo "building microteams-$os-$arch$ext"
+          # Unix only: the host uses a pty, tmux, and SIGUSR2, so a machine that runs agents is
+          # always Linux or macOS — Windows is not a target (it lacks syscall.SIGUSR2).
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${t%/*}"; arch="${t#*/}"
+            echo "building microteams-$os-$arch"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
               go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
-              -o "dist/microteams-$os-$arch$ext" .
+              -o "dist/microteams-$os-$arch" .
           done
           ls -la dist
       - name: Upload cli binaries
