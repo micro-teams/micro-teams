@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Save, Settings, History as HistoryIcon, Trash2 } from "lucide-react";
 import type { DocCommit, DocNode } from "@/api";
 import { baseName, parentPath } from "@/lib/docs";
+import { renderMarkdown } from "@/lib/markdown";
 import { mtCall, teamApi } from "@/lib/mtApi";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
@@ -15,7 +16,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Loading, Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-type Tab = "edit" | "history";
+type Tab = "preview" | "edit" | "history";
 
 export function FilePage() {
   const { teamId: teamIdParam } = useParams();
@@ -25,7 +26,9 @@ export function FilePage() {
   const isNew = params.get("new") === "1";
 
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("edit");
+  // Reading dominates editing, so an existing doc opens in preview; a brand-new
+  // file opens straight in edit (there is nothing to read yet).
+  const [tab, setTab] = useState<Tab>(isNew ? "edit" : "preview");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [content, setContent] = useState("");
@@ -113,6 +116,7 @@ export function FilePage() {
             value={tab}
             onChange={setTab}
             options={[
+              { value: "preview", label: "preview" },
               { value: "edit", label: "edit" },
               { value: "history", label: "history" },
             ]}
@@ -123,6 +127,30 @@ export function FilePage() {
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
+        )}
+
+        {tab === "preview" && !isNew && (
+          <>
+            {load.loading && <Loading />}
+            {load.error && (
+              <Alert variant="destructive">
+                <AlertDescription>{load.error}</AlertDescription>
+              </Alert>
+            )}
+            {(load.data || savedContent !== null) &&
+              (content.trim() ? (
+                <div
+                  className="doc-preview"
+                  // The team's own document; sanitized in renderMarkdown.
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                />
+              ) : (
+                <p className="text-muted-foreground py-10 text-center text-sm">
+                  empty document — switch to{" "}
+                  <span className="font-medium">edit</span> to write
+                </p>
+              ))}
+          </>
         )}
 
         {tab === "edit" && (

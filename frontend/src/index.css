@@ -81,6 +81,110 @@
   }
 }
 
+/* Rendered markdown preview in the desktop document editor. Tailwind's preflight
+   strips heading/list defaults, so restore just enough typography for a document
+   to read as one. Scoped to .doc-preview so nothing else is affected. */
+.doc-preview {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.doc-preview > :first-child {
+  margin-top: 0;
+}
+.doc-preview h1,
+.doc-preview h2,
+.doc-preview h3,
+.doc-preview h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.4em 0 0.6em;
+}
+.doc-preview h1 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.doc-preview h2 {
+  font-size: 1.25em;
+}
+.doc-preview h3 {
+  font-size: 1.1em;
+}
+.doc-preview p {
+  margin: 0.7em 0;
+}
+.doc-preview ul,
+.doc-preview ol {
+  margin: 0.7em 0;
+  padding-left: 1.6em;
+}
+.doc-preview ul {
+  list-style: disc;
+}
+.doc-preview ol {
+  list-style: decimal;
+}
+.doc-preview li {
+  margin: 0.25em 0;
+}
+.doc-preview li > ul,
+.doc-preview li > ol {
+  margin: 0.25em 0;
+}
+.doc-preview a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.doc-preview strong {
+  font-weight: 700;
+}
+.doc-preview em {
+  font-style: italic;
+}
+.doc-preview blockquote {
+  border-left: 3px solid var(--primary);
+  padding-left: 0.9em;
+  margin: 0.8em 0;
+  color: var(--muted-foreground);
+}
+.doc-preview code {
+  background: var(--muted);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.doc-preview pre {
+  background: var(--muted);
+  padding: 0.9em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.doc-preview pre code {
+  background: none;
+  padding: 0;
+}
+.doc-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.4em 0;
+}
+.doc-preview table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  display: block;
+  overflow-x: auto;
+}
+.doc-preview th,
+.doc-preview td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.7em;
+}
+.doc-preview img {
+  max-width: 100%;
+}
+
 /* Embedded terminal fonts for the 现场 viewer (served from /public/fonts).
    JetBrainsMono Nerd Font matches a local Claude Code terminal; Cascadia Code
    backfills Braille + box-drawing arcs. Global so @font-face is registered
