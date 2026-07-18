@@ -60,6 +60,9 @@ class AgentService(
     private val userRepository: UserRepository,
     private val userProfileRepository: UserProfileRepository,
     drivers: List<AgentDriver>,
+    // Fallback MICROTEAMS_API, used only for a machine that connected without reporting its own
+    // endpoint (an older CLI). Normally the origin comes from the machine's live connection, so the
+    // server never assumes its own address. See MachineHub.origin.
     @Value("\${application.connector-origin:http://127.0.0.1:8080}")
     private val connectorOrigin: String,
     @Value("\${application.agent-email-domain:agents.microteams.local}")
@@ -103,7 +106,9 @@ class AgentService(
         // relies on the machine's on-disk config token, but injecting is robust to a machine whose
         // default CLI config points elsewhere).
         val env = buildMap {
-            put("MICROTEAMS_API", connectorOrigin)
+            // The endpoint this machine reached us on (it reported it when it connected), so its
+            // screens call back on a URL that works for them; the config value is only a fallback.
+            put("MICROTEAMS_API", hub.originOf(machineId) ?: connectorOrigin)
             machineService.tokenOf(machineId)?.let { put("MICROTEAMS_TOKEN", it) }
         }
         val screen =

@@ -178,6 +178,13 @@ class MachineHandshakeInterceptor(private val machineService: MachineService) :
             return false
         }
         attributes["machineId"] = machine.machineId
+        // The CLI reports the base URL it dialed us on (the endpoint it selected); we echo it back
+        // as MICROTEAMS_API for this machine's screens, so the server need not know its own
+        // address.
+        request.headers
+            .getFirst("X-Microteams-Origin")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { attributes["origin"] = it.trimEnd('/') }
         return true
     }
 

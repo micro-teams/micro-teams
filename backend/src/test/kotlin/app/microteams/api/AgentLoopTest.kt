@@ -68,6 +68,11 @@ constructor(
     private lateinit var machineId: String
     private lateinit var machineToken: String
 
+    // A distinctive endpoint the fake machine reports on its handshake — deliberately not the
+    // server's own address — so asserting it reaches MICROTEAMS_API proves the server echoes each
+    // machine's own endpoint rather than assuming one.
+    private val reportedOrigin = "https://edge.example.test/mt"
+
     private class Collector : TextWebSocketHandler() {
         val frames = LinkedBlockingQueue<String>()
 
@@ -106,6 +111,7 @@ constructor(
     private fun connect(collector: Collector): WebSocketSession {
         val headers = WebSocketHttpHeaders()
         headers.add("X-Microteams-Session", machineToken)
+        headers.add("X-Microteams-Origin", reportedOrigin)
         // session.create ships the full applet source (>8 KB), so the client must accept
         // large text frames — raise the container's default buffer.
         val container = jakarta.websocket.ContainerProvider.getWebSocketContainer()
@@ -149,6 +155,10 @@ constructor(
         val create = awaitFrame(collector, "session.create")
         val screenToken = create.getString("screen")
         assertTrue(create.getJSONArray("command").getString(0) == "bash")
+        // The screen's MICROTEAMS_API is the endpoint THIS machine reported on its handshake, not
+        // the server's configured fallback — so a machine reached via any endpoint calls back on
+        // one that works for it.
+        assertEquals(reportedOrigin, create.getJSONObject("env").getString("MICROTEAMS_API"))
 
         // form the group: a thread with the human (owner) and the agent as a member
         val threadRes =

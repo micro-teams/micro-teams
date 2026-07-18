@@ -58,7 +58,8 @@ class LinkHandler(private val hub: MachineHub, private val objectMapper: ObjectM
             session.sendMessage(TextMessage(objectMapper.writeValueAsString(msg)))
         }
         bound[session.id] = Bound(machineId, transport)
-        hub.attachMachine(machineId, transport)
+        val origin = session.attributes["origin"] as? String
+        hub.attachMachine(machineId, transport, origin)
         logger.info("machine {} connected (session {})", machineId, session.id)
     }
 

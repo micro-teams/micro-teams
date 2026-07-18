@@ -70,17 +70,20 @@ const (
 
 // Conn maintains the dial-out websocket to the server.
 type Conn struct {
-	url   string
-	token string
+	url    string
+	token  string
+	origin string // the API base we dialed, reported so the server can echo it to our screens
 
 	mu      sync.Mutex
 	conn    *websocket.Conn
 	writeMu sync.Mutex
 }
 
-// New builds a Conn dialing url, authenticating with token.
-func New(url, token string) *Conn {
-	return &Conn{url: url, token: token}
+// New builds a Conn dialing url, authenticating with token. origin is the API base
+// this machine reached the server on (which endpoint it chose); the server echoes it
+// back as MICROTEAMS_API for screens it opens here, so it never assumes its own address.
+func New(url, token, origin string) *Conn {
+	return &Conn{url: url, token: token, origin: origin}
 }
 
 // Run dials and pumps messages to onMsg until ctx is cancelled, reconnecting
@@ -118,6 +121,9 @@ func (c *Conn) runOnce(ctx context.Context, onMsg func(Msg)) (connected bool) {
 	header := http.Header{}
 	if c.token != "" {
 		header.Set("X-Microteams-Session", c.token)
+	}
+	if c.origin != "" {
+		header.Set("X-Microteams-Origin", c.origin)
 	}
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.url, header)
 	if err != nil {

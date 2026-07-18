@@ -71,6 +71,16 @@ class HubScreen(
 class HubMachine(val machineId: String) {
     @Volatile var transport: MachineTransport? = null
     @Volatile var proto: Int? = null
+
+    /**
+     * The base URL this machine used to reach us on its *current* connection — reported by the CLI
+     * on the control-channel handshake. The server stays URL-agnostic: it never assumes its own
+     * address but echoes each machine's own endpoint back as MICROTEAMS_API, so two machines on the
+     * same deployment reached via different endpoints (a public reverse proxy, an IPv4 relay, IPv6
+     * direct, a campus network …) each drive their screens against the endpoint that works for
+     * them.
+     */
+    @Volatile var origin: String? = null
     val screens: MutableMap<String, HubScreen> = ConcurrentHashMap()
     val execSeq = AtomicInteger(0)
     val callSeq = AtomicInteger(0)
@@ -105,9 +115,12 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
 
     // -- machine connection -------------------------------------------------
 
-    fun attachMachine(machineId: String, transport: MachineTransport) {
+    fun attachMachine(machineId: String, transport: MachineTransport, origin: String? = null) {
         val machine = machine(machineId)
         machine.transport = transport
+        // Record the endpoint the CLI dialed on this connection (null when an older client did not
+        // report one); it becomes MICROTEAMS_API for screens opened while this connection lives.
+        if (origin != null) machine.origin = origin
         machine.send(LinkMsg(t = "welcome", v = PROTOCOL_VERSION))
     }
 
@@ -119,6 +132,11 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     }
 
     fun isOnline(machineId: String): Boolean = machines[machineId]?.transport != null
+
+    /**
+     * The base URL the machine reported on its live connection, or null (offline / not reported).
+     */
+    fun originOf(machineId: String): String? = machines[machineId]?.origin
 
     fun onlineMachineIds(): List<String> =
         machines.values.filter { it.transport != null }.map { it.machineId }
