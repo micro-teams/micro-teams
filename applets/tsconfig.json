@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2016",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // DOM is here only so the generated typescript-fetch client (src/api) type-checks — it
+    // references fetch/Response/etc. We import only its model *types* (`import type`), which esbuild
+    // erases, so no DOM/fetch code ever reaches the goja bundle. Do not use DOM globals in applet code.
+    "lib": ["ES2016", "DOM"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "skipLibCheck": true,
+    "types": [],
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}

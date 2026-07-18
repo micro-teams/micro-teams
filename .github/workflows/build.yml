@@ -1,0 +1,192 @@
+name: Build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  merge_group:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+# One workflow builds all four parts in parallel, packages them into a deployment zip, then proves
+# the zip actually boots by bringing the docker-compose cluster up and waiting for every service to
+# report healthy.
+
+jobs:
+  build-jar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+          cache-dependency-path: backend/pom.xml
+          # backend/.gitignore excludes settings.xml/toolchains.xml relative to backend/; point
+          # setup-java there too, or the spotless "uncommitted changes" check sees them as untracked.
+          settings-path: ${{ github.workspace }}/backend
+
+      # Our tests are integration tests: they need a real Postgres (with the "microteams" schema) and
+      # the real cheese-auth service. One script brings both up, mirroring the local setup.
+      - name: Start dependencies (Postgres + cheese-auth)
+        run: ./scripts/dependency-start.sh
+
+      - name: Build with Maven (runs the integration tests)
+        run: ./mvnw install
+        env:
+          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
+
+      - name: Check uncommitted changes to ensure format applied
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            git status
+            echo "There are uncommitted changes. Please run './mvnw spotless:apply' and commit the changes."
+            exit 1
+          else
+            echo "No uncommitted changes."
+          fi
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar
+          path: backend/target/*.jar
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run build
+      - name: Upload dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+  build-applet:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: applets
+    steps:
+      - uses: actions/checkout@v7
+      # openapi-generator (the codegen step) runs on the JVM.
+      - uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "temurin"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: applets/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Upload applets
+        uses: actions/upload-artifact@v7
+        with:
+          name: applets
+          path: applets/dist
+
+  build-cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Build binaries (one per OS/arch)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          VERSION="${GITHUB_SHA::7}"
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os="${t%/*}"; arch="${t#*/}"; ext=""
+            [ "$os" = windows ] && ext=".exe"
+            echo "building microteams-$os-$arch$ext"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+              -o "dist/microteams-$os-$arch$ext" .
+          done
+          ls -la dist
+      - name: Upload cli binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-binaries
+          path: cli/dist
+
+  package-zip:
+    needs: [build-jar, build-frontend, build-applet, build-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Assemble the deployment bundle
+        run: |
+          set -euo pipefail
+          STAGE=microteams-deploy
+          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/cli"
+          cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
+          cp -r deploy/init "$STAGE/"
+          cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
+          cp -r artifacts/frontend-dist/. "$STAGE/frontend/dist/"
+          cp artifacts/applets/*.js "$STAGE/applets/"
+          cp artifacts/cli-binaries/* "$STAGE/cli/"
+          chmod +x "$STAGE/gen-env.sh"
+          zip -qr microteams-deploy.zip "$STAGE"
+          echo "== bundle contents =="; find "$STAGE" -maxdepth 2 -type f | sort
+      - uses: actions/upload-artifact@v7
+        with:
+          name: microteams-deploy
+          path: microteams-deploy.zip
+
+  test-compose:
+    needs: [package-zip]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: microteams-deploy
+      - name: Unzip
+        run: unzip -q microteams-deploy.zip
+      - name: Bring the cluster up and wait for every service to be healthy
+        working-directory: microteams-deploy
+        run: |
+          ./gen-env.sh
+          docker compose up -d --wait --wait-timeout 360
+      - name: Cluster status
+        if: always()
+        working-directory: microteams-deploy
+        run: docker compose ps
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: microteams-deploy
+        run: docker compose logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        working-directory: microteams-deploy
+        run: docker compose down

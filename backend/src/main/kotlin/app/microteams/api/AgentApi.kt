@@ -4,6 +4,7 @@
  */
 package app.microteams.api
 
+import app.microteams.model.AgentTokenDTO
 import app.microteams.model.ListAgentsResponseDTO
 import app.microteams.model.MessageDTO
 import app.microteams.model.OpenAgentRequestDTO
@@ -36,6 +37,30 @@ interface AgentApi {
     fun closeAgent(
         @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long
     ): ResponseEntity<Unit> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "Exchange a screen's durable machine + per-screen tokens (headers X-Microteams-Session and X-Microteams-Screen) for a short-lived JWT that is the agent's own user token. The CLI mints one on demand so every `microteams api` call authorizes as an ordinary user, the same as a human's Bearer token -- there is no separate agent authorization path. ",
+        operationId = "exchangeAgentToken",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "A short-lived agent user token",
+                    content = [Content(schema = Schema(implementation = AgentTokenDTO::class))],
+                )
+            ],
+    )
+    @RequestMapping(
+        method = [RequestMethod.POST],
+        value = ["/agent/token"],
+        produces = ["application/json"],
+    )
+    fun exchangeAgentToken(): ResponseEntity<AgentTokenDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 
@@ -125,7 +150,7 @@ interface AgentApi {
     @Operation(
         tags = ["agent"],
         summary =
-            "The agent tool-door. A screen's CLI runs `microteams api post-note`, authenticated by its machine token plus the per-screen token, and the note lands in chat as the agent. ",
+            "The agent tool-door. A screen's CLI runs `microteams api post-note` with the agent token from /agent/token, and the note lands in chat authored by the agent user. ",
         operationId = "postNote",
         description = """""",
         responses =

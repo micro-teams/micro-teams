@@ -3,10 +3,11 @@
  *               a fake machine (a real WebSocket client) enrolls and connects; a human opens
  *               an agent on it (creates the agent user + ships a session.create the client
  *               receives); the agent joins a thread; the human posts a message and the client
- *               must receive it as a `say` rpc.call; the "agent" then calls the tool-door
- *               (POST /agent/note, authed by machine+screen token) and its reply must
+ *               must receive it as a `say` rpc.call; the "agent" then exchanges its machine +
+ *               screen tokens for its own user token (POST /agent/token) and posts through the
+ *               tool-door (POST /agent/note) as an ordinary Bearer caller, and its reply must
  *               appear in the thread authored by the agent user. This proves the orchestrator,
- *               the chat->agent event hook, attribution, and the tool-door together.
+ *               the chat->agent event hook, the token exchange, and the tool-door together.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -178,12 +179,24 @@ constructor(
             "the say prompt should carry the human's message",
         )
 
-        // the "agent" replies through the tool door (machine + screen token attribution)
+        // the "agent" exchanges its machine + screen tokens for its own short-lived user token,
+        // then replies through the tool door as an ordinary Bearer caller — the same path a human
+        // authenticates on, proving an agent is just a user
+        val tokenRes =
+            mockMvc
+                .perform(
+                    post("/agent/token")
+                        .header("X-Microteams-Session", machineToken)
+                        .header("X-Microteams-Screen", screenToken)
+                )
+                .andExpect(status().isOk)
+                .andReturn()
+        val agentToken = JSONObject(tokenRes.response.contentAsString).getString("token")
+
         mockMvc
             .perform(
                 post("/agent/note")
-                    .header("Authorization", "Bearer $machineToken")
-                    .header("X-Microteams-Screen", screenToken)
+                    .header("Authorization", "Bearer $agentToken")
                     .contentType("application/json")
                     .content("""{"text":"yes! reporting in.","thread_id":$threadId}""")
             )
@@ -204,44 +217,28 @@ constructor(
     }
 
     /**
-     * The spec `microteams api` builds its commands from must advertise the path the server
-     * actually serves. Nothing else checks this: the loop test above posts to the tool-door
-     * directly, so a stale path here would compile, pass every test, and only surface as a live
-     * agent whose every reply 404s — which is exactly what happened when the tool-door moved to
-     * /agent/note.
+     * The CLI applet — the JavaScript that defines the `microteams api` command tree — is served
+     * publicly (the CLI fetches it before it has a token). It must actually be present (the applets
+     * module's build copies it into backend resources) and register commands, or a live agent has
+     * no tools at all.
      */
     @Test
-    fun advertisedToolDoorPathIsTheOneThatWorks() {
-        val spec =
-            mockMvc
-                .perform(get("/openapi.json"))
-                .andExpect(status().isOk)
-                .andReturn()
-                .response
-                .contentAsString
-        val advertised: String =
-            JSONObject(spec).getJSONObject("paths").keys().asSequence().single().toString()
-        assertEquals("/agent/note", advertised)
-        // and it is a real route: reachable, refusing us only for want of credentials
+    fun cliAppletIsServed() {
         mockMvc
-            .perform(post(advertised).contentType("application/json").content("""{"text":"x"}"""))
-            .andExpect(status().isUnauthorized)
+            .perform(get("/agent/cli-applet"))
+            .andExpect(status().isOk)
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("microteams.command")))
     }
 
     /**
-     * 401, not 403: the machine token alone proves which *machine* is calling, never which agent.
-     * Without the per-screen token the caller has not finished authenticating, so there is nobody
-     * to authorize — the machine+screen pair together are the agent's credentials.
+     * 401, not 403: the machine token alone proves which *machine* is calling, never which agent,
+     * so the token exchange refuses it without the per-screen token — there is no agent to mint a
+     * token for. The machine+screen pair together are the agent's credentials.
      */
     @Test
-    fun postNoteWithoutScreenTokenIsUnauthenticated() {
+    fun agentTokenWithoutScreenTokenIsUnauthenticated() {
         mockMvc
-            .perform(
-                post("/agent/note")
-                    .header("Authorization", "Bearer $machineToken")
-                    .contentType("application/json")
-                    .content("""{"text":"nope","thread_id":1}""")
-            )
+            .perform(post("/agent/token").header("X-Microteams-Session", machineToken))
             .andExpect(status().isUnauthorized)
     }
 }
