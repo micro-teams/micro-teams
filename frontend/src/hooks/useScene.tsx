@@ -6,6 +6,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -26,8 +28,40 @@ const SceneContext = createContext<SceneContextValue | null>(null);
 
 export function SceneProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<SceneTarget | null>(null);
-  const open = useCallback((target: SceneTarget) => setCurrent(target), []);
-  const close = useCallback(() => setCurrent(null), []);
+  // Opening 现场 is a navigation, not a modal: it pushes a history entry so the browser/phone Back
+  // gesture (the app's existing page stack) closes it — with no on-screen back button. `pushed`
+  // tracks whether our sentinel entry is still on top so open/close stay balanced across re-opens.
+  const pushed = useRef(false);
+
+  const open = useCallback((target: SceneTarget) => {
+    if (!pushed.current) {
+      window.history.pushState({ __scene: true }, "");
+      pushed.current = true;
+    }
+    setCurrent(target);
+  }, []);
+
+  const close = useCallback(() => {
+    // Consume our own history entry so Back and Esc leave the stack in the same clean state.
+    if (pushed.current) {
+      pushed.current = false;
+      window.history.back(); // -> popstate -> setCurrent(null)
+    } else {
+      setCurrent(null);
+    }
+  }, []);
+
+  // The Back gesture pops our sentinel: react to it by closing (the URL never changed, so the
+  // router sees no route change).
+  useEffect(() => {
+    const onPop = () => {
+      pushed.current = false;
+      setCurrent(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   return (
     <SceneContext.Provider value={{ current, open, close }}>
       {children}

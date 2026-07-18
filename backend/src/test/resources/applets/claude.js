@@ -67,7 +67,8 @@
       const c = clean(l);
       return spins(c) && !/esc to interrupt/.test(c);
     }).length;
-    const working = orange || anySpinner;
+    const busyFooter = /\([^)]*\btokens?\b[^)]*\)/i.test(tailStr);
+    const working = orange || anySpinner || busyFooter;
     const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail.filter((l) => l.trim()).length > 3;
     return { kind: "open", orange, bandRows, working, hasUI };
   }

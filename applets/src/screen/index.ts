@@ -131,7 +131,14 @@ function observe(screen: string): any {
     const c = clean(l)
     return spins(c) && !/esc to interrupt/.test(c)
   }).length
-  const working = orange || anySpinner
+
+  // Newer Claude Code (2.x) dropped the "esc to interrupt" hint and animates its foreground
+  // spinner with dingbat glyphs (✢ ✶ ✻ ✽ · * ●), not braille — so neither signal above fires.
+  // But throughout a running turn it shows a "… (<elapsed> · ↓ <n> tokens)" reassurance line,
+  // which an idle prompt never carries (there the footer is just the input box + mode hint). A
+  // completed tool result reads "(5s)" with NO "tokens", so requiring the word avoids matching it.
+  const busyFooter = /\([^)]*\btokens?\b[^)]*\)/i.test(tailStr)
+  const working = orange || anySpinner || busyFooter
 
   const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail.filter((l) => l.trim()).length > 3
   return { kind: 'open', orange, bandRows, working, hasUI }

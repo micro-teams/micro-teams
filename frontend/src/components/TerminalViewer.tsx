@@ -161,6 +161,51 @@ export function TerminalViewer({
       capture: true,
     });
 
+    // Touch scrolling (phones/tablets emit no wheel events). Mirror onWheel: translate a vertical
+    // drag into PgUp/PgDn sent to the program. Claude keeps no local xterm scrollback, so a finger
+    // drag would otherwise do nothing. Dragging DOWN reveals earlier output (PgUp), matching a
+    // terminal's natural pull-to-see-history. Only scroll/full may scroll.
+    let touchY: number | null = null;
+    let touchAccum = 0;
+    const TOUCH_STEP = 40; // px of drag per PgUp/PgDn press
+    const onTouchStart = (e: TouchEvent) => {
+      const m = viewModeRef.current;
+      if ((m !== "scroll" && m !== "full") || e.touches.length !== 1) return;
+      touchY = e.touches[0].clientY;
+      touchAccum = 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const m = viewModeRef.current;
+      if ((m !== "scroll" && m !== "full") || touchY == null) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== 1 || e.touches.length !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const y = e.touches[0].clientY;
+      touchAccum += y - touchY; // finger down => positive => earlier output (PgUp)
+      touchY = y;
+      while (Math.abs(touchAccum) >= TOUCH_STEP) {
+        const up = touchAccum > 0;
+        ws.send(enc.encode(up ? "\x1b[5~" : "\x1b[6~")); // PgUp / PgDn
+        touchAccum += up ? -TOUCH_STEP : TOUCH_STEP;
+      }
+      ws.send(JSON.stringify({ type: "control", level: "scroll" }));
+      if (scrollIdle) clearTimeout(scrollIdle);
+      scrollIdle = setTimeout(sendControl, 2000);
+    };
+    const onTouchEnd = () => {
+      touchY = null;
+    };
+    container.addEventListener("touchstart", onTouchStart, {
+      passive: false,
+      capture: true,
+    });
+    container.addEventListener("touchmove", onTouchMove, {
+      passive: false,
+      capture: true,
+    });
+    container.addEventListener("touchend", onTouchEnd, { capture: true });
+
     const onResize = () => sendSize(false);
     window.addEventListener("resize", onResize);
     const sizeTimer = setInterval(() => sendSize(false), 3000);
@@ -216,6 +261,15 @@ export function TerminalViewer({
       clearInterval(sizeTimer);
       window.removeEventListener("resize", onResize);
       container.removeEventListener("wheel", onWheel, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener("touchstart", onTouchStart, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener("touchmove", onTouchMove, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener("touchend", onTouchEnd, {
         capture: true,
       } as EventListenerOptions);
       wsRef.current?.close();
