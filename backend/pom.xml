@@ -13,7 +13,7 @@
     <!-- Project Info -->
     <groupId>app.microteams</groupId>
     <artifactId>backend</artifactId>
-    <version>0.9.2</version>
+    <version>0.1.0</version>
     <name>backend</name>
     <description>Backend for the MicroTeams web application</description>
     <url/>
@@ -211,6 +211,13 @@
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
+            <version>7.7.0.202606012155-r</version>
+        </dependency>
+        <!-- Smart-HTTP git server: lets an agent (or human) clone/commit/push a team's document
+             tree as an ordinary git remote. Kept at the same version as jgit core. -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit.http.server</artifactId>
             <version>7.7.0.202606012155-r</version>
         </dependency>
     </dependencies>

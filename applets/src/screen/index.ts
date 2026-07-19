@@ -134,10 +134,17 @@ function observe(screen: string): any {
 
   // Newer Claude Code (2.x) dropped the "esc to interrupt" hint and animates its foreground
   // spinner with dingbat glyphs (✢ ✶ ✻ ✽ · * ●), not braille — so neither signal above fires.
-  // But throughout a running turn it shows a "… (<elapsed> · ↓ <n> tokens)" reassurance line,
-  // which an idle prompt never carries (there the footer is just the input box + mode hint). A
-  // completed tool result reads "(5s)" with NO "tokens", so requiring the word avoids matching it.
-  const busyFooter = /\([^)]*\btokens?\b[^)]*\)/i.test(tailStr)
+  // But throughout a running turn it shows a "<verb>… (<elapsed> · ↓ <n> tokens)" reassurance
+  // line, which an idle prompt never carries (there the footer is just the input box + mode hint).
+  //
+  // Anchor on the reassurance line's structural SIGNATURE — the "…(" that glues the gerund to
+  // its parenthetical (the same anchor the elapsed/tokens extractor below relies on) — plus an
+  // elapsed duration OR a token count inside. This is deliberately tighter than an anywhere-in-
+  // tail "(…tokens…)" match, which mis-fired two ways: it flagged idle screens whose scrollback
+  // merely mentioned "(… tokens)" in tool output (false busy), and it missed the first frames of
+  // a turn that show only elapsed before any tokens are counted (false idle). A FINISHED tool
+  // result reads "…name) (5s)" — its "…" is followed by ")" not "(", so the "…(" anchor skips it.
+  const busyFooter = /…\s*\([^)]*\b(?:\d+[hms]|tokens?)\b[^)]*\)/i.test(tailStr)
   const working = orange || anySpinner || busyFooter
 
   const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail.filter((l) => l.trim()).length > 3

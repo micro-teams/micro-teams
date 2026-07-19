@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: micro-agent-teams backend API
-  version: "0.2"
+  version: "0.1"
 servers:
   - url: "http://localhost:8080"
 paths:
@@ -868,6 +868,28 @@ paths:
       responses:
         "204":
           description: Closed
+  /agent/{userId}/reboot:
+    post:
+      tags: [agent]
+      operationId: rebootAgent
+      summary: >
+        Reboot an agent: end its current screen and relaunch the same driver, in the same cwd,
+        resuming the same session id. The agent user and its group memberships are unchanged; only
+        the backing screen (sid + screen token) is replaced.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Rebooted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenedAgent"
   /agent/token:
     post:
       tags: [agent]
@@ -884,26 +906,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentToken"
-  /agent/note:
-    post:
+  /agent/git-workspace:
+    get:
       tags: [agent]
-      operationId: postNote
+      operationId: getGitWorkspace
       summary: >
-        The agent tool-door. A screen's CLI runs `microteams api post-note` with the agent token
-        from /agent/token, and the note lands in chat authored by the agent user.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PostNoteRequest"
+        The calling agent's document-tree git workspace: the URL of its team's git remote and a
+        fresh token to authenticate git against it. The applet's `docs` commands call this (already
+        authenticated as the agent) and hand the token to a `git` subprocess, so the connector
+        binary needs no git knowledge. Authenticated by the agent's own Bearer token.
       responses:
         "200":
-          description: Posted
+          description: The team git remote and a credential for it
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Message"
+                $ref: "#/components/schemas/AgentGitWorkspace"
 
 
 components:
@@ -1510,6 +1528,17 @@ components:
         driver:
           type: string
           description: Defaults to the server's default driver (claude)
+        sessionId:
+          type: string
+          description: >
+            Opaque driver session id to open the agent with. When omitted the server mints one.
+            Supplying it (together with a matching cwd and resume=true) resumes a prior session.
+        resume:
+          type: boolean
+          default: false
+          description: >
+            Resume the given sessionId's prior transcript instead of starting it fresh. Only
+            meaningful together with sessionId; the driver decides what resuming means.
 
     OpenedAgent:
       type: object
@@ -1537,13 +1566,17 @@ components:
           format: int64
           description: Unix epoch seconds after which the token is no longer valid.
 
-    PostNoteRequest:
+    AgentGitWorkspace:
       type: object
-      required: [text]
+      required: [gitUrl, token, teamId]
       properties:
-        text:
+        gitUrl:
           type: string
-        thread_id:
+          description: The team document tree's git remote (e.g. https://host/mt/git/42) — clone/pull/push here.
+        token:
+          type: string
+          description: A short-lived JWT to authenticate git, sent as an Authorization Bearer header.
+        teamId:
           type: integer
           format: int64
-          description: Defaults to the thread the agent was last spoken to in
+          description: The team whose document tree this workspace is.

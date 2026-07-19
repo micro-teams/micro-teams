@@ -1,24 +1,28 @@
-import { NavLink, Outlet } from "react-router";
-import { FolderGit2, MessagesSquare, User } from "lucide-react";
+import type { ReactNode } from "react";
+import { NavLink } from "react-router";
+import { Bot, FolderGit2, MessagesSquare, User } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/chats", label: "chats", icon: MessagesSquare },
   { to: "/teams", label: "teams", icon: FolderGit2 },
+  { to: "/agents", label: "agents", icon: Bot },
   { to: "/profile", label: "me", icon: User },
 ];
 
 /**
  * The signed-in shell: a scrollable content area (each page brings its own
  * sticky header) above a fixed bottom tab bar. Mobile-first — the tab bar is
- * the primary navigation and respects the bottom safe area.
+ * the primary navigation and respects the bottom safe area. The tab pages are
+ * passed as children (kept alive by MobileTabs) rather than via an <Outlet>, so
+ * switching tabs hides rather than unmounts them.
  */
-export function AppLayout() {
+export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-svh">
       <main className="mx-auto max-w-2xl pb-[calc(4rem+env(safe-area-inset-bottom))]">
-        <Outlet />
+        {children}
       </main>
       <nav className="bg-background/90 fixed inset-x-0 bottom-0 z-40 border-t backdrop-blur pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto flex max-w-2xl">

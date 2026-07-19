@@ -360,6 +360,17 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         machine(machineId).send(LinkMsg(t = "screen.resize", sid = sid, cols = cols, rows = rows))
     }
 
+    /**
+     * The viewer scrolling through the pane's history. The hosted program is a full-screen TUI with
+     * no scrollback of its own -- the history lives in tmux -- so paging back drives tmux copy-mode
+     * on the machine, never PgUp/PgDn into the program (which it ignores). "up"/"down" page the
+     * scrollback; "bottom" returns to the live screen.
+     */
+    fun viewerScroll(machineId: String, sid: String, dir: String) {
+        val d = if (dir in setOf("up", "down", "bottom")) dir else "bottom"
+        machine(machineId).send(LinkMsg(t = "screen.scroll", sid = sid, dir = d))
+    }
+
     /** The viewer's mode (passive / scroll / full) → the `viewerLevel` variable. */
     fun viewerControl(machineId: String, sid: String, level: String) {
         val lvl = if (level in setOf("passive", "scroll", "full")) level else "passive"

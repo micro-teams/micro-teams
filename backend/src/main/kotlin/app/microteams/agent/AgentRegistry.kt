@@ -33,12 +33,6 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
      */
     private val bySid = ConcurrentHashMap<String, ScreenAgent>()
 
-    /**
-     * The thread each agent was most recently spoken to in, so a `post-note` that omits thread_id
-     * answers where it was asked.
-     */
-    private val lastThread = ConcurrentHashMap<IdType, IdType>()
-
     fun register(agent: Agent) {
         byUser[agent.userId] = agent
         if (agent is ScreenAgent) bySid[agent.sid] = agent
@@ -52,7 +46,6 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
                     speaker: String,
                     content: String,
                 ) {
-                    lastThread[agent.userId] = threadId
                     agent.tell(threadId, speaker, content)
                 }
             }
@@ -61,7 +54,6 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
 
     fun unregister(userId: IdType) {
         (byUser.remove(userId) as? ScreenAgent)?.let { bySid.remove(it.sid) }
-        lastThread.remove(userId)
         chatSubscriptions.unregister(userId)
     }
 
@@ -72,6 +64,4 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
     fun screenAgents(): List<ScreenAgent> = bySid.values.toList()
 
     fun all(): Collection<Agent> = byUser.values
-
-    fun lastThreadFor(userId: IdType): IdType? = lastThread[userId]
 }

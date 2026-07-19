@@ -5,9 +5,9 @@
  *               receives); the agent joins a thread; the human posts a message and the client
  *               must receive it as a `say` rpc.call; the "agent" then exchanges its machine +
  *               screen tokens for its own user token (POST /agent/token) and posts through the
- *               tool-door (POST /agent/note) as an ordinary Bearer caller, and its reply must
- *               appear in the thread authored by the agent user. This proves the orchestrator,
- *               the chat->agent event hook, the token exchange, and the tool-door together.
+ *               ordinary POST /chat/{id}/messages as a Bearer caller, and its reply must appear in
+ *               the thread authored by the agent user. This proves the orchestrator, the
+ *               chat->agent event hook, the token exchange, and an agent posting as a plain user.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -21,6 +21,7 @@ import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
 import app.microteams.team.machine.TeamMachine
 import app.microteams.team.machine.TeamMachineRepository
+import app.microteams.team.membership.TeamService
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URI
 import java.util.UUID
@@ -58,6 +59,7 @@ constructor(
     private val machineHub: MachineHub,
     private val machineRepository: MachineRepository,
     private val teamMachineRepository: TeamMachineRepository,
+    private val teamService: TeamService,
     private val objectMapper: ObjectMapper,
 ) {
     @LocalServerPort private var port: Int = 0
@@ -152,6 +154,13 @@ constructor(
                 .andExpect(status().isCreated)
                 .andReturn()
         val agentUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
+        // Opening an agent enrolls it as a member of its team; without this it cannot read or write
+        // its own team's document tree (the git remote + read/write-document are gated on
+        // membership).
+        assertTrue(
+            teamService.isTeamMember(teamId, agentUserId),
+            "an opened agent must be a member of its team",
+        )
         val create = awaitFrame(collector, "session.create")
         val screenToken = create.getString("screen")
         assertTrue(create.getJSONArray("command").getString(0) == "bash")
@@ -159,6 +168,8 @@ constructor(
         // the server's configured fallback — so a machine reached via any endpoint calls back on
         // one that works for it.
         assertEquals(reportedOrigin, create.getJSONObject("env").getString("MICROTEAMS_API"))
+        // The agent's team travels in the env too, so the applet's `docs` commands know which tree.
+        assertEquals(teamId.toString(), create.getJSONObject("env").getString("MICROTEAMS_TEAM"))
 
         // form the group: a thread with the human (owner) and the agent as a member
         val threadRes =
@@ -190,8 +201,8 @@ constructor(
         )
 
         // the "agent" exchanges its machine + screen tokens for its own short-lived user token,
-        // then replies through the tool door as an ordinary Bearer caller — the same path a human
-        // authenticates on, proving an agent is just a user
+        // then replies through the ordinary POST /chat/{id}/messages as a Bearer caller — the exact
+        // endpoint and authorization a human uses, proving an agent is just a user
         val tokenRes =
             mockMvc
                 .perform(
@@ -203,14 +214,26 @@ constructor(
                 .andReturn()
         val agentToken = JSONObject(tokenRes.response.contentAsString).getString("token")
 
+        // the agent asks for its document-tree git workspace: its team's remote on the endpoint its
+        // machine reported (so the URL is per-machine, not the server's own) plus a git credential
+        val wsRes =
+            mockMvc
+                .perform(get("/agent/git-workspace").header("Authorization", "Bearer $agentToken"))
+                .andExpect(status().isOk)
+                .andReturn()
+        val ws = JSONObject(wsRes.response.contentAsString)
+        assertEquals(teamId, ws.getLong("teamId"))
+        assertEquals("$reportedOrigin/git/$teamId", ws.getString("gitUrl"))
+        assertTrue(ws.getString("token").isNotBlank(), "a git credential must be returned")
+
         mockMvc
             .perform(
-                post("/agent/note")
+                post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $agentToken")
                     .contentType("application/json")
-                    .content("""{"text":"yes! reporting in.","thread_id":$threadId}""")
+                    .content("""{"content":"yes! reporting in."}""")
             )
-            .andExpect(status().isOk)
+            .andExpect(status().isCreated)
             .andExpect(jsonPath("$.senderId").value(agentUserId))
             .andExpect(jsonPath("$.content").value("yes! reporting in."))
 
@@ -250,5 +273,98 @@ constructor(
         mockMvc
             .perform(post("/agent/token").header("X-Microteams-Session", machineToken))
             .andExpect(status().isUnauthorized)
+    }
+
+    private fun commandOf(create: JSONObject): String {
+        val cmd = create.getJSONArray("command")
+        return (0 until cmd.length()).joinToString(" ") { cmd.getString(it) }
+    }
+
+    /**
+     * A caller may open an agent on a session id it names, and ask that the driver resume it rather
+     * than start fresh. The server keeps the id opaque (no Claude semantics leak into AgentService)
+     * and passes resume through to driver.command — so the launched argv resumes exactly that
+     * session, which is what lets a user pick up a prior session from a chosen cwd.
+     */
+    @Test
+    fun openWithExplicitSessionIdAndResumeLaunchesThatSession() {
+        val collector = Collector()
+        val session = connect(collector)
+        awaitFrame(collector, "welcome")
+
+        val sessionId = UUID.randomUUID().toString()
+        mockMvc
+            .perform(
+                post("/agent")
+                    .header("Authorization", "Bearer $humanToken")
+                    .contentType("application/json")
+                    .content(
+                        """{"machineId":"$machineId","teamId":$teamId,"sessionId":"$sessionId","resume":true}"""
+                    )
+            )
+            .andExpect(status().isCreated)
+
+        val create = awaitFrame(collector, "session.create")
+        val command = commandOf(create)
+        // resume=true -> the Claude driver uses --resume (not --session-id) on the very id we
+        // named.
+        assertTrue(command.contains("--resume $sessionId"), "argv should resume the named session")
+
+        session.close()
+    }
+
+    /**
+     * Reboot ends the agent's current screen and relaunches the SAME session (same session id, same
+     * cwd) with resume=true, replacing only the backing screen. We assert the old screen is closed,
+     * a new one is created resuming the minted session id, and the returned sid differs while the
+     * agent user id stays the same — the agent user and its memberships are untouched.
+     */
+    @Test
+    fun rebootReplacesScreenAndResumesSameSession() {
+        val collector = Collector()
+        val session = connect(collector)
+        awaitFrame(collector, "welcome")
+
+        val openRes =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Reb"}""")
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val agentUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
+        val oldSid = JSONObject(openRes.response.contentAsString).getString("sid")
+
+        val firstCreate = awaitFrame(collector, "session.create")
+        assertEquals(oldSid, firstCreate.getString("sid"))
+        // Recover the minted opaque session id from the fresh-open argv (`--session-id <id>`).
+        val mintedSession =
+            Regex("--session-id (\\S+)").find(commandOf(firstCreate))!!.groupValues[1]
+
+        val rebootRes =
+            mockMvc
+                .perform(
+                    post("/agent/$agentUserId/reboot").header("Authorization", "Bearer $humanToken")
+                )
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.agentUserId").value(agentUserId))
+                .andReturn()
+        val newSid = JSONObject(rebootRes.response.contentAsString).getString("sid")
+        assertTrue(newSid != oldSid, "reboot must swap in a new screen")
+
+        // The old screen is torn down first, then a new one is created resuming the same session.
+        val close = awaitFrame(collector, "session.close")
+        assertEquals(oldSid, close.getString("sid"))
+        val newCreate = awaitFrame(collector, "session.create")
+        assertEquals(newSid, newCreate.getString("sid"))
+        assertTrue(
+            commandOf(newCreate).contains("--resume $mintedSession"),
+            "reboot must resume the same session id",
+        )
+
+        session.close()
     }
 }

@@ -1,8 +1,10 @@
 // 现场 (live agent screen) viewer — a faithful copy of the reference misc/web-claude
 // terminal pane (its `#main`: the gatebar + the xterm). The terminal config, the wire
 // (raw bytes both ways + JSON control/resize/compact), the three viewer modes, the
-// wheel→PgUp/PgDn scrolling, the mode/compact/font controls, and the CSS are reproduced
-// verbatim from web-claude — no wording or styling changed. The screen `vars` (status /
+// mode/compact/font controls, and the CSS are reproduced (styling unchanged) from web-claude.
+// Scrolling differs on purpose: the hosted program is a full-screen TUI whose history lives in
+// tmux, not in the program, so the wheel/touch drive tmux copy-mode on the pane (a {type:"scroll"}
+// control) rather than sending PgUp/PgDn to the program, which it ignores. The screen `vars` (status /
 // question / compact / compactPct) come from the thread presence poll (passed in), the
 // way web-claude's dashboard event stream feeds its gatebar.
 
@@ -70,6 +72,13 @@ export function TerminalViewer({
   function setMode(m: ViewMode) {
     viewModeRef.current = m;
     setViewMode(m);
+    // Leaving scroll mode returns the pane to the live screen: tell the connector to
+    // exit any tmux copy-mode it entered while we were paged back through history.
+    if (m !== "scroll") {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === 1)
+        ws.send(JSON.stringify({ type: "scroll", dir: "bottom" }));
+    }
     sendSize(false);
     sendControl();
   }
@@ -138,36 +147,42 @@ export function TerminalViewer({
       if (ws && ws.readyState === 1) ws.send(enc.encode(d));
     });
 
-    // Scrolling. Claude is a full-screen TUI, so xterm has no local scrollback — history
-    // lives in Claude, reachable with PgUp/PgDn. Only scroll/full may scroll. Translate the
-    // wheel into PgUp/PgDn sent to the program, and report 'scroll'; after the wheel goes
-    // idle, revert to the mode's level (the driver then snaps back to the bottom).
+    // Scrolling. Claude is a full-screen TUI, so xterm has no local scrollback — and the
+    // program keeps none either: the history lives in tmux on the machine, reachable only via
+    // tmux copy-mode (PgUp/PgDn sent to the program do nothing). So the wheel sends a
+    // {type:"scroll",dir} control the connector turns into tmux copy-mode scroll on the pane,
+    // and reports 'scroll' so the driver holds its last verdict while we're paged back. When the
+    // viewer scrolls back to the bottom the connector leaves copy-mode on its own; leaving
+    // scroll/full mode sends an explicit 'bottom' (see setMode) to snap back to live.
     let scrollIdle: ReturnType<typeof setTimeout> | null = null;
-    const onWheel = (e: WheelEvent) => {
-      const m = viewModeRef.current;
-      if (m !== "scroll" && m !== "full") return;
+    const sendScroll = (dir: "up" | "down") => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== 1) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const seq = e.deltaY < 0 ? "\x1b[5~" : "\x1b[6~"; // PgUp / PgDn
-      ws.send(enc.encode(seq));
+      ws.send(JSON.stringify({ type: "scroll", dir }));
       ws.send(JSON.stringify({ type: "control", level: "scroll" }));
       if (scrollIdle) clearTimeout(scrollIdle);
       scrollIdle = setTimeout(sendControl, 2000);
     };
-    container.addEventListener("wheel", onWheel, {
-      passive: false,
-      capture: true,
+    // Intercept the wheel through xterm's OWN hook — a raw DOM listener does not reliably beat
+    // xterm's viewport handling (and, in 'full', its mouse-tracking). Returning false stops xterm
+    // from scrolling its empty local buffer or forwarding a mouse code; we drive tmux copy-mode
+    // scroll via {type:"scroll"} instead (PgUp/PgDn sent to the program does nothing).
+    term.attachCustomWheelEventHandler((e) => {
+      const m = viewModeRef.current;
+      if (m !== "scroll" && m !== "full") return true;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== 1) return true;
+      sendScroll(e.deltaY < 0 ? "up" : "down");
+      return false;
     });
 
     // Touch scrolling (phones/tablets emit no wheel events). Mirror onWheel: translate a vertical
-    // drag into PgUp/PgDn sent to the program. Claude keeps no local xterm scrollback, so a finger
-    // drag would otherwise do nothing. Dragging DOWN reveals earlier output (PgUp), matching a
+    // drag into tmux copy-mode scroll on the pane. The program keeps no scrollback, so a finger
+    // drag would otherwise do nothing. Dragging DOWN reveals earlier output (scroll up), matching a
     // terminal's natural pull-to-see-history. Only scroll/full may scroll.
     let touchY: number | null = null;
     let touchAccum = 0;
-    const TOUCH_STEP = 40; // px of drag per PgUp/PgDn press
+    const TOUCH_STEP = 40; // px of drag per scroll step
     const onTouchStart = (e: TouchEvent) => {
       const m = viewModeRef.current;
       if ((m !== "scroll" && m !== "full") || e.touches.length !== 1) return;
@@ -182,16 +197,13 @@ export function TerminalViewer({
       e.preventDefault();
       e.stopPropagation();
       const y = e.touches[0].clientY;
-      touchAccum += y - touchY; // finger down => positive => earlier output (PgUp)
+      touchAccum += y - touchY; // finger down => positive => earlier output (scroll up)
       touchY = y;
       while (Math.abs(touchAccum) >= TOUCH_STEP) {
         const up = touchAccum > 0;
-        ws.send(enc.encode(up ? "\x1b[5~" : "\x1b[6~")); // PgUp / PgDn
+        sendScroll(up ? "up" : "down");
         touchAccum += up ? -TOUCH_STEP : TOUCH_STEP;
       }
-      ws.send(JSON.stringify({ type: "control", level: "scroll" }));
-      if (scrollIdle) clearTimeout(scrollIdle);
-      scrollIdle = setTimeout(sendControl, 2000);
     };
     const onTouchEnd = () => {
       touchY = null;
@@ -260,9 +272,6 @@ export function TerminalViewer({
       if (scrollIdle) clearTimeout(scrollIdle);
       clearInterval(sizeTimer);
       window.removeEventListener("resize", onResize);
-      container.removeEventListener("wheel", onWheel, {
-        capture: true,
-      } as EventListenerOptions);
       container.removeEventListener("touchstart", onTouchStart, {
         capture: true,
       } as EventListenerOptions);

@@ -4,7 +4,9 @@
  *               misc/web-claude client speaks, so that client is reused verbatim: the
  *               machine's raw screen bytes go to the browser as binary frames; the browser
  *               sends raw input bytes (binary) and JSON control — {type:"control",level},
- *               {type:"resize",cols,rows}, {type:"compact"} — nothing is base64-wrapped.
+ *               {type:"resize",cols,rows}, {type:"compact"}, {type:"scroll",dir} — nothing is
+ *               base64-wrapped. `scroll` pages the pane's tmux history (copy-mode), since the
+ *               full-screen program keeps no scrollback of its own.
  *               A viewer is authenticated by its ?token= JWT and authorized to a screen only
  *               if it shares the screen's team or a chat group with the agent.
  *
@@ -86,6 +88,9 @@ class ViewerHandler(private val hub: MachineHub, private val objectMapper: Objec
                 if (cols > 0 && rows > 0) hub.viewerResize(state.machineId, state.sid, cols, rows)
             }
             "compact" -> hub.callScreen(state.machineId, state.sid, "compact", emptyList())
+            // Page through the pane's tmux scrollback (copy-mode) — see hub.viewerScroll.
+            "scroll" ->
+                hub.viewerScroll(state.machineId, state.sid, msg.path("dir").asText("bottom"))
         }
     }
 

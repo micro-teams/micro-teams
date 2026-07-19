@@ -135,7 +135,7 @@ smell (`backend/CLAUDE.md` §8). `install` also regenerates `backend/CREATE.sql`
 entities, so it needs a reachable DB too.
 
 ```sh
-java -jar target/microteams-0.9.2.jar --server.port=8199 \
+java -jar target/backend-0.1.0.jar --server.port=8199 \
   --spring.datasource.url=jdbc:postgresql://localhost:5433/mydb \
   --spring.datasource.username=username --spring.datasource.password=<db-pw> \
   --application.legacy-url=http://localhost:8091 \
@@ -209,3 +209,7 @@ to a group, and talk to it. Click its avatar anywhere to watch its live terminal
 - **cheese-auth's `prisma db push` runs once**, gated by a flag file on the uploads volume. Reset
   the database volume without the uploads volume and initialization is silently skipped — delete
   the flag if you ever see `table "public.avatar" does not exist`.
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 — see [`LICENSE`](LICENSE).

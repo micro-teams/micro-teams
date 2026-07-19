@@ -42,8 +42,11 @@ import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler
 class ConnectorWebSocketConfig {
 
     @Bean
-    fun connectorLinkHandler(hub: MachineHub, objectMapper: ObjectMapper): LinkHandler =
-        LinkHandler(hub, objectMapper)
+    fun connectorLinkHandler(
+        hub: MachineHub,
+        objectMapper: ObjectMapper,
+        eventPublisher: org.springframework.context.ApplicationEventPublisher,
+    ): LinkHandler = LinkHandler(hub, objectMapper, eventPublisher)
 
     /**
      * The raw `/agent` request handler as a Spring bean, so its Lifecycle (start/stop) and
