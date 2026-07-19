@@ -30,7 +30,7 @@ services:
       retries: 20
 
   cheese-auth:
-    image: ghcr.io/sageseekersociety/cheese-auth@sha256:f2f78c99536dbe3e0254523eca5ba045eed74592ee1aa601d47ebb86418d565d
+    image: ghcr.io/micro-teams/cheese-auth:dev@sha256:fe5a90a2680cac0bd634934b9a45c4cf48d171ee90e95f5f463de88932b31d22
     restart: unless-stopped
     depends_on:
       postgres:
