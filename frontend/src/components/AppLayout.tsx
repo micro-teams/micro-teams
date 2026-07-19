@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const TABS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/chats", label: "chats", icon: MessagesSquare },
-  { to: "/teams", label: "teams", icon: FolderGit2 },
+  { to: "/teams", label: "docs", icon: FolderGit2 },
   { to: "/agents", label: "agents", icon: Bot },
   { to: "/profile", label: "me", icon: User },
 ];

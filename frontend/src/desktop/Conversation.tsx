@@ -37,7 +37,7 @@ export function Conversation({
 }) {
   const { user } = useAuth();
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-[#111111]">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#111111]">
       <MessageList
         threadId={threadId}
         currentUserId={user?.id}
@@ -126,8 +126,8 @@ function MessageList({
 
   return (
     <>
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-6 py-4">
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-6 py-4">
+        <div className="mx-auto mt-auto flex w-full max-w-3xl flex-col gap-1">
           {loading && <Loading />}
           {error && (
             <Alert variant="destructive">
@@ -215,8 +215,8 @@ function MessageRow({
       <div
         className={
           mine
-            ? "flex max-w-[68%] flex-col items-end"
-            : "flex max-w-[68%] flex-col"
+            ? "flex max-w-[68%] min-w-0 flex-col items-end"
+            : "flex max-w-[68%] min-w-0 flex-col"
         }
       >
         {!mine && (

@@ -60,16 +60,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    api
-      .refreshToken()
-      .then(({ user, accessToken }) => {
-        setUser(user);
-        setAccessToken(accessToken);
-      })
-      .catch(() => {
-        // No valid refresh cookie — the visitor isn't signed in; not an error.
-      })
-      .finally(() => setBooting(false));
+    let cancelled = false;
+    // Restore the session from the refresh cookie on boot. A 401 means there is
+    // genuinely no valid cookie (not signed in) — accept it. But a *transient*
+    // failure (network blip, 5xx from the proxy) must NOT drop a signed-in user
+    // to the login screen, so retry those a couple times before giving up. This
+    // is what made a plain reload occasionally bounce you to /login.
+    const boot = async () => {
+      for (let attempt = 0; !cancelled; attempt++) {
+        try {
+          const { user, accessToken } = await api.refreshToken();
+          if (!cancelled) {
+            setUser(user);
+            setAccessToken(accessToken);
+          }
+          return;
+        } catch (err) {
+          const status = err instanceof api.ApiError ? err.status : 0;
+          const transient = status === 0 || status >= 500;
+          if (!transient || attempt >= 2) return; // real "not signed in"
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
+      }
+    };
+    void boot().finally(() => {
+      if (!cancelled) setBooting(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
