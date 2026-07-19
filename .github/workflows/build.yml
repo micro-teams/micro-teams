@@ -121,7 +121,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          VERSION="${GITHUB_SHA::7}"
+          # Product version from the repo-root VERSION file (single source of truth,
+          # managed by scripts/version.sh), with the short commit as build metadata for
+          # traceability — e.g. 0.1.0+1a2b3c4. cwd is cli/, so VERSION is one level up.
+          VERSION="$(cat ../VERSION)+${GITHUB_SHA::7}"
           # Unix only: the host uses a pty, tmux, and SIGUSR2, so a machine that runs agents is
           # always Linux or macOS — Windows is not a target (it lacks syscall.SIGUSR2).
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -138,8 +141,32 @@ jobs:
           name: cli-binaries
           path: cli/dist
 
+  build-tmux:
+    # A fully static tmux per Linux target, so a fresh machine needs nothing pre-installed:
+    # install.sh drops it at ~/.config/microteams/bin/tmux (macOS is not published — install.sh
+    # falls back to copying the machine's own tmux there). Only the build recipe is in git.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up QEMU (for the linux/arm64 build)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build static tmux (one per Linux target)
+        run: |
+          set -euo pipefail
+          for a in amd64 arm64; do
+            deploy/tmux/build-static-tmux.sh --arch "$a" --out dist
+          done
+          ls -la dist/*/
+      - name: Upload tmux binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: tmux-binaries
+          path: dist
+
   package-zip:
-    needs: [build-jar, build-frontend, build-applet, build-cli]
+    needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -158,8 +185,26 @@ jobs:
           cp artifacts/applets/*.js "$STAGE/applets/"
           cp artifacts/cli-binaries/* "$STAGE/cli/"
           chmod +x "$STAGE/gen-env.sh"
+          # CLI distribution: arrange the cross-compiled `microteams` binaries and the static tmux
+          # into the connector/latest/<target>/ layout the backend serves, under app_data/connector
+          # (compose bind-mounts it to application.connector-binaries-dir). Go-style os-arch dirs,
+          # matching install.sh's `target` and update.go's platformDir.
+          CONN="$STAGE/app_data/connector"
+          for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            os="${t%-*}"; arch="${t#*-}"
+            mkdir -p "$CONN/$t"
+            cp "artifacts/cli-binaries/microteams-$os-$arch" "$CONN/$t/microteams"
+            chmod +x "$CONN/$t/microteams"
+          done
+          # Static tmux is Linux-only; macOS uses its own via install.sh's system-tmux fallback.
+          for t in linux-amd64 linux-arm64; do
+            if [ -f "artifacts/tmux-binaries/$t/tmux" ]; then
+              cp "artifacts/tmux-binaries/$t/tmux" "$CONN/$t/tmux"
+              chmod +x "$CONN/$t/tmux"
+            fi
+          done
           zip -qr microteams-deploy.zip "$STAGE"
-          echo "== bundle contents =="; find "$STAGE" -maxdepth 2 -type f | sort
+          echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
       - uses: actions/upload-artifact@v7
         with:
           name: microteams-deploy

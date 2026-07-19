@@ -48,6 +48,9 @@ data class LinkMsg(
     // Data carries base64-encoded raw terminal bytes for the direct screen channel
     // (screen.data downstream, screen.input upstream).
     @get:JsonProperty("data") val data: String? = null,
+    // Dir is the direction of a screen.scroll request ("up" / "down" / "bottom"): the
+    // viewer paging through the pane's tmux scrollback (copy-mode).
+    @get:JsonProperty("dir") val dir: String? = null,
     // One-shot command execution: exec (request) / exec.cancel / exec.result.
     @get:JsonProperty("cwd") val cwd: String? = null,
     @get:JsonProperty("stdin") val stdin: String? = null,

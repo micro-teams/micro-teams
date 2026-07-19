@@ -50,8 +50,18 @@ services:
       FILE_UPLOAD_PATH: /app/uploads
       DEFAULT_AVATAR_NAME: default.jpg
       COOKIE_BASE_URL: /
-      FRONTEND_BASE_URL: http://localhost
-      EMAIL_SMTP_PORT: "25"
+      # The public origin (https://your-domain) baked into verification-email links. MUST be your
+      # real domain — the default localhost makes every registration link point at the user's own
+      # machine. Set PUBLIC_URL in .env.
+      FRONTEND_BASE_URL: ${PUBLIC_URL:-http://localhost}
+      # SMTP — cheese-auth emails a code on registration, so registration is dead without it.
+      # Fill these in .env. SSL_ENABLE=true is for implicit TLS (port 465); plain/STARTTLS use false.
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-25}
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_SMTP_SSL_ENABLE: ${EMAIL_SMTP_SSL_ENABLE:-false}
+      EMAIL_DEFAULT_FROM: ${EMAIL_DEFAULT_FROM:-MicroTeams <no-reply@localhost>}
     volumes:
       - ./app_data/cheese-auth-uploads:/app/uploads
     healthcheck:
@@ -87,6 +97,11 @@ services:
       - ./backend/backend.jar:/app/backend.jar:ro
       - ./applets:/app/applets:ro
       - ./app_data/git:/app/app_data/git
+      # The CLI distribution the backend serves at /connector/latest/<target>/<artifact>: the
+      # cross-compiled `microteams` binaries + static tmux, laid out by CI under app_data/connector.
+      # Read-only — it's a build artifact, not runtime state. Matches the backend's default
+      # application.connector-binaries-dir (/app/app_data/connector), so nothing extra to configure.
+      - ./app_data/connector:/app/app_data/connector:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"]
       interval: 10s

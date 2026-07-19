@@ -3,7 +3,8 @@
 // selected thread lives in the URL (/chats/:id) so deep links and the browser
 // back button work; the rail switches sections, this owns selection.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
+import { useSectionLocation } from "@/desktop/sectionKeepAlive";
 import { Plus, MessagesSquare, Info, Users, X, Trash2 } from "lucide-react";
 import type {
   ChatLastMessage,
@@ -28,7 +29,7 @@ import { cn } from "@/lib/utils";
 const ROLE_ORDER: Record<Role, number> = { OWNER: 0, ADMIN: 1, MEMBER: 2 };
 
 export function ChatsDesktop() {
-  const location = useLocation();
+  const location = useSectionLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const selectedId = useMemo(() => {

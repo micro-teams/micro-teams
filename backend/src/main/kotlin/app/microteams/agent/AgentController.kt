@@ -1,8 +1,9 @@
 /*
  *  Description: The agent module's one controller — every method implements an AgentApi operation
  *               generated from MicroTeams-API.yml, nothing more. Opening and closing an agent, the one
- *               agent enumeration, and the tool-door all live here; they used to be four separate
- *               hand-written controllers.
+ *               agent enumeration, and the machine+screen token exchange all live here; they used to
+ *               be four separate hand-written controllers. An agent speaks in a group not through a
+ *               special door but through the ordinary `POST /chat/{id}/messages`, as its own user.
  *
  *               listAgents is the only way to enumerate agents: what were a POST carrying a batch
  *               of user ids ("presence") and a second per-thread route are now just filters on it.
@@ -26,7 +27,6 @@ import app.microteams.agent.screen.AgentScreenRepository
 import app.microteams.agent.screen.AgentService
 import app.microteams.agent.screen.ScreenAgent
 import app.microteams.api.AgentApi
-import app.microteams.chat.message.MessageService
 import app.microteams.chat.thread.ThreadMemberRepository
 import app.microteams.machine.link.MachineHub
 import app.microteams.model.*
@@ -57,7 +57,6 @@ class AgentController(
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
     private val attribution: AgentAttribution,
-    private val messageService: MessageService,
     private val threadMemberRepository: ThreadMemberRepository,
     private val userProfileRepository: UserProfileRepository,
     private val hub: MachineHub,
@@ -218,17 +217,32 @@ class AgentController(
                 nickname = openAgentRequestDTO.nickname,
                 cwd = openAgentRequestDTO.cwd,
                 driverName = openAgentRequestDTO.driver,
+                sessionId = openAgentRequestDTO.sessionId,
+                resume = openAgentRequestDTO.resume ?: false,
             )
-        return ResponseEntity(
-            OpenedAgentDTO(
-                agentUserId = opened.agentUserId,
-                sid = opened.sid,
-                machineId = opened.machineId,
-                screenToken = opened.screenToken,
-            ),
-            HttpStatus.CREATED,
-        )
+        return ResponseEntity(opened.toDTO(), HttpStatus.CREATED)
     }
+
+    /**
+     * Reboot the agent: swap its backing screen for a fresh one resuming the same session. Guarded
+     * exactly like closeAgent (`reboot-agent` needs `is-member-of-agent-team`, the same predicate)
+     * — it is a lifecycle action on an existing agent, not opening a new one, so the agent user and
+     * its memberships stay put.
+     */
+    @Guard("reboot-agent", "agent")
+    override fun rebootAgent(
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long
+    ): ResponseEntity<OpenedAgentDTO> {
+        return ResponseEntity.ok(agentService.rebootAgent(userId).toDTO())
+    }
+
+    private fun app.microteams.agent.screen.OpenedAgent.toDTO() =
+        OpenedAgentDTO(
+            agentUserId = agentUserId,
+            sid = sid,
+            machineId = machineId,
+            screenToken = screenToken,
+        )
 
     @Guard("close-agent", "agent")
     override fun closeAgent(
@@ -266,34 +280,24 @@ class AgentController(
         return ResponseEntity.ok(AgentTokenDTO(token = minted.token, expiresAt = minted.expiresAt))
     }
 
-    // -- the tool door ------------------------------------------------------
-
     /**
-     * Post into a group as the calling agent. The caller now presents an ordinary Bearer token —
-     * the agent's own user token from /agent/token — so authentication is the same JWT read every
-     * endpoint does (`currentAuthorization()`), with nothing agent-specific about it.
-     *
-     * It stays @NoAuth + a manual `audit` rather than a declarative @Guard for one reason:
-     * thread_id is optional and may fall back to the agent's most recent thread, which is not known
-     * until the handler runs — so the guarded resource cannot be named on the annotation.
-     * Authorization is still the ordinary matrix (`post-message` on the thread, needing
-     * `is-thread-member`), the very row that governs every human.
+     * The calling agent's document-tree git workspace. Like exchangeAgentToken this is @NoAuth and
+     * resolves the caller from its own Bearer — the applet is already authenticated as the agent
+     * (apiauth attaches the JWT), so it just asks "where is my team's git remote, and give me a
+     * credential for it". We hand back the URL and a fresh token; the applet passes them to a `git`
+     * subprocess, so the connector binary never needs to know any git.
      */
     @NoAuth
-    override fun postNote(postNoteRequestDTO: PostNoteRequestDTO): ResponseEntity<MessageDTO> {
-        val auth = authorizationService.currentAuthorization()
-        val agentUserId = auth.userId
-
-        val text = postNoteRequestDTO.text.trim()
-        if (text.isEmpty()) throw BadRequestError("text must not be empty")
-        val threadId =
-            postNoteRequestDTO.threadId
-                ?: agentRegistry.lastThreadFor(agentUserId)
-                ?: throw BadRequestError("no thread_id given and no recent thread for this agent")
-
-        authorizationService.audit(auth, "post-message", "chat_message", threadId)
+    override fun getGitWorkspace(): ResponseEntity<AgentGitWorkspaceDTO> {
+        val request =
+            (RequestContextHolder.currentRequestAttributes() as ServletRequestAttributes).request
+        val auth = authorizationService.verify(request.getHeader("Authorization"))
+        val (gitUrl, teamId) =
+            agentService.gitWorkspaceUrl(auth.userId)
+                ?: throw BadRequestError("caller is not an active agent")
+        val minted = agentTokenService.mint(auth.userId)
         return ResponseEntity.ok(
-            messageService.postMessage(threadId, agentUserId, PostMessageRequestDTO(content = text))
+            AgentGitWorkspaceDTO(gitUrl = gitUrl, token = minted.token, teamId = teamId)
         )
     }
 }

@@ -16,9 +16,11 @@ import app.microteams.common.helper.PageHelper
 import app.microteams.model.*
 import app.microteams.user.UserProfile
 import app.microteams.user.UserProfileRepository
+import app.microteams.user.UserRepository
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import org.rucca.cheese.common.error.BadRequestError
 import org.rucca.cheese.common.error.NotFoundError
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -30,7 +32,19 @@ class ThreadService(
     private val threadMemberRepository: ThreadMemberRepository,
     private val messageRepository: MessageRepository,
     private val userProfileRepository: UserProfileRepository,
+    private val userRepository: UserRepository,
 ) {
+    /**
+     * Reject any id that does not refer to an existing user before it can be added as a thread
+     * member — otherwise a bogus id (e.g. 1000) silently creates a phantom member rendered as
+     * "user1000". Users live in the shared read-only `public.user` table (id is an Int).
+     */
+    private fun requireUsersExist(userIds: Collection<Long>) {
+        val unknown = userIds.distinct().filterNot { userRepository.existsById(it.toInt()) }
+        if (unknown.isNotEmpty())
+            throw BadRequestError("no such user(s): ${unknown.joinToString(", ")}")
+    }
+
     /**
      * The caller's chats, each with its members and its last message, most-recent activity first —
      * everything the chat list renders (last line + member avatars) in one call.
@@ -85,6 +99,7 @@ class ThreadService(
     }
 
     fun createThread(userId: Long, body: CreateThreadRequestDTO): ThreadDTO {
+        body.memberIds?.let { requireUsersExist(it.filter { mid -> mid != userId }) }
         val t = ThreadEntity().apply { title = body.title }
         threadRepository.save(t)
         threadMemberRepository.save(
@@ -135,6 +150,7 @@ class ThreadService(
         userProfileRepository.findByUserId(userId.toInt()).orElse(null)
 
     fun addMember(threadId: Long, userId: Long, role: ThreadMemberRole) {
+        requireUsersExist(listOf(userId))
         val existing = threadMemberRepository.findByThreadIdAndUserId(threadId, userId)
         if (existing != null) {
             existing.role = role

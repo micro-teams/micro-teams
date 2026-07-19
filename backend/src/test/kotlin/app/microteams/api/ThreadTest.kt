@@ -75,6 +75,21 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
     }
 
     @Test
+    @Order(11)
+    fun createThreadRejectsUnknownMemberId() {
+        // A memberId that refers to no existing user must be rejected (400), not silently
+        // added as a phantom member. 999999999 is far beyond any id cheese-auth issues.
+        mockMvc
+            .perform(
+                post("/chat")
+                    .header("Authorization", "Bearer $ownerToken")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"title":"bogus","memberIds":[999999999]}""")
+            )
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
     @Order(20)
     fun getThreadShowsOwnerMembership() {
         mockMvc

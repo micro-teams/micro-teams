@@ -2,18 +2,16 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { RequireAuth } from "@/components/RequireAuth";
-import { AppLayout } from "@/components/AppLayout";
+import { MobileTabs } from "@/components/MobileTabs";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
-import { WorkspacePage } from "@/pages/WorkspacePage";
 import { ManagePage } from "@/pages/ManagePage";
 import { TeamManagePage } from "@/pages/TeamManagePage";
 import { FilePage } from "@/pages/FilePage";
-import { ChatsPage } from "@/pages/ChatsPage";
 import { NewChatPage } from "@/pages/NewChatPage";
 import { ThreadPage } from "@/pages/ThreadPage";
 import { ChatInfoPage } from "@/pages/ChatInfoPage";
-import { ProfilePage } from "@/pages/ProfilePage";
+import { ConnectPage } from "@/pages/ConnectPage";
 import { AgentPresenceProvider } from "@/hooks/useAgentPresence";
 import { SceneProvider } from "@/hooks/useScene";
 import { SceneOverlay } from "@/components/SceneOverlay";
@@ -62,12 +60,16 @@ function MobileApp() {
           </Authed>
         }
       >
-        {/* Tabbed list views share the bottom-nav shell. */}
-        <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/chats" replace />} />
-          <Route path="/teams" element={<WorkspacePage />} />
-          <Route path="/chats" element={<ChatsPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+        <Route index element={<Navigate to="/chats" replace />} />
+
+        {/* Tabbed list views share ONE keep-alive bottom-nav shell: MobileTabs
+            stays mounted across these paths and hides (never unmounts) the
+            inactive tabs, so each tab keeps its scroll / selection / inputs. */}
+        <Route element={<MobileTabs />}>
+          <Route path="/teams" element={null} />
+          <Route path="/chats" element={null} />
+          <Route path="/agents" element={null} />
+          <Route path="/profile" element={null} />
         </Route>
 
         {/* Detail views push full-screen. */}
@@ -78,6 +80,7 @@ function MobileApp() {
           <Route path="/chats/new" element={<NewChatPage />} />
           <Route path="/chats/:threadId" element={<ThreadPage />} />
           <Route path="/chats/:threadId/info" element={<ChatInfoPage />} />
+          <Route path="/connect" element={<ConnectPage />} />
         </Route>
       </Route>
 
@@ -94,6 +97,14 @@ function DesktopApp() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route
+        path="/connect"
+        element={
+          <Authed>
+            <ConnectPage />
+          </Authed>
+        }
+      />
       <Route
         path="/*"
         element={

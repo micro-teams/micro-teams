@@ -31,6 +31,11 @@ import (
 	"github.com/micro-teams/microteams/cli/internal/update"
 )
 
+// scrollStep is how many scrollback lines one viewer scroll message moves. The
+// browser coalesces wheel/touch into discrete up/down messages, so a small step
+// gives a smooth, wheel-like feel while paging through tmux copy-mode history.
+const scrollStep = 3
+
 // LoadConfig reads this machine's config from path.
 func LoadConfig(path string) (*config.Config, error) { return config.Load(path) }
 
@@ -209,7 +214,22 @@ func (h *Host) onMsg(m link.Msg) {
 	case "screen.input": // raw viewer keystrokes -> the client's pty
 		if s := h.session(m.Sid); s != nil && s.client != nil {
 			if b, err := base64.StdEncoding.DecodeString(m.Data); err == nil {
+				// Typing means "back to the live program": leave any copy-mode
+				// scroll first, so the keystroke reaches the program instead of
+				// being interpreted as a copy-mode command.
+				s.term.ExitCopyMode()
 				_ = s.client.Write(b)
+			}
+		}
+	case "screen.scroll": // viewer pages through the pane's tmux scrollback (copy-mode)
+		if s := h.session(m.Sid); s != nil {
+			switch m.Dir {
+			case "up":
+				s.term.ScrollUp(scrollStep)
+			case "down":
+				s.term.ScrollDown(scrollStep)
+			default: // "bottom" / anything else: return to the live screen
+				s.term.ExitCopyMode()
 			}
 		}
 	case "exec": // run a one-shot command on this machine and return its output
@@ -300,6 +320,9 @@ func (h *Host) subscribeScreen(sid string, cols, rows int) {
 	if s == nil || s.client != nil {
 		return
 	}
+	// A fresh viewer always starts on the live screen: clear any copy-mode a
+	// previous viewer left behind on the pane.
+	s.term.ExitCopyMode()
 	client, err := s.term.Attach(cols, rows, func(b []byte) {
 		_ = h.conn.Send(link.Msg{T: "screen.data", Sid: sid,
 			Data: base64.StdEncoding.EncodeToString(b)})
@@ -323,6 +346,11 @@ func (h *Host) unsubscribeScreen(sid string) {
 		s.lastCols, s.lastRows = 0, 0
 	}
 	h.mu.Unlock()
+	if s != nil {
+		// The last viewer left — never strand the pane in copy-mode, or the next
+		// viewer (and the driver's live sampling) would open into a frozen scroll.
+		s.term.ExitCopyMode()
+	}
 	if client != nil {
 		client.Close()
 	}

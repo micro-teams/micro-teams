@@ -17,11 +17,11 @@ import (
 // prints the result — the whole describe -> cobra -> run -> http path in one shot.
 func TestAppletDefinesAndRunsCommand(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/agent/note" {
+		if r.Method == http.MethodPost && r.URL.Path == "/chat/1/messages" {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"senderId": 7, "content": body["text"]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"senderId": 7, "content": body["content"]})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -30,10 +30,10 @@ func TestAppletDefinesAndRunsCommand(t *testing.T) {
 
 	source := `
 	  microteams.command({
-	    name: 'post-note',
+	    name: 'say',
 	    flags: [{ name: 'text', type: 'string', required: true }],
 	    run: (ctx) => {
-	      const res = microteams.http({ method: 'POST', path: '/agent/note', body: { text: ctx.flags['text'] } })
+	      const res = microteams.http({ method: 'POST', path: '/chat/1/messages', body: { content: ctx.flags['text'] } })
 	      if (res.status >= 400) throw new Error('failed ' + res.status)
 	      microteams.print('sent:' + res.body.content + ' by:' + res.body.senderId)
 	    },
@@ -49,7 +49,7 @@ func TestAppletDefinesAndRunsCommand(t *testing.T) {
 		t.Fatalf("expected 1 command, got %d", len(cmds))
 	}
 
-	if err := run(cmds, "post-note", "--text", "hello"); err != nil {
+	if err := run(cmds, "say", "--text", "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); got != "sent:hello by:7\n" {

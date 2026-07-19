@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,11 +105,12 @@ type Session struct {
 	m    *Manager
 	name string
 
-	mu    sync.Mutex
-	last  string
-	cbs   []func()
-	stop  chan struct{}
-	start sync.Once
+	mu       sync.Mutex
+	last     string
+	cbs      []func()
+	stop     chan struct{}
+	start    sync.Once
+	copyMode bool // pane is in tmux copy-mode (viewer is scrolled back through history)
 }
 
 // Spawn launches argv in a fresh tmux session sized cols x rows, with env (a
@@ -229,12 +231,89 @@ func (c *Client) Close() {
 	})
 }
 
+// ScrollUp drives the pane's tmux scrollback UP by `lines`, entering copy-mode
+// first if it is not already scrolled. The hosted program is a full-screen TUI
+// with no scrollback of its own — the history lives in tmux, reached via
+// copy-mode — so paging back is done here, never by sending PgUp/PgDn to the
+// program (which the program ignores). Idempotent: re-entering copy-mode keeps
+// the current scroll position.
+func (s *Session) ScrollUp(lines int) {
+	if lines <= 0 {
+		lines = 1
+	}
+	s.mu.Lock()
+	enter := !s.copyMode
+	s.copyMode = true
+	s.mu.Unlock()
+	if enter {
+		_ = s.m.tmux("copy-mode", "-t", s.name).Run()
+	}
+	_ = s.m.tmux("send-keys", "-t", s.name, "-X", "-N", strconv.Itoa(lines), "scroll-up").Run()
+}
+
+// ScrollDown drives the scrollback back DOWN by `lines`. It is a no-op when the
+// pane is already live (not in copy-mode). When the scroll reaches the live
+// bottom it leaves copy-mode so the view resumes following new output — so a
+// viewer simply scrolling down to the end returns to the live screen with no
+// explicit "back to live" action.
+func (s *Session) ScrollDown(lines int) {
+	if lines <= 0 {
+		lines = 1
+	}
+	s.mu.Lock()
+	inCopy := s.copyMode
+	s.mu.Unlock()
+	if !inCopy {
+		return
+	}
+	_ = s.m.tmux("send-keys", "-t", s.name, "-X", "-N", strconv.Itoa(lines), "scroll-down").Run()
+	if s.atBottom() {
+		s.ExitCopyMode()
+	}
+}
+
+// atBottom reports whether copy-mode is scrolled to (or past) the live bottom.
+// tmux's #{scroll_position} is the number of lines above the bottom (empty when
+// not in copy-mode), so 0 / empty means "showing the live screen".
+func (s *Session) atBottom() bool {
+	var out bytes.Buffer
+	cmd := s.m.tmux("display-message", "-p", "-t", s.name, "-F", "#{scroll_position}")
+	cmd.Stdout = &out
+	if cmd.Run() != nil {
+		return false
+	}
+	str := strings.TrimSpace(out.String())
+	if str == "" {
+		return true
+	}
+	n, err := strconv.Atoi(str)
+	return err == nil && n <= 0
+}
+
+// ExitCopyMode leaves tmux copy-mode, snapping the pane back to the live bottom.
+// Safe to call when not in copy-mode. Called on any input to the program, when a
+// viewer detaches, and on an explicit "back to live" scroll request, so copy-mode
+// is always a transient view state the next real interaction dismisses.
+func (s *Session) ExitCopyMode() {
+	s.mu.Lock()
+	if !s.copyMode {
+		s.mu.Unlock()
+		return
+	}
+	s.copyMode = false
+	s.mu.Unlock()
+	_ = s.m.tmux("send-keys", "-t", s.name, "-X", "cancel").Run()
+}
+
 // Write sends raw bytes to the session as literal input (used by the hosted
-// script; viewer keystrokes go through a Client's pty instead).
+// script; viewer keystrokes go through a Client's pty instead). Any input to the
+// program first leaves copy-mode, so a queued driver command (or the driver's own
+// snap-to-bottom) is delivered to the live program, never swallowed by a scroll view.
 func (s *Session) Write(p []byte) error {
 	if len(p) == 0 {
 		return nil
 	}
+	s.ExitCopyMode()
 	var stderr bytes.Buffer
 	cmd := s.m.tmux("send-keys", "-t", s.name, "-l", "--", string(p))
 	cmd.Stderr = &stderr

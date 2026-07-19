@@ -48,6 +48,10 @@ type Msg struct {
 	// Data carries base64-encoded raw terminal bytes for the direct screen
 	// channel (screen.data downstream, screen.input upstream).
 	Data string `json:"data,omitempty"`
+	// Dir is the direction of a screen.scroll request ("up" / "down" / "bottom"):
+	// the viewer paging through the pane's tmux scrollback (copy-mode). Unknown to
+	// older peers (ignored).
+	Dir string `json:"dir,omitempty"`
 	// One-shot command execution: exec (request) / exec.cancel / exec.result.
 	Cwd       string `json:"cwd,omitempty"`
 	Stdin     string `json:"stdin,omitempty"`   // optional input fed to the command

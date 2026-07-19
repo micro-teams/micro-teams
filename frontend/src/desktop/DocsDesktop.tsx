@@ -5,7 +5,11 @@
 // empty state. Tree loading + create/rename/move/delete mirror the phone
 // WorkspacePage; selecting a file just changes the URL.
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
+import {
+  useSectionLocation,
+  useSectionSearchParams,
+} from "@/desktop/sectionKeepAlive";
 import { ChevronDown, Settings2, Plus, FolderGit2 } from "lucide-react";
 import type { DocNode } from "@/api";
 import {
@@ -41,8 +45,8 @@ interface PendingAction {
 export function DocsDesktop() {
   const ws = useWorkspace();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [params] = useSearchParams();
+  const location = useSectionLocation();
+  const params = useSectionSearchParams();
   const teamId = ws.teamId;
 
   // The file open in the editor is read from the URL, so DocTree's plain <Link>
