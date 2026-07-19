@@ -85,6 +85,10 @@ services:
     environment:
       # The backend derives absolute URLs from X-Forwarded-* (no domain baked in); ddl-auto=update
       # creates its tables in the "microteams" schema on first boot. Applets are mounted, not baked.
+      # cors-origin: the browser sends an Origin header even on same-origin POST/PUT/DELETE, and
+      # behind a proxy the backend can't tell it's same-origin — so it must allow your public origin
+      # or every write 403s with "Invalid CORS request". Defaults to "*" (fine: /mt auth is a Bearer
+      # token, not a cookie), but set PUBLIC_URL in .env to pin it to your domain.
       SPRING_APPLICATION_JSON: >-
         {"spring.datasource.url":"jdbc:postgresql://postgres:5432/${POSTGRES_DB}",
         "spring.datasource.username":"${POSTGRES_USER}",
@@ -93,6 +97,7 @@ services:
         "application.jwt-secret":"${JWT_SECRET}",
         "application.legacy-url":"http://cheese-auth:8091",
         "application.applets-dir":"/app/applets",
+        "application.cors-origin":"${PUBLIC_URL:-*}",
         "application.git-repo-base":"/app/app_data/git"}
     volumes:
       - ./backend/backend.jar:/app/backend.jar:ro
