@@ -30,14 +30,34 @@ export function ThreadPage() {
   const threadId = Number(threadIdParam);
   const navigate = useNavigate();
   const { user } = useAuth();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const detail = useAsync(
     () => mtCall(chatApi().getThread({ id: threadId })),
     [threadId],
   );
 
+  // Keep the thread sized to the *visible* viewport so the composer stays above
+  // the on-screen keyboard, which overlays (rather than shrinks) the layout on
+  // mobile. Covers iOS via visualViewport and reinforces the Android-only
+  // interactive-widget=resizes-content viewport hint in index.html.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      if (rootRef.current) rootRef.current.style.height = `${vv.height}px`;
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+    };
+  }, []);
+
   return (
-    <div className="flex h-svh flex-col bg-[#111111]">
+    <div ref={rootRef} className="flex h-svh flex-col bg-[#111111]">
       <PageHeader
         title={
           <span className="block text-center">
@@ -88,15 +108,24 @@ function MessageList({
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Initial load + a gentle 4s poll so messages from others show up without a
+  // manual reload — chat has no live socket, so the phone polls the same way the
+  // desktop pane (Conversation.tsx) does.
   useEffect(() => {
     let active = true;
     setLoading(true);
-    mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
-      .then((res) => active && setMessages(res.messages))
-      .catch((err: unknown) => active && setError(errMsg(err)))
-      .finally(() => active && setLoading(false));
+    const fetchOnce = (spin: boolean) => {
+      if (spin) setLoading(true);
+      return mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
+        .then((res) => active && setMessages(res.messages))
+        .catch((err: unknown) => active && setError(errMsg(err)))
+        .finally(() => active && setLoading(false));
+    };
+    void fetchOnce(true);
+    const poll = setInterval(() => void fetchOnce(false), 4000);
     return () => {
       active = false;
+      clearInterval(poll);
     };
   }, [threadId]);
 
@@ -117,7 +146,9 @@ function MessageList({
           postMessageRequest: { content },
         }),
       );
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
+      );
       setText("");
     } catch (err) {
       setError(errMsg(err));
@@ -135,7 +166,7 @@ function MessageList({
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
+      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
         {loading && <Loading />}
         {error && (
           <Alert variant="destructive">
@@ -226,8 +257,8 @@ function MessageRow({
       <div
         className={
           mine
-            ? "flex max-w-[72%] flex-col items-end"
-            : "flex max-w-[72%] flex-col"
+            ? "flex max-w-[72%] min-w-0 flex-col items-end"
+            : "flex max-w-[72%] min-w-0 flex-col"
         }
       >
         {!mine && (
