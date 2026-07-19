@@ -6,8 +6,10 @@
 #   postgres   shared DB: cheese-auth owns schema "public", backend owns "microteams"
 #
 # Secrets come from .env (generate it with `bash gen-env.sh`). All state lives in ./app_data/ as plain
-# host directories (no docker volumes) so it's visible and easy to back up. Images are pinned by
-# digest so a deployment is reproducible.
+# host directories (no docker volumes) so it's visible and easy to back up. Third-party images are
+# pinned by digest so a deployment is reproducible; cheese-auth carries only its :dev tag here and is
+# digest-pinned into the SHIPPED compose at package time (CI), since its rolling tag would make a
+# committed hash stale on every push.
 
 services:
   postgres:
@@ -30,7 +32,8 @@ services:
       retries: 20
 
   cheese-auth:
-    image: ghcr.io/micro-teams/cheese-auth:dev@sha256:fe5a90a2680cac0bd634934b9a45c4cf48d171ee90e95f5f463de88932b31d22
+    # Pinned to a digest in the shipped bundle by package-zip (CI); :dev here for local use.
+    image: ghcr.io/micro-teams/cheese-auth:dev
     restart: unless-stopped
     depends_on:
       postgres:

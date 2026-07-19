@@ -223,6 +223,19 @@ jobs:
               chmod +x "$CONN/$t/tmux"
             fi
           done
+          # Pin cheese-auth to a digest in the SHIPPED compose. The repo keeps only the rolling :dev
+          # tag (a committed hash would go stale on every cheese-auth push); resolve the current digest
+          # now so the bundle a user deploys is reproducible. buildx imagetools reads the public
+          # manifest with no auth.
+          AUTH_REF="ghcr.io/micro-teams/cheese-auth:dev"
+          AUTH_DIGEST="$(docker buildx imagetools inspect "$AUTH_REF" --format '{{.Manifest.Digest}}')"
+          case "$AUTH_DIGEST" in
+            sha256:*) : ;;
+            *) echo "could not resolve $AUTH_REF digest (got '$AUTH_DIGEST')" >&2; exit 1 ;;
+          esac
+          sed -i "s#image: ${AUTH_REF}\$#image: ${AUTH_REF}@${AUTH_DIGEST}#" "$STAGE/docker-compose.yml"
+          echo "pinned cheese-auth -> ${AUTH_REF}@${AUTH_DIGEST}"
+          grep -n 'cheese-auth:dev' "$STAGE/docker-compose.yml"
           echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
       # Upload the bundle DIRECTORY, not a pre-made zip: actions/upload-artifact already zips what it
       # receives, so uploading a .zip would nest it (download → microteams-deploy.zip → the real zip).
