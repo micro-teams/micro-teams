@@ -16,7 +16,7 @@ DB_PASSWORD=postgres
 DB_NAME=postgres
 JWT_SECRET=test-secret
 AUTH_PORT=8091
-AUTH_IMAGE=ghcr.io/sageseekersociety/cheese-auth:main
+AUTH_IMAGE=ghcr.io/micro-teams/cheese-auth:dev
 
 docker network create cheese_network 2>/dev/null || true
 

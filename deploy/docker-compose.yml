@@ -6,12 +6,13 @@
 #   postgres   shared DB: cheese-auth owns schema "public", backend owns "microteams"
 #
 # Secrets come from .env (generate it with `bash gen-env.sh`). All state lives in ./app_data/ as plain
-# host directories (no docker volumes) so it's visible and easy to back up. Images are pinned by
-# digest so a deployment is reproducible.
+# host directories (no docker volumes) so it's visible and easy to back up. Images carry readable tags
+# here; a committed digest goes stale whenever a tag is re-pushed. The shipped bundle is still
+# reproducible: package-zip (CI) resolves each tag to a digest and pins it into the bundled compose.
 
 services:
   postgres:
-    image: postgres:16.2@sha256:4aea012537edfad80f98d870a36e6b90b4c09b27be7f4b4759d72db863baeebb
+    image: postgres:16.2
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -30,7 +31,7 @@ services:
       retries: 20
 
   cheese-auth:
-    image: ghcr.io/sageseekersociety/cheese-auth@sha256:f2f78c99536dbe3e0254523eca5ba045eed74592ee1aa601d47ebb86418d565d
+    image: ghcr.io/micro-teams/cheese-auth:dev
     restart: unless-stopped
     depends_on:
       postgres:
@@ -72,7 +73,7 @@ services:
       start_period: 20s
 
   backend:
-    image: eclipse-temurin:21-jre@sha256:273396ed5998598ed1091e8d72711c2d36980a0e65103859c55a4e977a41ffd3
+    image: eclipse-temurin:21-jre
     restart: unless-stopped
     depends_on:
       postgres:
@@ -111,7 +112,7 @@ services:
       start_period: 40s
 
   nginx:
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
       backend:
