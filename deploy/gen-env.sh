@@ -24,12 +24,6 @@ POSTGRES_DB=microteams
 POSTGRES_PASSWORD=$(secret 40)
 JWT_SECRET=$(secret 64)
 
-# --- Public URL -------------------------------------------------------------
-# Your real external origin, used by cheese-auth for verification-email links. Set it
-# to the domain users actually reach — not localhost. (CORS needs nothing set — the
-# backend allows its own forwarded origin automatically.)
-PUBLIC_URL=https://your-domain.example
-
 # --- Email (SMTP) -----------------------------------------------------------
 # Registration emails a verification code; WITHOUT working SMTP nobody can sign up.
 # Point these at any SMTP relay (your provider, SES, Postmark, a company mail server…).
