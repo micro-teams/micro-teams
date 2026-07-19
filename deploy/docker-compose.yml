@@ -51,10 +51,11 @@ services:
       FILE_UPLOAD_PATH: /app/uploads
       DEFAULT_AVATAR_NAME: default.jpg
       COOKIE_BASE_URL: /
-      # The public origin (https://your-domain) baked into verification-email links. MUST be your
-      # real domain — the default localhost makes every registration link point at the user's own
-      # machine. Set PUBLIC_URL in .env.
-      FRONTEND_BASE_URL: ${PUBLIC_URL:-http://localhost}
+      # No public URL to configure: cheese-auth derives its own origin from the request's
+      # X-Forwarded-* headers for email links, so this deployment is domain-agnostic (one instance
+      # can sit behind several domains). Optionally set APP_NAME to rebrand the emails (default
+      # "MicroTeams").
+      APP_NAME: ${APP_NAME:-MicroTeams}
       # SMTP — cheese-auth emails a code on registration, so registration is dead without it.
       # Fill these in .env. SSL_ENABLE=true is for implicit TLS (port 465); plain/STARTTLS use false.
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
