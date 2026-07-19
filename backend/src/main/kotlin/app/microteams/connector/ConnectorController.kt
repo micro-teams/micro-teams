@@ -50,7 +50,7 @@ class ConnectorController(
     // configurable, and both have sane defaults for the compose deployment.
     @Value("\${application.connector-api-base-path:/mt}") private val apiBasePath: String,
     @Value("\${application.connector-ws-override:}") private val wsOverride: String,
-    @Value("\${application.connector-binaries-dir:/app/app_data/connector}")
+    @Value("\${application.connector-binaries-dir:/app/connector}")
     private val binariesDir: String,
 ) {
 

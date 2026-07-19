@@ -42,7 +42,7 @@ EMAIL_DEFAULT_FROM=MicroTeams <no-reply@your-domain.example>
 EOF
 chmod 600 .env
 
-mkdir -p app_data/postgresql app_data/git app_data/cheese-auth-uploads app_data/connector
+mkdir -p app_data/postgresql app_data/git app_data/cheese-auth-uploads
 
 echo "Wrote .env (chmod 600) and created app_data/ directories."
 echo "Next: docker compose up -d   then   docker compose ps   (wait for every service 'healthy')."

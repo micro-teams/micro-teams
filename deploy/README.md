@@ -14,10 +14,9 @@ init/                  postgres first-init SQL (creates the "microteams" schema)
 backend/backend.jar    the backend
 frontend/dist/         the built SPA (static, domain-independent)
 applets/               cli.js + claude.js (mounted into the backend, swappable)
-cli/                   the microteams CLI binaries, per OS/arch (served to machines)
-app_data/connector/    the CLI distribution served to fresh machines: per-target dirs each
+connector/             the CLI distribution served to fresh machines: per-target dirs each
                        holding the `microteams` binary + a static `tmux` (Linux only — see below)
-app_data/              created by gen-env.sh — all persistent state lives here (see below)
+app_data/              NOT shipped — gen-env.sh creates it; all persistent state lives here (see below)
 ```
 
 ## Fresh-machine install (`curl … | sh`)
@@ -44,19 +43,21 @@ microteams link auto-connect                       # enroll (approve in the brow
 `install.sh` is served by the backend at the origin root (nginx routes `/install.sh` and
 `/connector/…` straight to it, no `/mt` prefix), with the connector base and API base baked in from
 your `X-Forwarded-*` origin — so the same bundle works behind any domain with nothing configured.
-The binaries it downloads (`GET /connector/latest/<os>-<arch>/{microteams,tmux}`) come from
-`app_data/connector/`, which CI populates in the bundle:
+The binaries it downloads (`GET /connector/latest/<os>-<arch>/{microteams,tmux}`) come from the
+top-level `connector/` directory, which CI populates in the bundle:
 
 ```
-app_data/connector/linux-amd64/{microteams,tmux}
-app_data/connector/linux-arm64/{microteams,tmux}
-app_data/connector/darwin-amd64/microteams      # macOS static tmux is not published —
-app_data/connector/darwin-arm64/microteams      # install.sh copies the machine's own tmux
+connector/linux-amd64/{microteams,tmux}
+connector/linux-arm64/{microteams,tmux}
+connector/darwin-amd64/microteams      # macOS static tmux is not published —
+connector/darwin-arm64/microteams      # install.sh copies the machine's own tmux
 ```
 
-It is bind-mounted read-only into the backend at `/app/app_data/connector` (the default
-`application.connector-binaries-dir`). To refresh the CLI for all machines, replace the binaries here
-and `docker compose up -d` — connected machines self-update via `microteams update`.
+It is bind-mounted read-only into the backend at `/app/connector` (the default
+`application.connector-binaries-dir`). It lives at the top level, **not** under `app_data/`, because
+it is a shipped build artifact, not state — `app_data/` holds only what you back up. To refresh the
+CLI for all machines, replace the binaries here and `docker compose up -d` — connected machines
+self-update via `microteams update`.
 
 ## Deploy
 
