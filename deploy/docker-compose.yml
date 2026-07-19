@@ -5,7 +5,7 @@
 #   cheese-auth identity service (a prebuilt image)
 #   postgres   shared DB: cheese-auth owns schema "public", backend owns "microteams"
 #
-# Secrets come from .env (generate it with ./gen-env.sh). All state lives in ./app_data/ as plain
+# Secrets come from .env (generate it with `bash gen-env.sh`). All state lives in ./app_data/ as plain
 # host directories (no docker volumes) so it's visible and easy to back up. Images are pinned by
 # digest so a deployment is reproducible.
 
@@ -98,10 +98,11 @@ services:
       - ./applets:/app/applets:ro
       - ./app_data/git:/app/app_data/git
       # The CLI distribution the backend serves at /connector/latest/<target>/<artifact>: the
-      # cross-compiled `microteams` binaries + static tmux, laid out by CI under app_data/connector.
-      # Read-only — it's a build artifact, not runtime state. Matches the backend's default
-      # application.connector-binaries-dir (/app/app_data/connector), so nothing extra to configure.
-      - ./app_data/connector:/app/app_data/connector:ro
+      # cross-compiled `microteams` binaries + static tmux, laid out by CI under connector/.
+      # Read-only — it's a shipped build artifact, not runtime state, so it lives OUTSIDE app_data/
+      # (which holds only state you back up). Matches the backend's default
+      # application.connector-binaries-dir (/app/connector), so nothing extra to configure.
+      - ./connector:/app/connector:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"]
       interval: 10s

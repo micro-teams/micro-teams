@@ -94,7 +94,21 @@ install -m 0755 "$tmp" "$BIN_DIR/microteams"; rm -f "$tmp"
 ok "$BIN_DIR/microteams"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) warn "$BIN_DIR is not on your PATH — add:  export PATH=\"\$PATH:$BIN_DIR\"" ;;
+  *)
+    # Not on PATH — give the exact copy-paste line, targeting the login shell's rc file so the
+    # command actually sticks (zsh users editing ~/.bashrc is a classic dead end).
+    case "${SHELL##*/}" in
+      zsh)  rc="$HOME/.zshrc" ;;
+      fish) rc="$HOME/.config/fish/config.fish" ;;
+      *)    rc="$HOME/.bashrc" ;;
+    esac
+    warn "$BIN_DIR is not on your PATH. To fix it, run:"
+    if [ "${SHELL##*/}" = fish ]; then
+      printf '\n    fish_add_path %s\n\n' "$BIN_DIR" >&2
+    else
+      printf '\n    echo '\''export PATH="%s:$PATH"'\'' >> %s && . %s\n\n' "$BIN_DIR" "$rc" "$rc" >&2
+    fi
+    ;;
 esac
 
 # --- 2. private tmux ---------------------------------------------------------

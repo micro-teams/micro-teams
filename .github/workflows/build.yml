@@ -145,25 +145,42 @@ jobs:
     # A fully static tmux per Linux target, so a fresh machine needs nothing pre-installed:
     # install.sh drops it at ~/.config/microteams/bin/tmux (macOS is not published — install.sh
     # falls back to copying the machine's own tmux there). Only the build recipe is in git.
-    runs-on: ubuntu-latest
+    #
+    # Built NATIVELY on a matching-arch runner — the arm64 build used to run under QEMU emulation
+    # (minutes of emulated gcc; the Dockerfile already passes `make -j$(nproc)`, so the bottleneck was
+    # emulation, not parallelism). The two arches now run as parallel matrix jobs, and the result is
+    # cached by the build recipe's hash so an unchanged tmux version rebuilds instantly.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm   # GitHub-hosted native arm64 (no QEMU)
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - name: Set up QEMU (for the linux/arm64 build)
-        uses: docker/setup-qemu-action@v3
+      - name: Cache the built static tmux
+        id: tmux-cache
+        uses: actions/cache@v4
+        with:
+          path: dist/linux-${{ matrix.arch }}/tmux
+          key: tmux-${{ matrix.arch }}-${{ hashFiles('deploy/tmux/Dockerfile', 'deploy/tmux/build-static-tmux.sh') }}
       - name: Set up Docker Buildx
+        if: steps.tmux-cache.outputs.cache-hit != 'true'
         uses: docker/setup-buildx-action@v3
-      - name: Build static tmux (one per Linux target)
+      - name: Build static tmux (native, no QEMU)
+        if: steps.tmux-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          for a in amd64 arm64; do
-            deploy/tmux/build-static-tmux.sh --arch "$a" --out dist
-          done
+          deploy/tmux/build-static-tmux.sh --arch "${{ matrix.arch }}" --out dist
           ls -la dist/*/
-      - name: Upload tmux binaries
+      - name: Upload tmux binary
         uses: actions/upload-artifact@v7
         with:
-          name: tmux-binaries
-          path: dist
+          name: tmux-linux-${{ matrix.arch }}
+          path: dist/linux-${{ matrix.arch }}
 
   package-zip:
     needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux]
@@ -177,19 +194,20 @@ jobs:
         run: |
           set -euo pipefail
           STAGE=microteams-deploy
-          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/cli"
+          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
           cp -r deploy/init "$STAGE/"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp -r artifacts/frontend-dist/. "$STAGE/frontend/dist/"
           cp artifacts/applets/*.js "$STAGE/applets/"
-          cp artifacts/cli-binaries/* "$STAGE/cli/"
           chmod +x "$STAGE/gen-env.sh"
-          # CLI distribution: arrange the cross-compiled `microteams` binaries and the static tmux
-          # into the connector/latest/<target>/ layout the backend serves, under app_data/connector
-          # (compose bind-mounts it to application.connector-binaries-dir). Go-style os-arch dirs,
-          # matching install.sh's `target` and update.go's platformDir.
-          CONN="$STAGE/app_data/connector"
+          # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
+          # static tmux, laid out as connector/<target>/{microteams,tmux} (Go-style os-arch, matching
+          # install.sh's `target` and update.go's platformDir). It's a shipped build artifact, so it
+          # lives at the top level as connector/ — NOT under app_data/, which gen-env.sh creates fresh
+          # at deploy time and holds only state you back up. compose bind-mounts connector/ to the
+          # backend's default application.connector-binaries-dir (/app/connector).
+          CONN="$STAGE/connector"
           for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             os="${t%-*}"; arch="${t#*-}"
             mkdir -p "$CONN/$t"
@@ -197,32 +215,38 @@ jobs:
             chmod +x "$CONN/$t/microteams"
           done
           # Static tmux is Linux-only; macOS uses its own via install.sh's system-tmux fallback.
+          # Each arch is its own artifact (tmux-linux-<arch>/tmux) from the matrix build.
           for t in linux-amd64 linux-arm64; do
-            if [ -f "artifacts/tmux-binaries/$t/tmux" ]; then
-              cp "artifacts/tmux-binaries/$t/tmux" "$CONN/$t/tmux"
+            arch="${t#linux-}"
+            if [ -f "artifacts/tmux-linux-$arch/tmux" ]; then
+              cp "artifacts/tmux-linux-$arch/tmux" "$CONN/$t/tmux"
               chmod +x "$CONN/$t/tmux"
             fi
           done
-          zip -qr microteams-deploy.zip "$STAGE"
           echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
+      # Upload the bundle DIRECTORY, not a pre-made zip: actions/upload-artifact already zips what it
+      # receives, so uploading a .zip would nest it (download → microteams-deploy.zip → the real zip).
+      # Uploading the dir means the downloaded artifact zip IS the bundle, one layer.
       - uses: actions/upload-artifact@v7
         with:
           name: microteams-deploy
-          path: microteams-deploy.zip
+          path: microteams-deploy
 
   test-compose:
     needs: [package-zip]
     runs-on: ubuntu-latest
     steps:
+      # The artifact is the bundle directory (not a zip); download-artifact restores its files
+      # directly into microteams-deploy/ — no unzip step, and no nested archive. Note: artifact
+      # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash`.
       - uses: actions/download-artifact@v7
         with:
           name: microteams-deploy
-      - name: Unzip
-        run: unzip -q microteams-deploy.zip
+          path: microteams-deploy
       - name: Bring the cluster up and wait for every service to be healthy
         working-directory: microteams-deploy
         run: |
-          ./gen-env.sh
+          bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
       - name: Cluster status
         if: always()
