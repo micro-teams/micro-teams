@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# MicroTeams — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The MicroTeams web client: React 19 + Vite + Tailwind v4 + TypeScript, mobile-first. It talks to
+two backends through nginx's same-origin gateway — **cheese-auth** (identity) at `/api` and **mt**
+(teams, documents, chat, machines, agents) at `/mt`.
 
-Currently, two official plugins are available:
+## Develop
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+npm run dev        # :5173 — proxies /api → :8091 and /mt → :8199 (see vite.config.ts)
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Point the proxies elsewhere with `AUTH_BACKEND_URL` / `MT_BACKEND_URL`. Full local bring-up
+(cheese-auth + backend + nginx) is in the [repo root README](../README.md).
+
+## Scripts
+
+| | |
+|---|---|
+| `npm run dev` | Vite dev server (regenerates the API client first) |
+| `npm run build` | typecheck + production build (regenerates the API client first) |
+| `npm run lint` | oxlint |
+| `npm run format` / `format:check` | prettier |
+| `npm run codegen` | regenerate `src/api/` from `../MicroTeams-API.yml` |
+
+## The one rule that bites
+
+**`src/api/` is generated from the repo-root `MicroTeams-API.yml` and must never be hand-edited** —
+it is overwritten on every build (the `predev`/`prebuild` hooks run `codegen`). Change the API by
+editing the YAML first, then regenerate. See [`CLAUDE.md`](./CLAUDE.md) for the rest of the
+conventions (the single `mtApi` client, the one `UserAvatar` control, what stays hand-written).

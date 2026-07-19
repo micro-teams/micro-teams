@@ -13,7 +13,7 @@ not debug by "start the jar and curl". See _Testing_.
 ## 1. OpenAPI-first codegen
 
 - Change `MicroTeams-API.yml` **first**, then build regenerates the API interfaces
-  (`org.rucca.cheese.api.*Api`) and DTOs (`org.rucca.cheese.model.*DTO`). **Never hand-write
+  (`app.microteams.api.*Api`) and DTOs (`app.microteams.model.*DTO`). **Never hand-write
   or hand-edit generated interfaces / DTOs.**
 - The generator writes **into `src/main/kotlin/.../api` and `.../model`** (not `target/`) and
   **does not delete stale files**. When you remove a path/schema from the YAML, manually
@@ -222,7 +222,7 @@ The payoff: an auditor reads one file and sees every endpoint's rule.
   @TestInstance(PER_CLASS) @TestMethodOrder(OrderAnnotation)`, constructor-inject `MockMvc` +
   `UserCreatorService`, `@BeforeAll` creates real users and logs in **through the real
   cheese-auth service**, ordered tests share state, assert with `jsonPath`. See
-  `src/test/kotlin/org/rucca/microteams/api/{TeamTest,DocumentTest,ThreadTest,MachineTest,MachineLinkTest,AgentLoopTest}.kt`.
+  `src/test/kotlin/app/microteams/api/{TeamTest,DocumentTest,ThreadTest,MachineTest,MachineLinkTest,AgentLoopTest}.kt`.
 - **Depending on external services (Postgres, cheese-auth) is the point of integration
   testing, not a smell.** `UserCreatorService` inserts a real user row and logs in via
   `application.legacy-url`.
