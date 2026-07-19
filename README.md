@@ -1,4 +1,4 @@
-# micro-agent-teams
+# MicroTeams
 
 A collaboration substrate that turns AI agents into long-lived team members working alongside
 humans. An agent here is not a chat box: it is **a real user account** that drives a real CLI
@@ -17,13 +17,13 @@ forgotten; code does not.
 | **`backend/`** ("mt") | Kotlin / Spring Boot. Chat, teams, git-backed documents, machines, agents. |
 | **`frontend/`** | React + Vite, mobile-first. |
 | **`cli/`** | Go. Runs on a machine, hosts the agent's CLI, speaks the connector protocol. |
-| **cheese-auth** | A *separate* repo (`micro-agent-teams/cheese-auth`, NestJS): registration, login, avatars. Cloned as a sibling, not part of this monorepo. |
+| **cheese-auth** | A *separate* repo (`micro-teams/cheese-auth`, NestJS): registration, login, avatars. Runs as a prebuilt image in deployment; cloned as a sibling for local dev. Not part of this monorepo. |
 
 ### One contract, generated both ways
 
 `MicroTeams-API.yml` is the source of truth and neither side hand-writes its client:
 
-- the backend regenerates `org.rucca.cheese.api.*Api` on every build, and each module's single
+- the backend regenerates `app.microteams.api.*Api` on every build, and each module's single
   controller implements exactly its own interface — nothing else;
 - the frontend regenerates `frontend/src/api` on every `npm run dev` / `npm run build` (npm
   `pre*` hooks, so you cannot accidentally run against a stale client).
@@ -64,17 +64,17 @@ itself, and chat — which owns "who is in this group" — calls it. Chat never 
               ┌────────────┼────────────┐
          /  (root)     /api/*        /mt/*
               ▼            ▼            ▼
-        ┌───────────┐ ┌───────────┐ ┌──────────┐        ┌──────────┐
-        │ frontend  │ │cheese-auth│ │    mt    │◄──WS───│  cli │
-        │React+Vite │ │ (NestJS)  │ │ (Kotlin/ │        │ on your  │
-        │  :5173    │ │  :8091    │ │  Spring) │        │ machine  │
-        └───────────┘ └─────┬─────┘ └────┬─────┘        └────┬─────┘
-                            ▼            ▼                   ▼
-                      ┌──────────────────────┐          Claude Code
-                      │      Postgres        │          in a tmux screen
-                      │  public: auth's      │
-                      │  microteams:    mt's own    │
-                      └──────────────────────┘
+        ┌───────────┐ ┌───────────┐ ┌───────────┐        ┌───────────┐
+        │ frontend  │ │cheese-auth│ │    mt     │◄──WS───│    cli    │
+        │React+Vite │ │ (NestJS)  │ │ (Kotlin/  │        │ on your   │
+        │  :5173    │ │  :8091    │ │  Spring)  │        │ machine   │
+        └───────────┘ └─────┬─────┘ └─────┬─────┘        └─────┬─────┘
+                            ▼             ▼                    ▼
+                      ┌───────────────────────┐          Claude Code
+                      │       Postgres        │          in a tmux screen
+                      │  public:     auth's   │
+                      │  microteams: mt's own │
+                      └───────────────────────┘
 ```
 
 Everything the browser touches is **one origin** — nginx puts all three behind it at different
@@ -94,7 +94,7 @@ Prerequisites: JDK 21, Node.js, Go, Docker + Compose, nginx.
 
 ```sh
 cd ..                       # a sibling directory, not inside this repo
-git clone https://github.com/micro-agent-teams/cheese-auth.git && cd cheese-auth
+git clone https://github.com/micro-teams/cheese-auth.git && cd cheese-auth
 cp sample.env .env
 ```
 

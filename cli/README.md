@@ -14,7 +14,7 @@ on nothing but a system `tmux` and a POSIX pty.
 A screen is a program running in a terminal. The server drives each screen two
 independent ways at once:
 
-1. **A applet** — a small piece of JavaScript the server hosts inside the
+1. **An applet** — a small piece of JavaScript the server hosts inside the
    screen. Its entire world is three affordances, and nothing else:
 
    - **a terminal** it can read (the current screen) and write (keystrokes);
@@ -80,11 +80,13 @@ overrides) and only falls back to the system tmux — so a machine without tmux
 works, and a machine with a quirky one is never at its mercy. Sockets live in a
 private per-run directory either way.
 
-**`microteams api`** mounts the server's OpenAPI (fetched live from
-`<base>/openapi.json`) as subcommands, rebuilt each run so it never goes stale.
-It is hidden from the top-level help; run `microteams api` to list operations and
-`microteams api <op> -h` for one operation's generated help. Two things happen
-automatically:
+**`microteams api`** runs the server-hosted **CLI applet** (`cli.js`): the applet
+declares the whole command tree with `microteams.command`, and the host turns that
+declaration into subcommands, rebuilt from the applet each run so it never goes
+stale. The command set therefore lives on the server — a new command ships by
+updating the applet, not the binary. It is hidden from the top-level help; run
+`microteams api` to list commands and `microteams api <cmd> -h` for one command's
+help. Two things happen automatically on any backend call the applet makes:
 
 - the stored credential is attached as `Authorization: Bearer …`;
 - if the call comes from **inside a screen**, it is tagged with that screen's
@@ -104,10 +106,11 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o microteams-darwin-arm64 .
 
 Runtime needs `tmux` and a pty (Linux and macOS; no Windows).
 
-## Reference consumer
+## The consumer
 
-`../misc/web-claude` is a complete, isolated example built on this framework: a
-server + browser UI that hosts **Claude Code** in the browser, using screens,
-applets, the raw channel and screen-scoped `microteams api`. It is the first real
-consumer of `microteams` and doubles as a contract sample for a full backend. Note
-that the CLI here has no idea any of that is about AI — see `misc/web-claude`.
+This monorepo's **backend** (`../backend`, the `mt` service) is the server that
+drives this host: `agent/driver` picks a screen applet (`claude.js`) to run Claude
+Code in a screen, and `agent/AppletController` serves the CLI applet (`cli.js`) that
+defines `microteams api`. Both applets are authored in `../applets`. Nothing in
+`internal/` knows any of that is about AI — read the host code and you cannot tell
+what it hosts, which is the point.
