@@ -223,19 +223,27 @@ jobs:
               chmod +x "$CONN/$t/tmux"
             fi
           done
-          # Pin cheese-auth to a digest in the SHIPPED compose. The repo keeps only the rolling :dev
-          # tag (a committed hash would go stale on every cheese-auth push); resolve the current digest
-          # now so the bundle a user deploys is reproducible. buildx imagetools reads the public
-          # manifest with no auth.
-          AUTH_REF="ghcr.io/micro-teams/cheese-auth:dev"
-          AUTH_DIGEST="$(docker buildx imagetools inspect "$AUTH_REF" --format '{{.Manifest.Digest}}')"
-          case "$AUTH_DIGEST" in
-            sha256:*) : ;;
-            *) echo "could not resolve $AUTH_REF digest (got '$AUTH_DIGEST')" >&2; exit 1 ;;
-          esac
-          sed -i "s#image: ${AUTH_REF}\$#image: ${AUTH_REF}@${AUTH_DIGEST}#" "$STAGE/docker-compose.yml"
-          echo "pinned cheese-auth -> ${AUTH_REF}@${AUTH_DIGEST}"
-          grep -n 'cheese-auth:dev' "$STAGE/docker-compose.yml"
+          # Pin every image to a digest in the SHIPPED compose so a deployed bundle is reproducible,
+          # while the repo keeps only readable tags (a committed hash goes stale whenever a tag is
+          # re-pushed). buildx imagetools reads public manifests with no auth; the resolved digest is
+          # the multi-arch index digest, which is what compose should pull.
+          COMPOSE="$STAGE/docker-compose.yml"
+          for ref in $(grep -oE '^[[:space:]]*image:[[:space:]]*[^[:space:]]+' "$COMPOSE" | awk '{print $NF}'); do
+            case "$ref" in *@sha256:*) continue ;; esac   # already pinned — leave it
+            # Retry: registry manifest reads blip intermittently and shouldn't fail a release.
+            digest=""
+            for attempt in 1 2 3 4 5; do
+              digest="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+              case "$digest" in sha256:*) break ;; esac
+              echo "  ($ref) digest not resolved yet (attempt $attempt), retrying…" >&2
+              sleep 3
+            done
+            case "$digest" in sha256:*) : ;; *) echo "could not resolve digest for $ref after retries" >&2; exit 1 ;; esac
+            esc="$(printf '%s' "$ref" | sed 's/[.[\*^$/]/\\&/g')"   # escape regex metachars in the tag
+            sed -i "s#image: ${esc}\$#image: ${ref}@${digest}#" "$COMPOSE"
+            echo "pinned $ref -> ${ref}@${digest}"
+          done
+          echo "== pinned images =="; grep -nE '^[[:space:]]*image:' "$COMPOSE"
           echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
       # Upload the bundle DIRECTORY, not a pre-made zip: actions/upload-artifact already zips what it
       # receives, so uploading a .zip would nest it (download → microteams-deploy.zip → the real zip).
