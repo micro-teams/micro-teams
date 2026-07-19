@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // RequireAuth stashes the path it bounced the user off of (e.g. /connect?code=...)
+  // in location.state.from — send them back there once they're signed in.
+  const from = (location.state as { from?: string } | null)?.from;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +25,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       await login(username, password);
-      navigate("/");
+      navigate(from || "/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "login failed");
     } finally {

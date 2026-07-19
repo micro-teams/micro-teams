@@ -23,13 +23,55 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
      * We always control Claude's session id (`--session-id` fresh / `--resume` to continue), and
      * prepend the cwd because Claude resolves a session's transcript by the cwd's slug — resuming
      * from elsewhere silently starts a blank session.
+     *
+     * The standing operator instructions ride in `--append-system-prompt`: injected once here at
+     * launch, they apply for the whole session and *append to* (never replace) whatever CLAUDE.md
+     * the working repo carries — which matters when the cwd is a real code checkout with its own.
+     * That is why each group message we later type is just the message, not a repeated how-to.
      */
     override fun command(sessionId: String, cwd: String?, resume: Boolean): List<String> {
         val flag = if (resume) "--resume" else "--session-id"
-        var inner = "exec claude $flag $sessionId"
-        if (cwd != null) inner = "cd ${shellQuote(cwd)} && $inner"
+        // An autonomous agent can't answer prompts, so run Claude non-interactively: pre-mark
+        // first-run onboarding (so a fresh machine doesn't hang on the welcome/trust screens) and
+        // skip the permission gates. But Claude REFUSES --dangerously-skip-permissions under
+        // root/sudo, so add that flag only when the connector runs as a non-root user (the intended
+        // setup — install.sh + the boot service run as the enrolling user). Under root we omit it
+        // so
+        // Claude still starts and falls back to the applet's auto-accept, rather than exiting.
+        val onboard =
+            "mkdir -p \"\$HOME/.claude\"; [ -f \"\$HOME/.claude.json\" ] || " +
+                "printf '{\"hasCompletedOnboarding\":true}' > \"\$HOME/.claude.json\""
+        val skipIfNonRoot = "\$([ \"\$(id -u)\" != 0 ] && printf %s --dangerously-skip-permissions)"
+        var inner =
+            "$onboard; exec claude $flag $sessionId $skipIfNonRoot " +
+                "--append-system-prompt ${shellQuote(OPERATOR_PROMPT)}"
+        // The cwd is the agent's document-tree workspace; it may not exist yet on a fresh machine
+        // (the applet's `docs sync` clones into it), so create it before entering.
+        if (cwd != null) inner = "mkdir -p ${shellQuote(cwd)} && cd ${shellQuote(cwd)} && $inner"
         return listOf("bash", "-lc", inner)
     }
 
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
+
+    companion object {
+        // How this Claude behaves as a MicroTeams group member. The delivery mechanism
+        // (--append-system-prompt) is Claude-specific, so the text lives with the driver that knows
+        // Claude; a different driver would inject equivalent guidance its own way.
+        private val OPERATOR_PROMPT =
+            """
+            You are an autonomous agent taking part in a MicroTeams group chat as an ordinary user.
+            Group messages reach your terminal prefixed with `[thread:<id>] <speaker>：<text>`.
+            To speak in a group, run: microteams api say --thread-id <id> --text '<your reply>'
+            Only what you send with that command reaches the group; anything else you type stays local.
+            Act on your own initiative and don't wait for confirmation. If a message needs no reply, ignore it.
+
+            Your working directory is your team's shared document tree, a git repository. Run
+            `microteams api docs sync` once at the start to fetch the latest, then read and edit files
+            here with your normal tools. To let the team see your changes, run
+            `microteams api docs add -m '<what changed>'` to record them and then
+            `microteams api docs sync` to publish and pull others' updates.
+            `microteams api docs status` shows what you have changed but not yet recorded.
+            """
+                .trimIndent()
+    }
 }

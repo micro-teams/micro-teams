@@ -14,7 +14,7 @@
  *                    what.
  *
  *               Actions are named after what the endpoint *does* ("rename-machine", "watch",
- *               "post-note"), not after CRUD, so a row reads as the permission of a specific
+ *               "post-message"), not after CRUD, so a row reads as the permission of a specific
  *               endpoint rather than of a vague verb. customLogic is a boolean expression over
  *               those predicates (&&, ||, !, parens — see CustomAuthLogics), so a rule with several
  *               ways to be satisfied stays one readable row instead of being smeared across
@@ -227,6 +227,13 @@ class RolePermissionService {
                     // DELETE /agent/{userId}
                     Permission(
                         authorizedActions = listOf("close-agent"),
+                        authorizedResource = AuthorizedResource(types = listOf("agent")),
+                        customLogic = "is-member-of-agent-team",
+                    ),
+                    // POST /agent/{userId}/reboot — same team-membership rule as close: a lifecycle
+                    // action on an existing agent, so the caller must belong to its team.
+                    Permission(
+                        authorizedActions = listOf("reboot-agent"),
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                         customLogic = "is-member-of-agent-team",
                     ),

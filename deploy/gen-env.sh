@@ -23,10 +23,26 @@ POSTGRES_USER=microteams
 POSTGRES_DB=microteams
 POSTGRES_PASSWORD=$(secret 40)
 JWT_SECRET=$(secret 64)
+
+# --- Public URL -------------------------------------------------------------
+# Your real external origin. Baked into the verification-email links cheese-auth
+# sends, so it MUST be the domain users actually reach — not localhost.
+PUBLIC_URL=https://your-domain.example
+
+# --- Email (SMTP) -----------------------------------------------------------
+# Registration emails a verification code; WITHOUT working SMTP nobody can sign up.
+# Point these at any SMTP relay (your provider, SES, Postmark, a company mail server…).
+# SSL_ENABLE=true = implicit TLS on port 465; plain/STARTTLS relays use false.
+EMAIL_SMTP_HOST=
+EMAIL_SMTP_PORT=25
+EMAIL_SMTP_USERNAME=
+EMAIL_SMTP_PASSWORD=
+EMAIL_SMTP_SSL_ENABLE=false
+EMAIL_DEFAULT_FROM=MicroTeams <no-reply@your-domain.example>
 EOF
 chmod 600 .env
 
-mkdir -p app_data/postgresql app_data/git app_data/cheese-auth-uploads
+mkdir -p app_data/postgresql app_data/git app_data/cheese-auth-uploads app_data/connector
 
 echo "Wrote .env (chmod 600) and created app_data/ directories."
 echo "Next: docker compose up -d   then   docker compose ps   (wait for every service 'healthy')."

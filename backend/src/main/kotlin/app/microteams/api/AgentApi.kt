@@ -4,12 +4,11 @@
  */
 package app.microteams.api
 
+import app.microteams.model.AgentGitWorkspaceDTO
 import app.microteams.model.AgentTokenDTO
 import app.microteams.model.ListAgentsResponseDTO
-import app.microteams.model.MessageDTO
 import app.microteams.model.OpenAgentRequestDTO
 import app.microteams.model.OpenedAgentDTO
-import app.microteams.model.PostNoteRequestDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
 import io.swagger.v3.oas.annotations.media.*
@@ -61,6 +60,31 @@ interface AgentApi {
         produces = ["application/json"],
     )
     fun exchangeAgentToken(): ResponseEntity<AgentTokenDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "The calling agent's document-tree git workspace: the URL of its team's git remote and a fresh token to authenticate git against it. The applet's `docs` commands call this (already authenticated as the agent) and hand the token to a `git` subprocess, so the connector binary needs no git knowledge. Authenticated by the agent's own Bearer token. ",
+        operationId = "getGitWorkspace",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "The team git remote and a credential for it",
+                    content =
+                        [Content(schema = Schema(implementation = AgentGitWorkspaceDTO::class))],
+                )
+            ],
+    )
+    @RequestMapping(
+        method = [RequestMethod.GET],
+        value = ["/agent/git-workspace"],
+        produces = ["application/json"],
+    )
+    fun getGitWorkspace(): ResponseEntity<AgentGitWorkspaceDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 
@@ -150,30 +174,26 @@ interface AgentApi {
     @Operation(
         tags = ["agent"],
         summary =
-            "The agent tool-door. A screen's CLI runs `microteams api post-note` with the agent token from /agent/token, and the note lands in chat authored by the agent user. ",
-        operationId = "postNote",
+            "Reboot an agent: end its current screen and relaunch the same driver, in the same cwd, resuming the same session id. The agent user and its group memberships are unchanged; only the backing screen (sid + screen token) is replaced. ",
+        operationId = "rebootAgent",
         description = """""",
         responses =
             [
                 ApiResponse(
                     responseCode = "200",
-                    description = "Posted",
-                    content = [Content(schema = Schema(implementation = MessageDTO::class))],
+                    description = "Rebooted",
+                    content = [Content(schema = Schema(implementation = OpenedAgentDTO::class))],
                 )
             ],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
-        value = ["/agent/note"],
+        value = ["/agent/{userId}/reboot"],
         produces = ["application/json"],
-        consumes = ["application/json"],
     )
-    fun postNote(
-        @Parameter(description = "", required = true)
-        @Valid
-        @RequestBody
-        postNoteRequestDTO: PostNoteRequestDTO
-    ): ResponseEntity<MessageDTO> {
+    fun rebootAgent(
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long
+    ): ResponseEntity<OpenedAgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 }

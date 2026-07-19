@@ -12,6 +12,7 @@
 package app.microteams.team.documents
 
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -54,6 +55,13 @@ class GitService {
         locks.computeIfAbsent(teamId) { ReentrantLock() }
 
     private fun bareRepoPath(teamId: Long): Path = Paths.get(repoBase, "$teamId.git")
+
+    /**
+     * The team's bare repo directory, so the git smart-HTTP endpoint can serve it over the wire.
+     * Whether it exists is the caller's concern — a repo is created with the team, and a missing
+     * one is a 404 to the git client.
+     */
+    fun bareRepoDir(teamId: Long): File = bareRepoPath(teamId).toFile()
 
     /**
      * Rejects paths that could escape the repo. Document paths are *logical* git paths: always

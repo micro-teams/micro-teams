@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import {
   MessagesSquare,
   FolderGit2,
+  Bot,
   LogOut,
   User as UserIcon,
   type LucideIcon,
@@ -17,15 +18,23 @@ import type { Section } from "@/desktop/DesktopShell";
 
 const ITEMS: {
   section: Section;
-  to: string;
   label: string;
   icon: LucideIcon;
 }[] = [
-  { section: "chats", to: "/chats", label: "chats", icon: MessagesSquare },
-  { section: "docs", to: "/teams", label: "docs", icon: FolderGit2 },
+  { section: "chats", label: "chats", icon: MessagesSquare },
+  { section: "docs", label: "docs", icon: FolderGit2 },
+  { section: "agents", label: "agents", icon: Bot },
 ];
 
-export function DesktopRail({ section }: { section: Section }) {
+export function DesktopRail({
+  section,
+  hrefFor,
+}: {
+  section: Section;
+  // Where each rail item navigates: the section's remembered URL, so returning
+  // to a section lands back on the thread / file it left off on.
+  hrefFor: (section: Section) => string;
+}) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
@@ -45,13 +54,13 @@ export function DesktopRail({ section }: { section: Section }) {
       </div>
 
       <div className="flex flex-1 flex-col items-center gap-1">
-        {ITEMS.map(({ section: s, to, label, icon: Icon }) => {
+        {ITEMS.map(({ section: s, label, icon: Icon }) => {
           const active = s === section;
           return (
             <button
               key={s}
               type="button"
-              onClick={() => navigate(to)}
+              onClick={() => navigate(hrefFor(s))}
               title={label}
               aria-label={label}
               className={cn(
