@@ -62,7 +62,7 @@ self-update via `microteams update`.
 ## Deploy
 
 ```bash
-./gen-env.sh            # once: writes .env (random secrets + config placeholders) and app_data/
+bash gen-env.sh         # once: writes .env (random secrets + config placeholders) and app_data/
 # --> now edit .env: set PUBLIC_URL and the EMAIL_SMTP_* values (see "Email" below)
 docker compose up -d
 docker compose ps       # wait until every service shows "healthy"

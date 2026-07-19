@@ -237,7 +237,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # The artifact is the bundle directory (not a zip); download-artifact restores its files
-      # directly into microteams-deploy/ — no unzip step, and no nested archive.
+      # directly into microteams-deploy/ — no unzip step, and no nested archive. Note: artifact
+      # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash`.
       - uses: actions/download-artifact@v7
         with:
           name: microteams-deploy
@@ -245,7 +246,7 @@ jobs:
       - name: Bring the cluster up and wait for every service to be healthy
         working-directory: microteams-deploy
         run: |
-          ./gen-env.sh
+          bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
       - name: Cluster status
         if: always()
