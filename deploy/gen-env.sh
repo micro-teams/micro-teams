@@ -25,9 +25,9 @@ POSTGRES_PASSWORD=$(secret 40)
 JWT_SECRET=$(secret 64)
 
 # --- Public URL -------------------------------------------------------------
-# Your real external origin. Baked into cheese-auth's verification-email links, and
-# pins the backend's allowed CORS origin (otherwise "*"). Set it to the domain users
-# actually reach — not localhost.
+# Your real external origin, used by cheese-auth for verification-email links. Set it
+# to the domain users actually reach — not localhost. (CORS needs nothing set — the
+# backend allows its own forwarded origin automatically.)
 PUBLIC_URL=https://your-domain.example
 
 # --- Email (SMTP) -----------------------------------------------------------
