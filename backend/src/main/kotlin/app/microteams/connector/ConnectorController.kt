@@ -50,8 +50,7 @@ class ConnectorController(
     // configurable, and both have sane defaults for the compose deployment.
     @Value("\${application.connector-api-base-path:/mt}") private val apiBasePath: String,
     @Value("\${application.connector-ws-override:}") private val wsOverride: String,
-    @Value("\${application.connector-binaries-dir:/app/connector}")
-    private val binariesDir: String,
+    @Value("\${application.connector-binaries-dir:/app/connector}") private val binariesDir: String,
 ) {
 
     // The only shapes install.sh + update.go ever request — Go-style os-arch (amd64/arm64), NOT
