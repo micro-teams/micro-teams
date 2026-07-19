@@ -101,53 +101,39 @@ export function AgentsPage() {
       <PageHeader
         title="agents"
         actions={
-          <Button
-            size="icon-sm"
-            onClick={() => setOpenDlg(true)}
-            disabled={teamId == null}
-            aria-label="open agent"
+          <Menu
+            trigger={
+              <button
+                type="button"
+                className="bg-secondary text-secondary-foreground flex max-w-[10rem] items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-medium"
+              >
+                <span className="truncate">{currentTeam?.name ?? "team"}</span>
+                <ChevronDown className="size-3.5 shrink-0" />
+              </button>
+            }
           >
-            <Bot className="size-4" />
-          </Button>
+            {(ws.teams ?? []).map((t) => (
+              <MenuCheckItem
+                key={t.id}
+                checked={t.id === teamId}
+                icon={<FolderGit2 className="size-4" />}
+                onSelect={() => ws.setTeamId(t.id)}
+              >
+                {t.name}
+              </MenuCheckItem>
+            ))}
+            {ws.teams && ws.teams.length > 0 && <MenuSeparator />}
+            <MenuItem
+              icon={<Settings2 className="size-4" />}
+              onSelect={() => navigate("/teams/manage")}
+            >
+              Manage teams
+            </MenuItem>
+          </Menu>
         }
       />
 
       <div className="flex flex-col gap-6 p-3">
-        {/* team switcher */}
-        <Menu
-          align="start"
-          trigger={
-            <button
-              type="button"
-              className="bg-secondary text-secondary-foreground flex max-w-full items-center gap-1.5 self-start rounded-md px-3 py-1.5 text-sm font-medium"
-            >
-              <FolderGit2 className="size-4 shrink-0" />
-              <span className="truncate">
-                {currentTeam?.name ?? "select team"}
-              </span>
-              <ChevronDown className="size-3.5 shrink-0" />
-            </button>
-          }
-        >
-          {(ws.teams ?? []).map((t) => (
-            <MenuCheckItem
-              key={t.id}
-              checked={t.id === teamId}
-              icon={<FolderGit2 className="size-4" />}
-              onSelect={() => ws.setTeamId(t.id)}
-            >
-              {t.name}
-            </MenuCheckItem>
-          ))}
-          {ws.teams && ws.teams.length > 0 && <MenuSeparator />}
-          <MenuItem
-            icon={<Settings2 className="size-4" />}
-            onSelect={() => navigate("/teams/manage")}
-          >
-            Manage teams
-          </MenuItem>
-        </Menu>
-
         {teamId == null && (
           <div className="text-muted-foreground flex flex-col items-center gap-2 py-16 text-sm">
             <FolderGit2 className="size-8 opacity-50" />
@@ -204,9 +190,18 @@ export function AgentsPage() {
 
             {/* agents */}
             <section className="flex flex-col gap-2">
-              <h2 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
-                agents
-              </h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
+                  agents
+                </h2>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setOpenDlg(true)}
+                >
+                  <Bot className="size-4" /> open agent
+                </Button>
+              </div>
               {agents.loading && !agents.data && <Loading />}
               {agents.error && (
                 <Alert variant="destructive">
