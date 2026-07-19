@@ -23,7 +23,7 @@ forgotten; code does not.
 
 `MicroTeams-API.yml` is the source of truth and neither side hand-writes its client:
 
-- the backend regenerates `org.rucca.cheese.api.*Api` on every build, and each module's single
+- the backend regenerates `app.microteams.api.*Api` on every build, and each module's single
   controller implements exactly its own interface — nothing else;
 - the frontend regenerates `frontend/src/api` on every `npm run dev` / `npm run build` (npm
   `pre*` hooks, so you cannot accidentally run against a stale client).
