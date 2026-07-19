@@ -57,24 +57,16 @@ itself, and chat — which owns "who is in this group" — calls it. Chat never 
 
 ## Architecture
 
-```
-                    ┌──────────────┐
-   browser ───────► │    nginx     │   one public origin
-                    └──────┬───────┘
-              ┌────────────┼────────────┐
-         /  (root)     /api/*        /mt/*
-              ▼            ▼            ▼
-        ┌───────────┐ ┌───────────┐ ┌───────────┐        ┌───────────┐
-        │ frontend  │ │cheese-auth│ │    mt     │◄──WS───│    cli    │
-        │React+Vite │ │ (NestJS)  │ │ (Kotlin/  │        │ on your   │
-        │  :5173    │ │  :8091    │ │  Spring)  │        │ machine   │
-        └───────────┘ └─────┬─────┘ └─────┬─────┘        └─────┬─────┘
-                            ▼             ▼                    ▼
-                      ┌───────────────────────┐          Claude Code
-                      │       Postgres        │          in a tmux screen
-                      │  public:     auth's   │
-                      │  microteams: mt's own │
-                      └───────────────────────┘
+```mermaid
+flowchart TD
+    browser(["browser"]) -->|one public origin| nginx["nginx"]
+    nginx -->|"/"| frontend["frontend<br/>React + Vite · :5173"]
+    nginx -->|"/api"| auth["cheese-auth<br/>NestJS · :8091"]
+    nginx -->|"/mt"| mt["mt<br/>Kotlin / Spring · :8199"]
+    cli["cli<br/>on your machine"] -->|WebSocket| mt
+    cli --> claude["Claude Code<br/>in a tmux screen"]
+    auth -->|public schema| pg[("Postgres")]
+    mt -->|microteams schema| pg
 ```
 
 Everything the browser touches is **one origin** — nginx puts all three behind it at different
