@@ -5,7 +5,7 @@
 #   cheese-auth identity service (a prebuilt image)
 #   postgres   shared DB: cheese-auth owns schema "public", backend owns "microteams"
 #
-# Secrets come from .env (generate it with ./gen-env.sh). All state lives in ./app_data/ as plain
+# Secrets come from .env (generate it with `bash gen-env.sh`). All state lives in ./app_data/ as plain
 # host directories (no docker volumes) so it's visible and easy to back up. Images are pinned by
 # digest so a deployment is reproducible.
 
