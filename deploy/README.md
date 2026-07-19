@@ -85,9 +85,10 @@ placeholders into `.env`; fill them before first real use:
 | `EMAIL_DEFAULT_FROM` | the From header, e.g. `MicroTeams <no-reply@your-domain>` |
 
 Also set **`PUBLIC_URL`** in `.env` to your real external origin (e.g. `https://team.example.com`).
-It is baked into the verification-email links; leaving the `http://localhost` default sends every
-new user a link that points at their own machine. After editing `.env`, `docker compose up -d`
-recreates cheese-auth with the new values.
+It is baked into cheese-auth's verification-email links; leaving the `http://localhost` default
+sends every new user a link that points at their own machine. (CORS needs nothing configured — the
+backend allows its own forwarded origin automatically, since the whole stack is one origin behind
+nginx.) After editing `.env`, `docker compose up -d` recreates the affected services.
 
 Put your own reverse proxy (Caddy, nginx, a cloud LB — whatever terminates TLS) in front of port
 80 and point your domain at it. Nothing here bakes in a domain: the frontend uses same-origin

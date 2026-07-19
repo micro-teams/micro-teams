@@ -85,6 +85,8 @@ services:
     environment:
       # The backend derives absolute URLs from X-Forwarded-* (no domain baked in); ddl-auto=update
       # creates its tables in the "microteams" schema on first boot. Applets are mounted, not baked.
+      # CORS needs no config: the backend allows its own forwarded origin (this same-origin stack),
+      # derived from the X-Forwarded-* headers nginx sets — so writes don't 403 behind the proxy.
       SPRING_APPLICATION_JSON: >-
         {"spring.datasource.url":"jdbc:postgresql://postgres:5432/${POSTGRES_DB}",
         "spring.datasource.username":"${POSTGRES_USER}",
