@@ -169,7 +169,7 @@ jobs:
           key: tmux-${{ matrix.arch }}-${{ hashFiles('deploy/tmux/Dockerfile', 'deploy/tmux/build-static-tmux.sh') }}
       - name: Set up Docker Buildx
         if: steps.tmux-cache.outputs.cache-hit != 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build static tmux (native, no QEMU)
         if: steps.tmux-cache.outputs.cache-hit != 'true'
         run: |
