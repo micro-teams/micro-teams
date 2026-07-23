@@ -75,6 +75,13 @@ class AgentService(
     private val logger = LoggerFactory.getLogger(AgentService::class.java)
     private val driversByName = drivers.associateBy { it.name }
 
+    /** The driver names this server supports (for the open-agent form's picker). */
+    fun driverNames(): List<String> = driversByName.keys.sorted()
+
+    /** The driver used when a caller opens an agent without naming one. */
+    val defaultDriverName: String
+        get() = defaultDriver
+
     /**
      * Create an agent user and open its screen on [machineId], running in [teamId].
      *

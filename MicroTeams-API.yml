@@ -853,6 +853,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenedAgent"
+  /agent/drivers:
+    get:
+      tags: [agent]
+      operationId: listAgentDrivers
+      summary: >
+        The agent drivers this server supports, plus the default -- for the open-agent form's
+        driver picker. Every name here is a valid value for OpenAgentRequest.driver.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDrivers"
   /agent/{userId}:
     delete:
       tags: [agent]
@@ -1539,6 +1553,17 @@ components:
           description: >
             Resume the given sessionId's prior transcript instead of starting it fresh. Only
             meaningful together with sessionId; the driver decides what resuming means.
+
+    AgentDrivers:
+      type: object
+      required: [drivers, defaultDriver]
+      properties:
+        drivers:
+          type: array
+          items:
+            type: string
+        defaultDriver:
+          type: string
 
     OpenedAgent:
       type: object

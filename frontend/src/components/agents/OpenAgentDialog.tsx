@@ -79,6 +79,14 @@ function OpenAgentForm({
   );
   const list = machines.data?.machines ?? [];
 
+  // The drivers this server supports, for the driver picker (Claude, Codex, …).
+  const drivers = useAsync(() => mtCall(agentApi().listAgentDrivers()), []);
+  // Default the picker to the server's default once the list loads.
+  useEffect(() => {
+    if (drivers.data && !driver) setDriver(drivers.data.defaultDriver);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drivers.data]);
+
   // A new team means a new machine set — drop any stale selection.
   useEffect(() => setMachineId(""), [teamId]);
 
@@ -198,13 +206,21 @@ function OpenAgentForm({
       {advanced && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="oa-driver">driver (optional)</Label>
-            <Input
+            <Label htmlFor="oa-driver">driver</Label>
+            <select
               id="oa-driver"
               value={driver}
               onChange={(e) => setDriver(e.target.value)}
-              placeholder="claude (default)"
-            />
+              disabled={!drivers.data}
+              className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+            >
+              {(drivers.data?.drivers ?? []).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                  {d === drivers.data?.defaultDriver ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="oa-cwd">working directory (optional)</Label>
