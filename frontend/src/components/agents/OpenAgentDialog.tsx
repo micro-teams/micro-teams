@@ -90,6 +90,18 @@ function OpenAgentForm({
   // A new team means a new machine set — drop any stale selection.
   useEffect(() => setMachineId(""), [teamId]);
 
+  // The working dir the backend will default to when the field is left empty — mirrors
+  // AgentService.defaultWorkCwd's slug so the placeholder previews the (approximate) real default.
+  // The backend appends a unique per-agent suffix, so this is illustrative, not exact.
+  const cwdSlug =
+    nickname
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "agent";
+  const cwdPlaceholder = `~/.local/share/microteams/agents/${cwdSlug}`;
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (teamId == null) {
@@ -190,6 +202,26 @@ function OpenAgentForm({
         />
       </div>
 
+      {/* driver is first-class — Claude and Codex are equals, not an "advanced" choice. */}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="oa-driver">driver</Label>
+        <select
+          id="oa-driver"
+          value={driver}
+          onChange={(e) => setDriver(e.target.value)}
+          disabled={!drivers.data}
+          className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+        >
+          {(drivers.data?.drivers ?? []).map((d) => (
+            <option key={d} value={d}>
+              {d}
+              {d === drivers.data?.defaultDriver ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* working directory is genuinely advanced — it defaults sensibly. */}
       <button
         type="button"
         onClick={() => setAdvanced((v) => !v)}
@@ -204,34 +236,19 @@ function OpenAgentForm({
         advanced
       </button>
       {advanced && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="oa-driver">driver</Label>
-            <select
-              id="oa-driver"
-              value={driver}
-              onChange={(e) => setDriver(e.target.value)}
-              disabled={!drivers.data}
-              className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
-            >
-              {(drivers.data?.drivers ?? []).map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                  {d === drivers.data?.defaultDriver ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="oa-cwd">working directory (optional)</Label>
-            <Input
-              id="oa-cwd"
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              placeholder="/repo/path"
-              className="font-mono"
-            />
-          </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="oa-cwd">working directory (optional)</Label>
+          <Input
+            id="oa-cwd"
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+            placeholder={cwdPlaceholder}
+            className="font-mono"
+          />
+          <p className="text-muted-foreground text-xs">
+            defaults to the greyed path above; a unique suffix is added per
+            agent
+          </p>
         </div>
       )}
 
