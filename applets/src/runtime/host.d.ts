@@ -2,9 +2,10 @@
 // (cli/internal/runtime for the screen driver, cli/internal/commandapplet for the CLI applet).
 // This file is the CONTRACT between the TypeScript applets and the Go host: keep the two in sync.
 //
-// Two applets consume it:
-//   - src/screen — drives a Claude Code terminal (own/watch/term/expose/call/log)
-//   - src/cli    — defines the `microteams api` command tree (http/fs/exec/command/print)
+// Two kinds of applet consume it:
+//   - src/screen/{claude,codex} — one per agent driver, drives that program's terminal
+//                                 (own/watch/term/expose/call/log)
+//   - src/cli                   — defines the `microteams api` command tree (http/fs/exec/command/print)
 
 /** A script-owned variable the host mirrors up to the server. */
 interface Owned<T> {

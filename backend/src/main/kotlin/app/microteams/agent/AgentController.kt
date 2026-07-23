@@ -240,6 +240,15 @@ class AgentController(
         )
     }
 
+    @Guard("list-drivers", "agent")
+    override fun listAgentDrivers(): ResponseEntity<AgentDriversDTO> =
+        ResponseEntity.ok(
+            AgentDriversDTO(
+                drivers = agentService.driverNames(),
+                defaultDriver = agentService.defaultDriverName,
+            )
+        )
+
     // -- lifecycle ----------------------------------------------------------
 
     @Guard("open-agent", "agent")
