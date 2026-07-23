@@ -10,6 +10,8 @@
   label.onChange((v) => microteams.log("screen labelled: " + v));
   var viewerLevel = microteams.watch("viewerLevel");
   var isFull = () => viewerLevel.get() === "full";
+  var OPERATOR_PROMPT = "__MT_OPERATOR_PROMPT__";
+  var sentOperatorPrompt = false;
   var ESC = "\x1B";
   var ENTER = "\r";
   var PASTE_START = ESC + "[200~";
@@ -24,16 +26,13 @@
     return { kind: "open", working, hasUI };
   }
   var submitIn = 0;
-  var trustFrames = 0;
   microteams.term.onChange(() => {
     const screen = microteams.term.read();
     const tailStr = screen.split("\n").slice(-16).join("\n");
     if (/Do you trust/i.test(tailStr) && !isFull()) {
-      if (trustFrames % 4 === 0) microteams.term.write(ENTER);
-      trustFrames++;
+      microteams.term.write(ENTER);
       return;
     }
-    trustFrames = 0;
     if (submitIn > 0 && !isFull()) {
       if (--submitIn === 0) microteams.term.write(ENTER);
     }
@@ -77,7 +76,12 @@
   microteams.expose(
     "say",
     gated((text) => {
-      microteams.term.write(PASTE_START + String(text) + PASTE_END);
+      let body = String(text);
+      if (!sentOperatorPrompt && OPERATOR_PROMPT.slice(0, 5) !== "__MT_") {
+        sentOperatorPrompt = true;
+        body = OPERATOR_PROMPT + "\n\n" + body;
+      }
+      microteams.term.write(PASTE_START + body + PASTE_END);
       submitIn = 2;
       return true;
     })

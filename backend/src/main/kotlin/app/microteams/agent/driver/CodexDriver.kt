@@ -19,35 +19,51 @@ import org.springframework.stereotype.Component
 class CodexDriver(private val appletStore: AppletStore) : AgentDriver {
     override val name = "codex"
 
-    override val appletSource: String by lazy { appletStore.require("codex.js") }
+    /**
+     * The codex applet, with [OperatorPrompt] injected in place of its `"__MT_OPERATOR_PROMPT__"`
+     * placeholder (as a JS string literal). Codex has no system prompt, and passing the
+     * instructions as codex's initial prompt made the agent start working on its own at launch — so
+     * instead the applet prepends them to the FIRST group message. Injecting them here keeps the
+     * guidance with the driver, exactly as ClaudeDriver owns it, and the backend still never runs
+     * Codex itself.
+     */
+    override val appletSource: String by lazy {
+        appletStore
+            .require("codex.js")
+            .replace("\"__MT_OPERATOR_PROMPT__\"", jsStringLiteral(OperatorPrompt.TEXT))
+    }
 
     /**
-     * Launch (or resume) one Codex session. Two Codex-specific choices vs Claude:
-     * 1. **Autonomy.** Codex has no `--dangerously-skip-permissions`; the equivalent is running
-     *    with `approval_policy=never` + `sandbox_mode=danger-full-access` (its "YOLO" mode), passed
-     *    as `-c` config overrides so we never depend on the operator's config for how *we* run it.
-     * 2. **Standing instructions & sessions.** Codex has no `--append-system-prompt`, and it mints
-     *    its own session ids (we cannot hand it one the way `claude --session-id` accepts). So on a
-     *    fresh launch we inject [OperatorPrompt] as the initial prompt — Codex auto-runs it as turn
-     *    one and keeps it in the session context — and on resume we continue the most recent
-     *    session for this cwd (`resume --last`, cwd-scoped) without re-injecting, since the
-     *    guidance is already in that session's history. [sessionId] is therefore unused here.
+     * Launch (or resume) one Codex session.
+     *
+     * **Autonomy.** Codex has no `--dangerously-skip-permissions`; the equivalent is
+     * `--dangerously-bypass-approvals-and-sandbox`, which skips approvals AND the sandbox entirely.
+     * Without it Codex sandboxes the shell commands the agent runs and the document-tree flow fails
+     * — `microteams api docs sync` writes the CLI applet cache outside the cwd and needs the
+     * network, both denied by Codex's default sandbox ("Read-only file system").
+     *
+     * **No initial prompt.** We launch codex with no prompt so it just waits; the standing
+     * instructions ride with the first group message (see [appletSource]). Codex mints its own
+     * session ids, so on reboot we continue the most recent session for this cwd (`resume --last`,
+     * cwd-scoped) rather than a caller-supplied [sessionId], which is therefore unused here.
      *
      * The cwd is the agent's document-tree workspace; it may not exist yet on a fresh machine (the
      * applet's `docs sync` clones into it), so we create it before entering — same as ClaudeDriver.
      */
     override fun command(sessionId: String, cwd: String?, resume: Boolean): List<String> {
-        // Full-auto, the true peer of Claude's --dangerously-skip-permissions: skip approvals AND
-        // the sandbox ENTIRELY. Without this Codex sandboxes the shell commands the agent runs, and
-        // the document-tree flow fails — `microteams api docs sync` writes the CLI applet cache to
-        // ~/.config/microteams (outside the cwd) and needs the network, both of which Codex's
-        // default/workspace sandbox denies with "Read-only file system" / permission errors. The
-        // -c sandbox_mode override is not reliably enough on all machines; this flag is.
         val autonomy = "--dangerously-bypass-approvals-and-sandbox"
-        var inner =
-            if (resume) "exec codex $autonomy resume --last"
-            else "exec codex $autonomy ${shellQuote(OperatorPrompt.TEXT)}"
+        var inner = if (resume) "exec codex $autonomy resume --last" else "exec codex $autonomy"
         if (cwd != null) inner = enterCwd(cwd) + inner
         return listOf("bash", "-lc", inner)
     }
+
+    /** Encode [s] as a JavaScript double-quoted string literal for injection into the applet. */
+    private fun jsStringLiteral(s: String): String =
+        "\"" +
+            s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t") +
+            "\""
 }
