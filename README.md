@@ -127,7 +127,7 @@ smell (`backend/CLAUDE.md` §8). `install` also regenerates `backend/CREATE.sql`
 entities, so it needs a reachable DB too.
 
 ```sh
-java -jar target/backend-0.1.0.jar --server.port=8199 \
+java -jar target/backend-0.1.1.jar --server.port=8199 \
   --spring.datasource.url=jdbc:postgresql://localhost:5433/mydb \
   --spring.datasource.username=username --spring.datasource.password=<db-pw> \
   --application.legacy-url=http://localhost:8091 \
