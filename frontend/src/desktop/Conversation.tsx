@@ -66,6 +66,11 @@ function MessageList({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Whether the view is pinned to the bottom. Starts true (opening a thread lands
+  // on the newest message); flips off once the user scrolls up to read history,
+  // so the 4s poll never yanks them back down.
+  const atBottomRef = useRef(true);
 
   // Initial load + a gentle 4s poll for liveness. Replace wholesale — the list is
   // small (last 200) and the server is the source of truth.
@@ -73,6 +78,7 @@ function MessageList({
     let active = true;
     setLoading(true);
     setMessages([]);
+    atBottomRef.current = true;
     const fetchOnce = (spin: boolean) => {
       if (spin) setLoading(true);
       return mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
@@ -88,8 +94,11 @@ function MessageList({
     };
   }, [threadId]);
 
+  // Auto-scroll to the newest message only when the user is already at the
+  // bottom (or just sent one); otherwise leave their scroll position alone.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    if (atBottomRef.current)
+      bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
   async function send(e: FormEvent) {
@@ -105,6 +114,7 @@ function MessageList({
           postMessageRequest: { content },
         }),
       );
+      atBottomRef.current = true;
       setMessages((prev) =>
         prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
       );
@@ -126,7 +136,16 @@ function MessageList({
 
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-6 py-4">
+      <div
+        ref={listRef}
+        onScroll={() => {
+          const el = listRef.current;
+          if (el)
+            atBottomRef.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+        }}
+        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-6 py-4"
+      >
         <div className="mx-auto mt-auto flex w-full max-w-3xl flex-col gap-1">
           {loading && <Loading />}
           {error && (
