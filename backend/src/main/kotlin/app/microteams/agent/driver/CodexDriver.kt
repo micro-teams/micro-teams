@@ -37,13 +37,17 @@ class CodexDriver(private val appletStore: AppletStore) : AgentDriver {
      * applet's `docs sync` clones into it), so we create it before entering — same as ClaudeDriver.
      */
     override fun command(sessionId: String, cwd: String?, resume: Boolean): List<String> {
-        val autonomy = "-c approval_policy=never -c sandbox_mode=danger-full-access"
+        // Full-auto, the true peer of Claude's --dangerously-skip-permissions: skip approvals AND
+        // the sandbox ENTIRELY. Without this Codex sandboxes the shell commands the agent runs, and
+        // the document-tree flow fails — `microteams api docs sync` writes the CLI applet cache to
+        // ~/.config/microteams (outside the cwd) and needs the network, both of which Codex's
+        // default/workspace sandbox denies with "Read-only file system" / permission errors. The
+        // -c sandbox_mode override is not reliably enough on all machines; this flag is.
+        val autonomy = "--dangerously-bypass-approvals-and-sandbox"
         var inner =
-            if (resume) "exec codex resume --last $autonomy"
+            if (resume) "exec codex $autonomy resume --last"
             else "exec codex $autonomy ${shellQuote(OperatorPrompt.TEXT)}"
-        if (cwd != null) inner = "mkdir -p ${shellQuote(cwd)} && cd ${shellQuote(cwd)} && $inner"
+        if (cwd != null) inner = enterCwd(cwd) + inner
         return listOf("bash", "-lc", inner)
     }
-
-    private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 }

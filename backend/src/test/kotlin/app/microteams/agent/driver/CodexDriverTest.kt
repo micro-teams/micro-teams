@@ -28,26 +28,26 @@ class CodexDriverTest {
 
     @Test
     fun freshLaunchRunsCodexFullAutoWithTheOperatorPromptInTheCwd() {
-        val cmd = driver.command("sess-123", "microteams-docs/team-7", resume = false)
+        val cmd = driver.command("sess-123", "~/work/repo", resume = false)
         assertEquals(listOf("bash", "-lc"), cmd.dropLast(1))
         val inner = cmd.last()
-        // full-auto: Codex's YOLO equivalent of Claude's --dangerously-skip-permissions.
-        assertTrue(inner.contains("-c approval_policy=never"), inner)
-        assertTrue(inner.contains("-c sandbox_mode=danger-full-access"), inner)
+        // full-auto: skip approvals AND the sandbox entirely (peer of Claude's skip-permissions).
+        assertTrue(inner.contains("exec codex --dangerously-bypass-approvals-and-sandbox"), inner)
         // launches codex (not resume) and injects the standing instructions as the initial prompt.
-        assertTrue(inner.contains("exec codex -c "), inner)
         assertFalse(inner.contains("resume"), inner)
         assertTrue(inner.contains("microteams api say"), inner) // a fragment of OperatorPrompt.TEXT
-        // enters the workspace, creating it first (may not exist yet on a fresh machine).
-        assertTrue(inner.contains("mkdir -p 'microteams-docs/team-7'"), inner)
-        assertTrue(inner.contains("cd 'microteams-docs/team-7'"), inner)
+        // enters the workspace (created first; a leading ~ is expanded on the machine).
+        assertTrue(inner.contains("_mtcwd='~/work/repo'"), inner)
+        assertTrue(inner.contains("cd \"\$_mtcwd\""), inner)
     }
 
     @Test
     fun resumeContinuesTheLastSessionWithoutReinjectingInstructions() {
-        val inner = driver.command("sess-123", "microteams-docs/team-7", resume = true).last()
-        assertTrue(inner.contains("exec codex resume --last"), inner)
-        assertTrue(inner.contains("-c approval_policy=never"), inner)
+        val inner = driver.command("sess-123", "~/work/repo", resume = true).last()
+        assertTrue(
+            inner.contains("exec codex --dangerously-bypass-approvals-and-sandbox resume --last"),
+            inner,
+        )
         // The standing instructions are already in the resumed session's history.
         assertFalse(inner.contains("microteams api say"), inner)
     }

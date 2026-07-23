@@ -164,6 +164,16 @@ constructor(
         val create = awaitFrame(collector, "session.create")
         val screenToken = create.getString("screen")
         assertTrue(create.getJSONArray("command").getString(0) == "bash")
+        // With no explicit cwd, the agent defaults into a private per-agent checkout under
+        // ~/.local/share/microteams, named by its nickname ("Rin" -> rin-<userId>) — not a shared
+        // per-team dir.
+        assertTrue(
+            create
+                .getJSONArray("command")
+                .getString(2)
+                .contains(".local/share/microteams/agents/rin-"),
+            "default cwd should be a per-agent dir under ~/.local/share/microteams named by nickname",
+        )
         // The screen's MICROTEAMS_API is the endpoint THIS machine reported on its handshake, not
         // the server's configured fallback — so a machine reached via any endpoint calls back on
         // one that works for it.

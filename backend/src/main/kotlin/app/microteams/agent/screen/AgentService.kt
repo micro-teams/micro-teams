@@ -83,6 +83,20 @@ class AgentService(
         get() = defaultDriver
 
     /**
+     * The default working directory when a caller doesn't name one: a private per-agent checkout of
+     * the team document tree, under the user data dir (`~/.local/share/microteams/agents/<name>`),
+     * so each agent gets its own clone rather than sharing one per team. Named after the agent's
+     * nickname (filesystem-sanitised) with its user id appended for uniqueness; the id alone when
+     * unnamed. The leading `~` is expanded on the machine by the driver.
+     */
+    private fun defaultWorkCwd(nickname: String?, agentUserId: IdType): String {
+        val slug =
+            nickname?.lowercase()?.replace(Regex("[^a-z0-9]+"), "-")?.trim('-')?.take(40).orEmpty()
+        val name = if (slug.isBlank()) "agent-$agentUserId" else "$slug-$agentUserId"
+        return "~/.local/share/microteams/agents/$name"
+    }
+
+    /**
      * Create an agent user and open its screen on [machineId], running in [teamId].
      *
      * Whether the caller may do this is not asked here — RolePermissionService's `open-agent` rule
@@ -117,10 +131,12 @@ class AgentService(
         // is-team-member.
         teamService.addMember(teamId, agentUserId, TeamMemberRole.MEMBER)
         val session = sessionId ?: UUID.randomUUID().toString() // mint one when not supplied
-        // Default the agent into a stable per-team working directory — its document-tree checkout.
-        // The applet's `docs sync` clones the team repo here on first run; a caller that wants the
-        // agent elsewhere (e.g. a source-code checkout) passes an explicit cwd.
-        val workCwd = cwd ?: "microteams-docs/team-$teamId"
+        // Default to a private per-agent checkout of the team document tree, under the user data
+        // dir (~/.local/share/microteams/agents/<name>), so each agent gets its own clone rather
+        // than sharing one per team. The applet's `docs sync` clones the team repo here on first
+        // run; a caller that wants the agent elsewhere (e.g. a source-code checkout) passes an
+        // explicit cwd.
+        val workCwd = cwd ?: defaultWorkCwd(nickname, agentUserId)
         val opened = launch(agentUserId, machineId, teamId, workCwd, driver, session, resume)
         logger.info(
             "opened agent user {} on machine {} (screen {}, driver {}, session {}, resume {})",

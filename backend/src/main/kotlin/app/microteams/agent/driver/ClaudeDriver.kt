@@ -45,11 +45,9 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
         var inner =
             "$onboard; exec claude $flag $sessionId $skipIfNonRoot " +
                 "--append-system-prompt ${shellQuote(OperatorPrompt.TEXT)}"
-        // The cwd is the agent's document-tree workspace; it may not exist yet on a fresh machine
-        // (the applet's `docs sync` clones into it), so create it before entering.
-        if (cwd != null) inner = "mkdir -p ${shellQuote(cwd)} && cd ${shellQuote(cwd)} && $inner"
+        // The cwd is the agent's document-tree workspace; enterCwd creates it (it may not exist yet
+        // on a fresh machine — the applet's `docs sync` clones into it) and supports a leading `~`.
+        if (cwd != null) inner = enterCwd(cwd) + inner
         return listOf("bash", "-lc", inner)
     }
-
-    private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 }
