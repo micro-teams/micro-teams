@@ -72,10 +72,11 @@ microteams.term.onChange(() => {
   const tailStr = screen.split('\n').slice(-16).join('\n')
 
   // Auto-trust the "Do you trust the contents of this directory?" gate Codex shows on a fresh cwd.
-  // The default selection is "1. Yes, continue" / "Press enter to continue", so a bare Enter
-  // confirms it. Press it on every frame it is showing (the heartbeat drives this even on a static
-  // screen); once it is gone the check fails, so we never keep pressing into the input box.
-  if (/Do you trust/i.test(tailStr) && !isFull()) {
+  // Scan the WHOLE screen, not the tail: this gate renders at the TOP of a tall pane with blank
+  // space below, so it is NOT in the last 16 lines the rest of observe() looks at (that was why it
+  // stayed stuck). The default is "1. Yes, continue" / "Press enter to continue", so a bare Enter
+  // confirms it; press it on every frame it shows (heartbeat-driven), and once gone the check fails.
+  if (/Do you trust the contents/i.test(screen) && !isFull()) {
     microteams.term.write(ENTER)
     return
   }

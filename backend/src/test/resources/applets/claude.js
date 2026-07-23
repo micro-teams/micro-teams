@@ -76,7 +76,6 @@
   var stableBusy = false;
   var cmdSince = false;
   var wasActive = false;
-  var trustFrames = 0;
   var modeCyclesTried = 0;
   var bypassUnavailable = false;
   var frame = 0;
@@ -88,12 +87,10 @@
     if (submitIn > 0 && !isFull()) {
       if (--submitIn === 0) microteams.term.write(ENTER);
     }
-    if (/Do you trust/i.test(tailStr) && !isFull()) {
-      if (trustFrames % 4 === 0) microteams.term.write(ENTER);
-      trustFrames++;
+    if (/I trust this folder|created or one you trust|Do you trust/i.test(screen) && !isFull()) {
+      microteams.term.write(ENTER);
       return;
     }
-    trustFrames = 0;
     const active = isActive();
     if (wasActive && !active) for (let i = 0; i < 12; i++) microteams.term.write(PGDN);
     wasActive = active;
