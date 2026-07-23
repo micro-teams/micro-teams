@@ -107,6 +107,11 @@ function MessageList({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Whether the view is pinned to the bottom. Starts true (a fresh thread opens
+  // at the newest message); flips off once the user scrolls up to read history,
+  // so the 4s poll never yanks them back down.
+  const atBottomRef = useRef(true);
 
   // Initial load + a gentle 4s poll so messages from others show up without a
   // manual reload — chat has no live socket, so the phone polls the same way the
@@ -114,6 +119,7 @@ function MessageList({
   useEffect(() => {
     let active = true;
     setLoading(true);
+    atBottomRef.current = true;
     const fetchOnce = (spin: boolean) => {
       if (spin) setLoading(true);
       return mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
@@ -129,8 +135,11 @@ function MessageList({
     };
   }, [threadId]);
 
+  // Auto-scroll to the newest message only when the user is already at the
+  // bottom (or just sent one); otherwise leave their scroll position alone.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    if (atBottomRef.current)
+      bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
   async function send(e: FormEvent) {
@@ -146,6 +155,7 @@ function MessageList({
           postMessageRequest: { content },
         }),
       );
+      atBottomRef.current = true;
       setMessages((prev) =>
         prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
       );
@@ -166,7 +176,16 @@ function MessageList({
 
   return (
     <>
-      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
+      <div
+        ref={listRef}
+        onScroll={() => {
+          const el = listRef.current;
+          if (el)
+            atBottomRef.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+        }}
+        className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-1 overflow-y-auto px-3 py-3"
+      >
         {loading && <Loading />}
         {error && (
           <Alert variant="destructive">
