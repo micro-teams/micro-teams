@@ -21,7 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.12",
-    "lucide-react": "^1.25.0",
+    "lucide-react": "^1.26.0",
     "marked": "^18.0.7",
     "radix-ui": "^1.6.4",
     "react": "^19.2.7",
