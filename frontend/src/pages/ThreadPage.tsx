@@ -135,12 +135,15 @@ function MessageList({
     };
   }, [threadId]);
 
-  // Auto-scroll to the newest message only when the user is already at the
-  // bottom (or just sent one); otherwise leave their scroll position alone.
+  // Auto-scroll only when a NEW message arrives AND the user is at the bottom
+  // (or just sent one). Keying on the last message id — not the whole array —
+  // means a 4s poll that returns nothing new never re-scrolls, so reading a tall
+  // last message (scrolled up within it) is never interrupted.
+  const lastMessageId = messages.length ? messages[messages.length - 1].id : 0;
   useEffect(() => {
-    if (atBottomRef.current)
+    if (lastMessageId && atBottomRef.current)
       bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+  }, [lastMessageId]);
 
   async function send(e: FormEvent) {
     e.preventDefault();
