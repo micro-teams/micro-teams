@@ -22,6 +22,7 @@ import javax.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthenticationService
 import org.rucca.cheese.auth.AuthorizationService
 import org.rucca.cheese.auth.AuthorizedAction
+import org.rucca.cheese.auth.annotation.AuthInfo
 import org.rucca.cheese.auth.annotation.Guard
 import org.rucca.cheese.auth.annotation.ResourceId
 import org.rucca.cheese.common.persistent.IdGetter
@@ -109,7 +110,7 @@ class ChatController(
 
     @Guard("create-chat", "chat_thread")
     override fun createThread(
-        createThreadRequestDTO: CreateThreadRequestDTO?
+        @AuthInfo("createThread") createThreadRequestDTO: CreateThreadRequestDTO?
     ): ResponseEntity<ThreadDTO> {
         val body = createThreadRequestDTO ?: return ResponseEntity.badRequest().build()
         val userId = authenticationService.getCurrentUserId()
@@ -160,7 +161,7 @@ class ChatController(
     @Guard("add-chat-member", "chat_thread")
     override fun addThreadMember(
         @PathVariable("id") @ResourceId id: Long,
-        dto: AddMemberRequestDTO?,
+        @AuthInfo("addMember") dto: AddMemberRequestDTO?,
     ): ResponseEntity<Unit> {
         val body = dto ?: return ResponseEntity.badRequest().build()
         threadService.addMember(id, body.userId, body.role?.toDomain() ?: ThreadMemberRole.MEMBER)

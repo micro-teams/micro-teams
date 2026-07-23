@@ -98,6 +98,42 @@ class AgentController(
             rows.isNotEmpty() &&
                 rows.all { it.teamId != null && teamService.isTeamMember(it.teamId!!, userId) }
         }
+
+        // The two rules below stop anyone from pulling a team's agent into a group they run.
+        // They are registered here, in the agent module, because only it knows what an agent is
+        // and which team it serves; chat's permission rows reference them by name, so chat still
+        // never imports agent (exactly as the `watch` row references
+        // shares-group-with-screen-agent).
+
+        /**
+         * The single user being added to a thread (POST /chat/{id}/members) is not an agent the
+         * caller is foreign to — either not an agent (an ordinary member add, unrestricted), or an
+         * agent every one of whose teams the caller belongs to (same rule as open/close/reboot).
+         */
+        register("added-user-not-a-foreign-agent") { userId, authInfo ->
+            val dto = authInfo["addMember"] as? AddMemberRequestDTO ?: return@register true
+            mayPullInUser(userId, dto.userId)
+        }
+
+        /**
+         * No member listed on a thread being created (POST /chat carries an initial memberIds list
+         * that ThreadService adds directly) is an agent the caller is foreign to. Same rule as
+         * added-user-not-a-foreign-agent, applied to every listed id.
+         */
+        register("no-foreign-agent-in-created-thread") { userId, authInfo ->
+            val dto = authInfo["createThread"] as? CreateThreadRequestDTO ?: return@register true
+            (dto.memberIds ?: emptyList()).all { mayPullInUser(userId, it) }
+        }
+    }
+
+    /**
+     * True when [targetUserId] may be pulled into a group by [callerId]: not an agent (an ordinary
+     * user), or an agent every one of whose teams the caller belongs to.
+     */
+    private fun mayPullInUser(callerId: IdType, targetUserId: IdType): Boolean {
+        val rows = agentScreenRepository.findByAgentUserId(targetUserId)
+        if (rows.isEmpty()) return true
+        return rows.all { it.teamId != null && teamService.isTeamMember(it.teamId!!, callerId) }
     }
 
     /** Registers one atomic fact, hiding the seven-parameter handler shape. */

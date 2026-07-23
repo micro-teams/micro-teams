@@ -65,10 +65,17 @@ class RolePermissionService {
                     // -- Chat: threads -------------------------------------------------
 
                     // GET /chat — the query only ever returns the caller's own memberships.
-                    // POST /chat — anyone may start a group.
                     Permission(
-                        authorizedActions = listOf("enumerate-my-chats", "create-chat"),
+                        authorizedActions = listOf("enumerate-my-chats"),
                         authorizedResource = AuthorizedResource(types = listOf("chat_thread")),
+                    ),
+                    // POST /chat — anyone may start a group, but the initial memberIds may not
+                    // include an agent whose team the caller is outside of (otherwise anyone could
+                    // pull any team's agent into a group they run). Adding humans stays open.
+                    Permission(
+                        authorizedActions = listOf("create-chat"),
+                        authorizedResource = AuthorizedResource(types = listOf("chat_thread")),
+                        customLogic = "no-foreign-agent-in-created-thread",
                     ),
                     // GET /chat/{id}, GET /chat/{id}/members
                     Permission(
@@ -76,17 +83,19 @@ class RolePermissionService {
                         authorizedResource = AuthorizedResource(types = listOf("chat_thread")),
                         customLogic = "is-thread-member",
                     ),
-                    // PATCH /chat/{id}, POST|DELETE|PATCH /chat/{id}/members/...
+                    // PATCH /chat/{id}, DELETE|PATCH /chat/{id}/members/...
                     Permission(
                         authorizedActions =
-                            listOf(
-                                "rename-chat",
-                                "add-chat-member",
-                                "remove-chat-member",
-                                "change-chat-member-role",
-                            ),
+                            listOf("rename-chat", "remove-chat-member", "change-chat-member-role"),
                         authorizedResource = AuthorizedResource(types = listOf("chat_thread")),
                         customLogic = "is-thread-admin",
+                    ),
+                    // POST /chat/{id}/members — a thread admin may add members, but may not pull in
+                    // an agent whose team they are outside of (same rule as open/close/reboot).
+                    Permission(
+                        authorizedActions = listOf("add-chat-member"),
+                        authorizedResource = AuthorizedResource(types = listOf("chat_thread")),
+                        customLogic = "is-thread-admin && added-user-not-a-foreign-agent",
                     ),
                     // DELETE /chat/{id} — only the owner may dissolve a group.
                     Permission(
