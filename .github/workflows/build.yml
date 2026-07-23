@@ -163,7 +163,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Cache the built static tmux
         id: tmux-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: dist/linux-${{ matrix.arch }}/tmux
           key: tmux-${{ matrix.arch }}-${{ hashFiles('deploy/tmux/Dockerfile', 'deploy/tmux/build-static-tmux.sh') }}
