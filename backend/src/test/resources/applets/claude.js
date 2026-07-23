@@ -22,6 +22,7 @@
   var DOWN = ESC + "[B";
   var ENTER = "\r";
   var PGDN = ESC + "[6~";
+  var SHIFT_TAB = ESC + "[Z";
   var PASTE_START = ESC + "[200~";
   var PASTE_END = ESC + "[201~";
   function pickOption(n) {
@@ -76,8 +77,8 @@
   var cmdSince = false;
   var wasActive = false;
   var trustFrames = 0;
-  var autoModeDone = false;
-  var tabTries = 0;
+  var modeCyclesTried = 0;
+  var bypassUnavailable = false;
   var frame = 0;
   var submitIn = 0;
   microteams.term.onChange(() => {
@@ -109,11 +110,19 @@
       }
       st = busy ? "busy" : o.hasUI ? "idle" : "starting";
     }
-    if (!autoModeDone && st === "idle" && !isFull()) {
-      if (/auto[- ]?mode/i.test(tailStr)) autoModeDone = true;
-      else if (tabTries < 12 && frame % 2 === 0) {
-        microteams.term.write("\x1B[Z");
-        tabTries++;
+    if (st === "idle" && !isActive()) {
+      const inBypass = /bypass permissions on/i.test(tailStr);
+      const inAuto = /auto mode on/i.test(tailStr);
+      const modeVisible = inBypass || inAuto || /(accept edits|manual mode|plan mode) on/i.test(tailStr);
+      if (inBypass) {
+        modeCyclesTried = 0;
+        bypassUnavailable = false;
+      } else if (bypassUnavailable && inAuto) {
+        modeCyclesTried = 0;
+      } else if (modeVisible && frame % 2 === 0) {
+        microteams.term.write(SHIFT_TAB);
+        modeCyclesTried++;
+        if (modeCyclesTried >= 7) bypassUnavailable = true;
       }
     }
     statusVar.set(st);

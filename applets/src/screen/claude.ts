@@ -53,7 +53,8 @@ const ESC = '\x1b'
 const UP = ESC + '[A',
   DOWN = ESC + '[B',
   ENTER = '\r',
-  PGDN = ESC + '[6~'
+  PGDN = ESC + '[6~',
+  SHIFT_TAB = ESC + '[Z' // cycles Claude's permission mode
 // Bracketed-paste markers: wrap a body so the TUI ingests it as one atomic paste
 // (a long/multiline body pasted raw can have its embedded newlines interpreted as
 // submits). See say() / the deferred-submit countdown for why the Enter is separate.
@@ -156,8 +157,9 @@ let stableBusy = false // busy/idle from the last reliable (passive) sample
 let cmdSince = false // a command was emitted since that sample
 let wasActive = false // to detect the active -> passive transition
 let trustFrames = 0
-let autoModeDone = false // Claude switched into auto-accept (⏵⏵) mode
-let tabTries = 0
+// Permission-mode hunting (see below): prefer "bypass permissions", fall back to "auto mode".
+let modeCyclesTried = 0
+let bypassUnavailable = false
 let frame = 0
 let submitIn = 0 // frames to wait after a paste before pressing Enter (0 = disarmed)
 
@@ -211,18 +213,28 @@ microteams.term.onChange(() => {
     st = busy ? 'busy' : o.hasUI ? 'idle' : 'starting'
   }
 
-  // One-time: cycle Claude into "auto mode" via Shift+Tab, so routine tool use —
-  // including shell commands — runs without a permission prompt. Shift+Tab cycles
-  // through several modes (default → accept edits → auto mode → plan → …); both
-  // "accept edits" and "auto mode" show the ⏵⏵ marker, so we must match the exact
-  // "auto mode" TEXT, not the glyph, and keep pressing past "accept edits" until
-  // it appears. Throttled (footer needs a frame to update) and capped so it can
-  // never loop forever. Only when idle and no human is driving.
-  if (!autoModeDone && st === 'idle' && !isFull()) {
-    if (/auto[- ]?mode/i.test(tailStr)) autoModeDone = true
-    else if (tabTries < 12 && frame % 2 === 0) {
-      microteams.term.write('\x1b[Z')
-      tabTries++
+  // Keep Claude in "bypass permissions" mode — the peer of what --dangerously-skip-permissions
+  // launches into, and the most permissive (routine tool use runs without a prompt). Claude drifts
+  // out of it over time, and an older build of this applet actively cycled it AWAY into "auto mode".
+  // "bypass permissions" IS in the Shift+Tab cycle, so hunt for it; only if a full cycle passes
+  // without it appearing (e.g. it's disabled) do we settle for "auto mode". Re-checked whenever idle
+  // so a mode that drifts is restored. Guards: only when passive (the footer is trustworthy) and no
+  // human is driving, and only while a mode line is actually on screen — so a transient frame with
+  // no footer can never make us cycle away from a good mode.
+  if (st === 'idle' && !isActive()) {
+    const inBypass = /bypass permissions on/i.test(tailStr)
+    const inAuto = /auto mode on/i.test(tailStr)
+    const modeVisible =
+      inBypass || inAuto || /(accept edits|manual mode|plan mode) on/i.test(tailStr)
+    if (inBypass) {
+      modeCyclesTried = 0 // best mode — leave it
+      bypassUnavailable = false
+    } else if (bypassUnavailable && inAuto) {
+      modeCyclesTried = 0 // gave up on bypass; settled on the fallback — leave it
+    } else if (modeVisible && frame % 2 === 0) {
+      microteams.term.write(SHIFT_TAB)
+      modeCyclesTried++
+      if (modeCyclesTried >= 7) bypassUnavailable = true // a full cycle without bypass -> accept auto
     }
   }
 
