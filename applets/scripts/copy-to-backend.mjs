@@ -8,6 +8,7 @@ import { dirname } from 'node:path'
 const copies = [
   ['dist/cli.js', '../backend/src/test/resources/applets/cli.js'],
   ['dist/claude.js', '../backend/src/test/resources/applets/claude.js'],
+  ['dist/codex.js', '../backend/src/test/resources/applets/codex.js'],
 ]
 
 for (const [from, to] of copies) {

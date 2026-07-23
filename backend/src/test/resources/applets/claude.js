@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/screen/index.ts
+  // src/screen/claude.ts
   var statusVar = microteams.own("status", "starting");
   var elapsed = microteams.own("elapsed", "");
   var tokens = microteams.own("tokens", "");

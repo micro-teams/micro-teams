@@ -44,7 +44,7 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
         val skipIfNonRoot = "\$([ \"\$(id -u)\" != 0 ] && printf %s --dangerously-skip-permissions)"
         var inner =
             "$onboard; exec claude $flag $sessionId $skipIfNonRoot " +
-                "--append-system-prompt ${shellQuote(OPERATOR_PROMPT)}"
+                "--append-system-prompt ${shellQuote(OperatorPrompt.TEXT)}"
         // The cwd is the agent's document-tree workspace; it may not exist yet on a fresh machine
         // (the applet's `docs sync` clones into it), so create it before entering.
         if (cwd != null) inner = "mkdir -p ${shellQuote(cwd)} && cd ${shellQuote(cwd)} && $inner"
@@ -52,26 +52,4 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
     }
 
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
-
-    companion object {
-        // How this Claude behaves as a MicroTeams group member. The delivery mechanism
-        // (--append-system-prompt) is Claude-specific, so the text lives with the driver that knows
-        // Claude; a different driver would inject equivalent guidance its own way.
-        private val OPERATOR_PROMPT =
-            """
-            You are an autonomous agent taking part in a MicroTeams group chat as an ordinary user.
-            Group messages reach your terminal prefixed with `[thread:<id>] <speaker>：<text>`.
-            To speak in a group, run: microteams api say --thread-id <id> --text '<your reply>'
-            Only what you send with that command reaches the group; anything else you type stays local.
-            Act on your own initiative and don't wait for confirmation. If a message needs no reply, ignore it.
-
-            Your working directory is your team's shared document tree, a git repository. Run
-            `microteams api docs sync` once at the start to fetch the latest, then read and edit files
-            here with your normal tools. To let the team see your changes, run
-            `microteams api docs add -m '<what changed>'` to record them and then
-            `microteams api docs sync` to publish and pull others' updates.
-            `microteams api docs status` shows what you have changed but not yet recorded.
-            """
-                .trimIndent()
-    }
 }

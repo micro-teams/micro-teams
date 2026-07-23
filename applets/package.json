@@ -2,15 +2,16 @@
   "name": "microteams-applets",
   "private": true,
   "version": "0.1.1",
-  "description": "The applets shipped into the microteams CLI host: one drives a Claude Code screen, one defines the `microteams api` command tree. Authored in TypeScript against the generated API client, bundled to goja-compatible JS.",
+  "description": "The applets shipped into the microteams CLI host: one screen applet per agent driver (Claude Code, Codex) and one that defines the `microteams api` command tree. Authored in TypeScript against the generated API client, bundled to goja-compatible JS.",
   "type": "module",
   "scripts": {
     "codegen": "openapi-generator-cli generate -i ../MicroTeams-API.yml -g typescript-fetch -o src/api --additional-properties=supportsES6=true,withoutRuntimeChecks=true,prefixParameterInterfaces=true",
     "typecheck": "tsc --noEmit",
     "build:cli": "esbuild src/cli/index.ts --bundle --format=iife --target=es2016 --outfile=dist/cli.js --legal-comments=none",
-    "build:screen": "esbuild src/screen/index.ts --bundle --format=iife --target=es2016 --outfile=dist/claude.js --legal-comments=none",
+    "build:screen:claude": "esbuild src/screen/claude.ts --bundle --format=iife --target=es2016 --outfile=dist/claude.js --legal-comments=none",
+    "build:screen:codex": "esbuild src/screen/codex.ts --bundle --format=iife --target=es2016 --outfile=dist/codex.js --legal-comments=none",
     "copy": "node scripts/copy-to-backend.mjs",
-    "build": "npm run codegen && npm run typecheck && npm run build:cli && npm run build:screen && npm run copy",
+    "build": "npm run codegen && npm run typecheck && npm run build:cli && npm run build:screen:claude && npm run build:screen:codex && npm run copy",
     "prebuild": "npm run codegen"
   },
   "devDependencies": {

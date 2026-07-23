@@ -264,6 +264,20 @@ constructor(
     }
 
     /**
+     * GET /agent/drivers lists the drivers this server supports (both @Component AgentDriver beans
+     * are registered) plus the default — this is what the open-agent form's driver picker reads.
+     */
+    @Test
+    fun agentDriversListsSupportedDriversAndTheDefault() {
+        mockMvc
+            .perform(get("/agent/drivers").header("Authorization", "Bearer $humanToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.drivers", org.hamcrest.Matchers.hasItem("claude")))
+            .andExpect(jsonPath("$.drivers", org.hamcrest.Matchers.hasItem("codex")))
+            .andExpect(jsonPath("$.defaultDriver").value("claude"))
+    }
+
+    /**
      * 401, not 403: the machine token alone proves which *machine* is calling, never which agent,
      * so the token exchange refuses it without the per-screen token — there is no agent to mint a
      * token for. The machine+screen pair together are the agent's credentials.

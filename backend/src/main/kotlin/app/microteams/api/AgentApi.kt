@@ -4,6 +4,7 @@
  */
 package app.microteams.api
 
+import app.microteams.model.AgentDriversDTO
 import app.microteams.model.AgentGitWorkspaceDTO
 import app.microteams.model.AgentTokenDTO
 import app.microteams.model.ListAgentsResponseDTO
@@ -85,6 +86,30 @@ interface AgentApi {
         produces = ["application/json"],
     )
     fun getGitWorkspace(): ResponseEntity<AgentGitWorkspaceDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "The agent drivers this server supports, plus the default -- for the open-agent form's driver picker. Every name here is a valid value for OpenAgentRequest.driver. ",
+        operationId = "listAgentDrivers",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "OK",
+                    content = [Content(schema = Schema(implementation = AgentDriversDTO::class))],
+                )
+            ],
+    )
+    @RequestMapping(
+        method = [RequestMethod.GET],
+        value = ["/agent/drivers"],
+        produces = ["application/json"],
+    )
+    fun listAgentDrivers(): ResponseEntity<AgentDriversDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 

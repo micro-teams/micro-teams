@@ -220,9 +220,11 @@ class RolePermissionService {
 
                     // GET /agent — open to any authenticated user because it backs every avatar,
                     // and it discloses nothing privileged: the live screen id is attached per
-                    // agent only where the `watch` row above already allows it.
+                    // agent only where the `watch` row above already allows it. GET /agent/drivers
+                    // is the same: the set of supported drivers is not privileged (it just fills
+                    // the open-agent form's picker).
                     Permission(
-                        authorizedActions = listOf("enumerate-agents"),
+                        authorizedActions = listOf("enumerate-agents", "list-drivers"),
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                     ),
                     // POST /agent — you must belong to the team the agent will work for *and* be
