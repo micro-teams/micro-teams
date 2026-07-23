@@ -29,7 +29,7 @@
   microteams.term.onChange(() => {
     const screen = microteams.term.read();
     const tailStr = screen.split("\n").slice(-16).join("\n");
-    if (/Do you trust/i.test(tailStr) && !isFull()) {
+    if (/Do you trust the contents/i.test(screen) && !isFull()) {
       microteams.term.write(ENTER);
       return;
     }

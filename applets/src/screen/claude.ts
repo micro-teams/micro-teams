@@ -156,7 +156,6 @@ function observe(screen: string): any {
 let stableBusy = false // busy/idle from the last reliable (passive) sample
 let cmdSince = false // a command was emitted since that sample
 let wasActive = false // to detect the active -> passive transition
-let trustFrames = 0
 // Permission-mode hunting (see below): prefer "bypass permissions", fall back to "auto mode".
 let modeCyclesTried = 0
 let bypassUnavailable = false
@@ -178,14 +177,18 @@ microteams.term.onChange(() => {
     if (--submitIn === 0) microteams.term.write(ENTER)
   }
 
-  // Auto-trust the "Do you trust this folder?" gate. It can sit static, so lean
-  // on the heartbeat to retry pressing the default (Yes) until it's gone.
-  if (/Do you trust/i.test(tailStr) && !isFull()) {
-    if (trustFrames % 4 === 0) microteams.term.write(ENTER) // press the default (Yes)
-    trustFrames++
+  // Auto-trust the folder-trust gate Claude shows on a fresh cwd. Scan the WHOLE screen, not the
+  // tail: like Codex's, this gate renders at the TOP of a tall pane with blank space below, so it is
+  // NOT in the last 16 lines. The wording varies by version ("Do you trust this folder?" → "Is this
+  // a project you created or one you trust? … 1. Yes, I trust this folder"), so match any of those;
+  // the default option is highlighted with "Enter to confirm", so a bare Enter accepts it.
+  if (
+    /I trust this folder|created or one you trust|Do you trust/i.test(screen) &&
+    !isFull()
+  ) {
+    microteams.term.write(ENTER)
     return
   }
-  trustFrames = 0
 
   // When the human just stopped scrolling/typing, snap Claude back to the live
   // bottom so the next passive sample sees the real footer.
