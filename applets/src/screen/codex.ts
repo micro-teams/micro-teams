@@ -28,6 +28,13 @@ label.onChange((v) => microteams.log('screen labelled: ' + v))
 const viewerLevel = microteams.watch<string>('viewerLevel')
 const isFull = () => viewerLevel.get() === 'full'
 
+// The standing operator instructions. CodexDriver replaces the placeholder below with the real
+// text. Codex has no system prompt, and sending these as codex's initial prompt makes the agent
+// start working on its own at launch — so instead we prepend them to the FIRST group message. On a
+// resumed session they are already in the history; re-prepending once is harmless.
+const OPERATOR_PROMPT = '__MT_OPERATOR_PROMPT__'
+let sentOperatorPrompt = false
+
 // --- keystrokes ------------------------------------------------------------
 const ESC = '\x1b'
 const ENTER = '\r'
@@ -59,21 +66,19 @@ function observe(screen: string): { kind: string; working: boolean; hasUI: boole
 }
 
 let submitIn = 0 // frames to wait after a paste before pressing Enter (0 = disarmed)
-let trustFrames = 0
 
 microteams.term.onChange(() => {
   const screen = microteams.term.read()
   const tailStr = screen.split('\n').slice(-16).join('\n')
 
   // Auto-trust the "Do you trust the contents of this directory?" gate Codex shows on a fresh cwd.
-  // The default selection is "1. Yes, continue" and "Press enter to continue", so a bare Enter
-  // confirms it. It can sit static, so lean on the heartbeat to retry until it's gone.
+  // The default selection is "1. Yes, continue" / "Press enter to continue", so a bare Enter
+  // confirms it. Press it on every frame it is showing (the heartbeat drives this even on a static
+  // screen); once it is gone the check fails, so we never keep pressing into the input box.
   if (/Do you trust/i.test(tailStr) && !isFull()) {
-    if (trustFrames % 4 === 0) microteams.term.write(ENTER)
-    trustFrames++
+    microteams.term.write(ENTER)
     return
   }
-  trustFrames = 0
 
   // Deferred submit after a paste (see say()): press Enter a couple frames later, once the paste
   // has settled, and never while a human holds the keyboard. onChange is also fed by a heartbeat,
@@ -132,7 +137,16 @@ microteams.expose('snapshot', () => microteams.term.read())
 microteams.expose(
   'say',
   gated((text: unknown) => {
-    microteams.term.write(PASTE_START + String(text) + PASTE_END)
+    let body = String(text)
+    // Prepend the standing operator instructions to the very FIRST message, so the agent gets its
+    // context together with the first thing said to it — rather than at launch, where it would
+    // start working on its own. Guard against an un-replaced placeholder (CodexDriver always
+    // injects the real text, so this only skips if something went wrong).
+    if (!sentOperatorPrompt && OPERATOR_PROMPT.slice(0, 5) !== '__MT_') {
+      sentOperatorPrompt = true
+      body = OPERATOR_PROMPT + '\n\n' + body
+    }
+    microteams.term.write(PASTE_START + body + PASTE_END)
     submitIn = 2
     return true
   }),

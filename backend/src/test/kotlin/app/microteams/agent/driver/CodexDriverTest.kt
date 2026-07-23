@@ -27,35 +27,39 @@ class CodexDriverTest {
     }
 
     @Test
-    fun freshLaunchRunsCodexFullAutoWithTheOperatorPromptInTheCwd() {
+    fun freshLaunchRunsCodexFullAutoWithNoInitialPrompt() {
         val cmd = driver.command("sess-123", "~/work/repo", resume = false)
         assertEquals(listOf("bash", "-lc"), cmd.dropLast(1))
         val inner = cmd.last()
         // full-auto: skip approvals AND the sandbox entirely (peer of Claude's skip-permissions).
         assertTrue(inner.contains("exec codex --dangerously-bypass-approvals-and-sandbox"), inner)
-        // launches codex (not resume) and injects the standing instructions as the initial prompt.
+        // NOT resume, and NO initial prompt — the operator instructions ride with the first message
+        // (see appletSource), so codex just waits rather than starting work at launch.
         assertFalse(inner.contains("resume"), inner)
-        assertTrue(inner.contains("microteams api say"), inner) // a fragment of OperatorPrompt.TEXT
+        assertFalse(inner.contains("microteams api say"), inner)
+        assertTrue(inner.trimEnd().endsWith("--dangerously-bypass-approvals-and-sandbox"), inner)
         // enters the workspace (created first; a leading ~ is expanded on the machine).
         assertTrue(inner.contains("_mtcwd='~/work/repo'"), inner)
         assertTrue(inner.contains("cd \"\$_mtcwd\""), inner)
     }
 
     @Test
-    fun resumeContinuesTheLastSessionWithoutReinjectingInstructions() {
+    fun resumeContinuesTheLastSession() {
         val inner = driver.command("sess-123", "~/work/repo", resume = true).last()
         assertTrue(
-            inner.contains("exec codex --dangerously-bypass-approvals-and-sandbox resume --last"),
+            inner
+                .trimEnd()
+                .endsWith("exec codex --dangerously-bypass-approvals-and-sandbox resume --last"),
             inner,
         )
-        // The standing instructions are already in the resumed session's history.
-        assertFalse(inner.contains("microteams api say"), inner)
     }
 
     @Test
-    fun appletSourceResolvesToTheBundledCodexApplet() {
+    fun appletSourceInjectsTheOperatorPromptIntoTheBundledCodexApplet() {
         val src = driver.appletSource
         assertTrue(src.contains("screenReady"), "should be the real bundled screen applet")
-        assertTrue(src.contains("codex"), "the codex applet reports driver 'codex'")
+        // The placeholder is replaced with the standing instructions (a fragment of them).
+        assertFalse(src.contains("__MT_OPERATOR_PROMPT__"), "placeholder should be replaced")
+        assertTrue(src.contains("microteams api say"), "operator prompt should be injected")
     }
 }
