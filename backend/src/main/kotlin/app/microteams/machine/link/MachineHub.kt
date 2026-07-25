@@ -65,6 +65,39 @@ class HubScreen(
 ) {
     val vars: MutableMap<String, Any?> = ConcurrentHashMap()
     val viewers: MutableSet<ViewerTransport> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Whether the program on this screen is still running, as last observed. A screen is assumed
+     * alive until something says otherwise, because every death signal we have is positive: the
+     * applet reporting a dead pane, or the machine refusing to (re)drive the session. What "dead"
+     * means for the thing that runs here is the owning application's business — the machine layer
+     * only records the observation and tells whoever asked to be told.
+     */
+    @Volatile var alive: Boolean = true
+
+    /** Why it was last declared dead (for logs / diagnostics); null while alive. */
+    @Volatile var deadReason: String? = null
+}
+
+/**
+ * Told when a screen's program dies or comes back. The machine layer knows nothing about what runs
+ * on a screen, so it does not act on either event — it publishes them and the module that opened
+ * the screen decides whether a death is worth reviving (see the agent module's wake-up).
+ *
+ * Both directions are published, and both may come either from the wire (a machine refusing to
+ * drive a session) or from the owning module's own verdict via [MachineHub.markScreenDead] /
+ * [MachineHub.markScreenAlive] — reading a screen's mirrored variables is how a module recognises
+ * its own program's death, and that reading is knowledge the machine layer must not carry.
+ */
+interface ScreenLifecycleListener {
+    fun onScreenDead(screen: HubScreen, reason: String) {}
+
+    fun onScreenAlive(screen: HubScreen) {}
+}
+
+/** Told whenever a screen's applet pushes a new value for a variable it owns. */
+fun interface ScreenVarListener {
+    fun onScreenVar(screen: HubScreen, name: String, value: Any?)
 }
 
 /** The per-machine server-side state: its transport, its screens, and pending exec calls. */
@@ -85,6 +118,13 @@ class HubMachine(val machineId: String) {
     val execSeq = AtomicInteger(0)
     val callSeq = AtomicInteger(0)
     val execPending: MutableMap<String, CompletableFuture<ExecResult>> = ConcurrentHashMap()
+
+    /**
+     * Server→applet calls awaiting their `rpc.result`. Most calls are fire-and-forget (say / choose
+     * / compact — the answer is what the program then does on screen), but a caller that needs the
+     * value back — probing whether the applet is still there at all — parks its future here.
+     */
+    val callPending: MutableMap<String, CompletableFuture<Any?>> = ConcurrentHashMap()
     private val sendLock = ReentrantLock()
 
     /**
@@ -104,10 +144,59 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     private val screens: MutableMap<String, HubScreen> = ConcurrentHashMap() // sid -> screen
     private val byScreenToken: MutableMap<String, HubScreen> = ConcurrentHashMap()
     private val fns: MutableMap<String, ScreenFn> = ConcurrentHashMap()
+    private val lifecycleListeners =
+        java.util.concurrent.CopyOnWriteArrayList<ScreenLifecycleListener>()
+    private val varListeners = java.util.concurrent.CopyOnWriteArrayList<ScreenVarListener>()
 
     init {
-        fns["screenReady"] = ScreenFn { _, _, _ -> mapOf("ok" to true) }
+        // An applet announcing itself is the one unambiguous "the program is up and being driven"
+        // signal on the wire, so it also clears a death recorded before this (re)start.
+        fns["screenReady"] = ScreenFn { _, screen, _ ->
+            markScreenAlive(screen.sid)
+            mapOf("ok" to true)
+        }
         fns.putAll(screenFns)
+    }
+
+    /** Be told when screens die / come back. Listeners must not throw; one that does is logged. */
+    fun addScreenLifecycleListener(listener: ScreenLifecycleListener) {
+        lifecycleListeners.add(listener)
+    }
+
+    /** Be told when an applet pushes a variable it owns. */
+    fun addScreenVarListener(listener: ScreenVarListener) {
+        varListeners.add(listener)
+    }
+
+    /**
+     * Record that the program on [sid] is gone, and tell the listeners. Idempotent: a screen
+     * already known dead publishes nothing, so a repeated signal (a var re-pushed, a second
+     * session.error) can never re-trigger whatever the owning module does about it.
+     */
+    fun markScreenDead(sid: String, reason: String) {
+        val screen = screens[sid] ?: return
+        if (!screen.alive) return
+        screen.alive = false
+        screen.deadReason = reason
+        logger.info("screen {} on machine {} is dead: {}", sid, screen.machineId, reason)
+        lifecycleListeners.forEach { l -> safely { l.onScreenDead(screen, reason) } }
+    }
+
+    /** Record that the program on [sid] is running again. Idempotent, like [markScreenDead]. */
+    fun markScreenAlive(sid: String) {
+        val screen = screens[sid] ?: return
+        if (screen.alive) return
+        screen.alive = true
+        screen.deadReason = null
+        lifecycleListeners.forEach { l -> safely { l.onScreenAlive(screen) } }
+    }
+
+    private inline fun safely(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) { // a listener must never break the control channel
+            logger.warn("screen listener failed: {}", e.message)
+        }
     }
 
     private fun machine(machineId: String): HubMachine =
@@ -234,6 +323,50 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
             )
     }
 
+    /**
+     * Restart the program on an existing screen *in place*: end the machine's session and create it
+     * again under the SAME sid and the same screen token. Everything that names the screen — the
+     * owning module's rows, a browser 现场 URL, the MICROTEAMS_SCREEN a callback authenticates with —
+     * therefore keeps working across the restart, which is the whole reason this exists rather than
+     * a close + [openScreen] pair.
+     *
+     * Ordering is safe on the frozen CLI: it dispatches control messages one at a time off a single
+     * read loop, and its session.close kills the tmux synchronously, so the session.create that
+     * follows always finds the sid free and spawns fresh (rather than adopting the corpse).
+     *
+     * The screen stays marked dead until the new program's applet announces itself (screenReady),
+     * because a `--resume` takes seconds to paint a usable prompt and a screen that is merely
+     * *asked* to restart is not yet one that can be typed at. Whoever waits for it is told by the
+     * lifecycle listeners the moment it really is back.
+     */
+    fun respawnScreen(
+        machineId: String,
+        sid: String,
+        command: List<String>,
+        appletSource: String? = null,
+        env: Map<String, String>? = null,
+        cols: Int = 120,
+        rows: Int = 32,
+    ): Boolean {
+        val screen = machine(machineId).screens[sid] ?: return false
+        val machine = machine(machineId)
+        machine.send(LinkMsg(t = "session.close", sid = sid))
+        machine.send(
+            LinkMsg(
+                t = "session.create",
+                sid = sid,
+                command = command,
+                screen = screen.token,
+                cols = cols,
+                rows = rows,
+                source = appletSource,
+                env = env?.ifEmpty { null },
+            )
+        )
+        screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
+        return true
+    }
+
     /** Push a forced self-update to a machine (it downloads + swaps its binary in place). */
     fun sendUpdate(machineId: String) {
         machine(machineId).send(LinkMsg(t = "update"))
@@ -244,6 +377,34 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         val machine = machine(machineId)
         val id = "srv" + machine.callSeq.incrementAndGet()
         machine.send(LinkMsg(t = "rpc.call", sid = sid, id = id, name = name, args = args))
+    }
+
+    /**
+     * Server→applet call whose value we wait for, up to [timeoutSeconds]. Returns null on timeout,
+     * on an applet-side error, or when the machine is offline — every one of which means "nothing
+     * is driving that screen right now", which is exactly what a caller probing an applet wants to
+     * learn. Use [callScreen] for the ordinary fire-and-forget case.
+     */
+    fun callScreenAwait(
+        machineId: String,
+        sid: String,
+        name: String,
+        args: List<Any?> = emptyList(),
+        timeoutSeconds: Long = 3,
+    ): Any? {
+        val machine = machines[machineId] ?: return null
+        if (machine.transport == null) return null
+        val id = "srv" + machine.callSeq.incrementAndGet()
+        val fut = CompletableFuture<Any?>()
+        machine.callPending[id] = fut
+        try {
+            machine.send(LinkMsg(t = "rpc.call", sid = sid, id = id, name = name, args = args))
+            return fut.get(timeoutSeconds, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            return null
+        } finally {
+            machine.callPending.remove(id)
+        }
     }
 
     fun screenByToken(token: String): HubScreen? = byScreenToken[token]
@@ -399,8 +560,14 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 }
             }
             "heartbeat",
-            "session.ready",
-            "session.error" -> {}
+            "session.ready" -> {}
+            // The machine could not (re)drive this session. On the re-adopt path that is exactly
+            // how a screen whose tmux did NOT survive announces itself — the adopt carries an empty
+            // command precisely so a dead session errors here instead of being respawned blank —
+            // so it is the wire's own death notice, and the module that owns the screen is told.
+            "session.error" -> {
+                if (screen != null) markScreenDead(sid, m.error ?: "session error")
+            }
             "exec.result" -> {
                 val fut = machine.execPending[m.id]
                 if (fut != null && !fut.isDone) {
@@ -415,7 +582,17 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 }
             }
             "var.push" -> {
-                if (screen != null && m.name != null) screen.vars[m.name] = m.value
+                if (screen != null && m.name != null) {
+                    screen.vars[m.name] = m.value
+                    varListeners.forEach { l -> safely { l.onScreenVar(screen, m.name, m.value) } }
+                }
+            }
+            "rpc.result" -> {
+                val fut = machine.callPending[m.id]
+                if (fut != null && !fut.isDone) {
+                    if (m.error.isNullOrEmpty()) fut.complete(m.value)
+                    else fut.completeExceptionally(RuntimeException(m.error))
+                }
             }
             "screen.data" -> {
                 if (screen != null) fanOutScreenData(screen, m.data ?: "")

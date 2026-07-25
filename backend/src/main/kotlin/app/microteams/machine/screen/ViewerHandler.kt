@@ -28,8 +28,22 @@ import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.handler.AbstractWebSocketHandler
 
-class ViewerHandler(private val hub: MachineHub, private val objectMapper: ObjectMapper) :
-    AbstractWebSocketHandler() {
+/**
+ * Asked, just before a viewer attaches, whether anything needs doing to the screen first — the
+ * machine layer has no idea what runs on one, so what "needs doing" means belongs to the module
+ * that opened it (for agents: waking a program that has died, so 现场 opens onto a live terminal
+ * rather than the frozen last frame of a crash). It returns the sid to actually attach to, which is
+ * normally the one passed in.
+ */
+fun interface ScreenAttachPreflight {
+    fun beforeAttach(sid: String): String
+}
+
+class ViewerHandler(
+    private val hub: MachineHub,
+    private val objectMapper: ObjectMapper,
+    private val preflight: ScreenAttachPreflight? = null,
+) : AbstractWebSocketHandler() {
     private val logger = LoggerFactory.getLogger(ViewerHandler::class.java)
 
     private class ViewerState(
@@ -41,7 +55,12 @@ class ViewerHandler(private val hub: MachineHub, private val objectMapper: Objec
     private val states = ConcurrentHashMap<String, ViewerState>()
 
     override fun afterConnectionEstablished(session: WebSocketSession) {
-        val sid = session.attributes["sid"] as? String
+        // The handshake authorized this human against the sid they asked for; the preflight may
+        // hand back a different one, but only ever another screen of the SAME agent (it resolves
+        // the agent from this sid and reports where that agent lives now), so the authorization
+        // that was granted still covers what we attach to.
+        val asked = session.attributes["sid"] as? String
+        val sid = asked?.let { preflight?.beforeAttach(it) ?: it }
         val screen = sid?.let { hub.screen(it) }
         if (screen == null) {
             session.close(CloseStatus.POLICY_VIOLATION.withReason("screen not found"))

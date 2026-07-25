@@ -23,6 +23,7 @@
 package app.microteams.agent.screen
 
 import app.microteams.agent.AgentRegistry
+import app.microteams.agent.AgentWakeup
 import app.microteams.agent.driver.AgentDriver
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.MachineHub
@@ -60,6 +61,7 @@ class AgentService(
     private val teamService: TeamService,
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
+    private val agentWakeup: AgentWakeup,
     private val userRepository: UserRepository,
     private val userProfileRepository: UserProfileRepository,
     drivers: List<AgentDriver>,
@@ -189,6 +191,65 @@ class AgentService(
     }
 
     /**
+     * Wake an agent whose program has died, *in place*: respawn its screen under the same sid,
+     * screen token, cwd and session id, with resume=true, so the driver picks the conversation back
+     * up where it stopped. Nothing that names the screen changes — no DB write, no new registry
+     * entry, and a 现场 URL opened before the death keeps working — which is why this, rather than
+     * [rebootAgent], is what the automatic wake-up path uses.
+     *
+     * Falls back to [rebootAgent] when the hub has no screen under that sid at all (the machine has
+     * not reconnected since a server restart, so there is nothing to respawn in place). Returns
+     * false when the agent is unknown, has no session to resume, or its machine is offline — a
+     * machine we cannot reach cannot be woken, and saying so is more useful than pretending.
+     */
+    @Transactional
+    fun wakeAgent(agentUserId: IdType): Boolean {
+        val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull() ?: return false
+        val driver = driversByName[row.driver] ?: return false
+        val session = row.sessionId ?: return false
+        if (!hub.isOnline(row.machineId)) return false
+        val command = driver.command(session, row.cwd, resume = true)
+        val respawned =
+            hub.respawnScreen(
+                machineId = row.machineId,
+                sid = row.sid,
+                command = command,
+                appletSource = driver.appletSource,
+                env = screenEnv(row.machineId, row.teamId),
+            )
+        if (!respawned) {
+            rebootAgent(agentUserId) // no live screen to respawn — open a new one for this session
+            return true
+        }
+        logger.info(
+            "woke agent user {} on machine {} (screen {}, driver {}, session {})",
+            agentUserId,
+            row.machineId,
+            row.sid,
+            driver.name,
+            session,
+        )
+        return true
+    }
+
+    /**
+     * The environment every agent screen runs with. The screen's `microteams api` authenticates as
+     * this machine (MICROTEAMS_TOKEN) against this server (MICROTEAMS_API); paired with the
+     * per-screen MICROTEAMS_SCREEN the CLI injects, the tool-door attributes the call to this
+     * agent. We inject MICROTEAMS_TOKEN explicitly (the reference relies on the machine's on-disk
+     * config token, but injecting is robust to a machine whose default CLI config points
+     * elsewhere).
+     */
+    private fun screenEnv(machineId: String, teamId: IdType?): Map<String, String> = buildMap {
+        // The endpoint this machine reached us on (it reported it when it connected), so its
+        // screens call back on a URL that works for them; the config value is only a fallback.
+        put("MICROTEAMS_API", hub.originOf(machineId) ?: connectorOrigin)
+        machineService.tokenOf(machineId)?.let { put("MICROTEAMS_TOKEN", it) }
+        // The team the agent works for, so the applet's `docs` commands know which tree to sync.
+        put("MICROTEAMS_TEAM", teamId.toString())
+    }
+
+    /**
      * Open a screen for [agentUserId] and wire it up: launch the driver, persist the AgentScreen
      * row and register the ScreenAgent so chat can reach it. Shared by first-open and reboot, the
      * only difference being the session id and whether the driver resumes.
@@ -202,20 +263,7 @@ class AgentService(
         sessionId: String,
         resume: Boolean,
     ): OpenedAgent {
-        // The screen's `microteams api` authenticates as this machine (MICROTEAMS_TOKEN) against
-        // this server (MICROTEAMS_API); paired with the per-screen MICROTEAMS_SCREEN the CLI
-        // injects, the tool-door attributes the call to this agent. We inject MICROTEAMS_TOKEN
-        // explicitly (the reference relies on the machine's on-disk config token, but injecting is
-        // robust to a machine whose default CLI config points elsewhere).
-        val env = buildMap {
-            // The endpoint this machine reached us on (it reported it when it connected), so its
-            // screens call back on a URL that works for them; the config value is only a fallback.
-            put("MICROTEAMS_API", hub.originOf(machineId) ?: connectorOrigin)
-            machineService.tokenOf(machineId)?.let { put("MICROTEAMS_TOKEN", it) }
-            // The team the agent works for, so the applet's `docs` commands know which tree to
-            // sync.
-            put("MICROTEAMS_TEAM", teamId.toString())
-        }
+        val env = screenEnv(machineId, teamId)
         val screen =
             hub.openScreen(
                 machineId = machineId,
@@ -246,6 +294,7 @@ class AgentService(
                 screenToken = screen.token,
                 driver = driver,
                 hub = hub,
+                wakeup = agentWakeup,
             )
         )
         return OpenedAgent(agentUserId, screen.sid, machineId, screen.token)
@@ -261,6 +310,9 @@ class AgentService(
             agentScreenRepository.delete(row)
         }
         agentRegistry.unregister(agentUserId)
+        // Closed on purpose: forget the wake-up's bookkeeping too, so nothing queued for it is
+        // typed at some later agent and its death is never treated as one worth reviving.
+        agentWakeup.forget(agentUserId)
     }
 
     /**
