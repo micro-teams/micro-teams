@@ -63,8 +63,16 @@ class ConnectorWebSocketConfig {
     }
 
     @Bean
-    fun connectorViewerHandler(hub: MachineHub, objectMapper: ObjectMapper): ViewerHandler =
-        ViewerHandler(hub, objectMapper)
+    fun connectorViewerHandler(
+        hub: MachineHub,
+        objectMapper: ObjectMapper,
+        // Optional: a deployment with no module that owns screens has nothing to do before an
+        // attach, and the viewer works exactly as before.
+        preflight:
+            org.springframework.beans.factory.ObjectProvider<
+                app.microteams.machine.screen.ScreenAttachPreflight
+            >,
+    ): ViewerHandler = ViewerHandler(hub, objectMapper, preflight.getIfAvailable())
 
     /** The 现场 viewer request handler, carrying the JWT + membership handshake authz. */
     @Bean

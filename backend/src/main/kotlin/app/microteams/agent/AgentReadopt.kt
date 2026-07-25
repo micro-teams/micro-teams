@@ -35,6 +35,7 @@ class AgentReadopt(
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
     private val hub: MachineHub,
+    private val agentWakeup: AgentWakeup,
     drivers: List<AgentDriver>,
 ) {
     private val logger = LoggerFactory.getLogger(AgentReadopt::class.java)
@@ -92,6 +93,7 @@ class AgentReadopt(
                     screenToken = row.token,
                     driver = driver,
                     hub = hub,
+                    wakeup = agentWakeup,
                 )
             )
             readopted++
