@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import org.springframework.web.servlet.NoHandlerFoundException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 
 @ControllerAdvice
 class GlobalErrorHandler {
@@ -94,6 +96,29 @@ class GlobalErrorHandler {
             .body(
                 BadRequestError(e.message ?: "Invalid request caused http message conversion error")
             )
+    }
+
+    // A request that matches no controller route and no static resource is a 404 for the URL, not a
+    // server fault. Spring surfaces it as NoResourceFoundException (static-resource fallback, the
+    // default in Boot 3.2+) or NoHandlerFoundException; left to the catch-all below both would
+    // become
+    // a 500 with a full ERROR stacktrace — which floods the log with every bad URL, hides real
+    // failures, and tells a caller who mistyped a path that the server crashed. Map them to a 404
+    // NotFoundError contract instead, logged at DEBUG without a stacktrace.
+    @ExceptionHandler(NoResourceFoundException::class)
+    @ResponseBody
+    fun handleNoResourceFound(e: NoResourceFoundException): ResponseEntity<BaseError> {
+        logger.debug("No endpoint for {} {}", e.httpMethod, e.resourcePath)
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(EndpointNotFoundError(e.httpMethod.name(), "/${e.resourcePath}"))
+    }
+
+    @ExceptionHandler(NoHandlerFoundException::class)
+    @ResponseBody
+    fun handleNoHandlerFound(e: NoHandlerFoundException): ResponseEntity<BaseError> {
+        logger.debug("No endpoint for {} {}", e.httpMethod, e.requestURL)
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(EndpointNotFoundError(e.httpMethod, e.requestURL))
     }
 
     @ExceptionHandler(Exception::class)
