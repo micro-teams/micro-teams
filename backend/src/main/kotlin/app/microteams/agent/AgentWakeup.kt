@@ -31,9 +31,8 @@ package app.microteams.agent
 import app.microteams.agent.screen.AgentScreenRepository
 import app.microteams.agent.screen.AgentScreens
 import app.microteams.agent.screen.ScreenAgent
-import app.microteams.machine.link.HubScreen
 import app.microteams.machine.link.MachineHub
-import app.microteams.machine.link.ScreenLifecycleListener
+import app.microteams.machine.link.ScreenState
 import app.microteams.machine.link.ScreenVarListener
 import jakarta.annotation.PostConstruct
 import java.time.Duration
@@ -100,29 +99,39 @@ class AgentWakeup(
 
     @PostConstruct
     fun subscribe() {
-        hub.addScreenLifecycleListener(
-            object : ScreenLifecycleListener {
-                override fun onScreenDead(screen: HubScreen, reason: String) {
-                    val agent = agentRegistry.bySid(screen.sid) ?: return
-                    logger.info("agent {} died on screen {}: {}", agent.userId, screen.sid, reason)
-                    // Only wake right away if something is already waiting to be said; otherwise
-                    // let it lie until somebody wants it (a message / a viewer).
-                    if (!pending[agent.userId].isNullOrEmpty()) ensureAwake(agent.userId)
-                }
-
-                override fun onScreenAlive(screen: HubScreen) {
-                    val agent = agentRegistry.bySid(screen.sid) ?: return
-                    flush(agent)
+        hub.addScreenLifecycleListener { screen, _ ->
+            val agent = agentRegistry.bySid(screen.sid)
+            if (agent != null) {
+                when (screen.state) {
+                    // Back up and being driven: say everything that piled up while it was down.
+                    ScreenState.LIVE -> flush(agent)
+                    ScreenState.DEAD -> {
+                        logger.info(
+                            "agent {} died on screen {}: {}",
+                            agent.userId,
+                            screen.sid,
+                            screen.deadReason,
+                        )
+                        // Only wake right away if something is already waiting to be said;
+                        // otherwise let it lie until somebody wants it (a message / a viewer).
+                        if (!pending[agent.userId].isNullOrEmpty()) ensureAwake(agent.userId)
+                    }
+                    // Coming up, or never heard from: nothing to do but wait.
+                    ScreenState.STARTING,
+                    ScreenState.UNKNOWN -> {}
                 }
             }
-        )
+        }
         // The applet's own verdict. `status` is a driver-applet variable, so reading it as liveness
         // belongs to the agent module — the hub just forwards the push.
         hub.addScreenVarListener(
             ScreenVarListener { screen, name, value ->
                 if (name != STATUS_VAR) return@ScreenVarListener
-                if (value == STATUS_DEAD) hub.markScreenDead(screen.sid, "pane is dead")
-                else hub.markScreenAlive(screen.sid)
+                // Any value at all means the applet is running and reading the terminal; what it
+                // says about the pane is what tells the two apart.
+                if (value == STATUS_DEAD)
+                    hub.markScreen(screen.sid, ScreenState.DEAD, "pane is dead")
+                else hub.markScreen(screen.sid, ScreenState.LIVE)
             }
         )
     }
@@ -250,16 +259,34 @@ class AgentWakeup(
      */
     private fun probe(sid: String) {
         val screen = hub.screen(sid) ?: return
-        if (!screen.alive || !hub.isOnline(screen.machineId)) return
+        // Only worth asking where we would otherwise assume the best: a screen already known dead
+        // needs no confirming, and one that is starting has not had time to answer yet.
+        if (screen.state == ScreenState.DEAD || screen.state == ScreenState.STARTING) return
+        if (!hub.isOnline(screen.machineId)) return
         val answer = hub.callScreenAwait(screen.machineId, sid, "snapshot", timeoutSeconds = 2)
-        if (answer == null) hub.markScreenDead(sid, "the applet did not answer")
+        if (answer == null) {
+            hub.markScreen(sid, ScreenState.DEAD, "the applet did not answer")
+        }
     }
 
-    /** Whether this agent's program is, as far as we know, running and able to be typed at. */
+    /**
+     * Whether this agent can be typed at right now. A screen we have never heard from counts: the
+     * applet speaks only when something changes, so silence is not evidence of death and refusing
+     * to talk to a quiet agent would be worse than the rare message typed at one that just died —
+     * which its next variable push corrects anyway. STARTING deliberately does not count: a program
+     * still painting its first frames swallows what is typed at it.
+     */
     fun isAwake(agentUserId: IdType): Boolean {
         val agent = agentRegistry.get(agentUserId) as? ScreenAgent ?: return false
         val screen = hub.screen(agent.sid) ?: return false
-        return hub.isOnline(agent.machineId) && screen.alive
+        if (!hub.isOnline(agent.machineId)) return false
+        return screen.state == ScreenState.LIVE || screen.state == ScreenState.UNKNOWN
+    }
+
+    /** Whether a (re)start we asked for is still coming up — a second one would only fight it. */
+    private fun isStarting(agentUserId: IdType): Boolean {
+        val agent = agentRegistry.get(agentUserId) as? ScreenAgent ?: return false
+        return hub.screen(agent.sid)?.state == ScreenState.STARTING
     }
 
     /**
@@ -269,11 +296,11 @@ class AgentWakeup(
      * reports success rather than queueing a second one behind it.
      */
     fun ensureAwake(agentUserId: IdType): Boolean {
-        if (isAwake(agentUserId)) return true
+        if (isAwake(agentUserId) || isStarting(agentUserId)) return true
         val lock = locks.computeIfAbsent(agentUserId) { ReentrantLock() }
         if (!lock.tryLock()) return true // another thread is already waking it
         try {
-            if (isAwake(agentUserId)) return true
+            if (isAwake(agentUserId) || isStarting(agentUserId)) return true
             if (agentScreenRepository.findByAgentUserId(agentUserId).isEmpty()) return false
             val attempt = attempts.computeIfAbsent(agentUserId) { WakeAttempts() }
             if (Duration.between(attempt.last, Instant.now()) > stableWindow) attempt.count = 0

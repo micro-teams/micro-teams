@@ -27,6 +27,7 @@ import app.microteams.agent.AgentRegistry
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.ScreenState
 import app.microteams.team.machine.TeamMachine
 import app.microteams.team.machine.TeamMachineRepository
 import java.net.URI
@@ -205,7 +206,11 @@ constructor(
     fun aMessageToADeadAgentWakesItAndIsDeliveredAfterwards() {
         reportDead()
         Thread.sleep(300) // let the push land
-        assertFalse(machineHub.screen(sid)!!.alive, "the applet's `status = dead` must be believed")
+        assertEquals(
+            ScreenState.DEAD,
+            machineHub.screen(sid)!!.state,
+            "the applet's `status = dead` must be believed",
+        )
 
         mockMvc
             .perform(
@@ -238,7 +243,11 @@ constructor(
             say.getJSONArray("args").getString(0).contains("are you still with us?"),
             "the message said while it was dead must arrive once it is back",
         )
-        assertTrue(machineHub.screen(sid)!!.alive, "screenReady means the program is running again")
+        assertEquals(
+            ScreenState.LIVE,
+            machineHub.screen(sid)!!.state,
+            "screenReady means the program is running again",
+        )
     }
 
     /**
@@ -299,7 +308,7 @@ constructor(
 
         send("""{"t":"var.push","sid":"$viewedSid","name":"status","value":"dead"}""")
         Thread.sleep(300)
-        assertFalse(machineHub.screen(viewedSid)!!.alive)
+        assertEquals(ScreenState.DEAD, machineHub.screen(viewedSid)!!.state)
 
         // A human opens the live screen on it. The attach itself must revive the program.
         val viewer =

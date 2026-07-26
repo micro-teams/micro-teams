@@ -200,6 +200,15 @@ constructor(
         // The agent's team travels in the env too, so the applet's `docs` commands know which tree.
         assertEquals(teamId.toString(), create.getJSONObject("env").getString("MICROTEAMS_TEAM"))
 
+        // A real applet announces itself once it is driving the program; until then the screen is
+        // still starting and nothing may be typed at it. The fake machine must say so too.
+        session.sendMessage(
+            TextMessage(
+                """{"t":"rpc.call","sid":"${sidOf(openRes.response.contentAsString)}","id":"r1",""" +
+                    """"name":"screenReady","args":[{"driver":"claude"}]}"""
+            )
+        )
+
         // form the group: a thread with the human (owner) and the agent as a member
         val threadRes =
             mockMvc

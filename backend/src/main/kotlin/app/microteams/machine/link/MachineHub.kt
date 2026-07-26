@@ -66,33 +66,50 @@ class HubScreen(
     val vars: MutableMap<String, Any?> = ConcurrentHashMap()
     val viewers: MutableSet<ViewerTransport> = ConcurrentHashMap.newKeySet()
 
-    /**
-     * Whether the program on this screen is still running, as last observed. A screen is assumed
-     * alive until something says otherwise, because every death signal we have is positive: the
-     * applet reporting a dead pane, or the machine refusing to (re)drive the session. What "dead"
-     * means for the thing that runs here is the owning application's business — the machine layer
-     * only records the observation and tells whoever asked to be told.
-     */
-    @Volatile var alive: Boolean = true
+    /** What we last observed about the program on this screen. See [ScreenState]. */
+    @Volatile var state: ScreenState = ScreenState.UNKNOWN
 
-    /** Why it was last declared dead (for logs / diagnostics); null while alive. */
+    /** Why it was last declared dead (for logs / diagnostics); null unless [state] is DEAD. */
     @Volatile var deadReason: String? = null
 }
 
 /**
- * Told when a screen's program dies or comes back. The machine layer knows nothing about what runs
- * on a screen, so it does not act on either event — it publishes them and the module that opened
- * the screen decides whether a death is worth reviving (see the agent module's wake-up).
+ * What is known about the program on a screen — four states rather than a boolean, because the
+ * three things a caller does about it are genuinely different and a boolean forced two of them to
+ * share a value.
  *
- * Both directions are published, and both may come either from the wire (a machine refusing to
- * drive a session) or from the owning module's own verdict via [MachineHub.markScreenDead] /
- * [MachineHub.markScreenAlive] — reading a screen's mirrored variables is how a module recognises
- * its own program's death, and that reading is knowledge the machine layer must not carry.
+ * The distinction that matters is between not knowing and knowing it is gone. A screen we have
+ * merely never heard from may well be running perfectly (the applet only speaks when something
+ * changes), so treating that as death would restart healthy agents; a screen we know is gone must
+ * not be typed at. And a screen we have just asked to start is neither: it is coming up, so nothing
+ * should be typed at it yet and nothing should ask for it to be started again.
  */
-interface ScreenLifecycleListener {
-    fun onScreenDead(screen: HubScreen, reason: String) {}
+enum class ScreenState {
+    /** Never heard from. Assume it is there — the applet speaks only when something changes. */
+    UNKNOWN,
 
-    fun onScreenAlive(screen: HubScreen) {}
+    /** We asked the machine to (re)start the program; it has not announced itself yet. */
+    STARTING,
+
+    /** The applet is driving a running program: what is typed here reaches it. */
+    LIVE,
+
+    /** The program is gone. Anything typed here is lost; it must be started before it is used. */
+    DEAD,
+}
+
+/**
+ * Told when what is known about a screen's program changes. The machine layer knows nothing about
+ * what runs on a screen, so it never acts on the change — it publishes it, and the module that
+ * opened the screen decides whether a death is worth reviving (see the agent module's wake-up).
+ *
+ * Changes may come either from the wire (a machine refusing to drive a session, an applet
+ * announcing itself) or from the owning module's own verdict via [MachineHub.markScreen] — reading
+ * a screen's mirrored variables is how a module recognises its own program's death, and that
+ * reading is knowledge the machine layer must not carry.
+ */
+fun interface ScreenLifecycleListener {
+    fun onScreenState(screen: HubScreen, previous: ScreenState)
 }
 
 /** Told whenever a screen's applet pushes a new value for a variable it owns. */
@@ -152,7 +169,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         // An applet announcing itself is the one unambiguous "the program is up and being driven"
         // signal on the wire, so it also clears a death recorded before this (re)start.
         fns["screenReady"] = ScreenFn { _, screen, _ ->
-            markScreenAlive(screen.sid)
+            markScreen(screen.sid, ScreenState.LIVE)
             mapOf("ok" to true)
         }
         fns.putAll(screenFns)
@@ -169,26 +186,26 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     }
 
     /**
-     * Record that the program on [sid] is gone, and tell the listeners. Idempotent: a screen
-     * already known dead publishes nothing, so a repeated signal (a var re-pushed, a second
-     * session.error) can never re-trigger whatever the owning module does about it.
+     * Record what is now known about the program on [sid], and tell the listeners what changed.
+     * Idempotent: a state that does not change publishes nothing, so a repeated signal (a variable
+     * re-pushed, a second session.error) can never re-trigger whatever the owning module does about
+     * it.
      */
-    fun markScreenDead(sid: String, reason: String) {
+    fun markScreen(sid: String, state: ScreenState, reason: String? = null) {
         val screen = screens[sid] ?: return
-        if (!screen.alive) return
-        screen.alive = false
-        screen.deadReason = reason
-        logger.info("screen {} on machine {} is dead: {}", sid, screen.machineId, reason)
-        lifecycleListeners.forEach { l -> safely { l.onScreenDead(screen, reason) } }
-    }
-
-    /** Record that the program on [sid] is running again. Idempotent, like [markScreenDead]. */
-    fun markScreenAlive(sid: String) {
-        val screen = screens[sid] ?: return
-        if (screen.alive) return
-        screen.alive = true
-        screen.deadReason = null
-        lifecycleListeners.forEach { l -> safely { l.onScreenAlive(screen) } }
+        val previous = screen.state
+        if (previous == state) return
+        screen.state = state
+        screen.deadReason = if (state == ScreenState.DEAD) reason else null
+        if (state == ScreenState.DEAD) {
+            logger.info(
+                "screen {} on machine {} is dead: {}",
+                sid,
+                screen.machineId,
+                reason ?: "no reason given",
+            )
+        }
+        lifecycleListeners.forEach { l -> safely { l.onScreenState(screen, previous) } }
     }
 
     private inline fun safely(block: () -> Unit) {
@@ -262,6 +279,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         machine.screens[sid] = screen
         screens[sid] = screen
         byScreenToken[screen.token] = screen
+        screen.state = ScreenState.STARTING // we asked for it; its applet will confirm
         machine.send(
             LinkMsg(
                 t = "session.create",
@@ -334,10 +352,9 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
      * read loop, and its session.close kills the tmux synchronously, so the session.create that
      * follows always finds the sid free and spawns fresh (rather than adopting the corpse).
      *
-     * The screen stays marked dead until the new program's applet announces itself (screenReady),
-     * because a `--resume` takes seconds to paint a usable prompt and a screen that is merely
-     * *asked* to restart is not yet one that can be typed at. Whoever waits for it is told by the
-     * lifecycle listeners the moment it really is back.
+     * The screen goes to STARTING rather than LIVE: a `--resume` takes seconds to paint a usable
+     * prompt, so a screen that is merely *asked* to restart is not yet one that can be typed at.
+     * Whoever waits for it is told by the lifecycle listeners the moment it really is back.
      */
     fun respawnScreen(
         machineId: String,
@@ -364,6 +381,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
             )
         )
         screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
+        markScreen(sid, ScreenState.STARTING)
         return true
     }
 
@@ -566,7 +584,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
             // command precisely so a dead session errors here instead of being respawned blank —
             // so it is the wire's own death notice, and the module that owns the screen is told.
             "session.error" -> {
-                if (screen != null) markScreenDead(sid, m.error ?: "session error")
+                if (screen != null) markScreen(sid, ScreenState.DEAD, m.error ?: "session error")
             }
             "exec.result" -> {
                 val fut = machine.execPending[m.id]
