@@ -204,11 +204,38 @@ class AgentService(
      */
     @Transactional
     fun wakeAgent(agentUserId: IdType): Boolean {
-        val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull() ?: return false
-        val driver = driversByName[row.driver] ?: return false
-        val session = row.sessionId ?: return false
-        if (!hub.isOnline(row.machineId)) return false
-        val command = driver.command(session, row.cwd, resume = true)
+        val row =
+            agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull()
+                ?: run {
+                    logger.warn("cannot wake agent {}: it has no screen row", agentUserId)
+                    return false
+                }
+        val driver =
+            driversByName[row.driver]
+                ?: run {
+                    logger.warn("cannot wake agent {}: unknown driver {}", agentUserId, row.driver)
+                    return false
+                }
+        if (!hub.isOnline(row.machineId)) {
+            logger.info("not waking agent {}: machine {} is offline", agentUserId, row.machineId)
+            return false
+        }
+        // A row with no session id predates our minting one (or belongs to a driver that picks its
+        // own). There is then nothing to resume — but refusing to wake would leave the agent dead
+        // forever, which is strictly worse than starting it fresh, so mint a session now and record
+        // it, and every later wake resumes THAT one.
+        val resume = row.sessionId != null
+        val session = row.sessionId ?: UUID.randomUUID().toString()
+        if (!resume) {
+            row.sessionId = session
+            agentScreenRepository.save(row)
+            logger.warn(
+                "agent {} had no session to resume; waking it on a fresh session {}",
+                agentUserId,
+                session,
+            )
+        }
+        val command = driver.command(session, row.cwd, resume = resume)
         val respawned =
             hub.respawnScreen(
                 machineId = row.machineId,

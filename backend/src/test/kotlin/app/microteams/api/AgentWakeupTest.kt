@@ -24,6 +24,7 @@
 package app.microteams.api
 
 import app.microteams.agent.AgentRegistry
+import app.microteams.agent.screen.AgentScreenRepository
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
@@ -69,6 +70,7 @@ constructor(
     private val userCreatorService: UserCreatorService,
     private val machineHub: MachineHub,
     private val agentRegistry: AgentRegistry,
+    private val agentScreenRepository: AgentScreenRepository,
     private val machineRepository: MachineRepository,
     private val teamMachineRepository: TeamMachineRepository,
 ) {
@@ -319,6 +321,55 @@ constructor(
         )
         // And the viewer is attached to the same screen it asked for — waking respawned in place.
         awaitFrameFor("screen.subscribe", viewedSid)
+        viewer.close()
+    }
+
+    /**
+     * An agent whose row carries no session id — one opened before we minted them — must still be
+     * woken. There is nothing to resume, so it starts fresh and records that session for next time;
+     * refusing would leave such an agent dead forever, which is strictly worse.
+     */
+    @Test
+    @Order(5)
+    fun anAgentWithNoSessionToResumeIsStillWokenOnAFreshOne() {
+        val openRes =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Old"}""")
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val oldSid = JSONObject(openRes.response.contentAsString).getString("sid")
+        awaitFrameFor("session.create", oldSid)
+
+        val row = agentScreenRepository.findById(oldSid).orElseThrow()
+        row.sessionId = null
+        agentScreenRepository.save(row)
+
+        send("""{"t":"var.push","sid":"$oldSid","name":"status","value":"dead"}""")
+        Thread.sleep(300)
+
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI("ws://localhost:$port/machine/screen/$oldSid?token=$humanToken"),
+                )
+                .get(5, TimeUnit.SECONDS)
+
+        val respawn = awaitFrameFor("session.create", oldSid)
+        assertFalse(
+            respawn.getJSONArray("command").getString(2).contains("--resume"),
+            "with nothing to resume it must start a fresh session, not a resume of nothing",
+        )
+        assertTrue(
+            agentScreenRepository.findById(oldSid).orElseThrow().sessionId != null,
+            "the session it was woken on must be recorded, so the next wake resumes it",
+        )
         viewer.close()
     }
 

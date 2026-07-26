@@ -156,7 +156,13 @@ class AgentWakeup(
      * on the fallback path where the screen had to be reopened from scratch.
      */
     fun ensureAwakeForViewer(sid: String): String {
-        val agent = agentRegistry.bySid(sid) ?: return sid
+        val agent =
+            agentRegistry.bySid(sid)
+                ?: run {
+                    // Not an agent screen, or a sid the caller read before a restart replaced it.
+                    logger.info("viewer asked for screen {}, which belongs to no live agent", sid)
+                    return sid
+                }
         probe(agent.sid)
         ensureAwake(agent.userId)
         return agentRegistry.get(agent.userId)?.let { (it as? ScreenAgent)?.sid } ?: sid
@@ -216,7 +222,15 @@ class AgentWakeup(
                 return false
             }
             val wait = backoff[attempt.count]
-            if (Duration.between(attempt.last, Instant.now()) < wait) return false
+            if (Duration.between(attempt.last, Instant.now()) < wait) {
+                logger.info(
+                    "not waking agent {} yet: attempt {} is held back for {}s after the last one",
+                    agentUserId,
+                    attempt.count + 1,
+                    wait.seconds,
+                )
+                return false
+            }
             attempt.count++
             attempt.last = Instant.now()
             return try {

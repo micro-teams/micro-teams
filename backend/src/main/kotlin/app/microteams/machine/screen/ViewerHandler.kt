@@ -63,6 +63,9 @@ class ViewerHandler(
         val sid = asked?.let { preflight?.beforeAttach(it) ?: it }
         val screen = sid?.let { hub.screen(it) }
         if (screen == null) {
+            // Worth a line: to the human this is an empty terminal that never says why, and the
+            // usual cause is a sid read before a restart or a close replaced it.
+            logger.warn("viewer rejected: no screen '{}' (asked for '{}')", sid, asked)
             session.close(CloseStatus.POLICY_VIOLATION.withReason("screen not found"))
             return
         }
