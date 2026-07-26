@@ -91,6 +91,14 @@
       microteams.term.write(ENTER);
       return;
     }
+    const resumeGate = /Resuming the full session|resuming from a summary/i.test(screen) && /❯\s*\d+\.\s/.test(clean(screen));
+    if (resumeGate && !isFull()) {
+      if (frame % 2 === 0) {
+        const full = screen.split("\n").map(parseOption).filter((o2) => o2 !== null).filter((o2) => /resume full session/i.test(o2.label))[0];
+        if (full) pickOption(full.n);
+      }
+      return;
+    }
     const active = isActive();
     if (wasActive && !active) for (let i = 0; i < 12; i++) microteams.term.write(PGDN);
     wasActive = active;
@@ -196,7 +204,7 @@
       return true;
     })
   );
-  microteams.call("screenReady", { driver: "claude", version: 11 }).then((ack) => {
+  microteams.call("screenReady", { driver: "claude", version: 12 }).then((ack) => {
     microteams.log("server acked screenReady: " + JSON.stringify(ack));
   });
 })();
