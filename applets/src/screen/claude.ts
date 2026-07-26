@@ -190,6 +190,32 @@ microteams.term.onChange(() => {
     return
   }
 
+  // Resuming an old session, Claude offers to continue from a SUMMARY instead of the full
+  // transcript, and waits on that choice before it will read anything. Take the full session: the
+  // whole point of `--resume` here is that the agent picks up where it left off, and a summary
+  // silently drops the detail it was working from — a compaction nobody asked for. Left alone the
+  // agent simply hangs on the dialog forever, which is how a woken agent that "came back" can still
+  // never answer.
+  //
+  // Anchor on the dialog's own wording rather than an option number, and press the option whose
+  // label says so — the numbering and the recommended default are Claude's to change. Scanning the
+  // whole screen, and the two-frame gate, mirror the folder-trust handling above: the dialog
+  // repaints while we type into it, and pressing twice would answer the NEXT dialog too.
+  const resumeGate =
+    /Resuming the full session|resuming from a summary/i.test(screen) &&
+    /❯\s*\d+\.\s/.test(clean(screen)) // its selection cursor: the dialog is still up
+  if (resumeGate && !isFull()) {
+    if (frame % 2 === 0) {
+      const full = screen
+        .split('\n')
+        .map(parseOption)
+        .filter((o): o is Choice => o !== null)
+        .filter((o) => /resume full session/i.test(o.label))[0]
+      if (full) pickOption(full.n)
+    }
+    return
+  }
+
   // When the human just stopped scrolling/typing, snap Claude back to the live
   // bottom so the next passive sample sees the real footer.
   const active = isActive()
@@ -335,6 +361,6 @@ microteams.expose(
   }),
 )
 
-microteams.call('screenReady', { driver: 'claude', version: 11 }).then((ack) => {
+microteams.call('screenReady', { driver: 'claude', version: 12 }).then((ack) => {
   microteams.log('server acked screenReady: ' + JSON.stringify(ack))
 })
