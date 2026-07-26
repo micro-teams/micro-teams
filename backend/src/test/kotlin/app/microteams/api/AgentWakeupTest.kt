@@ -27,6 +27,7 @@ import app.microteams.agent.AgentRegistry
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.ScreenState
 import app.microteams.team.machine.TeamMachine
 import app.microteams.team.machine.TeamMachineRepository
 import java.net.URI
@@ -205,7 +206,11 @@ constructor(
     fun aMessageToADeadAgentWakesItAndIsDeliveredAfterwards() {
         reportDead()
         Thread.sleep(300) // let the push land
-        assertFalse(machineHub.screen(sid)!!.alive, "the applet's `status = dead` must be believed")
+        assertEquals(
+            ScreenState.DEAD,
+            machineHub.screen(sid)!!.state,
+            "the applet's `status = dead` must be believed",
+        )
 
         mockMvc
             .perform(
@@ -238,7 +243,11 @@ constructor(
             say.getJSONArray("args").getString(0).contains("are you still with us?"),
             "the message said while it was dead must arrive once it is back",
         )
-        assertTrue(machineHub.screen(sid)!!.alive, "screenReady means the program is running again")
+        assertEquals(
+            ScreenState.LIVE,
+            machineHub.screen(sid)!!.state,
+            "screenReady means the program is running again",
+        )
     }
 
     /**
@@ -276,10 +285,10 @@ constructor(
     }
 
     /**
-     * 看现场 is the other moment the agent must be alive: opening the live screen of a dead agent
-     * would otherwise show the frozen last frame of whatever killed it, with no way to tell that
-     * from an agent that is merely quiet. Uses a second, untouched agent so this is a first wake
-     * rather than one held back by the previous test's back-off.
+     * Watching the live screen is the other moment the agent must be alive: opening the live screen
+     * of a dead agent would otherwise show the frozen last frame of whatever killed it, with no way
+     * to tell that from an agent that is merely quiet. Uses a second, untouched agent so this is a
+     * first wake rather than one held back by the previous test's back-off.
      */
     @Test
     @Order(4)
@@ -299,9 +308,9 @@ constructor(
 
         send("""{"t":"var.push","sid":"$viewedSid","name":"status","value":"dead"}""")
         Thread.sleep(300)
-        assertFalse(machineHub.screen(viewedSid)!!.alive)
+        assertEquals(ScreenState.DEAD, machineHub.screen(viewedSid)!!.state)
 
-        // A human opens 现场 on it. The attach itself must revive the program.
+        // A human opens the live screen on it. The attach itself must revive the program.
         val viewer =
             StandardWebSocketClient()
                 .execute(
@@ -315,10 +324,77 @@ constructor(
         val respawn = awaitFrameFor("session.create", viewedSid)
         assertTrue(
             respawn.getJSONArray("command").getString(2).contains("--resume"),
-            "看现场 must resume the agent's own session, not start a blank one",
+            "watching must resume the agent's own session, not start a blank one",
         )
         // And the viewer is attached to the same screen it asked for — waking respawned in place.
         awaitFrameFor("screen.subscribe", viewedSid)
+        viewer.close()
+    }
+
+    /**
+     * Opening the live screen must ENSURE there is something to look at, not assume it. Here the
+     * server has forgotten the screen completely — no hub registration, no registry entry, only the
+     * persisted row — which is what a restart that never re-adopted this screen leaves behind. The
+     * attach must rebuild all of it from the row and start the program, rather than closing on
+     * "screen not found" and leaving the human with a blank terminal and no explanation.
+     */
+    @Test
+    @Order(5)
+    fun openingTheLiveScreenRebuildsAScreenTheServerHasForgotten() {
+        val openRes =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Lost"}"""
+                        )
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val lostSid = JSONObject(openRes.response.contentAsString).getString("sid")
+        val lostUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
+        awaitFrameFor("session.create", lostSid)
+
+        // Forget it as thoroughly as a restart would: out of the hub, out of the registry. Only the
+        // AgentScreen row is left — which is all the viewer path may rely on.
+        machineHub.closeScreen(machineId, lostSid)
+        agentRegistry.unregister(lostUserId)
+        assertTrue(machineHub.screen(lostSid) == null)
+        assertTrue(agentRegistry.bySid(lostSid) == null)
+
+        // The UI only offers the live screen for an agent that is online AND carries a screen id,
+        // so a
+        // forgotten agent must still be described from its row — otherwise the human cannot even
+        // ask for the rebuild.
+        mockMvc
+            .perform(get("/agent?userId=$lostUserId").header("Authorization", "Bearer $humanToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.agents[0].online").value(true))
+            .andExpect(jsonPath("$.agents[0].sid").value(lostSid))
+
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI("ws://localhost:$port/machine/screen/$lostSid?token=$humanToken"),
+                )
+                .get(5, TimeUnit.SECONDS)
+
+        // Rebuilt: the program is started again on the SAME screen, and the viewer attaches to it.
+        val respawn = awaitFrameFor("session.create", lostSid)
+        assertTrue(
+            respawn.getJSONArray("command").getString(2).contains("--resume"),
+            "the rebuilt screen must resume the agent's own session",
+        )
+        awaitFrameFor("screen.subscribe", lostSid)
+        assertTrue(machineHub.screen(lostSid) != null, "the screen must be known to the hub again")
+        assertTrue(
+            agentRegistry.bySid(lostSid) != null,
+            "and the agent must be reachable by chat again",
+        )
         viewer.close()
     }
 

@@ -133,6 +133,24 @@ constructor(
         error("no '$type' frame arrived in time")
     }
 
+    /**
+     * The frame for ONE screen. Every connect re-drives every agent screen the machine carries, so
+     * a test that opens its own agent on a machine other tests have used must say which screen it
+     * means rather than take the first frame of that type.
+     */
+    private fun awaitFrameFor(collector: Collector, type: String, sid: String): JSONObject {
+        val deadline = System.currentTimeMillis() + 8000
+        while (System.currentTimeMillis() < deadline) {
+            val payload = collector.frames.poll(1, TimeUnit.SECONDS) ?: continue
+            val obj = JSONObject(payload)
+            if (obj.optString("t") == type && obj.optString("sid") == sid) return obj
+        }
+        error("no '$type' frame for screen $sid arrived in time")
+    }
+
+    /** The sid of the agent an open-agent response describes. */
+    private fun sidOf(response: String): String = JSONObject(response).getString("sid")
+
     @Test
     fun humanMessageReachesAgentAndAgentReplyLandsInThread() {
         val collector = Collector()
@@ -161,7 +179,8 @@ constructor(
             teamService.isTeamMember(teamId, agentUserId),
             "an opened agent must be a member of its team",
         )
-        val create = awaitFrame(collector, "session.create")
+        val create =
+            awaitFrameFor(collector, "session.create", sidOf(openRes.response.contentAsString))
         val screenToken = create.getString("screen")
         assertTrue(create.getJSONArray("command").getString(0) == "bash")
         // With no explicit cwd, the agent defaults into a private per-agent checkout under
@@ -180,6 +199,15 @@ constructor(
         assertEquals(reportedOrigin, create.getJSONObject("env").getString("MICROTEAMS_API"))
         // The agent's team travels in the env too, so the applet's `docs` commands know which tree.
         assertEquals(teamId.toString(), create.getJSONObject("env").getString("MICROTEAMS_TEAM"))
+
+        // A real applet announces itself once it is driving the program; until then the screen is
+        // still starting and nothing may be typed at it. The fake machine must say so too.
+        session.sendMessage(
+            TextMessage(
+                """{"t":"rpc.call","sid":"${sidOf(openRes.response.contentAsString)}","id":"r1",""" +
+                    """"name":"screenReady","args":[{"driver":"claude"}]}"""
+            )
+        )
 
         // form the group: a thread with the human (owner) and the agent as a member
         val threadRes =
@@ -317,18 +345,20 @@ constructor(
         awaitFrame(collector, "welcome")
 
         val sessionId = UUID.randomUUID().toString()
-        mockMvc
-            .perform(
-                post("/agent")
-                    .header("Authorization", "Bearer $humanToken")
-                    .contentType("application/json")
-                    .content(
-                        """{"machineId":"$machineId","teamId":$teamId,"sessionId":"$sessionId","resume":true}"""
-                    )
-            )
-            .andExpect(status().isCreated)
+        val res =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"sessionId":"$sessionId","resume":true}"""
+                        )
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
 
-        val create = awaitFrame(collector, "session.create")
+        val create = awaitFrameFor(collector, "session.create", sidOf(res.response.contentAsString))
         val command = commandOf(create)
         // resume=true -> the Claude driver uses --resume (not --session-id) on the very id we
         // named.
@@ -362,8 +392,7 @@ constructor(
         val agentUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
         val oldSid = JSONObject(openRes.response.contentAsString).getString("sid")
 
-        val firstCreate = awaitFrame(collector, "session.create")
-        assertEquals(oldSid, firstCreate.getString("sid"))
+        val firstCreate = awaitFrameFor(collector, "session.create", oldSid)
         // Recover the minted opaque session id from the fresh-open argv (`--session-id <id>`).
         val mintedSession =
             Regex("--session-id (\\S+)").find(commandOf(firstCreate))!!.groupValues[1]
@@ -380,10 +409,8 @@ constructor(
         assertTrue(newSid != oldSid, "reboot must swap in a new screen")
 
         // The old screen is torn down first, then a new one is created resuming the same session.
-        val close = awaitFrame(collector, "session.close")
-        assertEquals(oldSid, close.getString("sid"))
-        val newCreate = awaitFrame(collector, "session.create")
-        assertEquals(newSid, newCreate.getString("sid"))
+        awaitFrameFor(collector, "session.close", oldSid)
+        val newCreate = awaitFrameFor(collector, "session.create", newSid)
         assertTrue(
             commandOf(newCreate).contains("--resume $mintedSession"),
             "reboot must resume the same session id",

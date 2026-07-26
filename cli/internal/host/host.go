@@ -151,7 +151,7 @@ func (h *Host) performUpdate() {
 	// syscall.Exec skips the deferred closeAll, so an attached viewer's tmux client
 	// (a child process) would otherwise survive as an ORPHAN still attached to the
 	// session — and with `window-size latest` it fights the fresh viewer the new
-	// binary attaches, leaving 现场 garbled/unopenable. Closing the client here only
+	// binary attaches, leaving the live screen garbled/unopenable. Closing the client here only
 	// tears down the viewer relay; the program/task in the tmux session lives on and
 	// the new binary re-adopts it, then a re-subscribe attaches a clean single viewer.
 	h.closeViewerClients()

@@ -2,7 +2,7 @@
 // with a 64px icon rail on the left and a master-detail section filling the rest.
 // The section is derived from the URL, so the rail, deep links, and the browser
 // back button all agree; each section owns its own selection state. The one
-// app-global 现场 viewer (SceneOverlay) is mounted above this in App.tsx and
+// app-global live-screen viewer (SceneOverlay) is mounted above this in App.tsx and
 // floats over everything, opened by any agent avatar.
 //
 // Sections are KEEP-ALIVE: every section visited once stays mounted, and only

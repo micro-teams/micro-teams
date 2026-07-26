@@ -89,7 +89,7 @@ function ChatRow({
 }) {
   const others = c.members.filter((m) => m.userId !== meId);
   // 1-on-1 (me + exactly one other): show the other's avatar (reused control — an agent
-  // keeps its ring/click-to-现场). Otherwise a WeChat-style grid of the first members.
+  // keeps its ring/click-to-watch). Otherwise a WeChat-style grid of the first members.
   const oneOnOne = c.members.length === 2 && others.length === 1;
 
   const title =

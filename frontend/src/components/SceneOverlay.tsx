@@ -1,4 +1,4 @@
-// The one app-global 现场 overlay. Mounted once; when an avatar opens a scene it shows the
+// The one app-global live-screen overlay. Mounted once; when an avatar opens a scene it shows the
 // agent's live Claude Code terminal (the verbatim web-claude pane) full-screen over the app.
 // Live vars for the gatebar come from the shared presence poll. Close with Esc.
 

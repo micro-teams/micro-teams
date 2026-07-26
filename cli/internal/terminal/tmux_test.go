@@ -43,7 +43,7 @@ func TestHasSessionAndAdopt(t *testing.T) {
 	}
 }
 
-// TestScrollHistory proves the 现场 scroll mechanism end-to-end against a real tmux:
+// TestScrollHistory proves the live-screen scroll mechanism end-to-end against a real tmux:
 // a normal-buffer program's output is retained in tmux scrollback, ScrollUp enters
 // copy-mode and pages back into that history, and scrolling to the bottom leaves
 // copy-mode so the pane resumes following live output. This is the whole reason the

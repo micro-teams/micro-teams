@@ -62,6 +62,7 @@ class AgentService(
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
     private val agentWakeup: AgentWakeup,
+    private val agentScreens: AgentScreens,
     private val userRepository: UserRepository,
     private val userProfileRepository: UserProfileRepository,
     drivers: List<AgentDriver>,
@@ -194,8 +195,8 @@ class AgentService(
      * Wake an agent whose program has died, *in place*: respawn its screen under the same sid,
      * screen token, cwd and session id, with resume=true, so the driver picks the conversation back
      * up where it stopped. Nothing that names the screen changes — no DB write, no new registry
-     * entry, and a 现场 URL opened before the death keeps working — which is why this, rather than
-     * [rebootAgent], is what the automatic wake-up path uses.
+     * entry, and a live-screen URL opened before the death keeps working — which is why this,
+     * rather than [rebootAgent], is what the automatic wake-up path uses.
      *
      * Falls back to [rebootAgent] when the hub has no screen under that sid at all (the machine has
      * not reconnected since a server restart, so there is nothing to respawn in place). Returns
@@ -272,7 +273,7 @@ class AgentService(
                 appletSource = driver.appletSource,
                 env = env,
             )
-        agentScreenRepository.save(
+        val row =
             AgentScreen(
                 sid = screen.sid,
                 machineId = machineId,
@@ -284,19 +285,11 @@ class AgentService(
                 driver = driver.name,
                 createdAt = LocalDateTime.now(),
             )
-        )
-        agentRegistry.register(
-            ScreenAgent(
-                userId = agentUserId,
-                sid = screen.sid,
-                machineId = machineId,
-                teamId = teamId,
-                screenToken = screen.token,
-                driver = driver,
-                hub = hub,
-                wakeup = agentWakeup,
-            )
-        )
+        agentScreenRepository.save(row)
+        // The row is saved first and everything live is derived from it — the same one step the
+        // machine-connect and viewer-repair paths take, so an agent is put together exactly one
+        // way however it came to exist.
+        agentScreens.adopt(row)
         return OpenedAgent(agentUserId, screen.sid, machineId, screen.token)
     }
 

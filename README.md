@@ -160,7 +160,7 @@ server {
 
     location /api/ { proxy_pass http://127.0.0.1:8091/; include proxy_params; }
     location /mt/  { proxy_pass http://127.0.0.1:8199/; include proxy_params;
-                     proxy_http_version 1.1;             # the CLI link + 现场 WebSockets
+                     proxy_http_version 1.1;             # the CLI link + live-screen WebSockets
                      proxy_set_header Upgrade $http_upgrade;
                      proxy_set_header Connection "upgrade"; }
     location /     { proxy_pass http://127.0.0.1:5173;  include proxy_params;
@@ -182,7 +182,7 @@ cd cli && go build -o microteams .
 ```
 
 Then open an agent on that machine (`POST /agent` with `machineId`, `teamId`, `nickname`), add it
-to a group, and talk to it. Click its avatar anywhere to watch its live terminal (现场).
+to a group, and talk to it. Click its avatar anywhere to watch its live terminal (the live screen).
 
 ## Gotchas
 

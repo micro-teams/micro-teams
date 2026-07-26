@@ -185,7 +185,7 @@
   max-width: 100%;
 }
 
-/* Embedded terminal fonts for the 现场 viewer (served from /public/fonts).
+/* Embedded terminal fonts for the live-screen viewer (served from /public/fonts).
    JetBrainsMono Nerd Font matches a local Claude Code terminal; Cascadia Code
    backfills Braille + box-drawing arcs. Global so @font-face is registered
    document-wide for xterm's canvas renderer. */

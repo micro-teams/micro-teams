@@ -31,14 +31,14 @@ function FullScreen() {
 
 // The signed-in providers, shared by both shells: one WorkspaceProvider so the
 // selected team / expanded folders / doc-tree cache survive navigation, agent
-// presence + the one app-global 现场 viewer overlay.
+// presence + the one app-global live-screen viewer overlay.
 function Authed({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <AgentPresenceProvider>
         <SceneProvider>
           {children}
-          {/* One app-global 现场 viewer, opened by any agent avatar. */}
+          {/* One app-global live-screen viewer, opened by any agent avatar. */}
           <SceneOverlay />
         </SceneProvider>
       </AgentPresenceProvider>

@@ -47,13 +47,13 @@ right.
 
 - `src/lib/api.ts` — the cheese-auth client. cheese-auth is a separate service with its own
   (enveloped `{code,message,data}`) contract and is **not** in `MicroTeams-API.yml`.
-- The 现场 viewer's WebSocket (`src/components/TerminalViewer.tsx`) and the STOMP chat socket.
+- The live-screen viewer's WebSocket (`src/components/TerminalViewer.tsx`) and the STOMP chat socket.
   WebSockets cannot be described by OpenAPI, so they are wired by hand against the paths the
   backend registers (`/machine/screen/{sid}`, `/mt/ws`). If those move, they move here too.
 
 ## 4. Avatars
 
 Every avatar in the app — human or agent, anywhere — is the one `UserAvatar` control. It tracks
-presence, draws the inference ring while an agent is working, and opens 现场 on click. Do not
+presence, draws the inference ring while an agent is working, and opens the live screen on click. Do not
 render a bare `<img>` or a second avatar component: the point is that one control means every
 avatar everywhere gains the same behaviour at once.

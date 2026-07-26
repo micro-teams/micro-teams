@@ -29,7 +29,7 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
     /**
      * Screen-backed agents by screen id. Only they have one — an agent is not required to, so this
      * index is a property of the implementation rather than of [Agent], and callers that resolve a
-     * sid (the tool-door, 现场) are asking specifically about a ScreenAgent.
+     * sid (the tool-door, the live screen) are asking specifically about a ScreenAgent.
      */
     private val bySid = ConcurrentHashMap<String, ScreenAgent>()
 

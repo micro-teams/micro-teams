@@ -1,7 +1,7 @@
 // The one avatar control for the whole app — a faithful port of the reference
 // microteams-agent-layer UserAvatar. Give it a `userId` and it becomes agent-aware from
 // app-global presence: an agent shows a robot badge, a pulsing ring while it is working,
-// its elapsed·tokens meta underneath, and clicking opens its 现场 (the one app-global
+// its elapsed·tokens meta underneath, and clicking opens its live screen (the one app-global
 // viewer). Humans render as a plain avatar. Same look and behaviour everywhere.
 
 import { useEffect, type MouseEvent as ReactMouseEvent } from "react";

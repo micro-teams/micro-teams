@@ -1,5 +1,5 @@
-// The single, app-global 现场 (live agent screen) target. Any avatar anywhere opens the one
-// floating viewer through this context; <SceneOverlay> (mounted once) renders it. Keeps 现场
+// The single, app-global live agent screen target. Any avatar anywhere opens the one
+// floating viewer through this context; <SceneOverlay> (mounted once) renders it. Keeps the live screen
 // opening decoupled from any particular page.
 
 import {
@@ -28,7 +28,7 @@ const SceneContext = createContext<SceneContextValue | null>(null);
 
 export function SceneProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<SceneTarget | null>(null);
-  // Opening 现场 is a navigation, not a modal: it pushes a history entry so the browser/phone Back
+  // Opening the live screen is a navigation, not a modal: it pushes a history entry so the browser/phone Back
   // gesture (the app's existing page stack) closes it — with no on-screen back button. `pushed`
   // tracks whether our sentinel entry is still on top so open/close stay balanced across re-opens.
   const pushed = useRef(false);

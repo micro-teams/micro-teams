@@ -32,7 +32,7 @@ independent ways at once:
    lives *there*, expressed once, never duplicated in the host.
 
 2. **The raw screen channel** — separately, the server can attach to a screen's
-   live byte stream and read/write it directly (the "现场"): full-fidelity
+   live byte stream and read/write it directly (the live screen): full-fidelity
    terminal in, keystrokes and resizes out. This is what a browser terminal
    rides on. It is independent of the applet.
 

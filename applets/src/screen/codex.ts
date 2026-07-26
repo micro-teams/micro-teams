@@ -13,7 +13,7 @@
 // resources. Hot-reload safe for the same reason claude.ts is: each reload gets a fresh goja VM.
 
 // A-class variables (this script owns; the server mirrors). Kept name-compatible with claude.ts so
-// the same 现场 gatebar renders both drivers.
+// the same live-screen gatebar renders both drivers.
 const statusVar = microteams.own('status', 'starting') // starting|busy|idle|dead
 const elapsed = microteams.own('elapsed', '') // e.g. "6s" — how long the turn has been working
 const tokens = microteams.own('tokens', '') // Codex's default footer shows none; kept for parity

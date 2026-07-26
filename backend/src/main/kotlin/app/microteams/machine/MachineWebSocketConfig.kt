@@ -1,7 +1,7 @@
 /*
  *  Description: Wires the connector's two raw WebSocket endpoints: the machine control
  *               channel at `/agent` — the path the frozen CLI dials — and the browser's
- *               现场 viewer at `/connector/session/{sid}/screen`. Both are raw (not STOMP)
+ *               live-screen viewer at `/connector/session/{sid}/screen`. Both are raw (not STOMP)
  *               and share one handler mapping, so they stay in one config.
  *
  *               The chat module already owns `@EnableWebSocketMessageBroker`
@@ -74,7 +74,7 @@ class ConnectorWebSocketConfig {
             >,
     ): ViewerHandler = ViewerHandler(hub, objectMapper, preflight.getIfAvailable())
 
-    /** The 现场 viewer request handler, carrying the JWT + membership handshake authz. */
+    /** The live-screen viewer request handler, carrying the JWT + membership handshake authz. */
     @Bean
     fun connectorViewerRequestHandler(
         handler: ViewerHandler,
@@ -86,8 +86,9 @@ class ConnectorWebSocketConfig {
     }
 
     /**
-     * Map `/agent` (machine control) and the browser 现场 viewer at `/connector/session/{sid}/screen`
-     * to their handlers. Negative order so it is consulted before the STOMP mapping.
+     * Map `/agent` (machine control) and the browser live-screen viewer at
+     * `/connector/session/{sid}/screen` to their handlers. Negative order so it is consulted before
+     * the STOMP mapping.
      */
     @Bean
     fun connectorWsHandlerMapping(
@@ -106,11 +107,11 @@ class ConnectorWebSocketConfig {
 }
 
 /**
- * Authenticates + authorizes a 现场 viewer handshake. The `?token=` JWT identifies the human; whether
- * they may watch is not decided here but asked of the permission matrix, as `watch` on a
- * `machine_screen` — so the rule lives where every other rule lives, and the modules that own the
- * screen kinds register the predicates that answer it (see RolePermissionService). The sid travels
- * in authInfo rather than as the resourceId because screen ids are strings, not IdType.
+ * Authenticates + authorizes a live-screen viewer handshake. The `?token=` JWT identifies the
+ * human; whether they may watch is not decided here but asked of the permission matrix, as `watch`
+ * on a `machine_screen` — so the rule lives where every other rule lives, and the modules that own
+ * the screen kinds register the predicates that answer it (see RolePermissionService). The sid
+ * travels in authInfo rather than as the resourceId because screen ids are strings, not IdType.
  */
 class ViewerHandshakeInterceptor(private val authorizationService: AuthorizationService) :
     HandshakeInterceptor {

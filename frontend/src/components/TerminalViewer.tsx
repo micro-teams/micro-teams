@@ -1,4 +1,4 @@
-// 现场 (live agent screen) viewer — a faithful copy of the reference misc/web-claude
+// Live agent screen viewer — a faithful copy of the reference misc/web-claude
 // terminal pane (its `#main`: the gatebar + the xterm). The terminal config, the wire
 // (raw bytes both ways + JSON control/resize/compact), the three viewer modes, the
 // mode/compact/font controls, and the CSS are reproduced (styling unchanged) from web-claude.
