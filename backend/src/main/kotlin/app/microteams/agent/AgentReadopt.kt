@@ -44,12 +44,20 @@ class AgentReadopt(
     /**
      * Re-adopt every agent screen this module has on the machine that just connected.
      *
+     * Every connect re-drives every screen, and only *registering* is conditional. It used to skip
+     * an agent already in the registry entirely, reading "we still have it in memory" as "its
+     * screen survived" — true when the server was what restarted, false when the MACHINE was. A
+     * machine that reboots loses its tmux (the socket lives under /tmp) while the server keeps its
+     * registry, so those agents were skipped, never probed, and became ghosts: registered, believed
+     * alive, with nothing behind them. Messages were typed into the void and 现场 opened onto a
+     * session the machine no longer had — and no signal could ever correct it, because the death
+     * notice is exactly what the skipped adopt would have produced.
+     *
      * Idempotent by design, because attachMachine (hence this event) fires on *every* connect:
      * - A machine with no agent rows is a no-op (the loop body never runs).
-     * - An agent already live in the registry is skipped — a machine flap while the server itself
-     *   stayed up must not double-register it or re-drive a screen that never lost its driver. Only
-     *   the genuine hot-upgrade case — rows exist but the registry is empty because this server
-     *   process is new — does any work.
+     * - A screen whose tmux did survive is simply re-driven and its applet hot-reloaded, which is
+     *   what an adopt does to a live session anyway.
+     * - An agent already in the registry keeps its entry rather than being registered twice.
      */
     @EventListener
     @Transactional
@@ -57,7 +65,6 @@ class AgentReadopt(
         val rows = agentScreenRepository.findByMachineId(event.machineId)
         var readopted = 0
         for (row in rows) {
-            if (agentRegistry.get(row.agentUserId) != null) continue // already live (a flap)
             val driver = driversByName[row.driver]
             if (driver == null) {
                 logger.warn(
@@ -71,7 +78,9 @@ class AgentReadopt(
             // Re-register the screen in the hub off the persisted token (no session.create yet), so
             // its token is known, then send the adopt session.create that re-drives the surviving
             // tmux. Reconstruct the ScreenAgent from the row so chat can reach it again.
-            hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
+            if (hub.screen(row.sid) == null) {
+                hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
+            }
             // Empty command is deliberate: it makes this a *pure adopt*. The frozen CLI adopts the
             // tmux when the session survives (re-driving the running program and hot-reloading the
             // applet), but if the session is gone it would otherwise SPAWN m.command fresh — which
@@ -84,22 +93,24 @@ class AgentReadopt(
                 command = emptyList(),
                 appletSource = driver.appletSource,
             )
-            agentRegistry.register(
-                ScreenAgent(
-                    userId = row.agentUserId,
-                    sid = row.sid,
-                    machineId = row.machineId,
-                    teamId = row.teamId,
-                    screenToken = row.token,
-                    driver = driver,
-                    hub = hub,
-                    wakeup = agentWakeup,
+            if (agentRegistry.get(row.agentUserId) == null) {
+                agentRegistry.register(
+                    ScreenAgent(
+                        userId = row.agentUserId,
+                        sid = row.sid,
+                        machineId = row.machineId,
+                        teamId = row.teamId,
+                        screenToken = row.token,
+                        driver = driver,
+                        hub = hub,
+                        wakeup = agentWakeup,
+                    )
                 )
-            )
+            }
             readopted++
         }
         if (readopted > 0) {
-            logger.info("re-adopted {} agent screen(s) on machine {}", readopted, event.machineId)
+            logger.info("re-drove {} agent screen(s) on machine {}", readopted, event.machineId)
         }
     }
 }
