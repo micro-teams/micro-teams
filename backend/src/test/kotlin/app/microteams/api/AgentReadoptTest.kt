@@ -187,9 +187,60 @@ constructor(
         secondSession.close()
     }
 
-    /** A machine that carries no agent rows reconnecting must do nothing at all — a clean no-op. */
+    /**
+     * The machine — not the server — restarting. The registry still holds the agent (this server
+     * process never died), but the machine's tmux went with its reboot, so the reconnect must STILL
+     * send the adopt probe. Skipping it, as this used to, left a ghost: registered, believed alive,
+     * with nothing behind it on the machine, and no signal could ever say otherwise because the
+     * death notice is exactly what the skipped adopt produces.
+     */
     @Test
     @Order(2)
+    fun aMachineReconnectProbesScreensEvenWhenTheAgentIsStillRegistered() {
+        val collector = Collector()
+        val session = connect(collector)
+        awaitFrame(collector, "welcome")
+
+        val openRes =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Ghost"}"""
+                        )
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val agentUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
+        val sid = JSONObject(openRes.response.contentAsString).getString("sid")
+        awaitFrame(collector, "session.create")
+        assertNotNull(agentRegistry.get(agentUserId))
+
+        // The machine reboots and comes back — the registry is untouched throughout.
+        session.close()
+        val after = Collector()
+        val reconnected = connect(after)
+        awaitFrame(after, "welcome")
+
+        var probe = awaitFrame(after, "session.create")
+        while (probe.getString("sid") != sid) probe = awaitFrame(after, "session.create")
+        assertTrue(
+            probe.optBoolean("adopt", false),
+            "a machine reconnect must re-drive its screens even for an agent already registered",
+        )
+        assertTrue(
+            probe.optJSONArray("command") == null || probe.getJSONArray("command").length() == 0,
+            "the probe stays a pure adopt: an empty command, so a dead session errors rather than " +
+                "being respawned blank",
+        )
+        reconnected.close()
+    }
+
+    /** A machine that carries no agent rows reconnecting must do nothing at all — a clean no-op. */
+    @Test
+    @Order(3)
     fun connectWithNoAgentRowsIsANoOp() {
         val strangerMachineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12)
         // Publishing the event directly is enough: findByMachineId is empty, so the listener's loop
