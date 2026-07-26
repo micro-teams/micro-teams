@@ -322,6 +322,72 @@ constructor(
         viewer.close()
     }
 
+    /**
+     * Opening 现场 must ENSURE there is something to look at, not assume it. Here the server has
+     * forgotten the screen completely — no hub registration, no registry entry, only the persisted
+     * row — which is what a restart that never re-adopted this screen leaves behind. The attach
+     * must rebuild all of it from the row and start the program, rather than closing on "screen not
+     * found" and leaving the human with a blank terminal and no explanation.
+     */
+    @Test
+    @Order(5)
+    fun openingTheLiveScreenRebuildsAScreenTheServerHasForgotten() {
+        val openRes =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Lost"}"""
+                        )
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val lostSid = JSONObject(openRes.response.contentAsString).getString("sid")
+        val lostUserId = JSONObject(openRes.response.contentAsString).getLong("agentUserId")
+        awaitFrameFor("session.create", lostSid)
+
+        // Forget it as thoroughly as a restart would: out of the hub, out of the registry. Only the
+        // AgentScreen row is left — which is all the viewer path may rely on.
+        machineHub.closeScreen(machineId, lostSid)
+        agentRegistry.unregister(lostUserId)
+        assertTrue(machineHub.screen(lostSid) == null)
+        assertTrue(agentRegistry.bySid(lostSid) == null)
+
+        // The UI only offers 现场 for an agent that is online AND carries a screen id, so a
+        // forgotten agent must still be described from its row — otherwise the human cannot even
+        // ask for the rebuild.
+        mockMvc
+            .perform(get("/agent?userId=$lostUserId").header("Authorization", "Bearer $humanToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.agents[0].online").value(true))
+            .andExpect(jsonPath("$.agents[0].sid").value(lostSid))
+
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI("ws://localhost:$port/machine/screen/$lostSid?token=$humanToken"),
+                )
+                .get(5, TimeUnit.SECONDS)
+
+        // Rebuilt: the program is started again on the SAME screen, and the viewer attaches to it.
+        val respawn = awaitFrameFor("session.create", lostSid)
+        assertTrue(
+            respawn.getJSONArray("command").getString(2).contains("--resume"),
+            "the rebuilt screen must resume the agent's own session",
+        )
+        awaitFrameFor("screen.subscribe", lostSid)
+        assertTrue(machineHub.screen(lostSid) != null, "the screen must be known to the hub again")
+        assertTrue(
+            agentRegistry.bySid(lostSid) != null,
+            "and the agent must be reachable by chat again",
+        )
+        viewer.close()
+    }
+
     private fun awaitFrameFor(type: String, sid: String, timeoutMs: Long = 8000): JSONObject {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {

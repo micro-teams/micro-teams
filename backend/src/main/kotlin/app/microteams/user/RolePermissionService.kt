@@ -207,13 +207,22 @@ class RolePermissionService {
 
                     // The whole rule, in one place: you may watch a screen if you may use the
                     // machine it runs on, or if it is an agent you share a group with. The second
-                    // clause is false for a screen that is not an agent's (a shared shell), which
-                    // is how an application widens access to its own screens without touching
-                    // anyone else's.
+                    // and third clauses are false for a screen that is not an agent's (a shared
+                    // shell), which is how an application widens access to its own screens without
+                    // touching anyone else's.
+                    //
+                    // The third clause grants nothing the first does not already grant — it asks
+                    // the same machine-access question about the same screen — except that it
+                    // resolves the machine from the agent's persisted row rather than from what
+                    // this server holds in memory. Without it, a screen the server has forgotten
+                    // (one no readopt reached) is unwatchable, which is worse than useless: 现场 is
+                    // exactly the way a human would ask for such a screen to be rebuilt.
                     Permission(
                         authorizedActions = listOf("watch"),
                         authorizedResource = AuthorizedResource(types = listOf("machine_screen")),
-                        customLogic = "can-access-screen-machine || shares-group-with-screen-agent",
+                        customLogic =
+                            "can-access-screen-machine || shares-group-with-screen-agent || " +
+                                "can-access-agent-screen-machine",
                     ),
 
                     // -- Agents --------------------------------------------------------

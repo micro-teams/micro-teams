@@ -28,6 +28,8 @@
 
 package app.microteams.agent
 
+import app.microteams.agent.driver.AgentDriver
+import app.microteams.agent.screen.AGENT_SCREEN_KIND
 import app.microteams.agent.screen.AgentScreenRepository
 import app.microteams.agent.screen.ScreenAgent
 import app.microteams.machine.link.HubScreen
@@ -62,8 +64,10 @@ class AgentWakeup(
     // Late-bound: AgentService constructs the ScreenAgents that call back into here, so asking for
     // it eagerly would be a cycle. Nothing is resolved until the first wake.
     private val agentService: ObjectProvider<app.microteams.agent.screen.AgentService>,
+    drivers: List<AgentDriver>,
 ) {
     private val logger = LoggerFactory.getLogger(AgentWakeup::class.java)
+    private val driversByName = drivers.associateBy { it.name }
 
     /** One wake at a time per agent, so three messages arriving together start one program. */
     private val locks = ConcurrentHashMap<IdType, ReentrantLock>()
@@ -150,16 +154,96 @@ class AgentWakeup(
     }
 
     /**
-     * A human is opening 现场 on [sid]. Wake the agent behind it if its program has died, so what
-     * they get is a live terminal rather than the frozen last frame of a crash. Returns the sid to
-     * attach to — the same one in the normal case, since waking respawns in place; a new one only
-     * on the fallback path where the screen had to be reopened from scratch.
+     * A human is opening 现场 on [sid]: make sure there is something live to look at, rebuilding
+     * whatever is missing, and if that cannot be done say so at ERROR — every failure downstream of
+     * here looks like the same blank terminal, so the log is the only place they can be told apart.
+     *
+     * Everything an agent screen needs can be rebuilt from its persisted row, and this asks for all
+     * of it rather than assuming any earlier step ran:
+     * 1. the row itself — without one there is no agent behind this sid and nothing to ensure;
+     * 2. its registration in the hub, so the machine layer can route to it at all;
+     * 3. its registration as an agent, so chat can reach it and the wake-up can find it;
+     * 4. a running program, probed and woken if the machine has nothing behind the screen.
+     *
+     * Returns the sid to attach to: the same one in the normal case, since waking respawns in
+     * place; a different one only where the screen had to be reopened from scratch.
      */
-    fun ensureAwakeForViewer(sid: String): String {
-        val agent = agentRegistry.bySid(sid) ?: return sid
-        probe(agent.sid)
-        ensureAwake(agent.userId)
-        return agentRegistry.get(agent.userId)?.let { (it as? ScreenAgent)?.sid } ?: sid
+    fun ensureAwakeForViewer(sid: String): String =
+        try {
+            ensureScreen(sid)
+        } catch (e: Exception) {
+            logger.error("现场: could not ensure screen {} is live: {}", sid, e.toString(), e)
+            sid
+        }
+
+    private fun ensureScreen(sid: String): String {
+        val row = agentScreenRepository.findById(sid).orElse(null)
+        if (row == null) {
+            // No agent owns this sid. A live screen of some other kind is fine (a shared shell is
+            // nobody's agent); nothing at all is a viewer that will open onto blackness, and the
+            // sid it was given is the only clue as to why.
+            if (hub.screen(sid) == null) {
+                logger.error(
+                    "现场: screen {} has neither an agent row nor a live screen — nothing to show",
+                    sid,
+                )
+            }
+            return sid
+        }
+        val driver = driversByName[row.driver]
+        if (driver == null) {
+            logger.error(
+                "现场: cannot ensure screen {}: agent {} runs unknown driver '{}'",
+                sid,
+                row.agentUserId,
+                row.driver,
+            )
+            return sid
+        }
+        // (2) The hub may never have heard of this screen — a server that restarted without the
+        // machine's readopt reaching this row. Re-register it off the persisted token; whether the
+        // machine still has the session behind it is what the probe below settles.
+        if (hub.screen(row.sid) == null) {
+            logger.warn(
+                "现场: screen {} was not registered on this server; re-adopting it from its row",
+                row.sid,
+            )
+            hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
+        }
+        // (3) Same for the agent itself: without a registry entry chat cannot reach it and the
+        // wake-up cannot find it, and it would show offline while its row says otherwise.
+        if (agentRegistry.get(row.agentUserId) == null) {
+            logger.warn(
+                "现场: agent {} was not registered on this server; re-registering it from its row",
+                row.agentUserId,
+            )
+            agentRegistry.register(
+                ScreenAgent(
+                    userId = row.agentUserId,
+                    sid = row.sid,
+                    machineId = row.machineId,
+                    teamId = row.teamId,
+                    screenToken = row.token,
+                    driver = driver,
+                    hub = hub,
+                    wakeup = this,
+                )
+            )
+        }
+        // (4) Finally the program. The probe is what catches a screen the server believes is alive
+        // while the machine has nothing behind it — the case that reports itself no other way.
+        probe(row.sid)
+        if (!isAwake(row.agentUserId) && !ensureAwake(row.agentUserId)) {
+            logger.error(
+                "现场: agent {} on screen {} is not running and could not be woken (machine {} " +
+                    "online: {})",
+                row.agentUserId,
+                row.sid,
+                row.machineId,
+                hub.isOnline(row.machineId),
+            )
+        }
+        return (agentRegistry.get(row.agentUserId) as? ScreenAgent)?.sid ?: row.sid
     }
 
     // -- mechanics -----------------------------------------------------------

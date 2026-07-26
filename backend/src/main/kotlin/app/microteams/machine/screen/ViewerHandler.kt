@@ -63,6 +63,10 @@ class ViewerHandler(
         val sid = asked?.let { preflight?.beforeAttach(it) ?: it }
         val screen = sid?.let { hub.screen(it) }
         if (screen == null) {
+            // The viewer sees an empty terminal either way; only this line says why. Whoever owns
+            // the screen was already asked to ensure it exists (the preflight), so reaching here
+            // means that could not be done.
+            logger.error("现场: no screen '{}' to attach to (asked for '{}')", sid, asked)
             session.close(CloseStatus.POLICY_VIOLATION.withReason("screen not found"))
             return
         }

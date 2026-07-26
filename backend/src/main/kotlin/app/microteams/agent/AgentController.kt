@@ -75,8 +75,33 @@ class AgentController(
          * without touching anyone else's.
          */
         register("shares-group-with-screen-agent") { userId, authInfo ->
-            val agent = (authInfo["sid"] as? String)?.let { agentRegistry.bySid(it) }
-            agent != null && sharesGroup(userId, agent.userId)
+            val sid = authInfo["sid"] as? String
+            // Whose screen this is, is a fact about the AgentScreen row — not about what this
+            // server happens to be holding in memory. Resolving it from the registry alone made a
+            // screen the server had forgotten (one no readopt reached) UNWATCHABLE: the handshake
+            // was refused before anything could rebuild it, so the human got a 现场 that would not
+            // open and no way to ask for it to be fixed. The row outlives every restart, so ask it
+            // when the registry is empty.
+            val agentUserId =
+                sid?.let { s ->
+                    agentRegistry.bySid(s)?.userId
+                        ?: agentScreenRepository.findById(s).orElse(null)?.agentUserId
+                }
+            agentUserId != null && sharesGroup(userId, agentUserId)
+        }
+
+        /**
+         * The screen being watched is an agent's, and the caller may use the machine that agent
+         * runs on — resolved from its persisted row, so the right survives a server that has
+         * forgotten the screen. For a live screen this asks exactly what can-access-screen-machine
+         * asks; it differs only in where it reads the machine id from.
+         */
+        register("can-access-agent-screen-machine") { userId, authInfo ->
+            val row =
+                (authInfo["sid"] as? String)?.let {
+                    agentScreenRepository.findById(it).orElse(null)
+                }
+            row != null && teamMachineService.mayAccess(userId, row.machineId)
         }
 
         /** The caller belongs to the team the agent being opened will work for. */
@@ -212,25 +237,37 @@ class AgentController(
         viewerAuth: org.rucca.cheese.auth.Authorization,
     ): AgentDTO {
         val profile = userProfileRepository.findByUserId(uid.toInt()).orElse(null)
-        val screen = agent?.let { hub.screen(it.sid) }
+        // An agent is described from its persisted row when this server holds nothing live for it.
+        // Reporting such an agent as offline with no screen id is what made a forgotten screen
+        // unreachable in the UI: the avatar is only clickable when it is online AND carries a sid,
+        // so the human could not even ASK for 现场 — which is precisely the request that rebuilds
+        // and restarts it. The row is the durable truth about which screen an agent is, and the
+        // machine being connected is what makes it reachable.
+        val row = agentScreenRepository.findByAgentUserId(uid).firstOrNull()
+        val sid = agent?.sid ?: row?.sid
+        val machineId = agent?.machineId ?: row?.machineId
+        val screen = sid?.let { hub.screen(it) }
         val watchable =
-            agent != null &&
+            sid != null &&
                 authorizationService.allows(
                     viewerAuth,
                     "watch",
                     "machine_screen",
                     null,
-                    mapOf("sid" to agent.sid),
+                    mapOf("sid" to sid),
                 )
         return AgentDTO(
             userId = uid,
             nickname = profile?.nickname ?: "user$uid",
             avatarId = profile?.avatar?.id?.toLong(),
-            online = agent != null,
-            machineId = agent?.machineId,
-            sid = if (watchable) agent!!.sid else null,
-            teamId = agent?.teamId,
-            driver = agent?.driver?.name,
+            // Reachable, rather than "a program is running this instant": a connected machine plus
+            // a row is all it takes to (re)start the agent the moment somebody talks to it or
+            // watches it, and that is what a human means by asking whether it is there.
+            online = agent != null || (machineId != null && hub.isOnline(machineId)),
+            machineId = machineId,
+            sid = if (watchable) sid else null,
+            teamId = agent?.teamId ?: row?.teamId,
+            driver = agent?.driver?.name ?: row?.driver,
             // The live screen's mirrored variables (status/elapsed/tokens/question/choices/
             // compact/…) so the 现场 gatebar can show the same hints web-claude does.
             vars =
