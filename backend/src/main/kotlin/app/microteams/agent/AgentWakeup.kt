@@ -28,9 +28,8 @@
 
 package app.microteams.agent
 
-import app.microteams.agent.driver.AgentDriver
-import app.microteams.agent.screen.AGENT_SCREEN_KIND
 import app.microteams.agent.screen.AgentScreenRepository
+import app.microteams.agent.screen.AgentScreens
 import app.microteams.agent.screen.ScreenAgent
 import app.microteams.machine.link.HubScreen
 import app.microteams.machine.link.MachineHub
@@ -64,10 +63,9 @@ class AgentWakeup(
     // Late-bound: AgentService constructs the ScreenAgents that call back into here, so asking for
     // it eagerly would be a cycle. Nothing is resolved until the first wake.
     private val agentService: ObjectProvider<app.microteams.agent.screen.AgentService>,
-    drivers: List<AgentDriver>,
+    private val agentScreens: ObjectProvider<AgentScreens>,
 ) {
     private val logger = LoggerFactory.getLogger(AgentWakeup::class.java)
-    private val driversByName = drivers.associateBy { it.name }
 
     /** One wake at a time per agent, so three messages arriving together start one program. */
     private val locks = ConcurrentHashMap<IdType, ReentrantLock>()
@@ -196,8 +194,20 @@ class AgentWakeup(
             }
             return sid
         }
-        val driver = driversByName[row.driver]
-        if (driver == null) {
+        // (2)+(3) Everything that follows from the row: its registration in the hub, so the
+        // machine layer can route to it, and its registration as an agent, so chat can reach it
+        // and the wake-up can find it. A server that never re-adopted this screen has neither, and
+        // an agent missing from the registry would show offline while its row says otherwise.
+        val known = hub.screen(row.sid) != null && agentRegistry.get(row.agentUserId) != null
+        if (!known) {
+            logger.warn(
+                "live screen: screen {} of agent {} was not live on this server; rebuilding it " +
+                    "from its row",
+                row.sid,
+                row.agentUserId,
+            )
+        }
+        if (agentScreens.getObject().adopt(row) == null) {
             logger.error(
                 "live screen: cannot ensure screen {}: agent {} runs unknown driver '{}'",
                 sid,
@@ -205,36 +215,6 @@ class AgentWakeup(
                 row.driver,
             )
             return sid
-        }
-        // (2) The hub may never have heard of this screen — a server that restarted without the
-        // machine's readopt reaching this row. Re-register it off the persisted token; whether the
-        // machine still has the session behind it is what the probe below settles.
-        if (hub.screen(row.sid) == null) {
-            logger.warn(
-                "live screen: screen {} was not registered on this server; re-adopting it from its row",
-                row.sid,
-            )
-            hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
-        }
-        // (3) Same for the agent itself: without a registry entry chat cannot reach it and the
-        // wake-up cannot find it, and it would show offline while its row says otherwise.
-        if (agentRegistry.get(row.agentUserId) == null) {
-            logger.warn(
-                "live screen: agent {} was not registered on this server; re-registering it from its row",
-                row.agentUserId,
-            )
-            agentRegistry.register(
-                ScreenAgent(
-                    userId = row.agentUserId,
-                    sid = row.sid,
-                    machineId = row.machineId,
-                    teamId = row.teamId,
-                    screenToken = row.token,
-                    driver = driver,
-                    hub = hub,
-                    wakeup = this,
-                )
-            )
         }
         // (4) Finally the program. The probe is what catches a screen the server believes is alive
         // while the machine has nothing behind it — the case that reports itself no other way.

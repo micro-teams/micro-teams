@@ -62,6 +62,7 @@ class AgentService(
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
     private val agentWakeup: AgentWakeup,
+    private val agentScreens: AgentScreens,
     private val userRepository: UserRepository,
     private val userProfileRepository: UserProfileRepository,
     drivers: List<AgentDriver>,
@@ -272,7 +273,7 @@ class AgentService(
                 appletSource = driver.appletSource,
                 env = env,
             )
-        agentScreenRepository.save(
+        val row =
             AgentScreen(
                 sid = screen.sid,
                 machineId = machineId,
@@ -284,19 +285,11 @@ class AgentService(
                 driver = driver.name,
                 createdAt = LocalDateTime.now(),
             )
-        )
-        agentRegistry.register(
-            ScreenAgent(
-                userId = agentUserId,
-                sid = screen.sid,
-                machineId = machineId,
-                teamId = teamId,
-                screenToken = screen.token,
-                driver = driver,
-                hub = hub,
-                wakeup = agentWakeup,
-            )
-        )
+        agentScreenRepository.save(row)
+        // The row is saved first and everything live is derived from it — the same one step the
+        // machine-connect and viewer-repair paths take, so an agent is put together exactly one
+        // way however it came to exist.
+        agentScreens.adopt(row)
         return OpenedAgent(agentUserId, screen.sid, machineId, screen.token)
     }
 

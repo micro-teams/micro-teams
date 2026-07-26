@@ -19,10 +19,8 @@
 
 package app.microteams.agent
 
-import app.microteams.agent.driver.AgentDriver
-import app.microteams.agent.screen.AGENT_SCREEN_KIND
 import app.microteams.agent.screen.AgentScreenRepository
-import app.microteams.agent.screen.ScreenAgent
+import app.microteams.agent.screen.AgentScreens
 import app.microteams.machine.MachineConnectedEvent
 import app.microteams.machine.link.MachineHub
 import org.slf4j.LoggerFactory
@@ -35,11 +33,9 @@ class AgentReadopt(
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
     private val hub: MachineHub,
-    private val agentWakeup: AgentWakeup,
-    drivers: List<AgentDriver>,
+    private val agentScreens: AgentScreens,
 ) {
     private val logger = LoggerFactory.getLogger(AgentReadopt::class.java)
-    private val driversByName = drivers.associateBy { it.name }
 
     /**
      * Re-adopt every agent screen this module has on the machine that just connected.
@@ -49,9 +45,9 @@ class AgentReadopt(
      * screen survived" — true when the server was what restarted, false when the MACHINE was. A
      * machine that reboots loses its tmux (the socket lives under /tmp) while the server keeps its
      * registry, so those agents were skipped, never probed, and became ghosts: registered, believed
-     * alive, with nothing behind them. Messages were typed into the void and 现场 opened onto a
-     * session the machine no longer had — and no signal could ever correct it, because the death
-     * notice is exactly what the skipped adopt would have produced.
+     * alive, with nothing behind them. Messages were typed into the void and the live screen opened
+     * onto a session the machine no longer had — and no signal could ever correct it, because the
+     * death notice is exactly what the skipped adopt would have produced.
      *
      * Idempotent by design, because attachMachine (hence this event) fires on *every* connect:
      * - A machine with no agent rows is a no-op (the loop body never runs).
@@ -65,48 +61,23 @@ class AgentReadopt(
         val rows = agentScreenRepository.findByMachineId(event.machineId)
         var readopted = 0
         for (row in rows) {
-            val driver = driversByName[row.driver]
-            if (driver == null) {
-                logger.warn(
-                    "cannot readopt screen {} on machine {}: unknown driver {}",
-                    row.sid,
-                    row.machineId,
-                    row.driver,
-                )
-                continue
-            }
-            // Re-register the screen in the hub off the persisted token (no session.create yet), so
-            // its token is known, then send the adopt session.create that re-drives the surviving
-            // tmux. Reconstruct the ScreenAgent from the row so chat can reach it again.
-            if (hub.screen(row.sid) == null) {
-                hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
-            }
-            // Empty command is deliberate: it makes this a *pure adopt*. The frozen CLI adopts the
-            // tmux when the session survives (re-driving the running program and hot-reloading the
-            // applet), but if the session is gone it would otherwise SPAWN m.command fresh — which
-            // for a dead agent screen is a zombie resurrection with a blank transcript. An empty
-            // command turns that dead path into a harmless `terminal: empty command` session.error
-            // instead of a respawn, so a screen that truly died is never brought back as a zombie.
+            // Everything that follows from the row — its hub registration, its registry entry —
+            // is rebuilt in one place, so this path cannot drift from the other two that do it.
+            val driver = agentScreens.driverOf(row) ?: continue
+            agentScreens.adopt(row)
+            // Then ask the machine whether the program is still there. Empty command is
+            // deliberate: it makes this a *pure adopt*. The frozen CLI adopts the tmux when the
+            // session survives (re-driving the running program and hot-reloading the applet), but
+            // if the session is gone it would otherwise SPAWN m.command fresh — which for a dead
+            // agent screen is a zombie resurrection with a blank transcript. An empty command turns
+            // that dead path into a harmless `terminal: empty command` session.error instead of a
+            // respawn: the screen is marked dead and waits to be woken, never revived blank.
             hub.readoptScreen(
                 machineId = row.machineId,
                 sid = row.sid,
                 command = emptyList(),
                 appletSource = driver.appletSource,
             )
-            if (agentRegistry.get(row.agentUserId) == null) {
-                agentRegistry.register(
-                    ScreenAgent(
-                        userId = row.agentUserId,
-                        sid = row.sid,
-                        machineId = row.machineId,
-                        teamId = row.teamId,
-                        screenToken = row.token,
-                        driver = driver,
-                        hub = hub,
-                        wakeup = agentWakeup,
-                    )
-                )
-            }
             readopted++
         }
         if (readopted > 0) {
