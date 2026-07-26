@@ -8,7 +8,7 @@
  *               listAgents is the only way to enumerate agents: what were a POST carrying a batch
  *               of user ids ("presence") and a second per-thread route are now just filters on it.
  *               `sid` is included per agent only for a caller allowed to watch it — asked of the
- *               permission matrix, the same question the 现场 handshake gates on, rather than a
+ *               permission matrix, the same question the live-screen handshake gates on, rather than a
  *               second copy of the rule.
  *
  *               It registers the agent half of that rule: an agent's screen may also be watched by
@@ -79,7 +79,8 @@ class AgentController(
             // Whose screen this is, is a fact about the AgentScreen row — not about what this
             // server happens to be holding in memory. Resolving it from the registry alone made a
             // screen the server had forgotten (one no readopt reached) UNWATCHABLE: the handshake
-            // was refused before anything could rebuild it, so the human got a 现场 that would not
+            // was refused before anything could rebuild it, so the human got a live screen that
+            // would not
             // open and no way to ask for it to be fixed. The row outlives every restart, so ask it
             // when the registry is empty.
             val agentUserId =
@@ -240,7 +241,8 @@ class AgentController(
         // An agent is described from its persisted row when this server holds nothing live for it.
         // Reporting such an agent as offline with no screen id is what made a forgotten screen
         // unreachable in the UI: the avatar is only clickable when it is online AND carries a sid,
-        // so the human could not even ASK for 现场 — which is precisely the request that rebuilds
+        // so the human could not even ASK for the live screen — which is precisely the request that
+        // rebuilds
         // and restarts it. The row is the durable truth about which screen an agent is, and the
         // machine being connected is what makes it reachable.
         val row = agentScreenRepository.findByAgentUserId(uid).firstOrNull()
@@ -269,7 +271,7 @@ class AgentController(
             teamId = agent?.teamId ?: row?.teamId,
             driver = agent?.driver?.name ?: row?.driver,
             // The live screen's mirrored variables (status/elapsed/tokens/question/choices/
-            // compact/…) so the 现场 gatebar can show the same hints web-claude does.
+            // compact/…) so the live-screen gatebar can show the same hints web-claude does.
             vars =
                 if (watchable)
                     screen?.vars?.entries?.mapNotNull { (k, v) -> v?.let { k to it } }?.toMap()

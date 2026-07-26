@@ -194,8 +194,8 @@ class AgentService(
      * Wake an agent whose program has died, *in place*: respawn its screen under the same sid,
      * screen token, cwd and session id, with resume=true, so the driver picks the conversation back
      * up where it stopped. Nothing that names the screen changes — no DB write, no new registry
-     * entry, and a 现场 URL opened before the death keeps working — which is why this, rather than
-     * [rebootAgent], is what the automatic wake-up path uses.
+     * entry, and a live-screen URL opened before the death keeps working — which is why this,
+     * rather than [rebootAgent], is what the automatic wake-up path uses.
      *
      * Falls back to [rebootAgent] when the hub has no screen under that sid at all (the machine has
      * not reconnected since a server restart, so there is nothing to respawn in place). Returns

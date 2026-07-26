@@ -1,5 +1,5 @@
 /*
- *  Description: The 现场 (live screen) viewer WebSocket — the browser end of watching an
+ *  Description: The live-screen viewer WebSocket — the browser end of watching an
  *               agent's Claude Code terminal. It speaks the SAME wire the reference
  *               misc/web-claude client speaks, so that client is reused verbatim: the
  *               machine's raw screen bytes go to the browser as binary frames; the browser
@@ -31,9 +31,9 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler
 /**
  * Asked, just before a viewer attaches, whether anything needs doing to the screen first — the
  * machine layer has no idea what runs on one, so what "needs doing" means belongs to the module
- * that opened it (for agents: waking a program that has died, so 现场 opens onto a live terminal
- * rather than the frozen last frame of a crash). It returns the sid to actually attach to, which is
- * normally the one passed in.
+ * that opened it (for agents: waking a program that has died, so the live screen opens onto a live
+ * terminal rather than the frozen last frame of a crash). It returns the sid to actually attach to,
+ * which is normally the one passed in.
  */
 fun interface ScreenAttachPreflight {
     fun beforeAttach(sid: String): String
@@ -66,7 +66,7 @@ class ViewerHandler(
             // The viewer sees an empty terminal either way; only this line says why. Whoever owns
             // the screen was already asked to ensure it exists (the preflight), so reaching here
             // means that could not be done.
-            logger.error("现场: no screen '{}' to attach to (asked for '{}')", sid, asked)
+            logger.error("live screen: no screen '{}' to attach to (asked for '{}')", sid, asked)
             session.close(CloseStatus.POLICY_VIOLATION.withReason("screen not found"))
             return
         }

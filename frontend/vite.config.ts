@@ -39,7 +39,7 @@ export default defineConfig({
       "/mt": {
         target: process.env.MT_BACKEND_URL ?? "http://127.0.0.1:8199",
         changeOrigin: true,
-        // ws:true so both raw WebSockets upgrade through: the 现场 viewer
+        // ws:true so both raw WebSockets upgrade through: the live-screen viewer
         // (/mt/machine/screen/:sid) and the STOMP chat socket (/mt/ws).
         ws: true,
         rewrite: (path) => path.replace(/^\/mt/, ""),

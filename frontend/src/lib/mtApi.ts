@@ -31,7 +31,7 @@ export function setNtAccessToken(token: string | null) {
   accessToken = token;
 }
 
-/** The current in-memory access token (for the 现场 viewer WS `?token=`). */
+/** The current in-memory access token (for the live-screen viewer WS `?token=`). */
 export function getNtAccessToken(): string | null {
   return accessToken;
 }

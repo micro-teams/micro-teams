@@ -1,6 +1,6 @@
 // Agents — desktop master-detail. Left: team switcher + the machines that serve
 // it + the agents open on them (selectable). Right: the selected agent — a big
-// avatar (click it for 现场, same as everywhere), its live status/driver/machine,
+// avatar (click it for the live screen, same as everywhere), its live status/driver/machine,
 // and the two things a human needs, "chat with it" (creates a thread including the
 // agent and jumps to it) and "close it". Selection lives in the URL (/agents/:id)
 // so deep links and the browser back button work; the rail switches sections.
@@ -341,7 +341,7 @@ function AgentDetail({
         </dl>
 
         <p className="text-muted-foreground text-center text-xs">
-          click the avatar to watch its 现场 (live screen)
+          click the avatar to watch its live screen
         </p>
 
         <div className="flex w-full flex-col gap-2">

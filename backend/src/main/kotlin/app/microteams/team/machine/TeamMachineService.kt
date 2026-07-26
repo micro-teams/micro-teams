@@ -6,7 +6,7 @@
  *               The model is deliberately symmetric and owner-less: a machine may serve many
  *               teams, and every member of any of them has full, equal rights over it. That makes
  *               [mayAccess] the single access question the rest of the backend asks about a
- *               machine — enrollment, the control channel and 现场 all resolve to it.
+ *               machine — enrollment, the control channel and the live screen all resolve to it.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>

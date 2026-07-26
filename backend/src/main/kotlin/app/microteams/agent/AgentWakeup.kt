@@ -3,7 +3,7 @@
  *               on it — Claude Code exits on a crash, an OOM kill, a `/quit`, an out-of-credit
  *               error, and the tmux pane stays behind holding its corpse — so "the agent has a
  *               screen" was never the same as "the agent is listening". Before this, a message
- *               said to a dead agent was typed into a dead pane and silently lost, and 现场 opened
+ *               said to a dead agent was typed into a dead pane and silently lost, and the live screen opened
  *               onto a frozen screenful of whatever killed it.
  *
  *               Two things live here, and only these two. **Knowing** an agent is dead: the applet
@@ -13,7 +13,7 @@
  *               is the one place that reads those two signals as "the program is gone", because
  *               what a driver's status values mean is agent knowledge, not the machine layer's.
  *               And **deciding** to revive: lazily, on the two moments a human actually needs the
- *               agent — 发消息 and 看现场 — never as a background resurrection sweep, so an agent
+ *               agent — being messaged and being watched — never as a background resurrection sweep, so an agent
  *               nobody is talking to stays quietly dead instead of being restarted forever.
  *
  *               Waking is AgentService.wakeAgent (respawn in place, same session, resume=true), and
@@ -108,7 +108,7 @@ class AgentWakeup(
                     val agent = agentRegistry.bySid(screen.sid) ?: return
                     logger.info("agent {} died on screen {}: {}", agent.userId, screen.sid, reason)
                     // Only wake right away if something is already waiting to be said; otherwise
-                    // let it lie until somebody wants it (发消息 / 看现场).
+                    // let it lie until somebody wants it (a message / a viewer).
                     if (!pending[agent.userId].isNullOrEmpty()) ensureAwake(agent.userId)
                 }
 
@@ -154,9 +154,10 @@ class AgentWakeup(
     }
 
     /**
-     * A human is opening 现场 on [sid]: make sure there is something live to look at, rebuilding
-     * whatever is missing, and if that cannot be done say so at ERROR — every failure downstream of
-     * here looks like the same blank terminal, so the log is the only place they can be told apart.
+     * A human is opening the live screen on [sid]: make sure there is something live to look at,
+     * rebuilding whatever is missing, and if that cannot be done say so at ERROR — every failure
+     * downstream of here looks like the same blank terminal, so the log is the only place they can
+     * be told apart.
      *
      * Everything an agent screen needs can be rebuilt from its persisted row, and this asks for all
      * of it rather than assuming any earlier step ran:
@@ -172,7 +173,12 @@ class AgentWakeup(
         try {
             ensureScreen(sid)
         } catch (e: Exception) {
-            logger.error("现场: could not ensure screen {} is live: {}", sid, e.toString(), e)
+            logger.error(
+                "live screen: could not ensure screen {} is live: {}",
+                sid,
+                e.toString(),
+                e,
+            )
             sid
         }
 
@@ -184,7 +190,7 @@ class AgentWakeup(
             // sid it was given is the only clue as to why.
             if (hub.screen(sid) == null) {
                 logger.error(
-                    "现场: screen {} has neither an agent row nor a live screen — nothing to show",
+                    "live screen: screen {} has neither an agent row nor a live screen — nothing to show",
                     sid,
                 )
             }
@@ -193,7 +199,7 @@ class AgentWakeup(
         val driver = driversByName[row.driver]
         if (driver == null) {
             logger.error(
-                "现场: cannot ensure screen {}: agent {} runs unknown driver '{}'",
+                "live screen: cannot ensure screen {}: agent {} runs unknown driver '{}'",
                 sid,
                 row.agentUserId,
                 row.driver,
@@ -205,7 +211,7 @@ class AgentWakeup(
         // machine still has the session behind it is what the probe below settles.
         if (hub.screen(row.sid) == null) {
             logger.warn(
-                "现场: screen {} was not registered on this server; re-adopting it from its row",
+                "live screen: screen {} was not registered on this server; re-adopting it from its row",
                 row.sid,
             )
             hub.adoptScreen(row.sid, row.machineId, row.token, AGENT_SCREEN_KIND)
@@ -214,7 +220,7 @@ class AgentWakeup(
         // wake-up cannot find it, and it would show offline while its row says otherwise.
         if (agentRegistry.get(row.agentUserId) == null) {
             logger.warn(
-                "现场: agent {} was not registered on this server; re-registering it from its row",
+                "live screen: agent {} was not registered on this server; re-registering it from its row",
                 row.agentUserId,
             )
             agentRegistry.register(
@@ -235,7 +241,7 @@ class AgentWakeup(
         probe(row.sid)
         if (!isAwake(row.agentUserId) && !ensureAwake(row.agentUserId)) {
             logger.error(
-                "现场: agent {} on screen {} is not running and could not be woken (machine {} " +
+                "live screen: agent {} on screen {} is not running and could not be woken (machine {} " +
                     "online: {})",
                 row.agentUserId,
                 row.sid,
@@ -258,9 +264,9 @@ class AgentWakeup(
      * longer has.
      *
      * Only silence counts as death — an empty snapshot does not, since a program that is merely
-     * still starting paints nothing either. Reserved for 现场, where a stale screen is what the human
-     * is staring at and a second of latency is affordable; the message path relies on the reported
-     * signals instead of probing on every message.
+     * still starting paints nothing either. Reserved for the live screen, where a stale screen is
+     * what the human is staring at and a second of latency is affordable; the message path relies
+     * on the reported signals instead of probing on every message.
      */
     private fun probe(sid: String) {
         val screen = hub.screen(sid) ?: return

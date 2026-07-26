@@ -203,7 +203,7 @@ class RolePermissionService {
                         customLogic = "can-access-machine",
                     ),
 
-                    // -- 现场: watching a screen on a machine ---------------------------
+                    // -- The live screen: watching a screen on a machine -----------------------
 
                     // The whole rule, in one place: you may watch a screen if you may use the
                     // machine it runs on, or if it is an agent you share a group with. The second
@@ -215,7 +215,8 @@ class RolePermissionService {
                     // the same machine-access question about the same screen — except that it
                     // resolves the machine from the agent's persisted row rather than from what
                     // this server holds in memory. Without it, a screen the server has forgotten
-                    // (one no readopt reached) is unwatchable, which is worse than useless: 现场 is
+                    // (one no readopt reached) is unwatchable, which is worse than useless: the
+                    // live screen is
                     // exactly the way a human would ask for such a screen to be rebuilt.
                     Permission(
                         authorizedActions = listOf("watch"),

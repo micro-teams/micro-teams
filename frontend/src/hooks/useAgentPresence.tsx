@@ -1,6 +1,6 @@
 // App-global agent presence. Every shared avatar (UserAvatar) tracks its user id here; the
 // provider batches all tracked ids into one poll, so any avatar anywhere becomes agent-aware
-// (ring + status + live 现场 sid) from a single shared request.
+// (ring + status + live live-screen sid) from a single shared request.
 //
 // That poll is just `GET /agent?userId=...` — the one agent enumeration, filtered. Only agents
 // come back, so "is this user an agent?" is simply whether the id is present in `data`, and the

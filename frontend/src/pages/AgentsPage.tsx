@@ -1,7 +1,7 @@
 // Agents — phone surface. Pick a team (shared workspace selection), see the
 // machines that serve it and the agents currently open on them, open a new agent,
 // talk to one, or close it. Reuses UserAvatar so every agent here carries its
-// inference ring and click-to-现场 exactly like everywhere else in the app.
+// inference ring and click-to-watch exactly like everywhere else in the app.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import {

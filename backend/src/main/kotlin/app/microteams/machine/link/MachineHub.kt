@@ -326,9 +326,9 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     /**
      * Restart the program on an existing screen *in place*: end the machine's session and create it
      * again under the SAME sid and the same screen token. Everything that names the screen — the
-     * owning module's rows, a browser 现场 URL, the MICROTEAMS_SCREEN a callback authenticates with —
-     * therefore keeps working across the restart, which is the whole reason this exists rather than
-     * a close + [openScreen] pair.
+     * owning module's rows, a browser live-screen URL, the MICROTEAMS_SCREEN a callback
+     * authenticates with — therefore keeps working across the restart, which is the whole reason
+     * this exists rather than a close + [openScreen] pair.
      *
      * Ordering is safe on the frozen CLI: it dispatches control messages one at a time off a single
      * read loop, and its session.close kills the tmux synchronously, so the session.create that

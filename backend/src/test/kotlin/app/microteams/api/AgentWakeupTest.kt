@@ -276,10 +276,10 @@ constructor(
     }
 
     /**
-     * 看现场 is the other moment the agent must be alive: opening the live screen of a dead agent
-     * would otherwise show the frozen last frame of whatever killed it, with no way to tell that
-     * from an agent that is merely quiet. Uses a second, untouched agent so this is a first wake
-     * rather than one held back by the previous test's back-off.
+     * Watching the live screen is the other moment the agent must be alive: opening the live screen
+     * of a dead agent would otherwise show the frozen last frame of whatever killed it, with no way
+     * to tell that from an agent that is merely quiet. Uses a second, untouched agent so this is a
+     * first wake rather than one held back by the previous test's back-off.
      */
     @Test
     @Order(4)
@@ -301,7 +301,7 @@ constructor(
         Thread.sleep(300)
         assertFalse(machineHub.screen(viewedSid)!!.alive)
 
-        // A human opens 现场 on it. The attach itself must revive the program.
+        // A human opens the live screen on it. The attach itself must revive the program.
         val viewer =
             StandardWebSocketClient()
                 .execute(
@@ -315,7 +315,7 @@ constructor(
         val respawn = awaitFrameFor("session.create", viewedSid)
         assertTrue(
             respawn.getJSONArray("command").getString(2).contains("--resume"),
-            "看现场 must resume the agent's own session, not start a blank one",
+            "watching must resume the agent's own session, not start a blank one",
         )
         // And the viewer is attached to the same screen it asked for — waking respawned in place.
         awaitFrameFor("screen.subscribe", viewedSid)
@@ -323,11 +323,11 @@ constructor(
     }
 
     /**
-     * Opening 现场 must ENSURE there is something to look at, not assume it. Here the server has
-     * forgotten the screen completely — no hub registration, no registry entry, only the persisted
-     * row — which is what a restart that never re-adopted this screen leaves behind. The attach
-     * must rebuild all of it from the row and start the program, rather than closing on "screen not
-     * found" and leaving the human with a blank terminal and no explanation.
+     * Opening the live screen must ENSURE there is something to look at, not assume it. Here the
+     * server has forgotten the screen completely — no hub registration, no registry entry, only the
+     * persisted row — which is what a restart that never re-adopted this screen leaves behind. The
+     * attach must rebuild all of it from the row and start the program, rather than closing on
+     * "screen not found" and leaving the human with a blank terminal and no explanation.
      */
     @Test
     @Order(5)
@@ -355,7 +355,8 @@ constructor(
         assertTrue(machineHub.screen(lostSid) == null)
         assertTrue(agentRegistry.bySid(lostSid) == null)
 
-        // The UI only offers 现场 for an agent that is online AND carries a screen id, so a
+        // The UI only offers the live screen for an agent that is online AND carries a screen id,
+        // so a
         // forgotten agent must still be described from its row — otherwise the human cannot even
         // ask for the rebuild.
         mockMvc
