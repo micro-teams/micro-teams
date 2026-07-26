@@ -197,6 +197,12 @@ jobs:
           mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
           cp -r deploy/init "$STAGE/"
+          # Ship the JPA-generated schema at the bundle root. The stack still creates/updates its own
+          # tables (ddl-auto=update), so this file is NOT applied automatically — it's a reference for
+          # ops: it shows the full table structure this build expects, and diffing it against the
+          # previous bundle's copy reveals exactly what changed, so an operator can plan any manual
+          # migration an upgrade needs. Committed in-repo (CI verifies it matches the entities).
+          cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp -r artifacts/frontend-dist/. "$STAGE/frontend/dist/"
           cp artifacts/applets/*.js "$STAGE/applets/"

@@ -11,6 +11,7 @@ docker-compose.yml     the four services (nginx, backend, cheese-auth, postgres)
 nginx.conf             the domain-independent gateway (SPA + /api + /mt)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
+CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
 frontend/dist/         the built SPA (static, domain-independent)
 applets/               cli.js + claude.js (mounted into the backend, swappable)
@@ -129,6 +130,13 @@ authorize everything, and losing the JWT secret logs everyone out.
   container and recreate it: the mount follows the original inode, so the container keeps serving
   the deleted one and you get `403 directory index forbidden` / `500` until you restart the
   container. In-place replacement needs no restart; the jar does (`docker compose restart backend`).
+- **Schema reference (`CREATE.sql`).** The bundle root carries the full table structure this build
+  expects, generated from the backend's JPA entities. It is **not applied on deploy** — the backend
+  manages its own tables (`ddl-auto=update` creates and adds, but never drops or rewrites). It's here
+  so that when you upgrade you can *see* the current schema and, by diffing this file against the copy
+  from the bundle you're replacing (`diff old-bundle/CREATE.sql CREATE.sql`), see exactly what changed
+  — a renamed/removed column, a new table, a changed type — and perform any manual migration the
+  automatic `update` won't do for you (it never drops or alters existing columns).
 - **Live agents survive a backend restart.** Their terminals run in tmux on each machine, and the
   backend re-adopts them when the machine reconnects — so upgrading the jar doesn't kill running
   agents. Connected machines self-update their own connector via `microteams update`.
