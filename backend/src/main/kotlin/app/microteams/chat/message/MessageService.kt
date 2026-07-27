@@ -35,10 +35,17 @@ class MessageService(
         pageStart: Long?,
         pageSize: Int,
     ): Pair<List<MessageDTO>, PageDTO> {
-        val messages = messageRepository.findByThreadIdAndDeletedAtIsNullOrderById(threadId)
+        // Chat semantics: opening a thread should land on its MOST RECENT messages, not its
+        // first ones. Order newest-first and page from that (pageStart=null => the newest page),
+        // then reverse the page back to ascending for display. Because the ordering is descending,
+        // the page cursor (nextStart) walks toward OLDER history — so "scroll up to load older" is
+        // the same call with that cursor, no extra machinery. (The previous OrderById/ascending
+        // default returned the oldest page, so a thread past `pageSize` messages never showed new
+        // ones — the chat-list preview did, because it reads the latest message directly.)
+        val messages = messageRepository.findByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId)
         val (page, pageInfo) =
             PageHelper.pageFromAll(messages, pageStart, pageSize, { it.id!! }, null)
-        return page.map { it.toDTO() } to pageInfo
+        return page.map { it.toDTO() }.reversed() to pageInfo
     }
 
     fun postMessage(threadId: Long, userId: Long, body: PostMessageRequestDTO): MessageDTO {
