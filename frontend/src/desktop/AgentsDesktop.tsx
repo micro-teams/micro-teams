@@ -144,17 +144,6 @@ export function AgentsDesktop() {
               Manage teams
             </MenuItem>
           </Menu>
-          <div className="flex-1" />
-          <button
-            type="button"
-            onClick={() => setOpenDlg(true)}
-            disabled={teamId == null}
-            className="text-foreground hover:bg-accent flex size-8 items-center justify-center rounded-md disabled:opacity-40"
-            aria-label="open agent"
-            title="open agent"
-          >
-            <Bot className="size-5" />
-          </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-4">
@@ -176,14 +165,13 @@ export function AgentsDesktop() {
                   <h2 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
                     machines
                   </h2>
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     onClick={() => setAddDeviceDlg(true)}
-                    className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px] font-medium"
-                    title="add device"
                   >
-                    <PlusCircle className="size-3.5" /> add
-                  </button>
+                    <PlusCircle className="size-4" /> add device
+                  </Button>
                 </div>
                 {machines.loading && !machines.data && <Loading />}
                 {machines.error && (
@@ -225,9 +213,18 @@ export function AgentsDesktop() {
 
               {/* agents */}
               <div className="px-3 pt-4">
-                <h2 className="text-muted-foreground mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide">
-                  agents
-                </h2>
+                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                  <h2 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
+                    agents
+                  </h2>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setOpenDlg(true)}
+                  >
+                    <Bot className="size-4" /> open agent
+                  </Button>
+                </div>
                 {agents.loading && !agents.data && <Loading />}
                 {agents.error && (
                   <Alert variant="destructive">
