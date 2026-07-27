@@ -165,6 +165,22 @@
   background: none;
   padding: 0;
 }
+/* Rendered ```mermaid diagram (swapped in by renderMermaidIn): centred, and the SVG
+   scales down on narrow screens instead of overflowing. */
+.doc-preview .mermaid-diagram {
+  margin: 0.8em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.doc-preview .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+.doc-preview .mermaid-error {
+  color: var(--destructive);
+  font-size: 0.85em;
+  margin: 0.4em 0;
+}
 .doc-preview hr {
   border: none;
   border-top: 1px solid var(--border);

@@ -8,6 +8,7 @@ import { Save, Check } from "lucide-react";
 import type { DocNode } from "@/api";
 import { baseName } from "@/lib/docs";
 import { renderMarkdown } from "@/lib/markdown";
+import { renderMermaidIn } from "@/lib/mermaid";
 import { mtCall, teamApi } from "@/lib/mtApi";
 import { errMsg } from "@/hooks/useAsync";
 import { Segmented } from "@/components/ui/segmented";
@@ -99,6 +100,13 @@ export function DocEditor({
 
   const html = view === "edit" ? "" : renderMarkdown(content);
 
+  // Render any ```mermaid blocks once the preview HTML is in the DOM (re-run whenever
+  // the HTML changes, since dangerouslySetInnerHTML re-inserts the raw code blocks).
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void renderMermaidIn(previewRef.current);
+  }, [html]);
+
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
@@ -165,6 +173,7 @@ export function DocEditor({
           {(view === "preview" || view === "split") && (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
               <div
+                ref={previewRef}
                 className="doc-preview mx-auto max-w-3xl"
                 // Content is the team's own document; still sanitized above.
                 dangerouslySetInnerHTML={{ __html: html }}
