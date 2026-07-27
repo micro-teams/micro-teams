@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Save, Settings, History as HistoryIcon, Trash2 } from "lucide-react";
 import type { DocCommit, DocNode } from "@/api";
 import { baseName, parentPath } from "@/lib/docs";
 import { renderMarkdown } from "@/lib/markdown";
+import { renderMermaidIn } from "@/lib/mermaid";
 import { mtCall, teamApi } from "@/lib/mtApi";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
@@ -55,6 +56,12 @@ export function FilePage() {
   }, [load.data, savedContent]);
 
   const dirty = savedContent !== null && content !== savedContent;
+
+  // After the preview HTML is in the DOM, turn any ```mermaid blocks into diagrams.
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (tab === "preview") void renderMermaidIn(previewRef.current);
+  }, [tab, content]);
 
   async function save() {
     setError(null);
@@ -140,6 +147,7 @@ export function FilePage() {
             {(load.data || savedContent !== null) &&
               (content.trim() ? (
                 <div
+                  ref={previewRef}
                   className="doc-preview"
                   // The team's own document; sanitized in renderMarkdown.
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
