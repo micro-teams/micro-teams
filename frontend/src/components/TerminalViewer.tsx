@@ -181,9 +181,15 @@ export function TerminalViewer({
     // drag into tmux copy-mode scroll on the pane. The program keeps no scrollback, so a finger
     // drag would otherwise do nothing. Dragging DOWN reveals earlier output (scroll up), matching a
     // terminal's natural pull-to-see-history. Every mode may scroll (readonly reads back safely).
-    // NOTE: the #term container sets `touch-action: none`, so the browser hands us the vertical
-    // drag instead of claiming it as a native pan/scroll before touchmove becomes cancelable —
-    // without that, the gesture never reached this handler on mobile (the actual T-009 symptom).
+    // The finger actually lands on xterm's own `.xterm-viewport` (an absolutely-positioned,
+    // overflow-y:scroll layer xterm inserts INSIDE #term). Mobile browsers (iOS Safari especially)
+    // decide compositor panning of a scroll container from THAT element's own `touch-action`, not an
+    // ancestor's — so `touch-action:none` on #term alone doesn't stop the native pan, and the drag
+    // never reaches us (the T-009 symptom that survived the first fix). Bind the listeners to the
+    // viewport itself, and CSS sets `touch-action:none` on it too.
+    const touchTarget: HTMLElement =
+      (container.querySelector(".xterm-viewport") as HTMLElement | null) ??
+      container;
     let touchY: number | null = null;
     let touchAccum = 0;
     const TOUCH_STEP = 40; // px of drag per scroll step
@@ -210,15 +216,15 @@ export function TerminalViewer({
     const onTouchEnd = () => {
       touchY = null;
     };
-    container.addEventListener("touchstart", onTouchStart, {
+    touchTarget.addEventListener("touchstart", onTouchStart, {
       passive: false,
       capture: true,
     });
-    container.addEventListener("touchmove", onTouchMove, {
+    touchTarget.addEventListener("touchmove", onTouchMove, {
       passive: false,
       capture: true,
     });
-    container.addEventListener("touchend", onTouchEnd, { capture: true });
+    touchTarget.addEventListener("touchend", onTouchEnd, { capture: true });
 
     const onResize = () => sendSize(false);
     window.addEventListener("resize", onResize);
@@ -274,13 +280,13 @@ export function TerminalViewer({
       if (scrollIdle) clearTimeout(scrollIdle);
       clearInterval(sizeTimer);
       window.removeEventListener("resize", onResize);
-      container.removeEventListener("touchstart", onTouchStart, {
+      touchTarget.removeEventListener("touchstart", onTouchStart, {
         capture: true,
       } as EventListenerOptions);
-      container.removeEventListener("touchmove", onTouchMove, {
+      touchTarget.removeEventListener("touchmove", onTouchMove, {
         capture: true,
       } as EventListenerOptions);
-      container.removeEventListener("touchend", onTouchEnd, {
+      touchTarget.removeEventListener("touchend", onTouchEnd, {
         capture: true,
       } as EventListenerOptions);
       wsRef.current?.close();
@@ -371,9 +377,14 @@ const WC_CSS = `
 .wc-scene .ctrack { display: inline-block; width: 90px; height: .5rem; border-radius: .25rem; background: #2b2740; overflow: hidden; }
 .wc-scene .cfill { display: block; height: 100%; background: #fbbf24; transition: width .3s ease; }
 .wc-scene #termwrap { flex: 1; padding: .5rem; min-height: 0; position: relative; }
-/* touch-action:none hands vertical drags to our touch handlers (tmux copy-mode scroll) instead
-   of letting a mobile browser claim them as a native pan; overscroll-behavior stops the drag
-   from bubbling into a page pull-to-refresh / rubber-band. */
-.wc-scene #term { height: 100%; touch-action: none; overscroll-behavior: contain; }
+.wc-scene #term { height: 100%; }
+/* touch-action:none hands vertical drags to our touch handlers (tmux copy-mode scroll) instead of
+   letting a mobile browser claim them as a native pan; overscroll-behavior stops the drag bubbling
+   into a page pull-to-refresh / rubber-band. It must sit on xterm's OWN scroll layer (.xterm-viewport,
+   an overflow-y:scroll element xterm inserts inside #term) — that is the element the finger lands on,
+   and mobile decides panning from its touch-action, not #term's. */
+.wc-scene #term,
+.wc-scene #term .xterm-viewport,
+.wc-scene #term .xterm-screen { touch-action: none; overscroll-behavior: contain; }
 .wc-scene #gatebar .fontctl { margin-left: auto; display: inline-flex; gap: .1rem; }
 `;
