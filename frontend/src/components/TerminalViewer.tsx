@@ -167,9 +167,10 @@ export function TerminalViewer({
     // xterm's viewport handling (and, in 'full', its mouse-tracking). Returning false stops xterm
     // from scrolling its empty local buffer or forwarding a mouse code; we drive tmux copy-mode
     // scroll via {type:"scroll"} instead (PgUp/PgDn sent to the program does nothing).
+    // Every mode may scroll, including the default 'readonly': paging tmux history only reads
+    // back, it never types into the program, so it is safe there — and sendScroll reports the
+    // 'scroll' control level for the gesture, reverting to passive when idle.
     term.attachCustomWheelEventHandler((e) => {
-      const m = viewModeRef.current;
-      if (m !== "scroll" && m !== "full") return true;
       const ws = wsRef.current;
       if (!ws || ws.readyState !== 1) return true;
       sendScroll(e.deltaY < 0 ? "up" : "down");
@@ -179,19 +180,20 @@ export function TerminalViewer({
     // Touch scrolling (phones/tablets emit no wheel events). Mirror onWheel: translate a vertical
     // drag into tmux copy-mode scroll on the pane. The program keeps no scrollback, so a finger
     // drag would otherwise do nothing. Dragging DOWN reveals earlier output (scroll up), matching a
-    // terminal's natural pull-to-see-history. Only scroll/full may scroll.
+    // terminal's natural pull-to-see-history. Every mode may scroll (readonly reads back safely).
+    // NOTE: the #term container sets `touch-action: none`, so the browser hands us the vertical
+    // drag instead of claiming it as a native pan/scroll before touchmove becomes cancelable —
+    // without that, the gesture never reached this handler on mobile (the actual T-009 symptom).
     let touchY: number | null = null;
     let touchAccum = 0;
     const TOUCH_STEP = 40; // px of drag per scroll step
     const onTouchStart = (e: TouchEvent) => {
-      const m = viewModeRef.current;
-      if ((m !== "scroll" && m !== "full") || e.touches.length !== 1) return;
+      if (e.touches.length !== 1) return;
       touchY = e.touches[0].clientY;
       touchAccum = 0;
     };
     const onTouchMove = (e: TouchEvent) => {
-      const m = viewModeRef.current;
-      if ((m !== "scroll" && m !== "full") || touchY == null) return;
+      if (touchY == null) return;
       const ws = wsRef.current;
       if (!ws || ws.readyState !== 1 || e.touches.length !== 1) return;
       e.preventDefault();
@@ -369,6 +371,9 @@ const WC_CSS = `
 .wc-scene .ctrack { display: inline-block; width: 90px; height: .5rem; border-radius: .25rem; background: #2b2740; overflow: hidden; }
 .wc-scene .cfill { display: block; height: 100%; background: #fbbf24; transition: width .3s ease; }
 .wc-scene #termwrap { flex: 1; padding: .5rem; min-height: 0; position: relative; }
-.wc-scene #term { height: 100%; }
+/* touch-action:none hands vertical drags to our touch handlers (tmux copy-mode scroll) instead
+   of letting a mobile browser claim them as a native pan; overscroll-behavior stops the drag
+   from bubbling into a page pull-to-refresh / rubber-band. */
+.wc-scene #term { height: 100%; touch-action: none; overscroll-behavior: contain; }
 .wc-scene #gatebar .fontctl { margin-left: auto; display: inline-flex; gap: .1rem; }
 `;
