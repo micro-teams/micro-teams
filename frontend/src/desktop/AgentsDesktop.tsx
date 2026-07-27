@@ -12,12 +12,13 @@ import {
   ChevronDown,
   FolderGit2,
   MessageSquarePlus,
+  Pencil,
   PlusCircle,
   Server,
   Settings2,
   Trash2,
 } from "lucide-react";
-import type { Agent } from "@/api";
+import type { Agent, Machine } from "@/api";
 import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
 import { startChatWithAgent } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -29,6 +30,7 @@ import {
   OnlineDot,
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
+import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -48,6 +50,7 @@ export function AgentsDesktop() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
+  const [renaming, setRenaming] = useState<Machine | null>(null);
 
   const selectedId = useMemo(() => {
     const m = location.pathname.match(/^\/agents\/(\d+)/);
@@ -198,13 +201,22 @@ export function AgentsDesktop() {
                     {machineList.map((m) => (
                       <li
                         key={m.id}
-                        className="flex items-center gap-2 rounded-md px-1 py-1 text-sm"
+                        className="group hover:bg-accent/60 flex items-center gap-2 rounded-md px-1 py-1 text-sm"
                       >
                         <Server className="text-muted-foreground size-4 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">
                           {m.name}
                         </span>
                         <OnlineDot online={m.online} label={false} />
+                        <button
+                          type="button"
+                          onClick={() => setRenaming(m)}
+                          className="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
+                          aria-label="rename machine"
+                          title="rename"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -302,6 +314,15 @@ export function AgentsDesktop() {
         }}
       />
       <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
+      {renaming && (
+        <RenameMachineDialog
+          key={renaming.id}
+          machine={renaming}
+          open
+          onOpenChange={(o) => !o && setRenaming(null)}
+          onRenamed={() => machines.reload()}
+        />
+      )}
     </div>
   );
 }

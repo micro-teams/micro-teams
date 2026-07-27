@@ -9,12 +9,13 @@ import {
   ChevronDown,
   FolderGit2,
   MessageSquarePlus,
+  Pencil,
   PlusCircle,
   Server,
   Settings2,
   Trash2,
 } from "lucide-react";
-import type { Agent } from "@/api";
+import type { Agent, Machine } from "@/api";
 import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
 import { startChatWithAgent } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -27,6 +28,7 @@ import {
   OnlineDot,
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
+import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -44,6 +46,7 @@ export function AgentsPage() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
+  const [renaming, setRenaming] = useState<Machine | null>(null);
 
   const machines = useAsync(
     () =>
@@ -182,6 +185,15 @@ export function AgentsPage() {
                       <Server className="text-muted-foreground size-4 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{m.name}</span>
                       <OnlineDot online={m.online} />
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => setRenaming(m)}
+                        aria-label="rename machine"
+                        title="rename"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -242,6 +254,15 @@ export function AgentsPage() {
         onOpened={() => agents.reload()}
       />
       <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
+      {renaming && (
+        <RenameMachineDialog
+          key={renaming.id}
+          machine={renaming}
+          open
+          onOpenChange={(o) => !o && setRenaming(null)}
+          onRenamed={() => machines.reload()}
+        />
+      )}
     </>
   );
 }
