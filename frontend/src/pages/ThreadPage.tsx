@@ -301,7 +301,7 @@ function MessageRow({
               right: mine ? "-3px" : undefined,
             }}
           />
-          <p className="break-words whitespace-pre-wrap">{message.content}</p>
+          <p className="wrap-anywhere whitespace-pre-wrap">{message.content}</p>
         </div>
       </div>
     </div>
