@@ -55,7 +55,10 @@ export function ChatsPage() {
       />
 
       <div className="flex flex-col">
-        {loading && <Loading />}
+        {/* Only on the FIRST load — the 5s poll's reload() also flips `loading`, and showing
+            the spinner on every tick made the list read "loading…" every few seconds. Match the
+            desktop list, which gates its spinner on `!data` for the same reason. */}
+        {loading && !data && <Loading />}
         {error && (
           <div className="p-3">
             <Alert variant="destructive">
