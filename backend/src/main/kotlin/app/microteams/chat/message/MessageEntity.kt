@@ -19,7 +19,12 @@ open class MessageEntity : BaseEntity() {
 }
 
 interface MessageRepository : JpaRepository<MessageEntity, Long> {
-    fun findByThreadIdAndDeletedAtIsNullOrderById(threadId: Long): List<MessageEntity>
+    /**
+     * Newest-first (highest id first). listMessages pages from this so the default (no cursor) page
+     * is the most RECENT messages — a chat opens on its latest, and the cursor then walks toward
+     * older history. See MessageService.listMessages.
+     */
+    fun findByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId: Long): List<MessageEntity>
 
     /** The most recent (highest-id) live message in a thread — for the chat-list preview. */
     fun findTopByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId: Long): MessageEntity?

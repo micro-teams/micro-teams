@@ -189,6 +189,35 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
     }
 
     @Test
+    @Order(63)
+    fun listMessagesReturnsTheNewestPageNotTheOldest() {
+        // Post four messages, then ask for a page of 3: the response must be the three NEWEST
+        // (pg-b, pg-c, pg-d) in ascending order — not the oldest — so a thread longer than the
+        // page always opens on its latest messages. Robust to any messages posted before this.
+        for (c in listOf("pg-a", "pg-b", "pg-c", "pg-d")) {
+            mockMvc
+                .perform(
+                    post("/chat/$threadId/messages")
+                        .header("Authorization", "Bearer $ownerToken")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""{"content":"$c"}""")
+                )
+                .andExpect(status().isCreated)
+        }
+        mockMvc
+            .perform(
+                get("/chat/$threadId/messages")
+                    .header("Authorization", "Bearer $ownerToken")
+                    .param("page_size", "3")
+            )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.messages.length()").value(3))
+            // ascending within the page, newest last
+            .andExpect(jsonPath("$.messages[0].content").value("pg-b"))
+            .andExpect(jsonPath("$.messages[2].content").value("pg-d"))
+    }
+
+    @Test
     @Order(62)
     fun strangerCannotPostMessage() {
         mockMvc
