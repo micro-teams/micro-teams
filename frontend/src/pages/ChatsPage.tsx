@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAsync } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
+import { usePublicAgentMember } from "@/hooks/usePublicAgentMember";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { Loading } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -105,6 +106,10 @@ function ChatRow({
   // 1-on-1 (me + exactly one other): show the other's avatar (reused control — an agent
   // keeps its ring/click-to-watch). Otherwise a WeChat-style grid of the first members.
   const oneOnOne = c.members.length === 2 && others.length === 1;
+  // A "public agent" chat — exactly one agent, the rest human — shows the agent's avatar
+  // as the group avatar (takes precedence over the grid, and over the 1-on-1 case, which
+  // an agent DM already resolves to the same agent).
+  const publicAgent = usePublicAgentMember(c.members);
 
   const title =
     c.title ||
@@ -125,7 +130,15 @@ function ChatRow({
         className="hover:bg-accent flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
         <div className="size-12 shrink-0">
-          {oneOnOne ? (
+          {publicAgent ? (
+            <UserAvatar
+              userId={publicAgent.userId}
+              nickname={publicAgent.nickname}
+              avatarId={publicAgent.avatarId}
+              showMeta={false}
+              className="size-12 rounded-lg"
+            />
+          ) : oneOnOne ? (
             <UserAvatar
               userId={others[0].userId}
               nickname={others[0].nickname}
