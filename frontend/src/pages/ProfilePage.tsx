@@ -1,7 +1,8 @@
 import { useNavigate } from "react-router";
-import { LogOut, User as UserIcon } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { PageHeader } from "@/components/PageHeader";
+import { ChangeAvatar } from "@/components/ChangeAvatar";
 import { Button } from "@/components/ui/button";
 
 export function ProfilePage() {
@@ -20,9 +21,7 @@ export function ProfilePage() {
       <PageHeader title="me" />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-3">
         <div className="bg-card flex items-center gap-4 rounded-lg border p-4">
-          <div className="bg-muted text-primary flex size-14 shrink-0 items-center justify-center rounded-full">
-            <UserIcon className="size-7" />
-          </div>
+          <ChangeAvatar className="size-14" />
           <div className="min-w-0">
             <p className="truncate text-lg font-semibold">{user.nickname}</p>
             <p className="text-muted-foreground truncate text-sm">
