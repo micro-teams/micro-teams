@@ -2,8 +2,21 @@
 // generated AgentApi/ChatApi still do the talking; this only holds the one bit of
 // glue both shells need: turning an agent into a conversation you can talk to.
 
-import type { Agent } from "@/api";
+import type { Agent, Machine } from "@/api";
 import { chatApi, mtCall } from "@/lib/mtApi";
+
+/**
+ * Human-readable machine label for an agent: the machine's NAME (resolved from the
+ * team's machine list) rather than its opaque id. Falls back to the id if the machine
+ * isn't in the list (e.g. not loaded yet), and to undefined when the agent has no machine.
+ */
+export function machineLabel(
+  machineId: string | undefined,
+  machines: Machine[],
+): string | undefined {
+  if (!machineId) return undefined;
+  return machines.find((m) => m.id === machineId)?.name ?? machineId;
+}
 
 /**
  * Start a conversation with an agent: reuse the existing 1:1 with it if there is

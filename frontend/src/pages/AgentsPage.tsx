@@ -8,6 +8,7 @@ import {
   Bot,
   ChevronDown,
   FolderGit2,
+  Info,
   MessageSquarePlus,
   Pencil,
   PlusCircle,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
 import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
-import { startChatWithAgent } from "@/lib/agents";
+import { startChatWithAgent, machineLabel } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
@@ -29,6 +30,7 @@ import {
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
+import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -47,6 +49,7 @@ export function AgentsPage() {
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
+  const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
 
   const machines = useAsync(
     () =>
@@ -235,6 +238,8 @@ export function AgentsPage() {
                     <AgentRow
                       key={a.userId}
                       agent={a}
+                      machineName={machineLabel(a.machineId, machineList)}
+                      onInfo={() => setInfoAgent(a)}
                       onChat={() => chat(a)}
                       onClose={() => close(a)}
                     />
@@ -263,16 +268,30 @@ export function AgentsPage() {
           onRenamed={() => machines.reload()}
         />
       )}
+      {infoAgent && (
+        <AgentInfoDialog
+          key={infoAgent.userId}
+          agent={infoAgent}
+          machineName={machineLabel(infoAgent.machineId, machineList)}
+          open
+          onOpenChange={(o) => !o && setInfoAgent(null)}
+          onChat={() => chat(infoAgent)}
+        />
+      )}
     </>
   );
 }
 
 function AgentRow({
   agent: a,
+  machineName,
+  onInfo,
   onChat,
   onClose,
 }: {
   agent: Agent;
+  machineName?: string;
+  onInfo: () => void;
   onChat: () => void;
   onClose: () => void;
 }) {
@@ -291,9 +310,18 @@ function AgentRow({
         <span className="text-muted-foreground flex items-center gap-2 truncate text-xs">
           <OnlineDot online={a.online} />
           {a.driver && <span>· {a.driver}</span>}
-          {a.machineId && <span className="truncate">· {a.machineId}</span>}
+          {machineName && <span className="truncate">· {machineName}</span>}
         </span>
       </div>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        onClick={onInfo}
+        aria-label="agent info"
+        title="info"
+      >
+        <Info className="size-4" />
+      </Button>
       <Button
         size="icon-sm"
         variant="secondary"
@@ -314,5 +342,73 @@ function AgentRow({
         <Trash2 className="size-4" />
       </Button>
     </li>
+  );
+}
+
+// Agent detail on the phone — the desktop has a whole detail pane; the phone had no
+// way at all to see an agent's driver / machine / team, so this is that view as a modal.
+// The machine shows its NAME (resolved via machineLabel), not its opaque id.
+function AgentInfoDialog({
+  agent: a,
+  machineName,
+  open,
+  onOpenChange,
+  onChat,
+}: {
+  agent: Agent;
+  machineName?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onChat: () => void;
+}) {
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="agent info">
+      <div className="flex flex-col items-center gap-4">
+        <UserAvatar
+          userId={a.userId}
+          nickname={a.nickname}
+          avatarId={a.avatarId}
+          className="size-20"
+        />
+        <div className="flex flex-col items-center gap-1 text-center">
+          <span className="font-medium">
+            {a.nickname || `agent #${a.userId}`}
+          </span>
+          <OnlineDot online={a.online} />
+        </div>
+
+        <dl className="bg-card w-full divide-y overflow-hidden rounded-lg border text-sm">
+          <InfoRow label="user id" value={String(a.userId)} />
+          {a.driver && <InfoRow label="driver" value={a.driver} />}
+          {machineName && <InfoRow label="machine" value={machineName} />}
+          {a.teamId != null && (
+            <InfoRow label="team" value={String(a.teamId)} />
+          )}
+        </dl>
+
+        <p className="text-muted-foreground text-center text-xs">
+          tap the avatar to watch its live screen
+        </p>
+
+        <Button
+          className="w-full"
+          onClick={() => {
+            onOpenChange(false);
+            onChat();
+          }}
+        >
+          <MessageSquarePlus className="size-4" /> chat with agent
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 px-3 py-2.5">
+      <dt className="text-muted-foreground shrink-0">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-mono">{value}</dd>
+    </div>
   );
 }
