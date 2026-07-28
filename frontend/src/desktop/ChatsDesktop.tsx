@@ -17,6 +17,7 @@ import { chatApi, mtCall } from "@/lib/mtApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { UserAvatar } from "@/components/UserAvatar";
+import { usePublicAgentMember } from "@/hooks/usePublicAgentMember";
 import { Conversation } from "@/desktop/Conversation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -189,6 +190,9 @@ function ChatRow({
 }) {
   const others = c.members.filter((m) => m.userId !== meId);
   const oneOnOne = c.members.length === 2 && others.length === 1;
+  // A "public agent" chat — exactly one agent, the rest human — shows the agent's avatar
+  // as the group avatar.
+  const publicAgent = usePublicAgentMember(c.members);
   const title =
     c.title ||
     (oneOnOne
@@ -210,7 +214,15 @@ function ChatRow({
         )}
       >
         <div className="size-11 shrink-0">
-          {oneOnOne ? (
+          {publicAgent ? (
+            <UserAvatar
+              userId={publicAgent.userId}
+              nickname={publicAgent.nickname}
+              avatarId={publicAgent.avatarId}
+              showMeta={false}
+              className="size-11 rounded-lg"
+            />
+          ) : oneOnOne ? (
             <UserAvatar
               userId={others[0].userId}
               nickname={others[0].nickname}
