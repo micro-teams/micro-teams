@@ -24,6 +24,7 @@ export function ConnectPage() {
   const teams = useAsync(
     () => mtCall(teamApi().listTeams({ pageSize: 100 })),
     [],
+    "teams",
   );
   const teamList = teams.data?.teams ?? [];
 

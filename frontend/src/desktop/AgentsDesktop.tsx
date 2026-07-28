@@ -63,6 +63,7 @@ export function AgentsDesktop() {
         ? mtCall(machineApi().listMachines({ teamId, pageSize: 100 }))
         : Promise.resolve(null),
     [teamId],
+    teamId != null ? `machines:${teamId}` : undefined,
   );
   const agents = useAsync(
     () =>
@@ -70,6 +71,7 @@ export function AgentsDesktop() {
         ? mtCall(agentApi().listAgents({ teamId, pageSize: 100 }))
         : Promise.resolve(null),
     [teamId],
+    teamId != null ? `agents:${teamId}` : undefined,
   );
 
   useEffect(() => {

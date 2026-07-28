@@ -12,6 +12,7 @@ import {
 import * as api from "@/lib/api";
 import type { User } from "@/lib/api";
 import { setNtAccessToken, setNtReauthorize } from "@/lib/mtApi";
+import { setCacheScope } from "@/lib/cache";
 
 interface AuthState {
   user: User | null;
@@ -42,6 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNtAccessToken(accessToken);
   }, [accessToken]);
 
+  // Point the read-cache at the signed-in user. A different user (or sign-out)
+  // clears the cache so no account ever paints another's data; the same user
+  // across a reload keeps it. `undefined` during boot (before restore) leaves the
+  // disk cache in place, which is what lets a reload paint from it.
+  useEffect(() => {
+    if (user) setCacheScope(user.id);
+  }, [user]);
+
   // On a 401 from the nt backend, silently refresh through the httpOnly cookie
   // and hand the fresh token back for a one-shot retry.
   useEffect(() => {
@@ -54,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         setUser(null);
         setAccessToken(null);
+        setCacheScope(null);
         return null;
       }
     });
@@ -116,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.logout();
     setUser(null);
     setAccessToken(null);
+    setCacheScope(null); // drop this user's cached reads
   }, []);
 
   const refreshMe = useCallback(async () => {

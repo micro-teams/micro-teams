@@ -46,6 +46,7 @@ export function FilePage() {
         ? Promise.resolve<DocNode | null>(null)
         : mtCall(teamApi().getDocument({ id: teamId, path, content: true })),
     [teamId, path, isNew],
+    isNew ? undefined : `doc:${teamId}:${path}`,
   );
 
   useEffect(() => {
@@ -210,6 +211,7 @@ function HistoryTab({ teamId, path }: { teamId: number; path: string }) {
   const { data, error, loading } = useAsync(
     () => mtCall(teamApi().getDocument({ id: teamId, path, history: true })),
     [teamId, path],
+    `doc-history:${teamId}:${path}`,
   );
   const [diffSha, setDiffSha] = useState<string | null>(null);
 

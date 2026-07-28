@@ -43,6 +43,7 @@ export function ChatsDesktop() {
   const chats = useAsync(
     () => mtCall(chatApi().listChats({ pageSize: 100 })),
     [],
+    "chats",
   );
   // A steady 5s poll keeps the list previews and unread state fresh.
   useEffect(() => {
@@ -59,6 +60,7 @@ export function ChatsDesktop() {
         ? mtCall(chatApi().getThread({ id: selectedId }))
         : Promise.resolve(null),
     [selectedId],
+    selectedId ? `thread:${selectedId}` : undefined,
   );
 
   const title =
