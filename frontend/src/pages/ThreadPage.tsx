@@ -10,6 +10,7 @@ import { useNavigate, useParams } from "react-router";
 import { MoreHorizontal } from "lucide-react";
 import type { Message, ThreadMember } from "@/api";
 import { chatApi, mtCall } from "@/lib/mtApi";
+import { getCache, setCache } from "@/lib/cache";
 import { useAuth } from "@/hooks/useAuth";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
@@ -35,6 +36,7 @@ export function ThreadPage() {
   const detail = useAsync(
     () => mtCall(chatApi().getThread({ id: threadId })),
     [threadId],
+    `thread:${threadId}`,
   );
 
   // Keep the thread sized to the *visible* viewport so the composer stays above
@@ -101,13 +103,21 @@ function MessageList({
     () => new Map(members.map((m) => [m.userId, m])),
     [members],
   );
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
+  const msgKey = `messages:${threadId}`;
+  const [messages, setMessages] = useState<Message[]>(
+    () => getCache<Message[]>(msgKey) ?? [],
+  );
+  const [loading, setLoading] = useState(
+    () => getCache<Message[]>(msgKey) == null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Optimistic messages the user just sent, not yet confirmed by the server. The
+  // poll re-appends them so a refresh mid-send doesn't make them vanish.
+  const pendingRef = useRef<Message[]>([]);
   // Whether the view is pinned to the bottom. Starts true (a fresh thread opens
   // at the newest message); flips off once the user scrolls up to read history,
   // so the 4s poll never yanks them back down.
@@ -118,21 +128,30 @@ function MessageList({
   // desktop pane (Conversation.tsx) does.
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    // Paint the cached messages for this thread at once (stale-while-revalidate);
+    // only spin when we have nothing cached to show.
+    const cached = getCache<Message[]>(msgKey);
+    setMessages(cached ?? []);
+    setLoading(cached == null);
+    pendingRef.current = [];
     atBottomRef.current = true;
-    const fetchOnce = (spin: boolean) => {
-      if (spin) setLoading(true);
-      return mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
-        .then((res) => active && setMessages(res.messages))
+    const fetchOnce = () =>
+      mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
+        .then((res) => {
+          if (!active) return;
+          const pend = pendingRef.current;
+          setMessages(pend.length ? [...res.messages, ...pend] : res.messages);
+          setCache(msgKey, res.messages);
+        })
         .catch((err: unknown) => active && setError(errMsg(err)))
         .finally(() => active && setLoading(false));
-    };
-    void fetchOnce(true);
-    const poll = setInterval(() => void fetchOnce(false), 4000);
+    void fetchOnce();
+    const poll = setInterval(() => void fetchOnce(), 4000);
     return () => {
       active = false;
       clearInterval(poll);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
   // Auto-scroll only when a NEW message arrives AND the user is at the bottom
@@ -151,6 +170,19 @@ function MessageList({
     if (!content) return;
     setSending(true);
     setError(null);
+    // Optimistic: show the message immediately with a temp negative id, then
+    // reconcile with the server's real message (or roll back on failure).
+    const temp: Message = {
+      id: -Date.now(),
+      threadId,
+      senderId: currentUserId ?? 0,
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    pendingRef.current = [...pendingRef.current, temp];
+    atBottomRef.current = true;
+    setMessages((prev) => [...prev, temp]);
+    setText("");
     try {
       const msg = await mtCall(
         chatApi().postMessage({
@@ -158,13 +190,19 @@ function MessageList({
           postMessageRequest: { content },
         }),
       );
-      atBottomRef.current = true;
-      setMessages((prev) =>
-        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
-      );
-      setText("");
+      pendingRef.current = pendingRef.current.filter((m) => m.id !== temp.id);
+      setMessages((prev) => {
+        const noTemp = prev.filter((m) => m.id !== temp.id);
+        return noTemp.some((m) => m.id === msg.id) ? noTemp : [...noTemp, msg];
+      });
+      const cached = getCache<Message[]>(msgKey) ?? [];
+      if (!cached.some((m) => m.id === msg.id))
+        setCache(msgKey, [...cached, msg]);
     } catch (err) {
+      pendingRef.current = pendingRef.current.filter((m) => m.id !== temp.id);
+      setMessages((prev) => prev.filter((m) => m.id !== temp.id));
       setError(errMsg(err));
+      setText(content); // restore the draft so the user can retry
     } finally {
       setSending(false);
     }

@@ -17,6 +17,7 @@ export function ChatsPage() {
   const chats = useAsync(
     () => mtCall(chatApi().listChats({ pageSize: 100 })),
     [],
+    "chats",
   );
   const { data, error, loading } = chats;
   // A steady poll keeps the list fresh while sitting on it — new messages, moved

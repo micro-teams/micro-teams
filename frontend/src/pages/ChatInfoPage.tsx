@@ -24,6 +24,7 @@ export function ChatInfoPage() {
   const detail = useAsync(
     () => mtCall(chatApi().getThread({ id: threadId })),
     [threadId],
+    `thread:${threadId}`,
   );
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -76,11 +76,16 @@ function OpenAgentForm({
         ? mtCall(machineApi().listMachines({ teamId, pageSize: 100 }))
         : Promise.resolve(null),
     [teamId],
+    teamId != null ? `machines:${teamId}` : undefined,
   );
   const list = machines.data?.machines ?? [];
 
   // The drivers this server supports, for the driver picker (Claude, Codex, …).
-  const drivers = useAsync(() => mtCall(agentApi().listAgentDrivers()), []);
+  const drivers = useAsync(
+    () => mtCall(agentApi().listAgentDrivers()),
+    [],
+    "drivers",
+  );
   // Default the picker to the server's default once the list loads.
   useEffect(() => {
     if (drivers.data && !driver) setDriver(drivers.data.defaultDriver);

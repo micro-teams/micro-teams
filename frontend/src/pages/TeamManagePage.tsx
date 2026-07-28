@@ -31,6 +31,7 @@ export function TeamManagePage() {
   const detail = useAsync(
     () => mtCall(teamApi().getTeam({ id: teamId })),
     [teamId],
+    `team:${teamId}`,
   );
   const myRole = detail.data?.members.find((m) => m.userId === user?.id)?.role;
   const canManage = myRole === "OWNER" || myRole === "ADMIN";
