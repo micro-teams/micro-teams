@@ -105,3 +105,44 @@ export function logout(): Promise<void> {
 export function getMe(accessToken: string): Promise<{ user: User }> {
   return request("/users/me", { accessToken });
 }
+
+// Upload a new avatar image (multipart) and get its id back. Not routed through
+// request() because the browser must set the multipart Content-Type + boundary
+// itself — so this one call builds fetch by hand.
+export async function uploadAvatar(
+  file: File,
+  accessToken?: string,
+): Promise<number> {
+  const form = new FormData();
+  form.append("avatar", file);
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(`${BASE}/avatars`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: form,
+  });
+  const body = (await res.json().catch(() => null)) as Envelope<{
+    avatarId: number;
+  }> | null;
+  if (!res.ok || !body) {
+    throw new ApiError(body?.message ?? `HTTP ${res.status}`, res.status);
+  }
+  return body.data.avatarId;
+}
+
+// Update the caller's own profile. cheese-auth's PUT /users/:id takes the whole
+// profile, so pass the current nickname/intro through unchanged when only the
+// avatar is changing.
+export function updateProfile(
+  id: number,
+  input: { nickname: string; intro: string; avatarId: number },
+  accessToken?: string,
+): Promise<void> {
+  return request<void>(`/users/${id}`, {
+    method: "PUT",
+    accessToken,
+    body: JSON.stringify(input),
+  });
+}

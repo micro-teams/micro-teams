@@ -3,7 +3,7 @@
 import { useNavigate } from "react-router";
 import { LogOut, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { Avatar } from "@/components/Avatar";
+import { ChangeAvatar } from "@/components/ChangeAvatar";
 import { Button } from "@/components/ui/button";
 
 export function ProfileDesktop() {
@@ -23,11 +23,7 @@ export function ProfileDesktop() {
         <h1 className="mb-2 text-lg font-semibold">me</h1>
 
         <div className="bg-card flex items-center gap-4 rounded-lg border p-5">
-          <Avatar
-            seed={user.id}
-            label={user.nickname}
-            className="size-16 rounded-xl"
-          />
+          <ChangeAvatar className="size-16" />
           <div className="min-w-0">
             <p className="truncate text-lg font-semibold">{user.nickname}</p>
             <p className="text-muted-foreground truncate text-sm">
