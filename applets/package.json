@@ -1,7 +1,7 @@
 {
   "name": "microteams-applets",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The applets shipped into the microteams CLI host: one screen applet per agent driver (Claude Code, Codex) and one that defines the `microteams api` command tree. Authored in TypeScript against the generated API client, bundled to goja-compatible JS.",
   "type": "module",
   "scripts": {
