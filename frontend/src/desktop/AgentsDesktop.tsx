@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
 import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
-import { startChatWithAgent } from "@/lib/agents";
+import { startChatWithAgent, machineLabel } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
@@ -281,6 +281,7 @@ export function AgentsDesktop() {
         <AgentDetail
           key={selected.userId}
           agent={selected}
+          machineName={machineLabel(selected.machineId, machineList)}
           onChat={() => chat(selected)}
           onClose={() => close(selected)}
         />
@@ -326,10 +327,12 @@ export function AgentsDesktop() {
 
 function AgentDetail({
   agent: a,
+  machineName,
   onChat,
   onClose,
 }: {
   agent: Agent;
+  machineName?: string;
   onChat: () => void;
   onClose: () => void;
 }) {
@@ -352,7 +355,7 @@ function AgentDetail({
         <dl className="bg-card w-full divide-y overflow-hidden rounded-lg border text-sm">
           <DetailRow label="user id" value={String(a.userId)} />
           {a.driver && <DetailRow label="driver" value={a.driver} />}
-          {a.machineId && <DetailRow label="machine" value={a.machineId} />}
+          {machineName && <DetailRow label="machine" value={machineName} />}
           {a.teamId != null && (
             <DetailRow label="team" value={String(a.teamId)} />
           )}
