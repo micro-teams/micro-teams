@@ -17,6 +17,7 @@ import { chatApi, mtCall } from "@/lib/mtApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { UserAvatar } from "@/components/UserAvatar";
+import { MemberGrid } from "@/components/MemberGrid";
 import { usePublicAgentMember } from "@/hooks/usePublicAgentMember";
 import { Conversation } from "@/desktop/Conversation";
 import { Button } from "@/components/ui/button";
@@ -231,9 +232,7 @@ function ChatRow({
               className="size-11 rounded-lg"
             />
           ) : (
-            <div className="bg-secondary text-secondary-foreground flex size-11 items-center justify-center rounded-lg">
-              <Users className="size-5" />
-            </div>
+            <MemberGrid members={c.members} />
           )}
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
