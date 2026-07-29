@@ -25,6 +25,56 @@
       microteams.print(JSON.stringify(msg));
     }
   });
+  microteams.command({
+    name: "messages",
+    short: "Read recent messages from a group chat you're in (page back with --before)",
+    flags: [
+      { name: "thread-id", type: "int", required: true, help: "the group (thread) id to read" },
+      { name: "limit", type: "int", help: "how many messages to fetch (default 30, max 100)" },
+      {
+        name: "before",
+        type: "int",
+        help: "page further back: the 'older' cursor printed by a previous call"
+      },
+      {
+        name: "json",
+        type: "bool",
+        help: "output the raw JSON (messages + page cursor) instead of text lines"
+      }
+    ],
+    run: (ctx) => {
+      var _a, _b, _c, _d;
+      const threadId = Number(ctx.flags["thread-id"]);
+      let limit = ctx.flags["limit"] != null ? Number(ctx.flags["limit"]) : 30;
+      if (!(limit > 0)) limit = 30;
+      if (limit > 100) limit = 100;
+      let path = `/chat/${threadId}/messages?page_size=${limit}`;
+      if (ctx.flags["before"] != null) path += `&page_start=${Number(ctx.flags["before"])}`;
+      const resp = request({ method: "GET", path });
+      if (ctx.flags["json"]) {
+        microteams.print(JSON.stringify(resp));
+        return;
+      }
+      const messages = (_a = resp.messages) != null ? _a : [];
+      if (messages.length === 0) {
+        microteams.print("(no messages)");
+        return;
+      }
+      const detail = request({ method: "GET", path: `/chat/${threadId}` });
+      const nameById = {};
+      for (const m of (_b = detail.members) != null ? _b : []) nameById[m.userId] = (_c = m.nickname) != null ? _c : `#${m.userId}`;
+      for (const m of messages) {
+        const who = (_d = nameById[m.senderId]) != null ? _d : `#${m.senderId}`;
+        microteams.print(`${m.createdAt} ${who}\uFF1A${m.content}`);
+      }
+      const page = resp.page;
+      if (page.has_more && page.next_start != null) {
+        microteams.print(
+          `\u2014\u2014 older messages exist; page back with: microteams api messages --thread-id ${threadId} --before ${page.next_start}`
+        );
+      }
+    }
+  });
   function gitWorkspace() {
     return request({ method: "GET", path: "/agent/git-workspace" });
   }
