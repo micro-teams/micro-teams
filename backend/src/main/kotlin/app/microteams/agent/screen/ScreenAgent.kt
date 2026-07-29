@@ -59,5 +59,6 @@ class ScreenAgent(
     private fun prompt(threadId: IdType, speaker: String, text: String): String =
         "[thread:$threadId] $speaker：$text\n" +
             "(Reminder: the user cannot see anything you type here. To reply so the user sees it, " +
-            "you MUST run: microteams api say --thread-id $threadId --text '<your reply>')"
+            "you MUST run: microteams api say --thread-id $threadId --text '<your reply>'. " +
+            "Write your reply as plain text, not markdown — the chat shows it verbatim.)"
 }
