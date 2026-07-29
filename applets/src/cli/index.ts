@@ -14,6 +14,10 @@
 import type { AgentGitWorkspace, ListMessagesResponse, Message, ThreadDetail } from '../api'
 import { request } from '../runtime'
 
+// Above this many characters, `say` appends an advisory hint nudging the agent toward shorter
+// replies next time. The message is still sent in full — this only warns after the fact. Tune here.
+const SAY_LENGTH_HINT_THRESHOLD = 500
+
 microteams.command({
   name: 'say',
   short: 'Send a message into a group chat as yourself',
@@ -23,9 +27,15 @@ microteams.command({
   ],
   run: (ctx) => {
     const threadId = Number(ctx.flags['thread-id'])
-    const body = { content: String(ctx.flags['text']) }
+    const text = String(ctx.flags['text'])
+    const body = { content: text }
     const msg = request<Message>({ method: 'POST', path: `/chat/${threadId}/messages`, body })
     microteams.print(JSON.stringify(msg))
+    if (text.length > SAY_LENGTH_HINT_THRESHOLD) {
+      microteams.print(
+        `note: this message was ${text.length} characters (long). Prefer concise replies — lead with the conclusion and expand only if asked.`,
+      )
+    }
   },
 })
 
