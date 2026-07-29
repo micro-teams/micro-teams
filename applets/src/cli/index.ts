@@ -16,7 +16,10 @@ import { request } from '../runtime'
 
 // Above this many characters, `say` appends an advisory hint nudging the agent toward shorter
 // replies next time. The message is still sent in full — this only warns after the fact. Tune here.
-const SAY_LENGTH_HINT_THRESHOLD = 500
+// Calibrated against real thread-1 traffic (2026-07-29): human messages ran ~57 chars median,
+// ~165 at p90, 681 max; agent messages ~588 median. 300 lets a reply run a few times longer than a
+// typical human line (still terse) while flagging genuine essays.
+const SAY_LENGTH_HINT_THRESHOLD = 300
 
 microteams.command({
   name: 'say',
