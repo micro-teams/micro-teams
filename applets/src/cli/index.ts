@@ -175,5 +175,82 @@ microteams.command({
         microteams.print(r.stdout.trim() || 'clean')
       },
     },
+    // A heading-tree map of the document tree: per file, its markdown headings indented by level.
+    // The whole tree is many files but its all-headings outline is tiny — so an agent can load this
+    // cheap map first, then open only the one file/section it actually needs. Purely local: it scans
+    // the git checkout with exec (find + read), no backend call. Headings inside fenced code blocks
+    // (``` … ```) are skipped, so a `#` line in a code sample is never mistaken for a heading.
+    {
+      name: 'outline',
+      short: 'Print a heading-tree map of the document tree (which file has which sections)',
+      flags: [
+        { name: 'path', type: 'string', help: 'restrict the scan to this subdirectory of the tree' },
+        { name: 'depth', type: 'int', help: 'only include headings up to this level (1-6, default 6)' },
+      ],
+      run: (ctx) => {
+        const top = microteams.exec('git', ['rev-parse', '--show-toplevel'])
+        if (top.code !== 0)
+          throw new Error(
+            'docs outline: not inside the document tree — run `microteams api docs sync` first.\n' +
+              top.stderr,
+          )
+        const root = top.stdout.trim()
+
+        let maxDepth = ctx.flags['depth'] != null ? Number(ctx.flags['depth']) : 6
+        if (!(maxDepth >= 1)) maxDepth = 6
+        if (maxDepth > 6) maxDepth = 6
+
+        // Scan the whole tree by default, or the requested subdirectory. `find` skips .git and gives
+        // every .md file (tracked or not) so the map reflects what's on disk right now.
+        const scanDir = ctx.flags['path'] ? `${root}/${String(ctx.flags['path'])}` : root
+        const found = microteams.exec('find', [
+          scanDir,
+          '-type',
+          'f',
+          '-name',
+          '*.md',
+          '-not',
+          '-path',
+          '*/.git/*',
+        ])
+        if (found.code !== 0) throw new Error('docs outline (find) failed: ' + found.stderr)
+
+        const files = found.stdout
+          .split('\n')
+          .map((f) => f.trim())
+          .filter((f) => f.length > 0)
+          .sort()
+        if (files.length === 0) {
+          microteams.print('(no markdown files)')
+          return
+        }
+
+        for (const file of files) {
+          const rel = file.indexOf(root + '/') === 0 ? file.slice(root.length + 1) : file
+          const content = microteams.exec('cat', [file])
+          if (content.code !== 0) throw new Error('docs outline (read) failed: ' + content.stderr)
+
+          const lines: string[] = []
+          // Fence-aware: a line of 3+ backticks or tildes toggles a code block; headings inside are
+          // ignored. Do this in JS (not a shell one-liner) so the fence tracking is reliable.
+          let inFence = false
+          for (const line of content.stdout.split('\n')) {
+            if (/^\s*(`{3,}|~{3,})/.test(line)) {
+              inFence = !inFence
+              continue
+            }
+            if (inFence) continue
+            const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
+            if (!m) continue
+            const level = m[1].length
+            if (level > maxDepth) continue
+            lines.push('  '.repeat(level - 1) + m[2])
+          }
+
+          microteams.print(rel)
+          for (const h of lines) microteams.print(h)
+        }
+      },
+    },
   ],
 })
