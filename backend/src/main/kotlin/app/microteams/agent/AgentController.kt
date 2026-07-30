@@ -54,6 +54,7 @@ import org.springframework.web.context.request.ServletRequestAttributes
 @RestController
 class AgentController(
     private val agentService: AgentService,
+    private val agentProfileService: AgentProfileService,
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
     private val attribution: AgentAttribution,
@@ -327,6 +328,24 @@ class AgentController(
             machineId = machineId,
             screenToken = screenToken,
         )
+
+    /**
+     * Change an agent's avatar. Same team-membership rule as close/reboot: managing an existing
+     * agent. The image is already uploaded (by the caller, to the identity service); what a human
+     * cannot do is point ANOTHER user's profile at it, which is why this exists — see
+     * AgentProfileService.
+     */
+    @Guard("change-agent-avatar", "agent")
+    override fun setAgentAvatar(
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
+        setAgentAvatarRequestDTO: SetAgentAvatarRequestDTO,
+    ): ResponseEntity<AgentDTO> {
+        agentProfileService.setAvatar(userId, setAgentAvatarRequestDTO.avatarId)
+        val viewerAuth = authorizationService.currentAuthorization()
+        return ResponseEntity.ok(
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+        )
+    }
 
     @Guard("close-agent", "agent")
     override fun closeAgent(

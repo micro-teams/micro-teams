@@ -4,12 +4,14 @@
  */
 package app.microteams.api
 
+import app.microteams.model.AgentDTO
 import app.microteams.model.AgentDriversDTO
 import app.microteams.model.AgentGitWorkspaceDTO
 import app.microteams.model.AgentTokenDTO
 import app.microteams.model.ListAgentsResponseDTO
 import app.microteams.model.OpenAgentRequestDTO
 import app.microteams.model.OpenedAgentDTO
+import app.microteams.model.SetAgentAvatarRequestDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
 import io.swagger.v3.oas.annotations.media.*
@@ -219,6 +221,37 @@ interface AgentApi {
     fun rebootAgent(
         @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long
     ): ResponseEntity<OpenedAgentDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "Set an agent's avatar. The image itself is uploaded to the identity service by the caller (as themselves) — this only points the agent's profile at the resulting avatar id, which is the part a human cannot do directly: the identity service lets a user change only their own profile, so the server performs the change as the agent itself. ",
+        operationId = "setAgentAvatar",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "Updated — the agent as it now reads",
+                    content = [Content(schema = Schema(implementation = AgentDTO::class))],
+                )
+            ],
+    )
+    @RequestMapping(
+        method = [RequestMethod.PUT],
+        value = ["/agent/{userId}/avatar"],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun setAgentAvatar(
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
+        @Parameter(description = "", required = true)
+        @Valid
+        @RequestBody
+        setAgentAvatarRequestDTO: SetAgentAvatarRequestDTO,
+    ): ResponseEntity<AgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 }

@@ -915,6 +915,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenedAgent"
+  /agent/{userId}/avatar:
+    put:
+      tags: [agent]
+      operationId: setAgentAvatar
+      summary: >
+        Set an agent's avatar. The image itself is uploaded to the identity service by the caller
+        (as themselves) — this only points the agent's profile at the resulting avatar id, which is
+        the part a human cannot do directly: the identity service lets a user change only their own
+        profile, so the server performs the change as the agent itself.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAgentAvatarRequest"
+      responses:
+        "200":
+          description: Updated — the agent as it now reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
   /agent/token:
     post:
       tags: [agent]
@@ -1057,6 +1086,15 @@ components:
           type: string
           format: date-time
           description: Last activity (last message time, else the chat's creation time)
+
+    SetAgentAvatarRequest:
+      type: object
+      required:
+        - avatarId
+      properties:
+        avatarId:
+          type: integer
+          description: An avatar id from the identity service (POST /avatars).
 
     ChatMember:
       type: object

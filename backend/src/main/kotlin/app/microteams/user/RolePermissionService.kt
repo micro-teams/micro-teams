@@ -258,6 +258,16 @@ class RolePermissionService {
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                         customLogic = "is-member-of-agent-team",
                     ),
+                    // PUT /agent/{userId}/avatar — managing an existing agent, so the same rule
+                    // again. Note what this does NOT need: any right over the identity service's
+                    // profile of that user. The server performs the change as the agent itself
+                    // (AgentProfileService), so belonging to the agent's team is the whole
+                    // permission question.
+                    Permission(
+                        authorizedActions = listOf("change-agent-avatar"),
+                        authorizedResource = AuthorizedResource(types = listOf("agent")),
+                        customLogic = "is-member-of-agent-team",
+                    ),
                 ),
         )
     }
