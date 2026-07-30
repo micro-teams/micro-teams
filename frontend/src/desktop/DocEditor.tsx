@@ -66,6 +66,37 @@ export function DocEditor({
 
   const dirty = savedContent !== null && content !== savedContent;
 
+  // The editor loads once per (team, path); without this it would keep showing
+  // stale content after a teammate edits or `docs sync` pulls a newer version.
+  // Refetch when the tab becomes visible or the window regains focus, and adopt
+  // the server content only when there are no unsaved edits — read live via a
+  // ref so the listener never captures a stale `dirty`. (T-053)
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    if (isNew) return;
+    let active = true;
+    function revalidate() {
+      if (document.visibilityState !== "visible" || dirtyRef.current) return;
+      mtCall(teamApi().getDocument({ id: teamId, path, content: true }))
+        .then((node: DocNode) => {
+          if (!active || dirtyRef.current) return;
+          setContent(node.content ?? "");
+          setSavedContent(node.content ?? "");
+        })
+        .catch(() => {
+          // Keep showing current content if a background refresh fails.
+        });
+    }
+    document.addEventListener("visibilitychange", revalidate);
+    window.addEventListener("focus", revalidate);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", revalidate);
+      window.removeEventListener("focus", revalidate);
+    };
+  }, [teamId, path, isNew]);
+
   const save = useCallback(
     async (body: string) => {
       setError(null);
