@@ -49,14 +49,41 @@ export function FilePage() {
     isNew ? undefined : `doc:${teamId}:${path}`,
   );
 
+  // Seed local state from the loaded doc — on first load, and again when a
+  // background revalidation brings newer server content. Only adopt it when the
+  // user has no unsaved edits (content === savedContent), so we never clobber.
   useEffect(() => {
-    if (load.data && savedContent === null) {
-      setContent(load.data.content ?? "");
-      setSavedContent(load.data.content ?? "");
+    if (!load.data) return;
+    const incoming = load.data.content ?? "";
+    if (
+      savedContent === null ||
+      (content === savedContent && incoming !== savedContent)
+    ) {
+      setContent(incoming);
+      setSavedContent(incoming);
     }
-  }, [load.data, savedContent]);
+  }, [load.data, content, savedContent]);
 
   const dirty = savedContent !== null && content !== savedContent;
+
+  // The doc viewer loads once on mount; without this it would keep showing stale
+  // content after a teammate edits or `docs sync` pulls a newer version. Refetch
+  // when the tab becomes visible or the window regains focus — but not while the
+  // user has unsaved edits, to avoid interrupting them (the seed effect above
+  // also guards against clobbering). (T-053)
+  const reloadDoc = load.reload;
+  useEffect(() => {
+    if (isNew) return;
+    function revalidate() {
+      if (document.visibilityState === "visible" && !dirty) reloadDoc();
+    }
+    document.addEventListener("visibilitychange", revalidate);
+    window.addEventListener("focus", revalidate);
+    return () => {
+      document.removeEventListener("visibilitychange", revalidate);
+      window.removeEventListener("focus", revalidate);
+    };
+  }, [isNew, dirty, reloadDoc]);
 
   // After the preview HTML is in the DOM, turn any ```mermaid blocks into diagrams.
   const previewRef = useRef<HTMLDivElement>(null);
