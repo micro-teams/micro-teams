@@ -24,6 +24,7 @@ import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
 import { PageHeader } from "@/components/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
+import { ChangeAvatar } from "@/components/ChangeAvatar";
 import {
   OpenAgentDialog,
   OnlineDot,
@@ -272,6 +273,7 @@ export function AgentsPage() {
       )}
       {infoAgent && (
         <AgentInfoDialog
+          onAvatarChanged={() => agents.reload()}
           key={infoAgent.userId}
           agent={infoAgent}
           machineName={machineLabel(infoAgent.machineId, machineList)}
@@ -356,21 +358,28 @@ function AgentInfoDialog({
   open,
   onOpenChange,
   onChat,
+  onAvatarChanged,
 }: {
   agent: Agent;
   machineName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChat: () => void;
+  onAvatarChanged: () => void;
 }) {
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="agent info">
       <div className="flex flex-col items-center gap-4">
-        <UserAvatar
-          userId={a.userId}
-          nickname={a.nickname}
-          avatarId={a.avatarId}
+        {/* Same control as your own avatar, pointed at the agent — see ChangeAvatar. */}
+        <ChangeAvatar
           className="size-20"
+          target={{
+            kind: "agent",
+            userId: a.userId,
+            nickname: a.nickname,
+            avatarId: a.avatarId,
+          }}
+          onChanged={onAvatarChanged}
         />
         <div className="flex flex-col items-center gap-1 text-center">
           <span className="font-medium">
@@ -389,7 +398,7 @@ function AgentInfoDialog({
         </dl>
 
         <p className="text-muted-foreground text-center text-xs">
-          tap the avatar to watch its live screen
+          tap the avatar to change its picture
         </p>
 
         <Button

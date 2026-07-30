@@ -23,6 +23,9 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.rucca.cheese.auth.Authorization
+import org.rucca.cheese.auth.AuthorizedResource
+import org.rucca.cheese.auth.Permission
 import org.rucca.cheese.auth.TokenPayload
 import org.rucca.cheese.common.config.ApplicationConfig
 import org.rucca.cheese.common.persistent.IdType
@@ -52,10 +55,46 @@ class AgentTokenService(
             rolePermissionService.getAuthorizationForUserWithRole(agentUserId, "standard-user")
         val payload = TokenPayload(authorization, signedAt = now, validUntil = validUntil)
 
+        return sign(payload)
+    }
+
+    /**
+     * A token that may do exactly one thing: change [agentUserId]'s own profile in the identity
+     * service. Deliberately NOT the standard-user set (which mt trims to its own endpoints and so
+     * does not carry identity's `modify-profile` at all) and deliberately not a widening of the
+     * token the agent's CLI holds: this capability belongs to the server, exercised as the agent
+     * for one call, so an agent gains no new power over itself or anything else.
+     *
+     * `ownedByUser` is the agent, which is what makes identity accept it — its rule allows
+     * modify-profile only on the caller's own user — and equally what stops this token from
+     * touching anybody else's profile.
+     */
+    fun mintForOwnProfileUpdate(agentUserId: IdType): MintedToken {
+        val now = System.currentTimeMillis()
+        val validUntil = now + TTL_MS
+        val authorization =
+            Authorization(
+                userId = agentUserId,
+                permissions =
+                    listOf(
+                        Permission(
+                            authorizedActions = listOf("modify-profile"),
+                            authorizedResource =
+                                AuthorizedResource(
+                                    ownedByUser = agentUserId,
+                                    types = listOf("user"),
+                                ),
+                        )
+                    ),
+            )
+        return sign(TokenPayload(authorization, signedAt = now, validUntil = validUntil))
+    }
+
+    private fun sign(payload: TokenPayload): MintedToken {
         @Suppress("UNCHECKED_CAST")
         val claim = claimMapper.convertValue(payload, Map::class.java) as Map<String, Any>
         val token = JWT.create().withClaim("payload", claim).sign(Algorithm.HMAC256(jwtSecret))
-        return MintedToken(token = token, expiresAt = validUntil / 1000)
+        return MintedToken(token = token, expiresAt = payload.validUntil / 1000)
     }
 
     private companion object {

@@ -25,6 +25,7 @@ import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
 import { UserAvatar } from "@/components/UserAvatar";
+import { ChangeAvatar } from "@/components/ChangeAvatar";
 import {
   OpenAgentDialog,
   OnlineDot,
@@ -286,6 +287,7 @@ export function AgentsDesktop() {
           machineName={machineLabel(selected.machineId, machineList)}
           onChat={() => chat(selected)}
           onClose={() => close(selected)}
+          onAvatarChanged={() => agents.reload()}
         />
       ) : (
         <section className="text-muted-foreground flex min-w-0 flex-1 flex-col items-center justify-center gap-3">
@@ -332,20 +334,27 @@ function AgentDetail({
   machineName,
   onChat,
   onClose,
+  onAvatarChanged,
 }: {
   agent: Agent;
   machineName?: string;
   onChat: () => void;
   onClose: () => void;
+  onAvatarChanged: () => void;
 }) {
   return (
     <section className="min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-5 p-10">
-        <UserAvatar
-          userId={a.userId}
-          nickname={a.nickname}
-          avatarId={a.avatarId}
+        {/* Same control as your own avatar, pointed at the agent — see ChangeAvatar. */}
+        <ChangeAvatar
           className="size-24"
+          target={{
+            kind: "agent",
+            userId: a.userId,
+            nickname: a.nickname,
+            avatarId: a.avatarId,
+          }}
+          onChanged={onAvatarChanged}
         />
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-lg font-semibold">
