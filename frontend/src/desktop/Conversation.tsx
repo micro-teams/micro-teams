@@ -17,8 +17,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { errMsg } from "@/hooks/useAsync";
 import { UserAvatar } from "@/components/UserAvatar";
 import { useAgentPresence } from "@/hooks/useAgentPresence";
+import { useOutbox, type Pending } from "@/hooks/useOutbox";
 import { Textarea } from "@/components/ui/textarea";
-import { Loading, Spinner } from "@/components/ui/spinner";
+import { Clock } from "lucide-react";
+import { Loading } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // WeChat-ish bubble colours (recognisable green for your own messages) — identical
@@ -70,12 +72,22 @@ function MessageList({
   );
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // Optimistic messages the user just sent, not yet confirmed by the server. The
-  // poll re-appends them so a refresh mid-send doesn't make them vanish.
-  const pendingRef = useRef<Message[]>([]);
+  // Messages the user has sent that the server has not confirmed yet. The outbox keeps retrying
+  // them (and survives a reload), so a bad network never turns into a lost message or a scary
+  // error — see useOutbox.
+  const outbox = useOutbox(threadId, {
+    onSent: (msg) => {
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
+      );
+      const cached = getCache<Message[]>(msgKey) ?? [];
+      if (!cached.some((m) => m.id === msg.id))
+        setCache(msgKey, [...cached, msg]);
+    },
+    onDiscard: (content) => setText((t) => (t.trim() ? t : content)),
+  });
   // Whether the view is pinned to the bottom. Starts true (opening a thread lands
   // on the newest message); flips off once the user scrolls up to read history,
   // so the 4s poll never yanks them back down.
@@ -90,14 +102,15 @@ function MessageList({
     const cached = getCache<Message[]>(msgKey);
     setMessages(cached ?? []);
     setLoading(cached == null);
-    pendingRef.current = [];
     atBottomRef.current = true;
     const fetchOnce = () =>
       mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
         .then((res) => {
           if (!active) return;
-          const pend = pendingRef.current;
-          setMessages(pend.length ? [...res.messages, ...pend] : res.messages);
+          // Anything the server already has stops being pending — matched by clientToken, so a
+          // send whose response was lost is recognised rather than sent twice.
+          outbox.reconcile(res.messages);
+          setMessages(res.messages);
           setCache(msgKey, res.messages);
         })
         .catch((err: unknown) => active && setError(errMsg(err)))
@@ -121,48 +134,15 @@ function MessageList({
       bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lastMessageId]);
 
-  async function send(e: FormEvent) {
+  function send(e: FormEvent) {
     e.preventDefault();
     const content = text.trim();
     if (!content) return;
-    setSending(true);
-    setError(null);
-    // Optimistic: show the message immediately with a temp negative id, then
-    // reconcile with the server's real message (or roll back on failure).
-    const temp: Message = {
-      id: -Date.now(),
-      threadId,
-      senderId: currentUserId ?? 0,
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    pendingRef.current = [...pendingRef.current, temp];
+    // Handed to the outbox, which owns delivery from here: it retries until the server takes it.
+    // The composer clears at once because the message IS going to be sent.
+    outbox.enqueue(content);
     atBottomRef.current = true;
-    setMessages((prev) => [...prev, temp]);
     setText("");
-    try {
-      const msg = await mtCall(
-        chatApi().postMessage({
-          id: threadId,
-          postMessageRequest: { content },
-        }),
-      );
-      pendingRef.current = pendingRef.current.filter((m) => m.id !== temp.id);
-      setMessages((prev) => {
-        const noTemp = prev.filter((m) => m.id !== temp.id);
-        return noTemp.some((m) => m.id === msg.id) ? noTemp : [...noTemp, msg];
-      });
-      const cached = getCache<Message[]>(msgKey) ?? [];
-      if (!cached.some((m) => m.id === msg.id))
-        setCache(msgKey, [...cached, msg]);
-    } catch (err) {
-      pendingRef.current = pendingRef.current.filter((m) => m.id !== temp.id);
-      setMessages((prev) => prev.filter((m) => m.id !== temp.id));
-      setError(errMsg(err));
-      setText(content); // restore the draft so the user can retry
-    } finally {
-      setSending(false);
-    }
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -215,6 +195,14 @@ function MessageList({
               </div>
             );
           })}
+          {outbox.pending.map((p) => (
+            <PendingRow
+              key={p.clientToken}
+              pending={p}
+              onRetry={() => outbox.retry(p.clientToken)}
+              onDiscard={() => outbox.discard(p.clientToken)}
+            />
+          ))}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -231,15 +219,69 @@ function MessageList({
           />
           <button
             type="submit"
-            disabled={sending || !text.trim()}
+            disabled={!text.trim()}
             className="flex h-11 items-center justify-center rounded-md px-5 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
             style={{ backgroundColor: "#07c160" }}
           >
-            {sending ? <Spinner className="text-white" /> : "send"}
+            send
           </button>
         </div>
       </form>
     </>
+  );
+}
+
+/**
+ * A message on its way, or one the server refused. On its way it is just a dimmed own-message bubble
+ * with a clock — nothing red, because nothing has failed yet; the outbox is still trying. A refusal
+ * is the only thing that asks the user to decide: try again, or take the text back.
+ */
+function PendingRow({
+  pending: p,
+  onRetry,
+  onDiscard,
+}: {
+  pending: Pending;
+  onRetry: () => void;
+  onDiscard: () => void;
+}) {
+  const failed = p.state === "failed";
+  return (
+    <div className="flex flex-col">
+      <div className="flex flex-row-reverse items-start gap-2">
+        <div className="size-9 shrink-0" />
+        <div className="flex max-w-[72%] min-w-0 flex-col items-end">
+          <div
+            className={
+              failed
+                ? "rounded-lg px-3 py-2 text-sm"
+                : "rounded-lg px-3 py-2 text-sm opacity-60"
+            }
+            style={{ backgroundColor: OWN_BG, color: OWN_FG }}
+          >
+            <span className="break-words whitespace-pre-wrap wrap-anywhere">
+              {p.content}
+            </span>
+          </div>
+          {failed ? (
+            <div className="mt-0.5 flex items-center gap-2 px-1 text-xs text-red-400">
+              <span>not sent{p.error ? `: ${p.error}` : ""}</span>
+              <button type="button" onClick={onRetry} className="underline">
+                retry
+              </button>
+              <button type="button" onClick={onDiscard} className="underline">
+                remove
+              </button>
+            </div>
+          ) : (
+            <span className="mt-0.5 flex items-center gap-1 px-1 text-[11px] text-neutral-400">
+              <Clock className="size-3" />
+              sending…
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
