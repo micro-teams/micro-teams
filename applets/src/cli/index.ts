@@ -11,7 +11,14 @@
 // the wire field names from MicroTeams-API.yml (e.g. `content`). Response typing, where drift
 // actually bites, comes from the generated models (`import type` — erased from the bundle).
 
-import type { AgentGitWorkspace, ListMessagesResponse, Message, ThreadDetail } from '../api'
+import type {
+  AgentGitWorkspace,
+  ChatSummary,
+  ListChatsResponse,
+  ListMessagesResponse,
+  Message,
+  ThreadDetail,
+} from '../api'
 import { request } from '../runtime'
 
 microteams.command({
@@ -95,6 +102,119 @@ microteams.command({
     }
   },
 })
+
+// Which groups am I in? An agent only ever learns a thread id from a message that was pushed at it,
+// so a group nobody has pinged it in lately is invisible — it cannot even name it to `messages`.
+// This is the map that makes reading history usable: one line per group, most recently active first.
+//
+// The backend already returns everything a line needs (members + the last message) in this one call,
+// so unlike `messages` this resolves the last sender's name without a second request.
+microteams.command({
+  name: 'chats',
+  short: "List the group chats you're in — or one group's details with --thread-id",
+  flags: [
+    {
+      name: 'thread-id',
+      type: 'int',
+      help: 'show this one group in detail (its title and every member) instead of the list',
+    },
+    { name: 'limit', type: 'int', help: 'how many groups to list (default 20, max 100)' },
+    {
+      name: 'page-start',
+      type: 'int',
+      help: 'list further down: the cursor printed by a previous call',
+    },
+    { name: 'with-members', type: 'bool', help: 'also list each group\'s member names' },
+    { name: 'json', type: 'bool', help: 'output the raw JSON instead of text lines' },
+  ],
+  run: (ctx) => {
+    // One group in detail. Without this an agent sees only whoever has spoken lately and cannot
+    // learn who else is in the room — the full membership never appears in the messages it is fed.
+    if (ctx.flags['thread-id'] != null) {
+      chatDetail(Number(ctx.flags['thread-id']), ctx.flags['json'] === true)
+      return
+    }
+
+    let limit = ctx.flags['limit'] != null ? Number(ctx.flags['limit']) : 20
+    if (!(limit > 0)) limit = 20
+    if (limit > 100) limit = 100
+
+    let path = `/chat?page_size=${limit}`
+    if (ctx.flags['page-start'] != null) path += `&page_start=${Number(ctx.flags['page-start'])}`
+    const resp = request<ListChatsResponse>({ method: 'GET', path })
+
+    if (ctx.flags['json']) {
+      microteams.print(JSON.stringify(resp))
+      return
+    }
+
+    const chats = resp.chats ?? []
+    if (chats.length === 0) {
+      microteams.print('(you are in no groups)')
+      return
+    }
+
+    const withMembers = ctx.flags['with-members'] === true
+    for (const c of chats) microteams.print(chatLine(c, withMembers))
+
+    // Page is snake_case on the wire and request<T> does not remap field names.
+    const page = resp.page as unknown as { has_more?: boolean; next_start?: number }
+    if (page.has_more && page.next_start != null) {
+      microteams.print(
+        `—— more groups exist; list on with: microteams api chats --page-start ${page.next_start}`,
+      )
+    }
+  },
+})
+
+// Everything about one group that the agent cannot get from the messages it receives: its title and
+// its FULL membership, including the quiet ones, with who runs it. Straight off GET /chat/{id} — the
+// thread detail already carries members with their names and roles, so no backend work is involved.
+function chatDetail(threadId: number, asJson: boolean) {
+  const detail = request<ThreadDetail>({ method: 'GET', path: `/chat/${threadId}` })
+  if (asJson) {
+    microteams.print(JSON.stringify(detail))
+    return
+  }
+  const thread = detail.thread
+  const members = detail.members ?? []
+  const title = thread?.title || members.map((m) => m.nickname).join('、') || `thread #${threadId}`
+  microteams.print(`#${threadId} ${title}`)
+  if (thread?.createdAt) microteams.print(`created ${thread.createdAt}`)
+  if (thread?.updatedAt) microteams.print(`last activity ${thread.updatedAt}`)
+  microteams.print(`${members.length} member(s):`)
+  for (const m of members) {
+    const name = m.nickname ?? `#${m.userId}`
+    // Only an unusual role is worth printing; everyone being a "MEMBER" is noise.
+    const role = m.role && m.role !== 'MEMBER' ? ` ${m.role}` : ''
+    microteams.print(`  ${name} (#${m.userId})${role}`)
+  }
+}
+
+// One group as one line: id first (an id is what `--thread-id` wants), then title, size, and the
+// last thing said. The preview is flattened and clipped — a single multi-line message would
+// otherwise push every other group off the screen, which defeats the point of a map.
+function chatLine(c: ChatSummary, withMembers: boolean): string {
+  const members = c.members ?? []
+  const title = c.title || members.map((m) => m.nickname).join('、') || `thread #${c.id}`
+  let line = `#${c.id} ${title} · ${members.length} members`
+  const last = c.lastMessage
+  if (last) {
+    const nameById: Record<number, string> = {}
+    for (const m of members) nameById[m.userId] = m.nickname ?? `#${m.userId}`
+    const who = nameById[last.senderId] ?? `#${last.senderId}`
+    line += ` · ${last.createdAt} ${who}：${clip(String(last.content ?? ''), 60)}`
+  } else {
+    line += ' · (no messages yet)'
+  }
+  if (withMembers) line += `\n    members: ${members.map((m) => m.nickname).join(', ')}`
+  return line
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? flat.slice(0, max) + '…' : flat
+}
 
 // The team document tree, worked as an ordinary local git checkout. The agent edits files with its
 // normal tools; these commands are the only ones that touch git — running it via microteams.exec.
@@ -186,6 +306,11 @@ microteams.command({
       flags: [
         { name: 'path', type: 'string', help: 'restrict the scan to this subdirectory of the tree' },
         { name: 'depth', type: 'int', help: 'only include headings up to this level (1-6, default 6)' },
+        {
+          name: 'grep',
+          type: 'string',
+          help: 'only headings containing this text (case-insensitive); files with no match are skipped',
+        },
       ],
       run: (ctx) => {
         const top = microteams.exec('git', ['rev-parse', '--show-toplevel'])
@@ -199,6 +324,12 @@ microteams.command({
         let maxDepth = ctx.flags['depth'] != null ? Number(ctx.flags['depth']) : 6
         if (!(maxDepth >= 1)) maxDepth = 6
         if (maxDepth > 6) maxDepth = 6
+
+        // --grep is the cheapest tier of "find where this is written about": the outline is already
+        // a tiny index of the tree, so filtering it costs nothing and needs no search backend. It
+        // keeps a heading's indentation, so a hit still reads as a place in a document rather than a
+        // bare string, and it drops files with no hit so the answer is the shortlist itself.
+        const needle = ctx.flags['grep'] ? String(ctx.flags['grep']).toLowerCase() : null
 
         // Scan the whole tree by default, or the requested subdirectory. `find` skips .git and gives
         // every .md file (tracked or not) so the map reflects what's on disk right now.
@@ -225,6 +356,9 @@ microteams.command({
           return
         }
 
+        let scanned = 0
+        let headings = 0
+
         for (const file of files) {
           const rel = file.indexOf(root + '/') === 0 ? file.slice(root.length + 1) : file
           const content = microteams.exec('cat', [file])
@@ -244,12 +378,25 @@ microteams.command({
             if (!m) continue
             const level = m[1].length
             if (level > maxDepth) continue
+            if (needle && m[2].toLowerCase().indexOf(needle) < 0) continue
             lines.push('  '.repeat(level - 1) + m[2])
           }
 
+          // With --grep, a file whose headings all missed is not part of the answer.
+          if (needle && lines.length === 0) continue
+          scanned++
+          headings += lines.length
           microteams.print(rel)
           for (const h of lines) microteams.print(h)
         }
+
+        // What this map cost, so the reader can judge whether to go fetch any of the bodies. An
+        // agent decides "load the map first, then one file" on exactly this number.
+        microteams.print(
+          `—— ${scanned} file(s), ${headings} heading(s)` +
+            (needle ? ` matching "${String(ctx.flags['grep'])}"` : '') +
+            `; ${scanned + headings} line(s) printed`,
+        )
       },
     },
   ],
