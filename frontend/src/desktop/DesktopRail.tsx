@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { Avatar } from "@/components/Avatar";
+import { UserAvatar } from "@/components/UserAvatar";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 import type { Section } from "@/desktop/DesktopShell";
@@ -87,9 +87,11 @@ export function DesktopRail({
             aria-label="account"
             title={user?.nickname ?? "account"}
           >
-            <Avatar
-              seed={user?.id ?? 0}
-              label={user?.nickname}
+            <UserAvatar
+              userId={user?.id ?? 0}
+              nickname={user?.nickname}
+              avatarId={user?.avatarId}
+              showMeta={false}
               className="size-10 rounded-lg"
             />
           </button>
