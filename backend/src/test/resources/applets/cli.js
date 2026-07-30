@@ -75,6 +75,68 @@
       }
     }
   });
+  microteams.command({
+    name: "chats",
+    short: "List the group chats you're in, most recently active first",
+    flags: [
+      { name: "limit", type: "int", help: "how many groups to list (default 20, max 100)" },
+      {
+        name: "page-start",
+        type: "int",
+        help: "list further down: the cursor printed by a previous call"
+      },
+      { name: "with-members", type: "bool", help: "also list each group's member names" },
+      { name: "json", type: "bool", help: "output the raw JSON instead of text lines" }
+    ],
+    run: (ctx) => {
+      var _a;
+      let limit = ctx.flags["limit"] != null ? Number(ctx.flags["limit"]) : 20;
+      if (!(limit > 0)) limit = 20;
+      if (limit > 100) limit = 100;
+      let path = `/chat?page_size=${limit}`;
+      if (ctx.flags["page-start"] != null) path += `&page_start=${Number(ctx.flags["page-start"])}`;
+      const resp = request({ method: "GET", path });
+      if (ctx.flags["json"]) {
+        microteams.print(JSON.stringify(resp));
+        return;
+      }
+      const chats = (_a = resp.chats) != null ? _a : [];
+      if (chats.length === 0) {
+        microteams.print("(you are in no groups)");
+        return;
+      }
+      const withMembers = ctx.flags["with-members"] === true;
+      for (const c of chats) microteams.print(chatLine(c, withMembers));
+      const page = resp.page;
+      if (page.has_more && page.next_start != null) {
+        microteams.print(
+          `\u2014\u2014 more groups exist; list on with: microteams api chats --page-start ${page.next_start}`
+        );
+      }
+    }
+  });
+  function chatLine(c, withMembers) {
+    var _a, _b, _c, _d;
+    const members = (_a = c.members) != null ? _a : [];
+    const title = c.title || members.map((m) => m.nickname).join("\u3001") || `thread #${c.id}`;
+    let line = `#${c.id} ${title} \xB7 ${members.length} members`;
+    const last = c.lastMessage;
+    if (last) {
+      const nameById = {};
+      for (const m of members) nameById[m.userId] = (_b = m.nickname) != null ? _b : `#${m.userId}`;
+      const who = (_c = nameById[last.senderId]) != null ? _c : `#${last.senderId}`;
+      line += ` \xB7 ${last.createdAt} ${who}\uFF1A${clip(String((_d = last.content) != null ? _d : ""), 60)}`;
+    } else {
+      line += " \xB7 (no messages yet)";
+    }
+    if (withMembers) line += `
+    members: ${members.map((m) => m.nickname).join(", ")}`;
+    return line;
+  }
+  function clip(text, max) {
+    const flat = text.replace(/\s+/g, " ").trim();
+    return flat.length > max ? flat.slice(0, max) + "\u2026" : flat;
+  }
   function gitWorkspace() {
     return request({ method: "GET", path: "/agent/git-workspace" });
   }
@@ -140,6 +202,83 @@
         run: () => {
           const r = microteams.exec("git", ["status", "--short", "--branch"]);
           microteams.print(r.stdout.trim() || "clean");
+        }
+      },
+      // A heading-tree map of the document tree: per file, its markdown headings indented by level.
+      // The whole tree is many files but its all-headings outline is tiny — so an agent can load this
+      // cheap map first, then open only the one file/section it actually needs. Purely local: it scans
+      // the git checkout with exec (find + read), no backend call. Headings inside fenced code blocks
+      // (``` … ```) are skipped, so a `#` line in a code sample is never mistaken for a heading.
+      {
+        name: "outline",
+        short: "Print a heading-tree map of the document tree (which file has which sections)",
+        flags: [
+          { name: "path", type: "string", help: "restrict the scan to this subdirectory of the tree" },
+          { name: "depth", type: "int", help: "only include headings up to this level (1-6, default 6)" },
+          {
+            name: "grep",
+            type: "string",
+            help: "only headings containing this text (case-insensitive); files with no match are skipped"
+          }
+        ],
+        run: (ctx) => {
+          const top = microteams.exec("git", ["rev-parse", "--show-toplevel"]);
+          if (top.code !== 0)
+            throw new Error(
+              "docs outline: not inside the document tree \u2014 run `microteams api docs sync` first.\n" + top.stderr
+            );
+          const root = top.stdout.trim();
+          let maxDepth = ctx.flags["depth"] != null ? Number(ctx.flags["depth"]) : 6;
+          if (!(maxDepth >= 1)) maxDepth = 6;
+          if (maxDepth > 6) maxDepth = 6;
+          const needle = ctx.flags["grep"] ? String(ctx.flags["grep"]).toLowerCase() : null;
+          const scanDir = ctx.flags["path"] ? `${root}/${String(ctx.flags["path"])}` : root;
+          const found = microteams.exec("find", [
+            scanDir,
+            "-type",
+            "f",
+            "-name",
+            "*.md",
+            "-not",
+            "-path",
+            "*/.git/*"
+          ]);
+          if (found.code !== 0) throw new Error("docs outline (find) failed: " + found.stderr);
+          const files = found.stdout.split("\n").map((f) => f.trim()).filter((f) => f.length > 0).sort();
+          if (files.length === 0) {
+            microteams.print("(no markdown files)");
+            return;
+          }
+          let scanned = 0;
+          let headings = 0;
+          for (const file of files) {
+            const rel = file.indexOf(root + "/") === 0 ? file.slice(root.length + 1) : file;
+            const content = microteams.exec("cat", [file]);
+            if (content.code !== 0) throw new Error("docs outline (read) failed: " + content.stderr);
+            const lines = [];
+            let inFence = false;
+            for (const line of content.stdout.split("\n")) {
+              if (/^\s*(`{3,}|~{3,})/.test(line)) {
+                inFence = !inFence;
+                continue;
+              }
+              if (inFence) continue;
+              const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+              if (!m) continue;
+              const level = m[1].length;
+              if (level > maxDepth) continue;
+              if (needle && m[2].toLowerCase().indexOf(needle) < 0) continue;
+              lines.push("  ".repeat(level - 1) + m[2]);
+            }
+            if (needle && lines.length === 0) continue;
+            scanned++;
+            headings += lines.length;
+            microteams.print(rel);
+            for (const h of lines) microteams.print(h);
+          }
+          microteams.print(
+            `\u2014\u2014 ${scanned} file(s), ${headings} heading(s)` + (needle ? ` matching "${String(ctx.flags["grep"])}"` : "") + `; ${scanned + headings} line(s) printed`
+          );
         }
       }
     ]
