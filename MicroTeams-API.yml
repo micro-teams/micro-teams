@@ -45,6 +45,17 @@ paths:
           schema:
             type: integer
             default: 50
+        # Off by default, and deliberately so: answering it costs one extra lookup per page, and
+        # only the chat list needs it (to draw a one-agent group with that agent's avatar). A caller
+        # that does not ask gets a byte-identical response to before.
+        - name: queryIsMemberAgent
+          in: query
+          description: >
+            Also report, per member, whether that user is an agent. When omitted, ChatMember.isAgent
+            is null — which a client can tell apart from "asked, and it is not an agent" (false).
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: OK
@@ -1060,6 +1071,12 @@ components:
           type: string
         avatarId:
           type: integer
+        isAgent:
+          type: boolean
+          description: >
+            Whether this member is an agent. Answered only when the request asked for it
+            (queryIsMemberAgent=true); null means the question was not asked, which is NOT the same
+            as false.
 
     ChatLastMessage:
       type: object

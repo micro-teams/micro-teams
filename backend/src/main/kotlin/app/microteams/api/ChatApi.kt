@@ -174,6 +174,14 @@ interface ChatApi {
         @Valid
         @RequestParam(value = "page_size", required = false, defaultValue = "50")
         pageSize: kotlin.Int,
+        @Parameter(
+            description =
+                "Also report, per member, whether that user is an agent. When omitted, ChatMember.isAgent is null — which a client can tell apart from \"asked, and it is not an agent\" (false). ",
+            schema = Schema(defaultValue = "false"),
+        )
+        @Valid
+        @RequestParam(value = "queryIsMemberAgent", required = false, defaultValue = "false")
+        queryIsMemberAgent: kotlin.Boolean,
     ): ResponseEntity<ListChatsResponseDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }

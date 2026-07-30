@@ -43,7 +43,8 @@ export function ChatsDesktop() {
   const [infoOpen, setInfoOpen] = useState(false);
 
   const chats = useAsync(
-    () => mtCall(chatApi().listChats({ pageSize: 100 })),
+    () =>
+      mtCall(chatApi().listChats({ pageSize: 100, queryIsMemberAgent: true })),
     [],
     "chats",
   );

@@ -17,7 +17,8 @@ export function ChatsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const chats = useAsync(
-    () => mtCall(chatApi().listChats({ pageSize: 100 })),
+    () =>
+      mtCall(chatApi().listChats({ pageSize: 100, queryIsMemberAgent: true })),
     [],
     "chats",
   );
