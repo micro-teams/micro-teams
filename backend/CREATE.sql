@@ -126,8 +126,14 @@ CREATE
             sender_id BIGINT NOT NULL,
             thread_id BIGINT NOT NULL,
             updated_at TIMESTAMP(6) NOT NULL,
+            client_token VARCHAR(64),
             content TEXT NOT NULL,
-            PRIMARY KEY(id)
+            PRIMARY KEY(id),
+            CONSTRAINT uq_message_client_token UNIQUE(
+                thread_id,
+                sender_id,
+                client_token
+            )
         );
 
 CREATE

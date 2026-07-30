@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param content
  * @param createdAt
  * @param editedAt
+ * @param clientToken Echoed back when the caller supplied one, so a client can recognise its own
+ *   pending message in the one returned (and in a later poll) rather than guessing by content.
  */
 data class MessageDTO(
     @Schema(example = "null", required = true, description = "")
@@ -32,4 +34,11 @@ data class MessageDTO(
     @Schema(example = "null", description = "")
     @get:JsonProperty("editedAt")
     val editedAt: java.time.OffsetDateTime? = null,
+    @Schema(
+        example = "null",
+        description =
+            "Echoed back when the caller supplied one, so a client can recognise its own pending message in the one returned (and in a later poll) rather than guessing by content. ",
+    )
+    @get:JsonProperty("clientToken")
+    val clientToken: kotlin.String? = null,
 ) {}
