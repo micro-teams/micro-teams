@@ -111,8 +111,13 @@ microteams.command({
 // so unlike `messages` this resolves the last sender's name without a second request.
 microteams.command({
   name: 'chats',
-  short: "List the group chats you're in, most recently active first",
+  short: "List the group chats you're in — or one group's details with --thread-id",
   flags: [
+    {
+      name: 'thread-id',
+      type: 'int',
+      help: 'show this one group in detail (its title and every member) instead of the list',
+    },
     { name: 'limit', type: 'int', help: 'how many groups to list (default 20, max 100)' },
     {
       name: 'page-start',
@@ -123,6 +128,13 @@ microteams.command({
     { name: 'json', type: 'bool', help: 'output the raw JSON instead of text lines' },
   ],
   run: (ctx) => {
+    // One group in detail. Without this an agent sees only whoever has spoken lately and cannot
+    // learn who else is in the room — the full membership never appears in the messages it is fed.
+    if (ctx.flags['thread-id'] != null) {
+      chatDetail(Number(ctx.flags['thread-id']), ctx.flags['json'] === true)
+      return
+    }
+
     let limit = ctx.flags['limit'] != null ? Number(ctx.flags['limit']) : 20
     if (!(limit > 0)) limit = 20
     if (limit > 100) limit = 100
@@ -154,6 +166,30 @@ microteams.command({
     }
   },
 })
+
+// Everything about one group that the agent cannot get from the messages it receives: its title and
+// its FULL membership, including the quiet ones, with who runs it. Straight off GET /chat/{id} — the
+// thread detail already carries members with their names and roles, so no backend work is involved.
+function chatDetail(threadId: number, asJson: boolean) {
+  const detail = request<ThreadDetail>({ method: 'GET', path: `/chat/${threadId}` })
+  if (asJson) {
+    microteams.print(JSON.stringify(detail))
+    return
+  }
+  const thread = detail.thread
+  const members = detail.members ?? []
+  const title = thread?.title || members.map((m) => m.nickname).join('、') || `thread #${threadId}`
+  microteams.print(`#${threadId} ${title}`)
+  if (thread?.createdAt) microteams.print(`created ${thread.createdAt}`)
+  if (thread?.updatedAt) microteams.print(`last activity ${thread.updatedAt}`)
+  microteams.print(`${members.length} member(s):`)
+  for (const m of members) {
+    const name = m.nickname ?? `#${m.userId}`
+    // Only an unusual role is worth printing; everyone being a "MEMBER" is noise.
+    const role = m.role && m.role !== 'MEMBER' ? ` ${m.role}` : ''
+    microteams.print(`  ${name} (#${m.userId})${role}`)
+  }
+}
 
 // One group as one line: id first (an id is what `--thread-id` wants), then title, size, and the
 // last thing said. The preview is flattened and clipped — a single multi-line message would

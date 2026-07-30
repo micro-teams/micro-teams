@@ -77,8 +77,13 @@
   });
   microteams.command({
     name: "chats",
-    short: "List the group chats you're in, most recently active first",
+    short: "List the group chats you're in \u2014 or one group's details with --thread-id",
     flags: [
+      {
+        name: "thread-id",
+        type: "int",
+        help: "show this one group in detail (its title and every member) instead of the list"
+      },
       { name: "limit", type: "int", help: "how many groups to list (default 20, max 100)" },
       {
         name: "page-start",
@@ -90,6 +95,10 @@
     ],
     run: (ctx) => {
       var _a;
+      if (ctx.flags["thread-id"] != null) {
+        chatDetail(Number(ctx.flags["thread-id"]), ctx.flags["json"] === true);
+        return;
+      }
       let limit = ctx.flags["limit"] != null ? Number(ctx.flags["limit"]) : 20;
       if (!(limit > 0)) limit = 20;
       if (limit > 100) limit = 100;
@@ -115,6 +124,26 @@
       }
     }
   });
+  function chatDetail(threadId, asJson) {
+    var _a, _b;
+    const detail = request({ method: "GET", path: `/chat/${threadId}` });
+    if (asJson) {
+      microteams.print(JSON.stringify(detail));
+      return;
+    }
+    const thread = detail.thread;
+    const members = (_a = detail.members) != null ? _a : [];
+    const title = (thread == null ? void 0 : thread.title) || members.map((m) => m.nickname).join("\u3001") || `thread #${threadId}`;
+    microteams.print(`#${threadId} ${title}`);
+    if (thread == null ? void 0 : thread.createdAt) microteams.print(`created ${thread.createdAt}`);
+    if (thread == null ? void 0 : thread.updatedAt) microteams.print(`last activity ${thread.updatedAt}`);
+    microteams.print(`${members.length} member(s):`);
+    for (const m of members) {
+      const name = (_b = m.nickname) != null ? _b : `#${m.userId}`;
+      const role = m.role && m.role !== "MEMBER" ? ` ${m.role}` : "";
+      microteams.print(`  ${name} (#${m.userId})${role}`);
+    }
+  }
   function chatLine(c, withMembers) {
     var _a, _b, _c, _d;
     const members = (_a = c.members) != null ? _a : [];
