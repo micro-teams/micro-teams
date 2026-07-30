@@ -102,9 +102,13 @@ class ChatController(
     }
 
     @Guard("enumerate-my-chats", "chat_thread")
-    override fun listChats(pageStart: Long?, pageSize: Int): ResponseEntity<ListChatsResponseDTO> {
+    override fun listChats(
+        pageStart: Long?,
+        pageSize: Int,
+        queryIsMemberAgent: Boolean,
+    ): ResponseEntity<ListChatsResponseDTO> {
         val userId = authenticationService.getCurrentUserId()
-        val (chats, page) = threadService.listChats(userId, pageStart, pageSize)
+        val (chats, page) = threadService.listChats(userId, pageStart, pageSize, queryIsMemberAgent)
         return ResponseEntity.ok(ListChatsResponseDTO(chats = chats, page = page))
     }
 

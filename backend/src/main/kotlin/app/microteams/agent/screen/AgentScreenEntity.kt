@@ -47,5 +47,8 @@ interface AgentScreenRepository : JpaRepository<AgentScreen, String> {
 
     fun findByAgentUserId(agentUserId: IdType): List<AgentScreen>
 
+    /** The screens of any of these users — one query for a whole page of chat members. */
+    fun findByAgentUserIdIn(agentUserIds: Collection<IdType>): List<AgentScreen>
+
     fun deleteByMachineId(machineId: String)
 }
