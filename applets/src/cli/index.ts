@@ -30,11 +30,58 @@ microteams.command({
   ],
   run: (ctx) => {
     const threadId = Number(ctx.flags['thread-id'])
-    const body = { content: String(ctx.flags['text']) }
+    const text = String(ctx.flags['text'])
+    const body = { content: text }
     const msg = request<Message>({ method: 'POST', path: `/chat/${threadId}/messages`, body })
     microteams.print(JSON.stringify(msg))
+    // Told AFTER sending, never blocking it: the message is already fine to read, and an agent that
+    // learns from the feedback writes the next one better. See markdownHint.
+    const hint = markdownHint(text)
+    if (hint) microteams.print(hint)
   },
 })
+
+// The chat shows a message exactly as typed — there is no markdown renderer, deliberately (a chat
+// should read like a chat). So `**bold**` and `- item` arrive as literal asterisks and dashes: noise
+// the reader has to look past. Agents are the ones who write that way, out of habit.
+//
+// Rather than repeat "use plain text" on every single message (which becomes wallpaper and is
+// ignored), say it only when it actually happened, and say WHAT happened — a specific "you used
+// **bold** and a `-` list" is something an agent can act on, where a standing rule is not.
+//
+// Only patterns whose markdown meaning is unmistakable are matched, and each is anchored the way it
+// really appears: emphasis needs its pair of markers, list markers and headings must open a line. A
+// lone `*` or a stray `#` mid-sentence is left alone — this is a hint, so a false positive costs
+// little, but crying wolf about ordinary prose would make it worth ignoring, which is the one
+// failure mode that matters. A "1." list is not flagged for the same reason: unrendered, it still
+// reads as what it is, so it is not noise.
+function markdownHint(text: string): string | null {
+    const found: string[] = []
+    const seen = (what: string) => {
+      if (found.indexOf(what) < 0) found.push(what)
+    }
+    // Fenced or inline code: ``` … ``` / `code`.
+    if (/```/.test(text) || /`[^`\n]+`/.test(text)) seen('code marked with backticks')
+    if (/\*\*[^*\n]+\*\*/.test(text)) seen('**bold**')
+    if (/__[^_\n]+__/.test(text)) seen('__bold__')
+    if (/\[[^\]\n]+\]\([^)\n]+\)/.test(text)) seen('a [link](url)')
+    for (const line of text.split('\n')) {
+      if (/^\s{0,3}#{1,6}\s+\S/.test(line)) seen('a # heading')
+      // A list marker opening a line: "- x", "* x", "+ x", "1. x".
+      if (/^\s{0,3}[-*+]\s+\S/.test(line)) seen('a -/* bullet list')
+      if (/^\s{0,3}>\s+\S/.test(line)) seen('a > quote')
+      // A table's separator row is the one unambiguous part of a markdown table.
+      if (/^\s{0,3}\|?\s*:?-{3,}:?\s*\|/.test(line)) seen('a | table |')
+    }
+    if (found.length === 0) return null
+    return (
+      'Note: your message used ' +
+      found.join(', ') +
+      '. The chat renders no markdown, so those marks are shown literally to the reader — ' +
+      'write plain text next time: plain sentences, and if you must enumerate, one item per line ' +
+      'with no leading marker (or "1)" style, which reads as itself).'
+    )
+}
 
 // Read back a group chat's history. Only the live messages that arrive in the agent's terminal are
 // otherwise visible; after a context compaction or a restart there is no way to re-read what was
