@@ -20,11 +20,32 @@
     ],
     run: (ctx) => {
       const threadId = Number(ctx.flags["thread-id"]);
-      const body = { content: String(ctx.flags["text"]) };
+      const text = String(ctx.flags["text"]);
+      const body = { content: text };
       const msg = request({ method: "POST", path: `/chat/${threadId}/messages`, body });
       microteams.print(JSON.stringify(msg));
+      const hint = markdownHint(text);
+      if (hint) microteams.print(hint);
     }
   });
+  function markdownHint(text) {
+    const found = [];
+    const seen = (what) => {
+      if (found.indexOf(what) < 0) found.push(what);
+    };
+    if (/```/.test(text) || /`[^`\n]+`/.test(text)) seen("code marked with backticks");
+    if (/\*\*[^*\n]+\*\*/.test(text)) seen("**bold**");
+    if (/__[^_\n]+__/.test(text)) seen("__bold__");
+    if (/\[[^\]\n]+\]\([^)\n]+\)/.test(text)) seen("a [link](url)");
+    for (const line of text.split("\n")) {
+      if (/^\s{0,3}#{1,6}\s+\S/.test(line)) seen("a # heading");
+      if (/^\s{0,3}[-*+]\s+\S/.test(line)) seen("a -/* bullet list");
+      if (/^\s{0,3}>\s+\S/.test(line)) seen("a > quote");
+      if (/^\s{0,3}\|?\s*:?-{3,}:?\s*\|/.test(line)) seen("a | table |");
+    }
+    if (found.length === 0) return null;
+    return "Note: your message used " + found.join(", ") + '. The chat renders no markdown, so those marks are shown literally to the reader \u2014 write plain text next time: plain sentences, and if you must enumerate, one item per line with no leading marker (or "1)" style, which reads as itself).';
+  }
   microteams.command({
     name: "messages",
     short: "Read recent messages from a group chat you're in (page back with --before)",
