@@ -146,7 +146,7 @@
     }
   });
   function chatDetail(threadId, asJson) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f;
     const detail = request({ method: "GET", path: `/chat/${threadId}` });
     if (asJson) {
       microteams.print(JSON.stringify(detail));
@@ -157,10 +157,21 @@
     const title = (thread == null ? void 0 : thread.title) || members.map((m) => m.nickname).join("\u3001") || `thread #${threadId}`;
     microteams.print(`#${threadId} ${title}`);
     if (thread == null ? void 0 : thread.createdAt) microteams.print(`created ${thread.createdAt}`);
-    if (thread == null ? void 0 : thread.updatedAt) microteams.print(`last activity ${thread.updatedAt}`);
+    const latest = (_b = request({
+      method: "GET",
+      path: `/chat/${threadId}/messages?page_size=1`
+    }).messages) == null ? void 0 : _b[0];
+    if (latest) {
+      const nameById = {};
+      for (const m of members) nameById[m.userId] = (_c = m.nickname) != null ? _c : `#${m.userId}`;
+      const who = (_d = nameById[latest.senderId]) != null ? _d : `#${latest.senderId}`;
+      microteams.print(`last message ${latest.createdAt} ${who}\uFF1A${clip(String((_e = latest.content) != null ? _e : ""), 60)}`);
+    } else {
+      microteams.print("no messages yet");
+    }
     microteams.print(`${members.length} member(s):`);
     for (const m of members) {
-      const name = (_b = m.nickname) != null ? _b : `#${m.userId}`;
+      const name = (_f = m.nickname) != null ? _f : `#${m.userId}`;
       const role = m.role && m.role !== "MEMBER" ? ` ${m.role}` : "";
       microteams.print(`  ${name} (#${m.userId})${role}`);
     }

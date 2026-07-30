@@ -228,7 +228,22 @@ function chatDetail(threadId: number, asJson: boolean) {
   const title = thread?.title || members.map((m) => m.nickname).join('、') || `thread #${threadId}`
   microteams.print(`#${threadId} ${title}`)
   if (thread?.createdAt) microteams.print(`created ${thread.createdAt}`)
-  if (thread?.updatedAt) microteams.print(`last activity ${thread.updatedAt}`)
+  // NOT thread.updatedAt: on a real thread that is the row's own update time, which a new message
+  // does not touch — printing it as "last activity" claimed a group had been silent since the day
+  // it was created. The last message is the honest answer, and one page of size 1 is the cheapest
+  // way to ask for it.
+  const latest = request<ListMessagesResponse>({
+    method: 'GET',
+    path: `/chat/${threadId}/messages?page_size=1`,
+  }).messages?.[0]
+  if (latest) {
+    const nameById: Record<number, string> = {}
+    for (const m of members) nameById[m.userId] = m.nickname ?? `#${m.userId}`
+    const who = nameById[latest.senderId] ?? `#${latest.senderId}`
+    microteams.print(`last message ${latest.createdAt} ${who}：${clip(String(latest.content ?? ''), 60)}`)
+  } else {
+    microteams.print('no messages yet')
+  }
   microteams.print(`${members.length} member(s):`)
   for (const m of members) {
     const name = m.nickname ?? `#${m.userId}`
