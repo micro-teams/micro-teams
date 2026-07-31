@@ -88,8 +88,13 @@ func authCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 				return nil
 			}
 			warnScreens(*cfgPath)
-			_ = service.Control(*cfgPath, "stop")
-			_ = service.Control(*cfgPath, "uninstall")
+			// Stop BEFORE forgetting the credential, and do not swallow the failure. Erasing the
+			// token while the connector still runs leaves the worst of both: the machine stays
+			// connected (the running process holds the old token in memory) while nothing on disk
+			// says so — and the old code printed "Logged out and disconnected" regardless.
+			if err := stopInstalled(*cfgPath, "stop", "uninstall"); err != nil {
+				return fmt.Errorf("could not stop the connector, so the credential was kept: %w", err)
+			}
 			cfg.Token = ""
 			cfg.MachineID = ""
 			if err := config.Save(*cfgPath, cfg); err != nil {
@@ -142,6 +147,15 @@ func doLogin(cfgPath, serverArg string) (*config.Config, error) {
 // missing we fall back to a user service rather than fail. On success the elevated child
 // does all the work and this process exits.
 func elevateToRoot(userService bool, cfgPath string) error {
+	return elevateToRootFor(userService, cfgPath,
+		"Installing a system-wide service (needs root) — elevating with sudo…",
+		"(pass --user for a user-level service instead, e.g. on a personal laptop)")
+}
+
+// elevateToRootFor is elevateToRoot with the wording the situation calls for: installing a service
+// and stopping one both need root, but "Installing a system-wide service" is a lie when the user
+// asked to disconnect.
+func elevateToRootFor(userService bool, cfgPath, why, aside string) error {
 	if userService || os.Geteuid() == 0 {
 		return nil
 	}
@@ -154,8 +168,10 @@ func elevateToRoot(userService bool, cfgPath string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Installing a system-wide service (needs root) — elevating with sudo…")
-	fmt.Println("(pass --user for a user-level service instead, e.g. on a personal laptop)")
+	fmt.Println(why)
+	if aside != "" {
+		fmt.Println(aside)
+	}
 	// Re-run the same invocation verbatim as root; the absolute self path means sudo's
 	// secure_path can't hide it. Inherit stdio so the login link, polling and any sudo
 	// password prompt all work interactively.
@@ -173,6 +189,38 @@ func elevateToRoot(userService bool, cfgPath string) error {
 		return err
 	}
 	os.Exit(0)
+	return nil
+}
+
+// stopInstalled acts on the connector service that is actually installed on this machine,
+// elevating first when that service is a system one.
+//
+// Both halves of that sentence were the bug (T-039). `link connect` elevates and installs a SYSTEM
+// service; `link disconnect` did neither — as an ordinary user it built the per-user variant from
+// its own euid and told the service manager to stop a unit that had never been installed, so the
+// running connector was untouched and the machine stayed connected. Worse, `microteams status`
+// still said "connected", because status probes BOTH variants: looking and acting disagreed.
+//
+// Now the variant is read off the machine (service.Installed) and, if it is the system one, we
+// re-exec under sudo exactly as connect does — stopping a system unit needs root just as much as
+// installing it did.
+func stopInstalled(cfgPath string, actions ...string) error {
+	userService, found := service.Installed(cfgPath)
+	if !found {
+		fmt.Println("No connector service is installed on this machine — nothing to stop.")
+		return nil
+	}
+	if !userService {
+		if err := elevateToRootFor(false, cfgPath,
+			"Stopping the system-wide service (needs root) — elevating with sudo…", ""); err != nil {
+			return err
+		}
+	}
+	for _, action := range actions {
+		if err := service.ControlInstalled(cfgPath, action); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -242,7 +290,7 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 					return nil
 				}
 			}
-			if err := service.Control(*cfgPath, "stop"); err != nil {
+			if err := stopInstalled(*cfgPath, "stop"); err != nil {
 				return err
 			}
 			fmt.Println("Disconnected. `microteams link connect` to reconnect.")
@@ -272,8 +320,7 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 					return nil
 				}
 			}
-			_ = service.Control(*cfgPath, "stop")
-			if err := service.Control(*cfgPath, "uninstall"); err != nil {
+			if err := stopInstalled(*cfgPath, "stop", "uninstall"); err != nil {
 				return err
 			}
 			fmt.Println("Disconnected and removed from boot. `microteams link connect` to connect again.")

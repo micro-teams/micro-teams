@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -98,7 +99,12 @@ func newService(cfgPath string, userService bool) (ksvc.Service, error) {
 	return ksvc.New(&program{cfgPath: cfgPath}, cfg)
 }
 
-// Control runs an install/uninstall/start/stop/restart action against the service.
+// Control runs an install/uninstall/start/stop/restart action against the service, choosing the
+// variant from our own privilege — which is what INSTALLING wants: root installs a system service,
+// an unprivileged user a per-user one.
+//
+// For acting on a service that already exists, use ControlInstalled: the variant is then a fact
+// about the machine, not about who is asking.
 func Control(cfgPath, action string) error {
 	s, err := New(cfgPath)
 	if err != nil {
@@ -106,6 +112,24 @@ func Control(cfgPath, action string) error {
 	}
 	return ksvc.Control(s, action)
 }
+
+// ControlInstalled runs an action against the variant that is actually installed. Returns
+// ErrNotInstalled when neither variant exists, so a caller can say "nothing to stop" rather than
+// reporting whatever error the wrong variant's manager happened to produce.
+func ControlInstalled(cfgPath, action string) error {
+	userService, found := Installed(cfgPath)
+	if !found {
+		return ErrNotInstalled
+	}
+	s, err := newService(cfgPath, userService)
+	if err != nil {
+		return err
+	}
+	return ksvc.Control(s, action)
+}
+
+// ErrNotInstalled means no connector service exists on this machine, under either variant.
+var ErrNotInstalled = errors.New("no connector service is installed on this machine")
 
 // RunForeground runs the host in the current process (used by `microteams run`).
 func RunForeground(cfgPath string) error {
@@ -116,36 +140,67 @@ func RunForeground(cfgPath string) error {
 	return s.Run()
 }
 
+// resolveVariant picks the privilege variant to act on: the one that is actually INSTALLED,
+// preferring the one matching our own euid when both answer.
+//
+// This exists because looking and acting used to disagree. Status has always probed both variants
+// (so a normal user still sees a system service installed via sudo), while Control built its
+// service from euid alone — so `link disconnect`, run as an ordinary user on a machine whose
+// connector was installed with sudo, went looking for a *user* unit that had never existed, left
+// the running system service untouched, and reported either "not installed" or, on a machine with
+// no user session bus, a baffling D-Bus error. The machine stayed connected and `status` agreed it
+// was connected, because status was looking at the other variant.
+//
+// probe is injected so the decision is testable without a service manager.
+func resolveVariant(preferUser bool, probe func(userService bool) error) (userService, found bool) {
+	for _, v := range []bool{preferUser, !preferUser} {
+		if probe(v) == nil {
+			return v, true
+		}
+	}
+	return preferUser, false
+}
+
+// probeInstalled reports whether this variant exists on the machine (nil = it does).
+func probeInstalled(cfgPath string) func(bool) error {
+	return func(userService bool) error {
+		s, err := newService(cfgPath, userService)
+		if err != nil {
+			return err
+		}
+		_, err = s.Status() // ErrNotInstalled (or a manager error) means "not this one"
+		return err
+	}
+}
+
+// Installed reports which variant is installed, and whether either is. Callers that need root for
+// a system unit ask this first (see the CLI's disconnect/logout).
+func Installed(cfgPath string) (userService, found bool) {
+	return resolveVariant(os.Geteuid() != 0, probeInstalled(cfgPath))
+}
+
 // Status returns a human-readable service status string. It looks for the service under
 // both privilege variants — the one matching our own euid first, then the other — so a
 // normal-user `microteams status` still reports a *system* service installed via sudo (and
 // vice versa). Querying a system unit's state needs no root. "not installed" means
 // neither variant exists.
 func Status(cfgPath string) (string, error) {
-	prefUser := os.Geteuid() != 0
-	var lastErr error
-	for _, userService := range []bool{prefUser, !prefUser} {
-		s, err := newService(cfgPath, userService)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		st, err := s.Status()
-		if err != nil {
-			lastErr = err // most likely ErrNotInstalled for this variant — try the other
-			continue
-		}
-		switch st {
-		case ksvc.StatusRunning:
-			return "running", nil
-		case ksvc.StatusStopped:
-			return "stopped", nil
-		default:
-			return "unknown", nil
-		}
-	}
-	if lastErr != nil {
+	userService, found := Installed(cfgPath)
+	if !found {
 		return "not installed", nil
 	}
-	return "unknown", nil
+	s, err := newService(cfgPath, userService)
+	if err != nil {
+		return "unknown", nil
+	}
+	switch st, err := s.Status(); {
+	case err != nil:
+		return "unknown", nil
+	case st == ksvc.StatusRunning:
+		return "running", nil
+	case st == ksvc.StatusStopped:
+		return "stopped", nil
+	default:
+		return "unknown", nil
+	}
 }
