@@ -313,6 +313,22 @@ jobs:
         run: |
           bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
+      # Only the `fake` leg exercises `microteams update`: it needs a distinctly-versioned connector
+      # binary so the e2e can PROVE the running service re-execed into the freshly downloaded one
+      # (not merely that a file on disk changed). `setup-go` here matches build-cli's toolchain, and
+      # the two env vars below persist to the "End-to-end" step in the same job/leg.
+      - uses: actions/setup-go@v7
+        if: matrix.leg == 'fake'
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Build a marker-versioned connector (to prove `microteams update` swaps and re-execs)
+        if: matrix.leg == 'fake'
+        run: |
+          MARKER="update-e2e-${GITHUB_SHA::12}"
+          ( cd cli && go build -trimpath -ldflags "-X main.version=$MARKER" -o "$GITHUB_WORKSPACE/updated-microteams" . )
+          echo "UPDATE_MARKER_BIN=$GITHUB_WORKSPACE/updated-microteams" >> "$GITHUB_ENV"
+          echo "UPDATE_MARKER_VERSION=$MARKER" >> "$GITHUB_ENV"
       - name: "End-to-end: machine + agent + a message that must arrive (${{ matrix.leg }})"
         working-directory: microteams-deploy
         run: bash "$GITHUB_WORKSPACE/.github/scripts/e2e.sh" "${{ matrix.leg }}"

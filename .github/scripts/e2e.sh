@@ -327,6 +327,71 @@ JSON
 
 round_trip "agent already running"
 
+# --- microteams update: the live-tmux-preserving in-process re-exec (T-025) ----------------------
+# `microteams update` on a machine with a LIVE service must take the SIGUSR2 in-process path: the
+# service fetches a fresh binary from <origin>/connector/latest/linux-amd64/microteams, verifies it,
+# atomically replaces the on-disk self, then syscall.Exec's into the new binary WHILE its tmux (and
+# the running agent) stay ALIVE — the new binary RE-ATTACHES to the surviving session. This is the
+# OPPOSITE branch from the kill-server test below (tmux death → respawn), and it was untested.
+#
+# Guarded on UPDATE_MARKER_BIN, which the CI `fake` leg sets to a DISTINCTLY-versioned connector
+# build; other legs (and standalone bundle runs) have no marker binary and SKIP this gracefully.
+# connector/linux-amd64/microteams is bind-mounted into the backend as what it serves at
+# /connector/latest/linux-amd64/microteams (deploy/docker-compose.yml), so overwriting it here
+# changes what the running service downloads.
+#
+# Why this is a real assertion and not a false positive: assertion ① (the "signalled to the running
+# service" output) rules out the case where the FILE is swapped but the RUNNING service is still the
+# old binary — it proves update took the SIGUSR2 in-process path rather than a detached fetch-replace.
+# ①+② (the on-disk binary now reports the marker version) together — plus the surviving tmux session
+# and a message that still round-trips — indirectly but robustly establish that the running service
+# re-execed into the freshly downloaded binary.
+if [ -n "${UPDATE_MARKER_BIN:-}" ] && [ -f "${UPDATE_MARKER_BIN:-/nonexistent}" ]; then
+  step "microteams update: swap the binary, keep the live screen, re-exec into the NEW build (T-025)"
+  # Serve a distinctly-versioned binary so we can prove the running service re-execed into the
+  # freshly downloaded one.
+  cp "$UPDATE_MARKER_BIN" connector/linux-amd64/microteams
+  chmod +x connector/linux-amd64/microteams
+
+  PRE_VER="$(onmachine '$HOME/.local/bin/microteams --version' 2>&1 || true)"
+
+  # Trigger update. It MUST take the in-process SIGUSR2 path (a live service is registered), not a
+  # detached fetch-replace.
+  UPD_OUT="$(onmachine '$HOME/.local/bin/microteams update --config $HOME/.config/microteams/config.json' 2>&1 || true)"
+  printf '%s\n' "$UPD_OUT"
+  # ① proves update took the SIGUSR2 in-process path (not a detached fetch-replace of the file).
+  printf '%s' "$UPD_OUT" | grep -qi 'signalled to the running service' ||
+    fail "microteams update did not signal the live service (took the detached path?) — output: $UPD_OUT"
+
+  # ② Wait for the in-process hand-off: the on-disk binary now reports the marker version.
+  NOW_VER=""
+  for _ in $(seq 1 30); do
+    NOW_VER="$(onmachine '$HOME/.local/bin/microteams --version' 2>&1 || true)"
+    printf '%s' "$NOW_VER" | grep -q "$UPDATE_MARKER_VERSION" && break
+    sleep 1
+  done
+  printf '%s' "$NOW_VER" | grep -q "$UPDATE_MARKER_VERSION" ||
+    { docker exec "$MACHINE_CT" cat /tmp/connector.log || true; fail "after update the binary is not the freshly downloaded one (want $UPDATE_MARKER_VERSION; pre=$PRE_VER; now=$NOW_VER)"; }
+
+  # The service must still be online (it re-execed, did not die).
+  online=""
+  for _ in $(seq 1 30); do
+    online="$(curl -fsS "$MT/machine/$MACHINE_ID" -H "$AUTH" | json "str(d.get('online',False))")"
+    [ "$online" = "True" ] && break
+    sleep 1
+  done
+  [ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat /tmp/connector.log || true; fail "machine went offline across the update"; }
+
+  # The SAME tmux session must still be alive — proving re-attach, not respawn from a killed session.
+  mtmux has-session -t "$SID" 2>/dev/null || fail "the live tmux session $SID did not survive microteams update"
+
+  # And a message must still round-trip through the re-adopted screen.
+  round_trip "after microteams update"
+  pass "update ran in-process, preserved the live screen, and the running service is the freshly downloaded binary"
+else
+  step "skip microteams update test (no UPDATE_MARKER_BIN — running a leg/bundle without a marker build)"
+fi
+
 # --- the failure this system keeps hitting -------------------------------------------------------
 # A dead tmux used to pass for a live screen: the applet runtime lives in the connector process, so it
 # survives the session it was driving, and `microteams status` counted map entries rather than
