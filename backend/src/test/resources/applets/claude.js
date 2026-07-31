@@ -25,15 +25,29 @@
   var SHIFT_TAB = ESC + "[Z";
   var PASTE_START = ESC + "[200~";
   var PASTE_END = ESC + "[201~";
-  function pickOption(n) {
+  function moveToOption(n) {
     for (let i = 0; i < 9; i++) microteams.term.write(UP);
     for (let i = 1; i < n; i++) microteams.term.write(DOWN);
+  }
+  function pickOption(n) {
+    moveToOption(n);
     microteams.term.write(ENTER);
   }
   var clean = (l) => l.replace(/[│╭╮╰╯]/g, "");
   function parseOption(l) {
     const m = clean(l).match(/^\s*[❯>]?\s*(\d+)\.\s+(.*\S)\s*$/);
     return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null;
+  }
+  function chooseByLabel(screen, want) {
+    const lines = screen.split("\n");
+    for (const line of lines) {
+      const opt = parseOption(line);
+      if (!opt || !want.test(opt.label)) continue;
+      if (/❯/.test(line)) microteams.term.write(ENTER);
+      else moveToOption(opt.n);
+      return true;
+    }
+    return false;
   }
   function observe(screen) {
     const lines = screen.split("\n");
@@ -89,6 +103,10 @@
     }
     if (/I trust this folder|created or one you trust|Do you trust/i.test(screen) && !isFull()) {
       microteams.term.write(ENTER);
+      return;
+    }
+    if (/Bypass Permissions mode/i.test(screen) && !isFull()) {
+      if (frame % 2 === 0) chooseByLabel(screen, /yes,?\s*i\s*accept/i);
       return;
     }
     const resumeGate = /Resuming the full session|resuming from a summary/i.test(screen) && /❯\s*\d+\.\s/.test(clean(screen));
@@ -204,7 +222,7 @@
       return true;
     })
   );
-  microteams.call("screenReady", { driver: "claude", version: 12 }).then((ack) => {
+  microteams.call("screenReady", { driver: "claude", version: 13 }).then((ack) => {
     microteams.log("server acked screenReady: " + JSON.stringify(ack));
   });
 })();

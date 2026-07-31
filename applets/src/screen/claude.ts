@@ -61,9 +61,13 @@ const UP = ESC + '[A',
 const PASTE_START = ESC + '[200~',
   PASTE_END = ESC + '[201~'
 
-function pickOption(n: number) {
+function moveToOption(n: number) {
   for (let i = 0; i < 9; i++) microteams.term.write(UP) // go firmly to the top
   for (let i = 1; i < n; i++) microteams.term.write(DOWN) // step down to option n
+}
+
+function pickOption(n: number) {
+  moveToOption(n)
   microteams.term.write(ENTER)
 }
 
@@ -71,6 +75,31 @@ const clean = (l: string) => l.replace(/[│╭╮╰╯]/g, '')
 function parseOption(l: string): Choice | null {
   const m = clean(l).match(/^\s*[❯>]?\s*(\d+)\.\s+(.*\S)\s*$/)
   return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null
+}
+
+// Choose the option whose LABEL matches, in two steps that converge instead of racing.
+//
+// pickOption walks the cursor (UP x9, then DOWN) and presses Enter in one burst. On a dialog whose
+// default is not the answer we want, that burst is not reliable: the TUI is still processing the
+// cursor moves when the Enter arrives, so the Enter is swallowed and the dialog just sits there
+// with the right option highlighted — which is exactly what a real Claude Code did on the
+// bypass-permissions gate. So: if the wanted option is not selected yet, move to it and stop; once
+// a later frame shows it selected, send a bare Enter. Two clean steps, each idempotent.
+function chooseByLabel(screen: string, want: RegExp): boolean {
+  const lines = screen.split('\n')
+  for (const line of lines) {
+    const opt = parseOption(line)
+    if (!opt || !want.test(opt.label)) continue
+    // Move on one frame, confirm on a later one. Doing both in one burst is what made this
+    // unreliable: the TUI is still digesting the cursor keys when the Enter arrives, so the Enter
+    // either vanishes or — far worse on a gate whose first option is "No, exit" — lands while the
+    // cursor is still on that first option and quits Claude Code outright. Which is exactly what a
+    // real Claude Code did here, dying three seconds after launch.
+    if (/❯/.test(line)) microteams.term.write(ENTER)
+    else moveToOption(opt.n)
+    return true
+  }
+  return false
 }
 
 // --- observe (tail only; scrollback can never trip a match) ----------------
@@ -187,6 +216,19 @@ microteams.term.onChange(() => {
     !isFull()
   ) {
     microteams.term.write(ENTER)
+    return
+  }
+
+  // The bypass-permissions consent, shown the first time Claude Code is launched with
+  // --dangerously-skip-permissions on a machine that has never accepted it. It is the one gate whose
+  // default answer is DESTRUCTIVE: the cursor starts on "1. No, exit", so the blind Enter that gets
+  // past the folder-trust gate would quit Claude here instead — and an agent on a brand-new machine
+  // would die before it ever read a message.
+  //
+  // So this picks by LABEL, never by position: "Yes, I accept". The two gates having opposite option
+  // orders is exactly the trap, and matching text is the only thing that survives it.
+  if (/Bypass Permissions mode/i.test(screen) && !isFull()) {
+    if (frame % 2 === 0) chooseByLabel(screen, /yes,?\s*i\s*accept/i)
     return
   }
 
@@ -361,6 +403,6 @@ microteams.expose(
   }),
 )
 
-microteams.call('screenReady', { driver: 'claude', version: 12 }).then((ack) => {
+microteams.call('screenReady', { driver: 'claude', version: 13 }).then((ack) => {
   microteams.log('server acked screenReady: ' + JSON.stringify(ack))
 })
