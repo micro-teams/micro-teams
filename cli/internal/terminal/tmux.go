@@ -127,6 +127,8 @@ type Session struct {
 	cbs      []func()
 	stop     chan struct{}
 	start    sync.Once
+	gone     func() // called once when the session is confirmed to no longer exist
+	goneOnce sync.Once
 	copyMode bool // pane is in tmux copy-mode (viewer is scrolled back through history)
 }
 
@@ -167,15 +169,30 @@ func (s *Session) Snapshot() string {
 	return s.last
 }
 
-func (s *Session) capture() string {
+func (s *Session) capture() (string, error) {
 	var out, stderr bytes.Buffer
 	cmd := s.m.tmux("capture-pane", "-t", s.name, "-p")
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	if cmd.Run() != nil {
-		return ""
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("terminal: capture %q: %w: %s", s.name, err, stderr.String())
 	}
-	return out.String()
+	return out.String(), nil
+}
+
+// OnGone registers fn, called at most once, when this session is confirmed to be
+// gone — its tmux session (or the whole server) died under us.
+//
+// Something has to notice. The runtime driving this session lives in the connector
+// process, not in tmux, so it outlives the session it drives: reads keep returning
+// the last screen and writes keep failing into a log, and nothing upstream is any
+// the wiser. That is how a screen whose tmux had died went on being reported as
+// alive — see T-066. The poller below is already asking tmux a question every
+// 400ms, so it is the cheapest place to hear the answer "that session is gone".
+func (s *Session) OnGone(fn func()) {
+	s.mu.Lock()
+	s.gone = fn
+	s.mu.Unlock()
 }
 
 // Attach opens a real tmux client for this session inside a pty sized exactly to
@@ -358,7 +375,25 @@ func (s *Session) poll() {
 			return
 		case <-ticker.C:
 			ticks++
-			cur := s.capture()
+			cur, err := s.capture()
+			if err != nil {
+				// A failed capture is not proof: tmux can be momentarily busy. Ask the
+				// question that has a definite answer, and only then declare the session
+				// dead — once, after which polling a session that no longer exists is
+				// pointless.
+				if s.m.HasSession(s.name) {
+					continue
+				}
+				s.mu.Lock()
+				fn := s.gone
+				s.mu.Unlock()
+				s.goneOnce.Do(func() {
+					if fn != nil {
+						fn()
+					}
+				})
+				return
+			}
 			s.mu.Lock()
 			changed := cur != s.last
 			s.last = cur

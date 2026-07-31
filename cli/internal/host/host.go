@@ -333,6 +333,20 @@ func (h *Host) createSession(m link.Msg) {
 	h.sessions[m.Sid] = &sess{term: term, rt: rt, cancel: cancel}
 	h.mu.Unlock()
 
+	// If this session dies while we are driving it, say so. Until the server is told, it keeps the
+	// screen LIVE — so it never respawns it and never queues anything for it, and messages sent to
+	// the agent are typed into a terminal that is not there any more (they end up in the connector
+	// log as failed writes, which no user reads). `session.error` is the same report a failed adopt
+	// makes, so the server's existing path takes it from here: mark the screen dead, then rebuild it
+	// the next time someone writes to the agent or opens its live screen.
+	sid := m.Sid
+	term.OnGone(func() {
+		fmt.Fprintf(os.Stderr, "microteams: screen %s: its tmux session is gone; reporting it dead\n", sid)
+		h.closeSession(sid)
+		_ = h.conn.Send(link.Msg{T: "session.error", Sid: sid, Error: "terminal: session is gone"})
+		h.publishState()
+	})
+
 	go func() { _ = rt.Run(ctx) }()
 
 	if m.Source != "" {

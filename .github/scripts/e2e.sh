@@ -252,16 +252,20 @@ fi
 step "a chat message reaches the agent"
 THREAD_ID="$(curl -fsS -X POST "$MT/chat" -H "$AUTH" -H 'Content-Type: application/json' \
   -d "{\"title\":\"ci\",\"memberIds\":[$AGENT_ID]}" | json "d['id']")"
-MARKER="ci-marker-$RANDOM"
 
-if [ "$LEG" != "fake" ]; then
+# One message, posted and then waited for. Used twice: once against a running agent, and once
+# against one that has to be woken first — the same assertion, so the difference between the two
+# runs is only the state the agent was in.
+round_trip() {
+  MARKER="ci-marker-$1-$RANDOM"
+  REPLY="pong-$MARKER"
+  if [ "$LEG" != "fake" ]; then
   # Script the model: when Claude Code sends the conversation request (the one carrying its tool
   # list), answer with a Bash tool call that posts a reply as the agent. Matching on the tool list
   # matters — Claude Code also asks this endpoint for a session title, with no tools, and a
   # once-only expectation would otherwise be spent on that. `streaming` is not optional either: a
   # non-streamed tool call is silently ignored by Claude Code, which looks exactly like nothing
   # happening.
-  REPLY="pong-$MARKER"
   docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
     -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
 { "httpRequest": { "method": "POST", "path": "/v1/messages",
@@ -282,40 +286,46 @@ JSON
     "completion": { "text": "done", "streaming": true, "stopReason": "end_turn",
                     "usage": { "inputTokens": 60, "outputTokens": 3 } } } }
 JSON
-fi
+  fi
 
-curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
-  -d "{\"content\":\"$MARKER\"}" >/dev/null
+  HEARD=0
+  curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"content\":\"$MARKER\"}" >/dev/null
 
-if [ "$LEG" = "fake" ]; then
-  # The message crossed the backend, the control channel, the applet, the pty and tmux if — and
-  # only if — the program on the far end can show it back to us.
-  for _ in $(seq 1 40); do
-    if docker exec "$MACHINE_CT" grep -q "$MARKER" /tmp/agent-heard.txt 2>/dev/null; then
-      pass "the agent's program received the message"; HEARD=1; break
-    fi
-    sleep 2
-  done
-else
-  # The stronger assertion, and the only one a real Claude Code can make: the agent ANSWERS. The
-  # reply has to come back through `microteams api say`, so seeing it in the thread means the whole
-  # round trip worked — including the tool door the agent authenticates through.
-  for _ in $(seq 1 60); do
-    if curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" | grep -q "pong-$MARKER"; then
-      pass "the agent replied in the thread (real Claude Code, scripted model)"; HEARD=1; break
-    fi
-    sleep 3
-  done
-fi
+  if [ "$LEG" = "fake" ]; then
+    # The message crossed the backend, the control channel, the applet, the pty and tmux if — and
+    # only if — the program on the far end can show it back to us.
+    for _ in $(seq 1 40); do
+      if docker exec "$MACHINE_CT" grep -q "$MARKER" /tmp/agent-heard.txt 2>/dev/null; then
+        pass "the agent's program received the message ($1)"; HEARD=1; break
+      fi
+      sleep 2
+    done
+  else
+    # The stronger assertion, and the only one a real Claude Code can make: the agent ANSWERS. The
+    # reply has to come back through `microteams api say`, so seeing it in the thread means the whole
+    # round trip worked — including the tool door the agent authenticates through. It also means the
+    # Enter after the paste actually landed: text sitting un-submitted in the input box looks fine on
+    # the pane and produces no reply at all (T-064).
+    for _ in $(seq 1 60); do
+      if curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" | grep -q "$REPLY"; then
+        pass "the agent replied in the thread ($1)"; HEARD=1; break
+      fi
+      sleep 3
+    done
+  fi
 
-[ "${HEARD:-0}" = "1" ] || {
-  echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
-  echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
-  [ "$LEG" != "fake" ] && { echo "--- what the model was asked ---"
-    docker exec "$MACHINE_CT" curl -s -X PUT "http://$MOCK_CT:1080/mockserver/retrieve?type=REQUESTS&format=JSON" \
-      -d '{"path":"/v1/messages"}' | head -c 2000; }
-  fail "the message never completed its round trip"
+  [ "$HEARD" = "1" ] || {
+    echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
+    echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
+    [ "$LEG" != "fake" ] && { echo "--- what the model was asked ---"
+      docker exec "$MACHINE_CT" curl -s -X PUT "http://$MOCK_CT:1080/mockserver/retrieve?type=REQUESTS&format=JSON" \
+        -d '{"path":"/v1/messages"}' | head -c 2000; }
+    fail "the message never completed its round trip ($1)"
+  }
 }
+
+round_trip "agent already running"
 
 # --- the failure this system keeps hitting -------------------------------------------------------
 # A dead tmux used to pass for a live screen: the applet runtime lives in the connector process, so it
@@ -330,5 +340,18 @@ printf '%s\n' "$STATUS"
 printf '%s' "$STATUS" | grep -qE 'screens +(0|none)' ||
   fail "status still reports running screens after the tmux server died"
 pass "the connector no longer counts a screen whose tmux is gone"
+
+# --- waking a dead agent with a message ----------------------------------------------------------
+# The screen is now genuinely gone (the step above killed the server and proved the connector admits
+# it). Posting into the thread must therefore bring the agent BACK and still deliver — the backend
+# rebuilds the screen, the connector respawns the program, and the applet types the message into a
+# terminal that is still repainting its way through a `--resume`.
+#
+# That last part is the hard half, and it is a bug this project has actually shipped: the message was
+# pasted correctly but its Enter was swallowed, so the text sat in the input box and the agent never
+# answered (T-064). Nothing about that is visible in a screenshot — the pane looks perfect. Only the
+# reply proves it, which is why this asserts the same round trip as above rather than a pane capture.
+step "a message wakes a dead agent, and is actually submitted (T-064)"
+round_trip "woken by the message"
 
 step "everything asserted"

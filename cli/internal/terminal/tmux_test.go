@@ -85,9 +85,9 @@ func TestScrollHistory(t *testing.T) {
 
 	// Wait until the last line has been printed and is on screen.
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(s.capture(), "line100") {
+	for !strings.Contains(screen(t, s), "line100") {
 		if time.Now().After(deadline) {
-			t.Fatalf("program never finished printing; last screen:\n%s", s.capture())
+			t.Fatalf("program never finished printing; last screen:\n%s", screen(t, s))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -101,7 +101,7 @@ func TestScrollHistory(t *testing.T) {
 		t.Fatal("still at the live bottom after ScrollUp(20)")
 	}
 	// The scrolled view must reveal earlier history no longer on the live screen.
-	if got := s.capture(); !strings.Contains(got, "line80") {
+	if got := screen(t, s); !strings.Contains(got, "line80") {
 		t.Errorf("scrolled view does not show earlier history (line80); got:\n%s", got)
 	}
 
@@ -119,4 +119,16 @@ func TestScrollHistory(t *testing.T) {
 	if s.copyMode {
 		t.Error("copyMode still set after ExitCopyMode")
 	}
+}
+
+// screen is capture() for tests, which have no use for the error: a failed capture
+// shows up as an empty screen and the assertion that was waiting for content fails
+// on its own deadline.
+func screen(t *testing.T, s *Session) string {
+	t.Helper()
+	out, err := s.capture()
+	if err != nil {
+		return ""
+	}
+	return out
 }
