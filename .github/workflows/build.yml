@@ -274,9 +274,16 @@ jobs:
   #
   # The matrix is what plays the agent's program. `fake` is the deterministic baseline — no node, no
   # npm, no network — so a red run can be read at a glance: if `fake` is red WE broke something; if
-  # only a real-Claude leg is red, Claude Code changed. The `installer` leg tracks Claude Code's
-  # latest and is advisory (continue-on-error): a UI change upstream is intelligence worth having,
-  # not a reason to block a merge.
+  # only a real-Claude leg is red, Claude Code changed.
+  #
+  # `npm:2.1.220` runs the real Claude Code at a PINNED version, so it is deterministic in the same
+  # way `fake` is — nothing about it can change without us changing it — and it is therefore required.
+  # It is the only leg that proves the applet actually drives Claude Code: through the first-run
+  # wizard, the bypass-permissions gate, and back out through `microteams api say`.
+  #
+  # The `installer` leg tracks Claude Code's latest and stays advisory (continue-on-error): a UI
+  # change upstream is intelligence worth having, not a reason to block someone else's merge. When it
+  # goes red, the fix belongs in the applet, and the pinned leg is what says whether we broke it.
   test-e2e:
     needs: [package-zip]
     runs-on: ubuntu-latest
@@ -287,7 +294,7 @@ jobs:
           - leg: fake
             experimental: false
           - leg: npm:2.1.220
-            experimental: true
+            experimental: false
           - leg: installer
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
