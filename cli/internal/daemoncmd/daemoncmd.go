@@ -29,6 +29,7 @@ import (
 	"github.com/micro-teams/microteams/cli/internal/config"
 	"github.com/micro-teams/microteams/cli/internal/service"
 	"github.com/micro-teams/microteams/cli/internal/state"
+	"github.com/micro-teams/microteams/cli/internal/terminal"
 	"github.com/micro-teams/microteams/cli/internal/ui"
 	"github.com/micro-teams/microteams/cli/internal/update"
 )
@@ -369,7 +370,15 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 				ui.Field("link", ui.Yellow(st))
 			}
 
+			// Ask tmux, not the state file. The file records what the host published when screens
+			// were last created or closed, so a tmux server that died since — taking every screen
+			// with it — leaves it claiming screens nobody can open. That is precisely the state a
+			// human runs `status` to find out about, so the count is taken live here and the file
+			// is only the fallback for when this process cannot reach tmux at all.
 			n := state.Screens(*cfgPath)
+			if tm, err := terminal.NewManager(); err == nil {
+				n = tm.LiveSessions()
+			}
 			screens := ui.Dim("none")
 			if n > 0 {
 				screens = ui.Bold(fmt.Sprintf("%d", n)) + " running"

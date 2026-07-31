@@ -92,6 +92,23 @@ func (m *Manager) HasSession(name string) bool {
 	return m.tmux("has-session", "-t", name).Run() == nil
 }
 
+// LiveSessions counts the sessions this private tmux server currently has. Zero also covers "no
+// server at all", which is the point: a caller asking how many screens are running wants the answer
+// tmux would give, not one remembered from when they were started.
+func (m *Manager) LiveSessions() int {
+	out, err := m.tmux("list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return 0 // no server running, or nothing to list
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // Adopt wraps an already-existing tmux session (one that survived a process
 // re-exec) as a Session, without spawning anything. The caller must have checked
 // HasSession; the session's program keeps running untouched — only screen
