@@ -117,6 +117,13 @@ jobs:
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
+      # The Go tests existed but nothing ran them, so a broken one could not fail CI. tmux is what
+      # the terminal package's test drives; the runner image usually has it, install if not.
+      - name: Test
+        working-directory: cli
+        run: |
+          command -v tmux >/dev/null || sudo apt-get install -y -qq tmux
+          go test ./...
       - name: Build binaries (one per OS/arch)
         run: |
           set -euo pipefail
@@ -264,9 +271,26 @@ jobs:
   # healthy", which cannot see the half of the product that lives on a machine — the connector, its
   # private tmux, the applet driving a terminal, and the path a chat message takes into a program.
   # Every incident so far has lived exactly there, so that is what this boots and asserts.
-  test-fullstack:
+  #
+  # The matrix is what plays the agent's program. `fake` is the deterministic baseline — no node, no
+  # npm, no network — so a red run can be read at a glance: if `fake` is red WE broke something; if
+  # only a real-Claude leg is red, Claude Code changed. The `installer` leg tracks Claude Code's
+  # latest and is advisory (continue-on-error): a UI change upstream is intelligence worth having,
+  # not a reason to block a merge.
+  test-e2e:
     needs: [package-zip]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: fake
+            experimental: false
+          - leg: npm:2.1.220
+            experimental: true
+          - leg: installer
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
       # The artifact is the bundle directory (not a zip); download-artifact restores its files
@@ -282,9 +306,9 @@ jobs:
         run: |
           bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
-      - name: Full-stack smoke (machine + agent + a message that must arrive)
+      - name: "End-to-end: machine + agent + a message that must arrive (${{ matrix.leg }})"
         working-directory: microteams-deploy
-        run: bash "$GITHUB_WORKSPACE/.github/scripts/fullstack-smoke.sh"
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/e2e.sh" "${{ matrix.leg }}"
       - name: Cluster status
         if: always()
         working-directory: microteams-deploy
@@ -297,3 +321,12 @@ jobs:
         if: always()
         working-directory: microteams-deploy
         run: docker compose down
+
+  # One check to require in branch protection: it succeeds only when every job above did (a job with
+  # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
+  ci-success:
+    name: CI success
+    needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux, package-zip, test-e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All required CI jobs passed."
