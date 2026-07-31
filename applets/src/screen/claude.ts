@@ -77,29 +77,36 @@ function parseOption(l: string): Choice | null {
   return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null
 }
 
-// Choose the option whose LABEL matches, in two steps that converge instead of racing.
+// Choose the option whose LABEL matches, moving RELATIVE to where the cursor actually is.
 //
-// pickOption walks the cursor (UP x9, then DOWN) and presses Enter in one burst. On a dialog whose
-// default is not the answer we want, that burst is not reliable: the TUI is still processing the
-// cursor moves when the Enter arrives, so the Enter is swallowed and the dialog just sits there
-// with the right option highlighted — which is exactly what a real Claude Code did on the
-// bypass-permissions gate. So: if the wanted option is not selected yet, move to it and stop; once
-// a later frame shows it selected, send a bare Enter. Two clean steps, each idempotent.
+// The absolute "UP nine times to get to the top, then step down" trick that pickOption uses is
+// wrong on these dialogs, because Claude Code's selection WRAPS. On a two-option gate, nine UPs
+// land on option 2 (odd number of wraps) and the following DOWN wraps back to option 1 — so aiming
+// at "2. Yes, I accept" reliably arrived at "1. No, exit", and pressing Enter there quit Claude
+// Code three seconds after launch. Counting from the cursor's real position cannot drift like that.
+//
+// The move and the Enter are also deliberately split across frames: the TUI is still digesting the
+// cursor keys when a same-burst Enter arrives, so it either vanishes or lands on the option we were
+// moving away from. Move on one frame, confirm on the next — each step idempotent, and neither one
+// able to answer the dialog wrongly on its own.
 function chooseByLabel(screen: string, want: RegExp): boolean {
-  const lines = screen.split('\n')
-  for (const line of lines) {
+  const options: Array<{ opt: Choice; selected: boolean }> = []
+  for (const line of screen.split('\n')) {
     const opt = parseOption(line)
-    if (!opt || !want.test(opt.label)) continue
-    // Move on one frame, confirm on a later one. Doing both in one burst is what made this
-    // unreliable: the TUI is still digesting the cursor keys when the Enter arrives, so the Enter
-    // either vanishes or — far worse on a gate whose first option is "No, exit" — lands while the
-    // cursor is still on that first option and quits Claude Code outright. Which is exactly what a
-    // real Claude Code did here, dying three seconds after launch.
-    if (/❯/.test(line)) microteams.term.write(ENTER)
-    else moveToOption(opt.n)
+    if (opt) options.push({ opt, selected: /❯/.test(line) })
+  }
+  const targetIdx = options.findIndex((o) => want.test(o.opt.label))
+  if (targetIdx < 0) return false
+  const currentIdx = options.findIndex((o) => o.selected)
+  if (currentIdx === targetIdx) {
+    microteams.term.write(ENTER)
     return true
   }
-  return false
+  // No cursor visible (a frame mid-repaint): wait for one that shows it rather than guessing.
+  if (currentIdx < 0) return false
+  const step = targetIdx > currentIdx ? DOWN : UP
+  for (let i = 0; i < Math.abs(targetIdx - currentIdx); i++) microteams.term.write(step)
+  return true
 }
 
 // --- observe (tail only; scrollback can never trip a match) ----------------
@@ -247,14 +254,7 @@ microteams.term.onChange(() => {
     /Resuming the full session|resuming from a summary/i.test(screen) &&
     /❯\s*\d+\.\s/.test(clean(screen)) // its selection cursor: the dialog is still up
   if (resumeGate && !isFull()) {
-    if (frame % 2 === 0) {
-      const full = screen
-        .split('\n')
-        .map(parseOption)
-        .filter((o): o is Choice => o !== null)
-        .filter((o) => /resume full session/i.test(o.label))[0]
-      if (full) pickOption(full.n)
-    }
+    if (frame % 2 === 0) chooseByLabel(screen, /resume full session/i)
     return
   }
 
