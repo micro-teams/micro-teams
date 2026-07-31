@@ -39,15 +39,22 @@
     return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null;
   }
   function chooseByLabel(screen, want) {
-    const lines = screen.split("\n");
-    for (const line of lines) {
+    const options = [];
+    for (const line of screen.split("\n")) {
       const opt = parseOption(line);
-      if (!opt || !want.test(opt.label)) continue;
-      if (/❯/.test(line)) microteams.term.write(ENTER);
-      else moveToOption(opt.n);
+      if (opt) options.push({ opt, selected: /❯/.test(line) });
+    }
+    const targetIdx = options.findIndex((o) => want.test(o.opt.label));
+    if (targetIdx < 0) return false;
+    const currentIdx = options.findIndex((o) => o.selected);
+    if (currentIdx === targetIdx) {
+      microteams.term.write(ENTER);
       return true;
     }
-    return false;
+    if (currentIdx < 0) return false;
+    const step = targetIdx > currentIdx ? DOWN : UP;
+    for (let i = 0; i < Math.abs(targetIdx - currentIdx); i++) microteams.term.write(step);
+    return true;
   }
   function observe(screen) {
     const lines = screen.split("\n");
@@ -111,10 +118,7 @@
     }
     const resumeGate = /Resuming the full session|resuming from a summary/i.test(screen) && /❯\s*\d+\.\s/.test(clean(screen));
     if (resumeGate && !isFull()) {
-      if (frame % 2 === 0) {
-        const full = screen.split("\n").map(parseOption).filter((o2) => o2 !== null).filter((o2) => /resume full session/i.test(o2.label))[0];
-        if (full) pickOption(full.n);
-      }
+      if (frame % 2 === 0) chooseByLabel(screen, /resume full session/i);
       return;
     }
     const active = isActive();
