@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -131,4 +132,58 @@ func screen(t *testing.T, s *Session) string {
 		return ""
 	}
 	return out
+}
+
+// TestWriteLongMessage is T-058: a long message a human sends is never delivered to the agent.
+//
+// It reaches the database and the sender's own screen, so it looks sent; what fails is the last
+// hop. The applet hands the whole message to `tmux send-keys -l -- <text>` in one go, and tmux
+// caps how long a single command may be:
+//
+//	script: term.write: terminal: write "s9dcde052": exit status 1: command too long
+//
+// Nothing upstream is told — the error goes to the connector's log, which nobody reads — so the
+// agent simply never hears what was said to it. That silence is the bug; the length limit is only
+// how it starts.
+//
+// The test therefore asserts both halves: the write must not fail, and the bytes must actually
+// arrive at the program. The program runs with `stty raw` because the tty line discipline has a
+// length limit of its own (~4KB per line in canonical mode) that would otherwise be mistaken for
+// this one.
+func TestWriteLongMessage(t *testing.T) {
+	if _, err := findTmux(); err != nil {
+		t.Skip("no tmux available")
+	}
+	m := isolated(t)
+	defer m.KillServer()
+
+	out := t.TempDir() + "/heard.txt"
+	s, err := m.Spawn("long1", []string{"sh", "-c", "stty raw -echo; cat > " + out + "; sleep 30"},
+		nil, 80, 24)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer s.Close()
+	time.Sleep(500 * time.Millisecond) // let `stty raw` take effect before typing
+
+	// Comfortably past tmux's limit and a realistic size for a long human message.
+	body := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 500) // ~22KB
+	if err := s.Write([]byte(body)); err != nil {
+		t.Fatalf("Write of a %d-byte message failed: %v", len(body), err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := os.ReadFile(out)
+		if err == nil && len(got) >= len(body) {
+			if string(got[:len(body)]) != body {
+				t.Fatalf("the program received %d bytes but they are not what was sent", len(got))
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the program received %d of %d bytes", len(got), len(body))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
