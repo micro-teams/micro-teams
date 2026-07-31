@@ -63,3 +63,9 @@ the backend, not by a new host binding.)
 - Unix only (Linux/macOS); Windows is intentionally excluded (`syscall.SIGUSR2`).
 - Tests: table/httptest style next to the code (`internal/commandapplet/commandapplet_test.go`
   exercises the whole describe → cobra → run → http path against a fake server).
+- **Any test that touches tmux must build its Manager through `isolated(t)`** (or otherwise point
+  `TMPDIR` somewhere private) — never bare `NewManager()`. The socket path is a stable per-user one
+  by design, so a connector can find its own sessions after a restart; a test that shares it is
+  driving the live service's tmux, and tearing its server down at the end of the test kills every
+  agent on that machine. This has actually happened, and reads from the outside like tmux dying on
+  its own — no error, no OOM, just every screen gone at once.

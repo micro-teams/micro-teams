@@ -6,6 +6,27 @@ import (
 	"time"
 )
 
+// isolated builds a Manager whose tmux server is this test's alone.
+//
+// NewManager deliberately derives its socket from a STABLE per-user path, so that a restarted or
+// self-updated connector can find the sessions it left behind. A test that calls it bare therefore
+// gets the socket of whatever connector is running as this user — and these tests kill their server
+// when they are done. So `go test ./...` on a machine that hosts agents takes down every screen on
+// it. That is not hypothetical: it happened twice on 2026-07-31 and was investigated for hours as a
+// spontaneous tmux death, OOM included, before the test suite turned out to be the killer.
+//
+// Overriding TMPDIR moves the whole runtime dir somewhere only this test knows about — which is what
+// the comments below always claimed and never did.
+func isolated(t *testing.T) *Manager {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+	m, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	return m
+}
+
 // TestHasSessionAndAdopt spins up a fully isolated private tmux server on its own
 // temp socket (never the live service's), so it cannot touch any running screen.
 // It verifies HasSession reflects an existing session and that Adopt wraps it
@@ -14,10 +35,7 @@ func TestHasSessionAndAdopt(t *testing.T) {
 	if _, err := findTmux(); err != nil {
 		t.Skip("no tmux available")
 	}
-	m, err := NewManager()
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
+	m := isolated(t)
 	defer m.KillServer()
 
 	if m.HasSession("nope") {
@@ -52,10 +70,7 @@ func TestScrollHistory(t *testing.T) {
 	if _, err := findTmux(); err != nil {
 		t.Skip("no tmux available")
 	}
-	m, err := NewManager()
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
+	m := isolated(t)
 	defer m.KillServer()
 
 	// Print 100 lines to the NORMAL screen buffer (sh uses no alternate screen), then
