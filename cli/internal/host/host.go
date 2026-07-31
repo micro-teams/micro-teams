@@ -170,8 +170,20 @@ func (h *Host) publishState() {
 		return
 	}
 	h.mu.Lock()
-	n := len(h.sessions)
+	sids := make([]string, 0, len(h.sessions))
+	for sid := range h.sessions {
+		sids = append(sids, sid)
+	}
 	h.mu.Unlock()
+	// Count what tmux actually has, not what this map remembers. `microteams status` reports this
+	// number, and a map entry outlives its tmux session — after the server died it kept reporting
+	// "5 running" for screens nobody could open, which is worse than reporting nothing.
+	n := 0
+	for _, sid := range sids {
+		if h.tm.HasSession(sid) {
+			n++
+		}
+	}
 	state.Write(h.cfgPath, n)
 }
 
@@ -263,14 +275,29 @@ func (h *Host) session(sid string) *sess {
 
 func (h *Host) createSession(m link.Msg) {
 	if existing := h.session(m.Sid); existing != nil {
-		// Same-process reconnect: the screen is already live locally. An adopt
-		// create carries the current driver source — hot-reload it into the live
-		// runtime (this is how a backend restart pushes the latest applet into
-		// already-running screens). A non-adopt duplicate is a harmless no-op.
-		if m.Adopt && m.Source != "" {
-			existing.rt.LoadScript(m.Source)
+		// "We have an entry for it" is not the same as "it is still there". The tmux server can
+		// die under us — and when it does, nothing here notices: the applet runtime lives in THIS
+		// process, and reading a dead session's screen just returns "" (see terminal.Read), so the
+		// runtime keeps polling happily forever. Taking the shortcut below on that stale entry is
+		// what made a dead screen look healthy: the adopt hot-reloaded the applet, the applet
+		// announced itself with screenReady, and the server marked the screen LIVE again — while
+		// `tmux ls` reported no server at all and every viewer opened onto nothing.
+		//
+		// So check the ground truth first. A stale entry is torn down and we fall through, which
+		// either respawns the session (a create carrying a command) or reports session.error (a
+		// pure adopt, whose empty command cannot spawn) — and either outcome tells the server the
+		// truth instead of confirming a ghost.
+		if h.tm.HasSession(m.Sid) {
+			// Same-process reconnect: the screen is genuinely live locally. An adopt create
+			// carries the current driver source — hot-reload it into the live runtime (this is how
+			// a backend restart pushes the latest applet into already-running screens). A non-adopt
+			// duplicate is a harmless no-op.
+			if m.Adopt && m.Source != "" {
+				existing.rt.LoadScript(m.Source)
+			}
+			return
 		}
-		return
+		h.closeSession(m.Sid)
 	}
 	// The server owns the screen's identity: it hands down an opaque token in
 	// m.Screen, which the host injects as MICROTEAMS_SCREEN so any process the screen
