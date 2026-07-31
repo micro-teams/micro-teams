@@ -259,13 +259,20 @@ jobs:
           name: microteams-deploy
           path: microteams-deploy
 
-  test-compose:
+  # The one test that exercises this system the way it is actually used: the shipped bundle, plus a
+  # real machine with the real connector on it. `test-compose` used to stop at "the containers report
+  # healthy", which cannot see the half of the product that lives on a machine — the connector, its
+  # private tmux, the applet driving a terminal, and the path a chat message takes into a program.
+  # Every incident so far has lived exactly there, so that is what this boots and asserts.
+  test-fullstack:
     needs: [package-zip]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       # The artifact is the bundle directory (not a zip); download-artifact restores its files
       # directly into microteams-deploy/ — no unzip step, and no nested archive. Note: artifact
-      # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash`.
+      # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash` and the
+      # connector binaries are chmod'ed on the machine after they are copied in.
       - uses: actions/download-artifact@v8
         with:
           name: microteams-deploy
@@ -275,6 +282,9 @@ jobs:
         run: |
           bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
+      - name: Full-stack smoke (machine + agent + a message that must arrive)
+        working-directory: microteams-deploy
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/fullstack-smoke.sh"
       - name: Cluster status
         if: always()
         working-directory: microteams-deploy
