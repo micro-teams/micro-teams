@@ -54,13 +54,58 @@ class AgentProfileService(
             userProfileRepository.findByUserId(agentUserId.toInt()).orElseThrow {
                 NotFoundError("user", agentUserId)
             }
+        // Only the avatar changes; the existing nickname and intro are resent unchanged.
+        putProfile(
+            agentUserId,
+            profile,
+            nickname = profile.nickname ?: "agent$agentUserId",
+            intro = profile.intro ?: "",
+            avatarId = avatarId,
+            what = "avatar",
+        )
+    }
+
+    /** Rename [agentUserId] to [nickname], as the agent itself. */
+    @Transactional(readOnly = true)
+    fun setNickname(agentUserId: IdType, nickname: String) {
+        // The nickname is passed through as-is; identity is the sole authority on what a name may
+        // be, and any refusal from it surfaces through putProfile below.
+        val profile =
+            userProfileRepository.findByUserId(agentUserId.toInt()).orElseThrow {
+                NotFoundError("user", agentUserId)
+            }
+        // Only the nickname changes; the existing avatar and intro are resent unchanged, or they
+        // would be wiped by identity's whole-profile replace.
+        putProfile(
+            agentUserId,
+            profile,
+            nickname = nickname,
+            intro = profile.intro ?: "",
+            avatarId = profile.avatar?.id ?: error("agent $agentUserId has no avatar to preserve"),
+            what = "nickname",
+        )
+    }
+
+    /**
+     * Perform identity's whole-profile replace on [agentUserId] AS THE AGENT: every field must be
+     * sent, so callers read the profile first and override only the one they mean to change. [what]
+     * names the change for the log and the error a refusal turns into.
+     */
+    private fun putProfile(
+        agentUserId: IdType,
+        profile: app.microteams.user.UserProfile,
+        nickname: String,
+        intro: String,
+        avatarId: Int,
+        what: String,
+    ) {
         // A one-purpose token, not the agent's ordinary one: see mintForOwnProfileUpdate.
         val token = agentTokenService.mintForOwnProfileUpdate(agentUserId).token
         val body =
             mapOf(
                 // Resent as-is: identity replaces the whole profile, so omitting these clears them.
-                "nickname" to (profile.nickname ?: "agent$agentUserId"),
-                "intro" to (profile.intro ?: ""),
+                "nickname" to nickname,
+                "intro" to intro,
                 "avatarId" to avatarId,
             )
         try {
@@ -76,13 +121,8 @@ class AgentProfileService(
             // The identity service is the authority here; a refusal from it (an avatar id that does
             // not exist, a nickname it now considers invalid) is the caller's problem to see, not a
             // 500. Its own message is the useful part.
-            logger.warn(
-                "setting avatar {} on agent {} failed: {}",
-                avatarId,
-                agentUserId,
-                e.message,
-            )
-            throw BadRequestError("could not set the agent's avatar: ${e.message}")
+            logger.warn("setting {} on agent {} failed: {}", what, agentUserId, e.message)
+            throw BadRequestError("could not set the agent's $what: ${e.message}")
         }
         // The profile row was changed by ANOTHER service, behind this session's back. Detach the
         // copy we loaded so the rest of the request re-reads it from the database: with one

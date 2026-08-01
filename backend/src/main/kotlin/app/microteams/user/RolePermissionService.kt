@@ -268,6 +268,16 @@ class RolePermissionService {
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                         customLogic = "is-member-of-agent-team",
                     ),
+                    // PUT /agent/{userId}/nickname — renaming an agent is managing an existing
+                    // agent, so the same rule as avatar. Like avatar, this needs no right over the
+                    // identity profile of that user: the server performs the change as the agent
+                    // itself (AgentProfileService), so belonging to the agent's team is the whole
+                    // permission question.
+                    Permission(
+                        authorizedActions = listOf("change-agent-nickname"),
+                        authorizedResource = AuthorizedResource(types = listOf("agent")),
+                        customLogic = "is-member-of-agent-team",
+                    ),
                 ),
         )
     }
