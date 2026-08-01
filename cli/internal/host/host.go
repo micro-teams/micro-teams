@@ -25,6 +25,7 @@ import (
 
 	"github.com/micro-teams/microteams/cli/internal/config"
 	"github.com/micro-teams/microteams/cli/internal/link"
+	"github.com/micro-teams/microteams/cli/internal/protocol"
 	"github.com/micro-teams/microteams/cli/internal/runtime"
 	"github.com/micro-teams/microteams/cli/internal/state"
 	"github.com/micro-teams/microteams/cli/internal/terminal"
@@ -41,7 +42,9 @@ func LoadConfig(path string) (*config.Config, error) { return config.Load(path) 
 
 // Host owns the connection, the tmux manager, and the live screens.
 type Host struct {
-	conn    *link.Conn
+	// The control plane, as a transport rather than a particular one. MicroTeams runs the resident
+	// WebSocket; the same host serves a one-shot HTTP transport without knowing the difference.
+	conn    protocol.Transport
 	tm      *terminal.Manager
 	cfgPath string // for the shared screen-count state file ("" disables)
 	base    string // server origin, for self-update downloads
@@ -65,19 +68,30 @@ type sess struct {
 	lastRows int
 }
 
-// New builds a Host from cfg. cfgPath locates the shared state file that lets
-// CLI commands see how many screens are live ("" disables that).
+// New builds a Host from cfg, talking to the control plane over the resident WebSocket — the way a
+// machine that hosts long-lived screens runs. cfgPath locates the shared state file that lets CLI
+// commands see how many screens are live ("" disables that).
 func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	ctrlURL, err := cfg.ControlURL()
 	if err != nil {
 		return nil, err
 	}
+	return NewWithTransport(link.New(ctrlURL, cfg.Token, cfg.APIBase()), cfg, cfgPath)
+}
+
+// NewWithTransport builds a Host on a caller-supplied transport.
+//
+// The resident WebSocket is one way to reach a control plane, not the only one: a provisioning tool
+// that drives a single screen to completion inside a one-shot command wants the same session
+// handling and the same applets over an HTTP exchange that ends when the command does. Everything
+// below this line is written to not care which it is.
+func NewWithTransport(conn protocol.Transport, cfg *config.Config, cfgPath string) (*Host, error) {
 	tm, err := terminal.NewManager()
 	if err != nil {
 		return nil, err
 	}
 	return &Host{
-		conn:     link.New(ctrlURL, cfg.Token, cfg.APIBase()),
+		conn:     conn,
 		tm:       tm,
 		cfgPath:  cfgPath,
 		base:     cfg.Base,
@@ -193,11 +207,11 @@ func (h *Host) clearState() {
 	}
 }
 
-func (h *Host) onMsg(m link.Msg) {
+func (h *Host) onMsg(m protocol.Msg) {
 	switch m.T {
 	case "welcome":
-		if m.V != 0 && m.V != link.Version {
-			fmt.Fprintf(os.Stderr, "microteams: protocol version mismatch (server %d, client %d) — update microteams if things misbehave\n", m.V, link.Version)
+		if m.V != 0 && m.V != protocol.Version {
+			fmt.Fprintf(os.Stderr, "microteams: protocol version mismatch (server %d, client %d) — update microteams if things misbehave\n", m.V, protocol.Version)
 		}
 	case "session.create":
 		h.createSession(m)
@@ -273,7 +287,7 @@ func (h *Host) session(sid string) *sess {
 	return h.sessions[sid]
 }
 
-func (h *Host) createSession(m link.Msg) {
+func (h *Host) createSession(m protocol.Msg) {
 	if existing := h.session(m.Sid); existing != nil {
 		// "We have an entry for it" is not the same as "it is still there". The tmux server can
 		// die under us — and when it does, nothing here notices: the applet runtime lives in THIS
@@ -322,7 +336,7 @@ func (h *Host) createSession(m link.Msg) {
 		var err error
 		term, err = h.tm.Spawn(m.Sid, m.Command, env, m.Cols, m.Rows)
 		if err != nil {
-			_ = h.conn.Send(link.Msg{T: "session.error", Sid: m.Sid, Error: err.Error()})
+			_ = h.conn.Send(protocol.Msg{T: "session.error", Sid: m.Sid, Error: err.Error()})
 			return
 		}
 	}
@@ -343,7 +357,7 @@ func (h *Host) createSession(m link.Msg) {
 	term.OnGone(func() {
 		fmt.Fprintf(os.Stderr, "microteams: screen %s: its tmux session is gone; reporting it dead\n", sid)
 		h.closeSession(sid)
-		_ = h.conn.Send(link.Msg{T: "session.error", Sid: sid, Error: "terminal: session is gone"})
+		_ = h.conn.Send(protocol.Msg{T: "session.error", Sid: sid, Error: "terminal: session is gone"})
 		h.publishState()
 	})
 
@@ -352,7 +366,7 @@ func (h *Host) createSession(m link.Msg) {
 	if m.Source != "" {
 		rt.LoadScript(m.Source)
 	}
-	_ = h.conn.Send(link.Msg{T: "session.ready", Sid: m.Sid})
+	_ = h.conn.Send(protocol.Msg{T: "session.ready", Sid: m.Sid})
 	h.publishState()
 }
 
@@ -365,11 +379,11 @@ func (h *Host) subscribeScreen(sid string, cols, rows int) {
 	// previous viewer left behind on the pane.
 	s.term.ExitCopyMode()
 	client, err := s.term.Attach(cols, rows, func(b []byte) {
-		_ = h.conn.Send(link.Msg{T: "screen.data", Sid: sid,
+		_ = h.conn.Send(protocol.Msg{T: "screen.data", Sid: sid,
 			Data: base64.StdEncoding.EncodeToString(b)})
 	})
 	if err != nil {
-		_ = h.conn.Send(link.Msg{T: "session.error", Sid: sid, Error: err.Error()})
+		_ = h.conn.Send(protocol.Msg{T: "session.error", Sid: sid, Error: err.Error()})
 		return
 	}
 	h.mu.Lock()
@@ -452,9 +466,9 @@ const execMaxOut = 1 << 20 // 1 MiB per stream
 // for setup, health checks, and other fire-and-forget device-side work. The
 // caller may bound it (Timeout), feed it input (Stdin) and cancel it mid-run
 // (an exec.cancel with the same ID); output beyond execMaxOut is dropped.
-func (h *Host) runExec(m link.Msg) {
+func (h *Host) runExec(m protocol.Msg) {
 	if len(m.Command) == 0 {
-		_ = h.conn.Send(link.Msg{T: "exec.result", ID: m.ID, Stderr: "empty command", Exit: -1})
+		_ = h.conn.Send(protocol.Msg{T: "exec.result", ID: m.ID, Stderr: "empty command", Exit: -1})
 		return
 	}
 	timeout := time.Duration(m.Timeout) * time.Second
@@ -501,7 +515,7 @@ func (h *Host) runExec(m link.Msg) {
 			}
 		}
 	}
-	_ = h.conn.Send(link.Msg{T: "exec.result", ID: m.ID,
+	_ = h.conn.Send(protocol.Msg{T: "exec.result", ID: m.ID,
 		Stdout: stdout.String(), Stderr: stderr.String(), Exit: exit,
 		Truncated: stdout.truncated || stderr.truncated})
 }
@@ -541,22 +555,24 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 func (c *cappedBuffer) String() string { return c.buf.String() }
 func (c *cappedBuffer) Len() int       { return c.buf.Len() }
 
-// busAdapter maps one screen's runtime.Bus onto sid-tagged link messages.
+// busAdapter maps one screen's runtime.Bus onto sid-tagged protocol messages. The runtime knows
+// nothing about the control plane, and this knows nothing about how the messages travel — which is
+// what lets the same applet run over a resident WebSocket here and over one-shot HTTP elsewhere.
 type busAdapter struct {
-	conn *link.Conn
+	conn protocol.Transport
 	sid  string
 }
 
 func (b *busAdapter) PushVar(name string, value any) {
-	_ = b.conn.Send(link.Msg{T: "var.push", Sid: b.sid, Name: name, Value: value})
+	_ = b.conn.Send(protocol.Msg{T: "var.push", Sid: b.sid, Name: name, Value: value})
 }
 
 func (b *busAdapter) CallServer(id, name string, args []any) {
-	_ = b.conn.Send(link.Msg{T: "rpc.call", Sid: b.sid, ID: id, Name: name, Args: args})
+	_ = b.conn.Send(protocol.Msg{T: "rpc.call", Sid: b.sid, ID: id, Name: name, Args: args})
 }
 
 func (b *busAdapter) ReplyServer(id string, result any, errStr string) {
-	_ = b.conn.Send(link.Msg{T: "rpc.result", Sid: b.sid, ID: id, Value: result, Error: errStr})
+	_ = b.conn.Send(protocol.Msg{T: "rpc.result", Sid: b.sid, ID: id, Value: result, Error: errStr})
 }
 
 // SetInbound is unused: the host routes inbound messages to the runtime directly
