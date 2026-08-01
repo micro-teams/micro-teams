@@ -944,6 +944,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Agent"
+  /agent/{userId}/nickname:
+    put:
+      tags: [agent]
+      operationId: setAgentNickname
+      summary: >
+        Set an agent's nickname — rename it. Renaming an agent is changing its profile nickname,
+        which is the part a human cannot do directly: the identity service lets a user change only
+        their own profile, so the server performs the change as the agent itself. The agent's
+        avatar and intro are preserved (identity replaces the whole profile), so only the name
+        changes.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAgentNicknameRequest"
+      responses:
+        "200":
+          description: Updated — the agent as it now reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
   /agent/token:
     post:
       tags: [agent]
@@ -1095,6 +1125,15 @@ components:
         avatarId:
           type: integer
           description: An avatar id from the identity service (POST /avatars).
+
+    SetAgentNicknameRequest:
+      type: object
+      required:
+        - nickname
+      properties:
+        nickname:
+          type: string
+          description: The agent's new display name.
 
     ChatMember:
       type: object

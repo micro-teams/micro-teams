@@ -31,6 +31,7 @@ import {
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
+import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +51,7 @@ export function AgentsPage() {
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
+  const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
 
   const machines = useAsync(
@@ -243,6 +245,7 @@ export function AgentsPage() {
                       agent={a}
                       machineName={machineLabel(a.machineId, machineList)}
                       onInfo={() => setInfoAgent(a)}
+                      onRename={() => setRenamingAgent(a)}
                       onChat={() => chat(a)}
                       onClose={() => close(a)}
                     />
@@ -271,6 +274,15 @@ export function AgentsPage() {
           onRenamed={() => machines.reload()}
         />
       )}
+      {renamingAgent && (
+        <RenameAgentDialog
+          key={renamingAgent.userId}
+          agent={renamingAgent}
+          open
+          onOpenChange={(o) => !o && setRenamingAgent(null)}
+          onRenamed={() => agents.reload()}
+        />
+      )}
       {infoAgent && (
         <AgentInfoDialog
           onAvatarChanged={() => agents.reload()}
@@ -290,12 +302,14 @@ function AgentRow({
   agent: a,
   machineName,
   onInfo,
+  onRename,
   onChat,
   onClose,
 }: {
   agent: Agent;
   machineName?: string;
   onInfo: () => void;
+  onRename: () => void;
   onChat: () => void;
   onClose: () => void;
 }) {
@@ -325,6 +339,15 @@ function AgentRow({
         title="info"
       >
         <Info className="size-4" />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        onClick={onRename}
+        aria-label="rename agent"
+        title="rename"
+      >
+        <Pencil className="size-4" />
       </Button>
       <Button
         size="icon-sm"

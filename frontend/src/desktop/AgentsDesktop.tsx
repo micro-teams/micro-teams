@@ -32,6 +32,7 @@ import {
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
+import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -52,6 +53,7 @@ export function AgentsDesktop() {
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
+  const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
 
   const selectedId = useMemo(() => {
     const m = location.pathname.match(/^\/agents\/(\d+)/);
@@ -246,16 +248,19 @@ export function AgentsDesktop() {
                 {agentList.length > 0 && (
                   <ul className="flex flex-col gap-0.5">
                     {agentList.map((a) => (
-                      <li key={a.userId}>
+                      <li
+                        key={a.userId}
+                        className={cn(
+                          "group flex items-center rounded-md",
+                          a.userId === selectedId
+                            ? "bg-accent"
+                            : "hover:bg-accent/60",
+                        )}
+                      >
                         <button
                           type="button"
                           onClick={() => navigate(`/agents/${a.userId}`)}
-                          className={cn(
-                            "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left",
-                            a.userId === selectedId
-                              ? "bg-accent"
-                              : "hover:bg-accent/60",
-                          )}
+                          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-2 text-left"
                         >
                           <UserAvatar
                             userId={a.userId}
@@ -268,6 +273,15 @@ export function AgentsDesktop() {
                             {a.nickname || `agent #${a.userId}`}
                           </span>
                           <OnlineDot online={a.online} label={false} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRenamingAgent(a)}
+                          className="text-muted-foreground hover:text-foreground mr-1 shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
+                          aria-label="rename agent"
+                          title="rename"
+                        >
+                          <Pencil className="size-3.5" />
                         </button>
                       </li>
                     ))}
@@ -323,6 +337,15 @@ export function AgentsDesktop() {
           open
           onOpenChange={(o) => !o && setRenaming(null)}
           onRenamed={() => machines.reload()}
+        />
+      )}
+      {renamingAgent && (
+        <RenameAgentDialog
+          key={renamingAgent.userId}
+          agent={renamingAgent}
+          open
+          onOpenChange={(o) => !o && setRenamingAgent(null)}
+          onRenamed={() => agents.reload()}
         />
       )}
     </div>

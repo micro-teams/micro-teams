@@ -347,6 +347,24 @@ class AgentController(
         )
     }
 
+    /**
+     * Rename an agent (change its profile nickname). Same team-membership rule as
+     * close/reboot/avatar: managing an existing agent. What a human cannot do is change ANOTHER
+     * user's profile, which is why this exists — the server performs the change as the agent
+     * itself, see AgentProfileService.
+     */
+    @Guard("change-agent-nickname", "agent")
+    override fun setAgentNickname(
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
+        setAgentNicknameRequestDTO: SetAgentNicknameRequestDTO,
+    ): ResponseEntity<AgentDTO> {
+        agentProfileService.setNickname(userId, setAgentNicknameRequestDTO.nickname)
+        val viewerAuth = authorizationService.currentAuthorization()
+        return ResponseEntity.ok(
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+        )
+    }
+
     @Guard("close-agent", "agent")
     override fun closeAgent(
         @PathVariable("userId") @AuthInfo("agentUserId") userId: Long

@@ -12,6 +12,7 @@ import app.microteams.model.ListAgentsResponseDTO
 import app.microteams.model.OpenAgentRequestDTO
 import app.microteams.model.OpenedAgentDTO
 import app.microteams.model.SetAgentAvatarRequestDTO
+import app.microteams.model.SetAgentNicknameRequestDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
 import io.swagger.v3.oas.annotations.media.*
@@ -251,6 +252,37 @@ interface AgentApi {
         @Valid
         @RequestBody
         setAgentAvatarRequestDTO: SetAgentAvatarRequestDTO,
+    ): ResponseEntity<AgentDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "Set an agent's nickname — rename it. Renaming an agent is changing its profile nickname, which is the part a human cannot do directly: the identity service lets a user change only their own profile, so the server performs the change as the agent itself. The agent's avatar and intro are preserved (identity replaces the whole profile), so only the name changes. ",
+        operationId = "setAgentNickname",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "Updated — the agent as it now reads",
+                    content = [Content(schema = Schema(implementation = AgentDTO::class))],
+                )
+            ],
+    )
+    @RequestMapping(
+        method = [RequestMethod.PUT],
+        value = ["/agent/{userId}/nickname"],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun setAgentNickname(
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
+        @Parameter(description = "", required = true)
+        @Valid
+        @RequestBody
+        setAgentNicknameRequestDTO: SetAgentNicknameRequestDTO,
     ): ResponseEntity<AgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
