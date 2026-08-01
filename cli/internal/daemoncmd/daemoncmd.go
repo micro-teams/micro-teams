@@ -25,13 +25,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/micro-teams/microteams/cli/internal/auth"
-	"github.com/micro-teams/microteams/cli/internal/config"
+	"github.com/micro-teams/micro-connector/cli/auth"
+	"github.com/micro-teams/micro-connector/cli/config"
+	"github.com/micro-teams/micro-connector/cli/terminal"
+	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/service"
 	"github.com/micro-teams/microteams/cli/internal/state"
-	"github.com/micro-teams/microteams/cli/internal/terminal"
 	"github.com/micro-teams/microteams/cli/internal/ui"
-	"github.com/micro-teams/microteams/cli/internal/update"
 )
 
 // Commands returns every lifecycle command to add to the `microteams` root.

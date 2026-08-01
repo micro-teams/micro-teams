@@ -16,7 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/micro-teams/microteams/cli/internal/protocol"
+	"github.com/micro-teams/micro-connector/cli/protocol"
 )
 
 // Ping cadence and liveness window. We ping every pingPeriod; the peer's pong
