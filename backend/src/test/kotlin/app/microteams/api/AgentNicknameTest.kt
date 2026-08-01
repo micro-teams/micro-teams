@@ -56,7 +56,8 @@ constructor(
     private var teamId: IdType = -1
     private var agentUserId: IdType = -1
     private var agentAvatarId: Long = -1
-    private val newNickname = "Renamed ${UUID.randomUUID().toString().take(6)}"
+    // Identity restricts nicknames to 1-16 chars of letters/digits/underscores/Chinese — no spaces.
+    private val newNickname = "Renamed_${UUID.randomUUID().toString().take(6)}"
 
     @BeforeAll
     fun prepare() {
