@@ -15,8 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/micro-teams/microteams/cli/internal/apiauth"
-	"github.com/micro-teams/microteams/cli/internal/commandapplet"
+	"github.com/micro-teams/micro-connector/cli/apiauth"
+	"github.com/micro-teams/micro-connector/cli/commandapplet"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
 	"github.com/micro-teams/microteams/cli/internal/mtbrand"
 )

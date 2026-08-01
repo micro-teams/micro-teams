@@ -15,13 +15,13 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/protocol"
 	"github.com/micro-teams/micro-connector/cli/screen"
 	"github.com/micro-teams/micro-connector/cli/terminal"
-	"github.com/micro-teams/microteams/cli/internal/config"
+	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/link"
 	"github.com/micro-teams/microteams/cli/internal/state"
-	"github.com/micro-teams/microteams/cli/internal/update"
 )
 
 // scrollStep is how many scrollback lines one viewer scroll message moves. The
