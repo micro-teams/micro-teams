@@ -1,6 +1,10 @@
 package update
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/micro-teams/microteams/cli/internal/mtbrand"
+)
 
 func TestPlatformDir(t *testing.T) {
 	cases := []struct {
@@ -31,6 +35,11 @@ func TestPlatformDirUnsupported(t *testing.T) {
 	}
 }
 
+// The published path is part of this product's identity, so the test has to say which product it is
+// — exactly as the binary does at startup. A test that forgot would be testing the library's
+// generic default, which is the failure this arrangement is meant to make visible.
+func init() { mtbrand.Use() }
+
 func TestBinaryURL(t *testing.T) {
 	cases := []struct {
 		base, dir, want string
@@ -58,6 +67,11 @@ func TestBinaryURL(t *testing.T) {
 		}
 	}
 }
+
+// The published path is part of this product's identity, so the test has to say which product it is
+// — exactly as the binary does at startup. A test that forgot would be testing the library's
+// generic default, which is the failure this arrangement is meant to make visible.
+func init() { mtbrand.Use() }
 
 func TestBinaryURLBadBase(t *testing.T) {
 	if _, err := binaryURL("not-a-url", "linux-x86_64"); err == nil {

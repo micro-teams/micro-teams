@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/micro-teams/microteams/cli/internal/brand"
+	"github.com/micro-teams/micro-connector/cli/brand"
 	"github.com/micro-teams/microteams/cli/internal/config"
 )
 

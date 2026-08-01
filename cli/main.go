@@ -18,7 +18,12 @@ import (
 	"github.com/micro-teams/microteams/cli/internal/apiauth"
 	"github.com/micro-teams/microteams/cli/internal/commandapplet"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
+	"github.com/micro-teams/microteams/cli/internal/mtbrand"
 )
+
+// Declare who this connector is before anything reads a path or an environment variable. See
+// internal/mtbrand for why this is not a detail.
+func init() { mtbrand.Use() }
 
 // version is overridable at link time:
 //
@@ -27,8 +32,8 @@ var version = "dev"
 
 func main() {
 	root := &cobra.Command{
-		Use:     "microteams",
-		Short:   "Connect this machine so your microteams sessions can run on it",
+		Use:   "microteams",
+		Short: "Connect this machine so your microteams sessions can run on it",
 		Long: "microteams connects this machine to your microteams workspace so your sessions can " +
 			"run here and you can use them from the web. Log in once and it stays connected in the " +
 			"background. `microteams api` is the agent's tools for talking to your workspace.",

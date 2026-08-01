@@ -10,7 +10,7 @@ package update
 import (
 	"context"
 	"fmt"
-	"github.com/micro-teams/microteams/cli/internal/brand"
+	"github.com/micro-teams/micro-connector/cli/brand"
 	"io"
 	"net/http"
 	"net/url"

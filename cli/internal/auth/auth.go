@@ -11,7 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/micro-teams/microteams/cli/internal/brand"
+	"github.com/micro-teams/micro-connector/cli/brand"
 	"net/http"
 	"strings"
 	"time"

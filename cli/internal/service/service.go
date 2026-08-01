@@ -15,7 +15,7 @@ import (
 
 	ksvc "github.com/kardianos/service"
 
-	"github.com/micro-teams/microteams/cli/internal/brand"
+	"github.com/micro-teams/micro-connector/cli/brand"
 	"github.com/micro-teams/microteams/cli/internal/host"
 )
 
