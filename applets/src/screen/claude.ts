@@ -1,129 +1,40 @@
-// The applet that drives a Claude Code screen.
+// Claude Code, as a declaration.
 //
-// All domain knowledge lives here, derived from what Claude Code actually paints (verified against
-// real v2.1.x screens). The hosting `microteams` CLI has no idea it is watching an AI; it only
-// offers a terminal, variables, and functions (see ../runtime/host.d.ts).
-//
-// This is a faithful port of the original claude.js — ONLY type annotations were added; no logic
-// was changed. esbuild bundles it to dist/claude.js (target es2016, which leaves its ES2015 syntax
-// essentially intact), and the applets build copies that into backend resources.
-//
-// 热重载安全：hub.reload_driver 把这份源码发给 `script.load`，而 runtime.LoadScript 每次重载都会
-// 新建一个全新的 goja VM（重装 API，清空 owned/watched/exposed/pending），然后再 vm.RunString。
-// 因此顶层 const/let 每次都在一个干净的全局作用域里执行，绝不会「Identifier X has already been
-// declared」。所以这里用干净的顶层写法即可，不需要 IIFE 外壳或任何为规避重定义的怪写法。
+// Everything here is a statement about what Claude Code paints — verified against real 2.1.x
+// screens. Everything about HOW to act on it (relative cursor movement, split frames, deferred
+// submit, chunked writes) belongs to the engine, deliberately: those are the parts that broke.
 
-interface Choice {
-  n: number
-  label: string
-}
+import {
+  chooseByLabel,
+  clean,
+  defineDriver,
+  ENTER,
+  host,
+  Observation,
+  parseOption,
+  readOptions,
+  SHIFT_TAB,
+} from './engine/driver'
+import type { Choice } from './engine/driver'
 
-// A-class variables (this script owns; the server mirrors):
-// Named statusVar (not `status`) so it doesn't collide with the DOM lib's global `status` under
-// strict tsc; the mirrored variable name is the string 'status' below, unaffected by this rename.
-const statusVar = microteams.own('status', 'starting') // starting|busy|waiting|idle|dead
-const elapsed = microteams.own('elapsed', '') // e.g. "6m45s" — how long Claude has been working
-const tokens = microteams.own('tokens', '') // e.g. "19.2k" — tokens used so far this turn
-const question = microteams.own('question', '') // dialog prompt when waiting
-const choices = microteams.own<Choice[]>('choices', []) // [{n, label}] when waiting on a choice
-const compact = microteams.own('compact', '') // '' | 'running' | 'done'
-const compactPct = microteams.own('compactPct', 0) // 0..100 while compacting
-const subagents = microteams.own('subagents', 0) // # of running Task/Agent subagents in the band
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// B-class variables (server owns; we observe):
-const label = microteams.watch<string>('label') // human label for the screen
-label.onChange((v) => microteams.log('screen labelled: ' + v))
+// Permission-mode hunting state (see onIdle).
+let modeCyclesTried = 0
+let bypassUnavailable = false
 
-// viewerLevel: what the human viewer is doing right now, pushed by the UI:
-//   'passive' — read-only or auto: NOT scrolling/typing, so the screen sits at
-//               the live bottom and busy/idle can be read directly (ground truth);
-//   'scroll'  — scrolling history: the footer may be off-screen, don't trust it;
-//   'full'    — typing: the screen is changing under the human's hands.
-// isActive() means scroll or full (unreliable to sample); isFull() also gates
-// command buffering so the driver never types over a human.
-const viewerLevel = microteams.watch<string>('viewerLevel')
-const isActive = () => {
-  const l = viewerLevel.get()
-  return l === 'scroll' || l === 'full'
-}
-const isFull = () => viewerLevel.get() === 'full'
-
-// --- keystrokes ------------------------------------------------------------
-const ESC = '\x1b'
-const UP = ESC + '[A',
-  DOWN = ESC + '[B',
-  ENTER = '\r',
-  PGDN = ESC + '[6~',
-  SHIFT_TAB = ESC + '[Z' // cycles Claude's permission mode
-// Bracketed-paste markers: wrap a body so the TUI ingests it as one atomic paste
-// (a long/multiline body pasted raw can have its embedded newlines interpreted as
-// submits). See say() / the deferred-submit countdown for why the Enter is separate.
-const PASTE_START = ESC + '[200~',
-  PASTE_END = ESC + '[201~'
-
-function moveToOption(n: number) {
-  for (let i = 0; i < 9; i++) microteams.term.write(UP) // go firmly to the top
-  for (let i = 1; i < n; i++) microteams.term.write(DOWN) // step down to option n
-}
-
-function pickOption(n: number) {
-  moveToOption(n)
-  microteams.term.write(ENTER)
-}
-
-const clean = (l: string) => l.replace(/[│╭╮╰╯]/g, '')
-function parseOption(l: string): Choice | null {
-  const m = clean(l).match(/^\s*[❯>]?\s*(\d+)\.\s+(.*\S)\s*$/)
-  return m ? { n: parseInt(m[1], 10), label: m[2].trim() } : null
-}
-
-// Choose the option whose LABEL matches, moving RELATIVE to where the cursor actually is.
-//
-// The absolute "UP nine times to get to the top, then step down" trick that pickOption uses is
-// wrong on these dialogs, because Claude Code's selection WRAPS. On a two-option gate, nine UPs
-// land on option 2 (odd number of wraps) and the following DOWN wraps back to option 1 — so aiming
-// at "2. Yes, I accept" reliably arrived at "1. No, exit", and pressing Enter there quit Claude
-// Code three seconds after launch. Counting from the cursor's real position cannot drift like that.
-//
-// The move and the Enter are also deliberately split across frames: the TUI is still digesting the
-// cursor keys when a same-burst Enter arrives, so it either vanishes or lands on the option we were
-// moving away from. Move on one frame, confirm on the next — each step idempotent, and neither one
-// able to answer the dialog wrongly on its own.
-function chooseByLabel(screen: string, want: RegExp): boolean {
-  const options: Array<{ opt: Choice; selected: boolean }> = []
-  for (const line of screen.split('\n')) {
-    const opt = parseOption(line)
-    if (opt) options.push({ opt, selected: /❯/.test(line) })
-  }
-  const targetIdx = options.findIndex((o) => want.test(o.opt.label))
-  if (targetIdx < 0) return false
-  const currentIdx = options.findIndex((o) => o.selected)
-  if (currentIdx === targetIdx) {
-    microteams.term.write(ENTER)
-    return true
-  }
-  // No cursor visible (a frame mid-repaint): wait for one that shows it rather than guessing.
-  if (currentIdx < 0) return false
-  const step = targetIdx > currentIdx ? DOWN : UP
-  for (let i = 0; i < Math.abs(targetIdx - currentIdx); i++) microteams.term.write(step)
-  return true
-}
-
-// --- observe (tail only; scrollback can never trip a match) ----------------
-// Returns the directly-observable shape of the screen. The busy/idle decision
-// is made in onChange, because it depends on viewer state and history.
-function observe(screen: string): any {
+function observe(screen: string): Observation {
   const lines = screen.split('\n')
   const tail = lines.slice(-16)
   const tailStr = tail.join('\n')
 
   if (/Pane is dead \(status/.test(tailStr)) return { kind: 'dead' }
 
-  // A real choice dialog: a "❯ N." selection cursor + a dialog footer (or trust)
-  // + a contiguous 1,2,3,… option block. This rejects stray numbered lists (e.g.
-  // a "1./2./3." list inside a prompt), which have neither cursor nor footer.
+  // A real choice dialog: a "❯ N." cursor + a dialog footer (or the trust gate) + a contiguous
+  // 1,2,3,… block. All three, so a numbered list inside ordinary output cannot masquerade as one.
   const trust = /Do you trust/i.test(tailStr)
-  const hasFooter = /Esc to cancel|to amend|ctrl\+e to explain|Enter to (confirm|continue)|Esc to exit/i.test(tailStr)
+  const hasFooter =
+    /Esc to cancel|to amend|ctrl\+e to explain|Enter to (confirm|continue)|Esc to exit/i.test(tailStr)
   const selIdx = tail.findIndex((l) => /❯\s+\d+\.\s/.test(clean(l)))
   if (selIdx >= 0 && (hasFooter || trust)) {
     let start = selIdx
@@ -144,24 +55,17 @@ function observe(screen: string): any {
     }
   }
 
-  // The orange signature line: Claude shows "esc to interrupt" only while the
-  // FOREGROUND turn is working.
+  // Older builds print "esc to interrupt" only while the FOREGROUND turn is working.
   const orange = /esc to interrupt/.test(tailStr)
 
-  // --- active work = an animated spinner AT THE START OF A ROW ---------------
-  // A row that is actively working leads with an animated braille SPINNER frame
-  // (U+2801–U+28FF). This is the ONLY reliable "in-progress" glyph:
-  //   * U+2800 (blank braille) is EXCLUDED — TUIs paint it as an invisible spacer, so
-  //     matching it (as the old anywhere-in-tail check did) reported busy forever;
-  //   * completed tool results lead with a STATIC ⏺ (U+23FA), not braille, and often
-  //     carry a "(5s)" duration — the old band check matched those and reported busy
-  //     after every finished tool call;
-  //   * an idle prompt has NO spinner at all.
-  // Match ONLY at line start (never mid-line) so stray braille / durations sitting in
-  // scrollback can't trip it. The foreground turn spins on its own row; each RUNNING
-  // subagent in the bottom band spins on its own row too — so counting spinner rows
-  // that are NOT the foreground "esc to interrupt" line gives the running-subagent
-  // count. Reads structural UI state (a spinner), not any natural-language meaning.
+  // A row that is actively working leads with an animated braille spinner (U+2801–U+28FF). This is
+  // the only reliable in-progress glyph, and the exclusions are all mistakes that were made:
+  //   * U+2800 (blank braille) is a spacer — matching it reported busy forever;
+  //   * a FINISHED tool result leads with a static ⏺ and often carries "(5s)" — matching those
+  //     reported busy after every completed call;
+  //   * an idle prompt has no spinner at all.
+  // Matched only at line start, so stray braille in scrollback cannot trip it. Each running
+  // subagent spins on its own row, so spinner rows that are not the foreground line count them.
   const spins = (c: string) => /^\s*[⠁-⣿]/.test(c)
   const anySpinner = tail.some((l) => spins(clean(l)))
   const bandRows = tail.filter((l) => {
@@ -169,240 +73,124 @@ function observe(screen: string): any {
     return spins(c) && !/esc to interrupt/.test(c)
   }).length
 
-  // Newer Claude Code (2.x) dropped the "esc to interrupt" hint and animates its foreground
-  // spinner with dingbat glyphs (✢ ✶ ✻ ✽ · * ●), not braille — so neither signal above fires.
-  // But throughout a running turn it shows a "<verb>… (<elapsed> · ↓ <n> tokens)" reassurance
-  // line, which an idle prompt never carries (there the footer is just the input box + mode hint).
-  //
-  // Anchor on the reassurance line's structural SIGNATURE — the "…(" that glues the gerund to
-  // its parenthetical (the same anchor the elapsed/tokens extractor below relies on) — plus an
-  // elapsed duration OR a token count inside. This is deliberately tighter than an anywhere-in-
-  // tail "(…tokens…)" match, which mis-fired two ways: it flagged idle screens whose scrollback
-  // merely mentioned "(… tokens)" in tool output (false busy), and it missed the first frames of
-  // a turn that show only elapsed before any tokens are counted (false idle). A FINISHED tool
-  // result reads "…name) (5s)" — its "…" is followed by ")" not "(", so the "…(" anchor skips it.
+  // Claude Code 2.x dropped "esc to interrupt" and animates with dingbats, so neither signal above
+  // fires. It does show a "<verb>… (<elapsed> · ↓ <n> tokens)" line throughout a turn, which an idle
+  // prompt never carries. Anchor on the "…(" that glues the gerund to its parenthetical — an
+  // anywhere-in-tail "(… tokens)" match mis-fired both ways: busy on idle screens whose scrollback
+  // mentioned tokens, and idle on the first frames of a turn, before any tokens are counted.
   const busyFooter = /…\s*\([^)]*\b(?:\d+[hms]|tokens?)\b[^)]*\)/i.test(tailStr)
-  const working = orange || anySpinner || busyFooter
 
   const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail.filter((l) => l.trim()).length > 3
-  return { kind: 'open', orange, bandRows, working, hasUI }
+  return { kind: 'open', working: orange || anySpinner || busyFooter, hasUI, bandRows } as Observation & {
+    bandRows: number
+  }
 }
 
-// --- busy/idle state machine ------------------------------------------------
-let stableBusy = false // busy/idle from the last reliable (passive) sample
-let cmdSince = false // a command was emitted since that sample
-let wasActive = false // to detect the active -> passive transition
-// Permission-mode hunting (see below): prefer "bypass permissions", fall back to "auto mode".
-let modeCyclesTried = 0
-let bypassUnavailable = false
-let frame = 0
-let submitIn = 0 // frames to wait after a paste before pressing Enter (0 = disarmed)
+defineDriver({
+  name: 'claude',
+  version: 14,
 
-microteams.term.onChange(() => {
-  frame++
-  const screen = microteams.term.read()
-  const tailStr = screen.split('\n').slice(-16).join('\n')
+  gates: [
+    {
+      // The folder-trust gate on a fresh cwd. Wording varies by version, and the default option is
+      // the safe one ("Enter to confirm"), so a bare Enter is right. Every frame: it is idempotent.
+      name: 'folder trust',
+      when: /I trust this folder|created or one you trust|Do you trust/i,
+      every: 1,
+      act: (c) => c.write(ENTER),
+    },
+    {
+      // The bypass-permissions consent, shown the first time Claude Code is started with
+      // --dangerously-skip-permissions on a machine that has never accepted it. This is the one
+      // gate whose default answer is DESTRUCTIVE — the cursor starts on "No, exit" — so the bare
+      // Enter that gets past folder-trust would quit Claude here instead, and an agent on a
+      // brand-new machine would die before reading anything. Pick by label, never by position.
+      name: 'bypass permissions',
+      when: /Bypass Permissions mode/i,
+      act: (c) => c.choose(/yes,?\s*i\s*accept/i),
+    },
+    {
+      // Resuming, Claude offers to continue from a SUMMARY instead of the full transcript and waits
+      // on the answer before it will read anything. Take the full session: the point of --resume is
+      // that the agent picks up where it left off, and a summary silently drops what it was working
+      // from. Left alone it hangs here forever, which is how a woken agent that "came back" never
+      // answers. The second clause is the dialog's own cursor: it is still up.
+      name: 'resume full session',
+      when: (c) =>
+        /Resuming the full session|resuming from a summary/i.test(c.screen) &&
+        /❯\s*\d+\.\s/.test(clean(c.screen)),
+      act: (c) => c.choose(/resume full session/i),
+    },
+  ],
 
-  // Deferred submit — the bracketed-paste vs Enter race (see say()). After a paste,
-  // Claude Code ingests the body asynchronously; a CR written too soon is swallowed
-  // into the paste and never submits. So say() only arms this counter and the Enter
-  // is pressed here, a few frames later, once the paste has settled. onChange is fed
-  // by terminal changes AND a ~1.2s heartbeat, so this fires even on a static screen.
-  // Guarded by !isFull() so we never fight a human who has grabbed the keyboard.
-  if (submitIn > 0 && !isFull()) {
-    if (--submitIn === 0) microteams.term.write(ENTER)
-  }
+  observe,
 
-  // Auto-trust the folder-trust gate Claude shows on a fresh cwd. Scan the WHOLE screen, not the
-  // tail: like Codex's, this gate renders at the TOP of a tall pane with blank space below, so it is
-  // NOT in the last 16 lines. The wording varies by version ("Do you trust this folder?" → "Is this
-  // a project you created or one you trust? … 1. Yes, I trust this folder"), so match any of those;
-  // the default option is highlighted with "Enter to confirm", so a bare Enter accepts it.
-  if (
-    /I trust this folder|created or one you trust|Do you trust/i.test(screen) &&
-    !isFull()
-  ) {
-    microteams.term.write(ENTER)
-    return
-  }
+  vars: { compact: '', compactPct: 0, subagents: 0 },
 
-  // The bypass-permissions consent, shown the first time Claude Code is launched with
-  // --dangerously-skip-permissions on a machine that has never accepted it. It is the one gate whose
-  // default answer is DESTRUCTIVE: the cursor starts on "1. No, exit", so the blind Enter that gets
-  // past the folder-trust gate would quit Claude here instead — and an agent on a brand-new machine
-  // would die before it ever read a message.
-  //
-  // So this picks by LABEL, never by position: "Yes, I accept". The two gates having opposite option
-  // orders is exactly the trap, and matching text is the only thing that survives it.
-  if (/Bypass Permissions mode/i.test(screen) && !isFull()) {
-    if (frame % 2 === 0) chooseByLabel(screen, /yes,?\s*i\s*accept/i)
-    return
-  }
-
-  // Resuming an old session, Claude offers to continue from a SUMMARY instead of the full
-  // transcript, and waits on that choice before it will read anything. Take the full session: the
-  // whole point of `--resume` here is that the agent picks up where it left off, and a summary
-  // silently drops the detail it was working from — a compaction nobody asked for. Left alone the
-  // agent simply hangs on the dialog forever, which is how a woken agent that "came back" can still
-  // never answer.
-  //
-  // Anchor on the dialog's own wording rather than an option number, and press the option whose
-  // label says so — the numbering and the recommended default are Claude's to change. Scanning the
-  // whole screen, and the two-frame gate, mirror the folder-trust handling above: the dialog
-  // repaints while we type into it, and pressing twice would answer the NEXT dialog too.
-  const resumeGate =
-    /Resuming the full session|resuming from a summary/i.test(screen) &&
-    /❯\s*\d+\.\s/.test(clean(screen)) // its selection cursor: the dialog is still up
-  if (resumeGate && !isFull()) {
-    if (frame % 2 === 0) chooseByLabel(screen, /resume full session/i)
-    return
-  }
-
-  // When the human just stopped scrolling/typing, snap Claude back to the live
-  // bottom so the next passive sample sees the real footer.
-  const active = isActive()
-  if (wasActive && !active) for (let i = 0; i < 12; i++) microteams.term.write(PGDN)
-  wasActive = active
-
-  const o = observe(screen)
-  let st = o.kind
-  if (o.kind === 'open') {
-    let busy
-    if (!active) {
-      // Passive: the footer is trustworthy — this is the ground-truth sample.
-      // `working` is true for foreground activity ("esc to interrupt") AND for a
-      // running subagent/background task (bottom band rows / spinner frame), so a
-      // quiet foreground with live subagents still reads as busy.
-      busy = o.working
-      stableBusy = busy
-      cmdSince = false
+  report: (ctx, vars, o) => {
+    vars.subagents.set(o.kind === 'open' ? ((o as any).bandRows ?? 0) : 0)
+    const cm = ctx.tail.match(/Compacting conversation[^%]*?(\d+)\s*%/)
+    if (cm || /Compacting conversation/.test(ctx.tail)) {
+      vars.compact.set('running')
+      vars.compactPct.set(cm ? parseInt(cm[1], 10) : 0)
+    } else if (/Compacted \(|Not enough messages to compact/i.test(ctx.tail)) {
+      vars.compact.set('done')
+      vars.compactPct.set(100)
     } else {
-      // Active: can't trust the live view. Hold the last passive verdict, but a
-      // command emitted since then has likely started work, so treat that as busy.
-      busy = stableBusy || cmdSince
+      vars.compact.set('')
+      vars.compactPct.set(0)
     }
-    st = busy ? 'busy' : o.hasUI ? 'idle' : 'starting'
-  }
+  },
 
-  // Keep Claude in "bypass permissions" mode — the peer of what --dangerously-skip-permissions
-  // launches into, and the most permissive (routine tool use runs without a prompt). Claude drifts
-  // out of it over time, and an older build of this applet actively cycled it AWAY into "auto mode".
-  // "bypass permissions" IS in the Shift+Tab cycle, so hunt for it; only if a full cycle passes
-  // without it appearing (e.g. it's disabled) do we settle for "auto mode". Re-checked whenever idle
-  // so a mode that drifts is restored. Guards: only when passive (the footer is trustworthy) and no
-  // human is driving, and only while a mode line is actually on screen — so a transient frame with
-  // no footer can never make us cycle away from a good mode.
-  if (st === 'idle' && !isActive()) {
-    const inBypass = /bypass permissions on/i.test(tailStr)
-    const inAuto = /auto mode on/i.test(tailStr)
-    const modeVisible =
-      inBypass || inAuto || /(accept edits|manual mode|plan mode) on/i.test(tailStr)
+  // "…(6m 45s · ↓ 19.2k tokens)" — how long this turn has been going and what it has cost.
+  progress: (ctx) => {
+    const paren = ctx.tail.match(/…\s*\(([^)]*)\)/)
+    if (!paren) return null
+    const out: { elapsed?: string; tokens?: string } = {}
+    const tm = paren[1].match(/(?:\d+h\s*)?(?:\d+m\s*)?\d+s|\d+m\b/)
+    if (tm) out.elapsed = tm[0].replace(/\s+/g, '')
+    const tk = paren[1].match(/([\d.]+k?)\s*tokens/i)
+    if (tk) out.tokens = tk[1]
+    return out
+  },
+
+  // Keep Claude in bypass-permissions mode — the peer of what --dangerously-skip-permissions starts
+  // in, and the most permissive. It drifts out of it over time, and an older driver actively cycled
+  // it AWAY into auto mode. Bypass is in the Shift+Tab cycle, so hunt for it; only if a full cycle
+  // passes without it appearing (it can be disabled) settle for auto. Only act while a mode line is
+  // actually on screen, so a transient frame cannot cycle away from a good mode.
+  onIdle: (ctx) => {
+    const inBypass = /bypass permissions on/i.test(ctx.tail)
+    const inAuto = /auto mode on/i.test(ctx.tail)
+    const modeVisible = inBypass || inAuto || /(accept edits|manual mode|plan mode) on/i.test(ctx.tail)
     if (inBypass) {
-      modeCyclesTried = 0 // best mode — leave it
+      modeCyclesTried = 0
       bypassUnavailable = false
     } else if (bypassUnavailable && inAuto) {
-      modeCyclesTried = 0 // gave up on bypass; settled on the fallback — leave it
-    } else if (modeVisible && frame % 2 === 0) {
-      microteams.term.write(SHIFT_TAB)
-      modeCyclesTried++
-      if (modeCyclesTried >= 7) bypassUnavailable = true // a full cycle without bypass -> accept auto
+      modeCyclesTried = 0
+    } else if (modeVisible && ctx.frame % 2 === 0) {
+      ctx.write(SHIFT_TAB)
+      if (++modeCyclesTried >= 7) bypassUnavailable = true
     }
-  }
+  },
 
-  statusVar.set(st)
-  question.set(o.kind === 'waiting' ? o.question || '' : '')
-  choices.set(o.kind === 'waiting' ? o.choices || [] : [])
-  // Report how many subagents the bottom band is showing (0 when none / not open).
-  subagents.set(o.kind === 'open' ? o.bandRows : 0)
-
-  // While working, Claude shows "…(6m 45s · ↓ 19.2k tokens)" — the genuinely
-  // useful reassurance: how long it's been going and how many tokens it's used.
-  // Update from that line when busy; clear when not. (Only update on a match, so a
-  // scrolled-away spinner doesn't blank it mid-turn.)
-  if (st === 'busy') {
-    const paren = tailStr.match(/…\s*\(([^)]*)\)/)
-    if (paren) {
-      const tm = paren[1].match(/(?:\d+h\s*)?(?:\d+m\s*)?\d+s|\d+m\b/)
-      if (tm) elapsed.set(tm[0].replace(/\s+/g, ''))
-      const tk = paren[1].match(/([\d.]+k?)\s*tokens/i)
-      if (tk) tokens.set(tk[1])
-    }
-  } else {
-    elapsed.set('')
-    tokens.set('')
-  }
-
-  const cm = tailStr.match(/Compacting conversation[^%]*?(\d+)\s*%/)
-  if (cm || /Compacting conversation/.test(tailStr)) {
-    compact.set('running')
-    compactPct.set(cm ? parseInt(cm[1], 10) : 0)
-  } else if (/Compacted \(|Not enough messages to compact/i.test(tailStr)) {
-    compact.set('done')
-    compactPct.set(100)
-  } else {
-    compact.set('')
-    compactPct.set(0)
-  }
-})
-
-// --- command buffering ------------------------------------------------------
-// While a human is typing (full mode) server commands would collide with their
-// keystrokes, so we queue them and flush the moment the human hands control back.
-// Every executed command marks cmdSince so the state machine treats the screen as
-// busy until the next reliable sample.
-let queue: Array<() => any> = []
-function gated(fn: (...args: any[]) => any) {
-  return function (this: any): any {
-    const args = Array.prototype.slice.call(arguments)
-    const run = () => {
-      cmdSince = true
-      return fn.apply(null, args)
-    }
-    if (isFull()) {
-      queue.push(run)
-      return 'buffered'
-    }
-    return run()
-  }
-}
-viewerLevel.onChange(() => {
-  if (!isFull() && queue.length) {
-    const q = queue
-    queue = []
-    q.forEach((f) => f())
-  }
-})
-
-// --- functions the server may call -----------------------------------------
-microteams.expose('snapshot', () => microteams.term.read())
-// Paste the body as ONE atomic bracketed paste, then arm a deferred Enter (pressed
-// by the onChange loop once the paste settles). Never write the CR in this same step:
-// for a long/multiline paste the TUI is still ingesting and the CR gets swallowed,
-// leaving the message stuck at the "[Pasted text #N +L lines]" placeholder, un-submitted.
-microteams.expose(
-  'say',
-  gated((text: string) => {
-    microteams.term.write(PASTE_START + text + PASTE_END)
-    submitIn = 2
-    return true
-  }),
-)
-microteams.expose(
-  'choose',
-  gated((n: any) => {
-    pickOption(parseInt(n, 10) || 1)
-    return true
-  }),
-)
-microteams.expose(
-  'compact',
-  gated(() => {
-    microteams.term.write('/compact')
-    microteams.term.write(ENTER)
-    return true
-  }),
-)
-
-microteams.call('screenReady', { driver: 'claude', version: 13 }).then((ack) => {
-  microteams.log('server acked screenReady: ' + JSON.stringify(ack))
+  commands: {
+    // Answer the dialog currently on screen by option NUMBER, for a control plane relaying a
+    // person's click. Resolved to that option's label and then moved to relatively — the number
+    // says which option, never how many keys to press. (The old driver counted keystrokes from an
+    // imagined top of the list, which is the bug that made it press "No, exit".)
+    choose: (n: unknown) => {
+      const want = parseInt(String(n), 10) || 1
+      const opt = readOptions(host.term.read()).find((o) => o.opt.n === want)
+      if (!opt) return false
+      chooseByLabel((d) => host.term.write(d), host.term.read(), new RegExp(escapeRe(opt.opt.label)))
+      return true
+    },
+    // Two writes, not one: the command text and its submit, the same way a person sends it.
+    compact: () => {
+      host.term.write('/compact')
+      host.term.write(ENTER)
+      return true
+    },
+  },
 })
