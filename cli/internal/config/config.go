@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,10 +19,10 @@ import (
 // durable credential minted for this device by `microteams auth login`. WS is an
 // optional explicit control-channel URL — when empty it is derived from Base.
 type Config struct {
-	Base     string `json:"base"`
-	Token    string `json:"token"`
+	Base      string `json:"base"`
+	Token     string `json:"token"`
 	MachineID string `json:"machine_id,omitempty"`
-	WS       string `json:"ws,omitempty"`
+	WS        string `json:"ws,omitempty"`
 }
 
 // DefaultPath is where the config lives unless overridden (~/.config/microteams/config.json).
@@ -30,7 +31,7 @@ func DefaultPath() string {
 	if err != nil {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "microteams", "config.json")
+	return filepath.Join(base, brand.Current.ConfigDir, "config.json")
 }
 
 // Dir is the directory containing the default config.

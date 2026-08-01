@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"github.com/micro-teams/microteams/cli/internal/config"
 	"github.com/micro-teams/microteams/cli/internal/link"
 	"github.com/micro-teams/microteams/cli/internal/runtime"
@@ -304,7 +305,7 @@ func (h *Host) createSession(m link.Msg) {
 	// spawns can prove which screen it belongs to when it calls back.
 	env := make([]string, 0, len(m.Env)+1)
 	if m.Screen != "" {
-		env = append(env, "MICROTEAMS_SCREEN="+m.Screen)
+		env = append(env, brand.Current.Env("SCREEN")+"="+m.Screen)
 	}
 	for k, v := range m.Env {
 		env = append(env, k+"="+v)

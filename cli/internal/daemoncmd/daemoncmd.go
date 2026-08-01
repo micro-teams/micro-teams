@@ -545,4 +545,3 @@ func confirm(q string) bool {
 	line = strings.ToLower(strings.TrimSpace(line))
 	return line == "y" || line == "yes"
 }
-

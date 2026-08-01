@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"net/http"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ type Result struct {
 func Login(ctx context.Context, base string, show func(approveURL string)) (*Result, error) {
 	base = strings.TrimRight(base, "/")
 	var sr startResp
-	if err := postJSON(ctx, base+"/machine/enroll/start", map[string]string{}, &sr); err != nil {
+	if err := postJSON(ctx, base+brand.Current.EnrollBase+"/start", map[string]string{}, &sr); err != nil {
 		return nil, fmt.Errorf("auth: start: %w", err)
 	}
 	if sr.Code == "" || sr.ApproveURL == "" {
@@ -67,7 +68,7 @@ func Login(ctx context.Context, base string, show func(approveURL string)) (*Res
 			return nil, ctx.Err()
 		case <-tick.C:
 			var pr pollResp
-			if err := postJSON(ctx, base+"/machine/enroll/poll",
+			if err := postJSON(ctx, base+brand.Current.EnrollBase+"/poll",
 				map[string]string{"code": sr.Code}, &pr); err != nil {
 				return nil, fmt.Errorf("auth: poll: %w", err)
 			}
