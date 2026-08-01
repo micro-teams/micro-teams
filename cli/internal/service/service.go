@@ -15,11 +15,14 @@ import (
 
 	ksvc "github.com/kardianos/service"
 
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"github.com/micro-teams/microteams/cli/internal/host"
 )
 
-const (
-	serviceName = "microteams"
+// The unit's identity. The name must match the brand, because uninstalling by the wrong name stops
+// nothing while reporting success — a failure this project has already shipped once.
+var (
+	serviceName = brand.Current.ServiceName
 	displayName = "Microteams"
 	description = "Connects this machine to Microteams and hosts server-driven sessions."
 )

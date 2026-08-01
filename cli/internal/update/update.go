@@ -10,6 +10,7 @@ package update
 import (
 	"context"
 	"fmt"
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,7 +53,7 @@ func binaryURL(base, dir string) (string, error) {
 		return "", fmt.Errorf("update: bad base %q: %v", base, err)
 	}
 	origin := u.Scheme + "://" + u.Host
-	return origin + "/connector/latest/" + dir + "/microteams", nil
+	return origin + brand.Current.BinaryBase + "/" + dir + "/" + brand.Current.Name, nil
 }
 
 // Fetch downloads the current platform's `microteams` binary from base's origin into a

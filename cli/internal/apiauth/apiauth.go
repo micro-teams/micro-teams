@@ -17,18 +17,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"github.com/micro-teams/microteams/cli/internal/config"
 )
 
 // APIBase returns the server base URL: MICROTEAMS_API if set, else this machine's configured base,
 // else a localhost default.
 func APIBase() string {
-	if base := os.Getenv("MICROTEAMS_API"); base != "" {
+	if base := brand.Current.Getenv("API"); base != "" {
 		return strings.TrimRight(base, "/")
 	}
 	if cfg, err := config.Load(config.DefaultPath()); err == nil && cfg.Base != "" {
@@ -39,7 +39,7 @@ func APIBase() string {
 
 // resolveToken returns this machine's credential: MICROTEAMS_TOKEN if set, else the stored one.
 func resolveToken() string {
-	if tok := os.Getenv("MICROTEAMS_TOKEN"); tok != "" {
+	if tok := brand.Current.Getenv("TOKEN"); tok != "" {
 		return tok
 	}
 	if cfg, err := config.Load(config.DefaultPath()); err == nil {
@@ -60,7 +60,7 @@ func Transport() http.RoundTripper {
 		host:    host,
 		apiBase: base,
 		token:   resolveToken(),
-		screen:  os.Getenv("MICROTEAMS_SCREEN"),
+		screen:  brand.Current.Getenv("SCREEN"),
 	}
 }
 

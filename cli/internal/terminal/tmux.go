@@ -7,6 +7,7 @@ package terminal
 import (
 	"bytes"
 	"fmt"
+	"github.com/micro-teams/microteams/cli/internal/brand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +65,7 @@ func NewManager() (*Manager, error) {
 	// (syscall.Exec) microteams must reconnect to the SAME socket to find and re-adopt the
 	// surviving sessions. A random dir per process would strand them on an orphan
 	// socket (which is exactly what broke in-place update before this).
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("microteams-%d", os.Getuid()))
+	dir := brand.Current.RuntimePath()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("terminal: runtime dir: %w", err)
 	}
