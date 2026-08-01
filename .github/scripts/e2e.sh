@@ -419,4 +419,81 @@ pass "the connector no longer counts a screen whose tmux is gone"
 step "a message wakes a dead agent, and is actually submitted (T-064)"
 round_trip "woken by the message"
 
+# --- a long message, in both directions -----------------------------------------------------------
+# Long messages have been lost in both directions, silently, for weeks:
+#
+#   T-058  a long message a PERSON sends is stored and shown to the sender, but never reaches the
+#          agent — `tmux send-keys` refused the over-long command and the error went to a log file.
+#   T-057  a long message an AGENT sends comes out truncated.
+#
+# Silent loss is the worst failure this system has, because the sender is told nothing. Each leg
+# asserts the direction it can actually see: the fake program can be compared byte for byte, and only
+# a real Claude Code can send anything back.
+step "a long message survives, in both directions (T-057 / T-058)"
+if [ "$LEG" = "fake" ]; then
+  # Inbound. Many lines rather than one enormous one on purpose: the tty line discipline has its own
+  # ~4KB limit per line in canonical mode, which would be mistaken for the bug under test. The tail
+  # marker is what the assertion turns on — a write truncated anywhere loses it.
+  # Built as a file and posted with curl like every other request here: python's urllib would honour
+  # a proxy from the environment, which on a developer machine quietly breaks a localhost call.
+  python3 -c "
+import json
+body = '\\n'.join('line%03d %s' % (i, 'x' * 60) for i in range(400)) + '\\nTAIL-MARKER-OK'
+open('/tmp/e2e-long.json', 'w').write(json.dumps({'content': body}))"
+  curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
+    --data-binary @/tmp/e2e-long.json >/dev/null
+  for _ in $(seq 1 40); do
+    if docker exec "$MACHINE_CT" grep -q "TAIL-MARKER-OK" /tmp/agent-heard.txt 2>/dev/null; then
+      LONG_IN=1; break
+    fi
+    sleep 2
+  done
+  [ "${LONG_IN:-0}" = "1" ] || {
+    echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
+    fail "a ~25KB message never reached the agent's program (T-058)"
+  }
+  pass "a ~25KB message reached the agent's program whole"
+else
+  # Outbound. The model is told to post a 20,000-character message; the assertion is on what the
+  # backend stored, so anything that truncates on the way — the CLI applet, the request, the column —
+  # fails here.
+  # The 20,000 characters are composed by a script on the machine rather than inside the tool call:
+  # a JSON string, inside a mock expectation, inside a shell heredoc is three levels of quoting, and
+  # what is being tested is message length, not anyone's escaping.
+  docker exec "$MACHINE_CT" bash -c "cat > /usr/local/bin/longsay <<'EOS'
+#!/bin/bash
+microteams api say --thread-id \$1 --text \"LONGREPLY-\$(python3 -c 'print(\"y\"*20000)')-END\"
+EOS
+    chmod +x /usr/local/bin/longsay"
+  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
+    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
+{ "httpRequest": { "method": "POST", "path": "/v1/messages",
+                   "body": { "type": "JSON_PATH", "jsonPath": "\$.tools[?(@.name=='Bash')]" } },
+  "times": { "remainingTimes": 1, "unlimited": false },
+  "priority": 20,
+  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
+    "completion": { "text": "Answering at length.", "streaming": true, "stopReason": "tool_use",
+      "toolCalls": [ { "id": "toolu_ci_long", "name": "Bash",
+        "arguments": "{\"command\":\"longsay $THREAD_ID\",\"description\":\"long reply\"}" } ],
+      "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
+JSON
+  curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"content":"say something long"}' >/dev/null
+  for _ in $(seq 1 60); do
+    LEN="$(curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" |
+      python3 -c "
+import json,sys
+ms = json.load(sys.stdin)['messages']
+print(max([len(m.get('content') or '') for m in ms if 'LONGREPLY-' in (m.get('content') or '')] or [0]))")"
+    [ "${LEN:-0}" -ge 20000 ] && { LONG_OUT=1; break; }
+    sleep 3
+  done
+  [ "${LONG_OUT:-0}" = "1" ] || {
+    echo "--- longest LONGREPLY message stored: ${LEN:-0} chars (want >= 20000) ---"
+    echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
+    fail "the agent's long message was truncated or never arrived (T-057)"
+  }
+  pass "the agent's 20,000-character message was stored whole ($LEN chars)"
+fi
+
 step "everything asserted"
