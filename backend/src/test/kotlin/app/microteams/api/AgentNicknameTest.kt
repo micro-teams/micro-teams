@@ -56,8 +56,9 @@ constructor(
     private var teamId: IdType = -1
     private var agentUserId: IdType = -1
     private var agentAvatarId: Long = -1
-    // Identity restricts nicknames to 1-16 chars of letters/digits/underscores/Chinese — no spaces.
-    private val newNickname = "Renamed_${UUID.randomUUID().toString().take(6)}"
+    // Identity accepts any nickname now, so this uses a name with a space — the kind the old rule
+    // would have rejected — to prove end-to-end that arbitrary names go through.
+    private val newNickname = "Renamed ${UUID.randomUUID().toString().take(6)}"
 
     @BeforeAll
     fun prepare() {

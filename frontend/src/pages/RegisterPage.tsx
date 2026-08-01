@@ -4,7 +4,6 @@ import { useAuth } from "@/hooks/useAuth";
 import * as api from "@/lib/api";
 import {
   checkPassword,
-  nicknamePattern,
   passwordPattern,
   usernamePattern,
 } from "@/lib/validation";
@@ -20,9 +19,8 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [nickname, setNickname] = useState("");
-  // Nickname mirrors username until the user edits nickname themselves — a
-  // username char that's illegal in a nickname (e.g. '-') just leaves the
-  // mirrored nickname invalid; the nickname's own rule feedback covers that.
+  // Nickname mirrors username until the user edits nickname themselves. A
+  // nickname may be any non-empty string, so the mirrored value is always fine.
   const [nicknameTouched, setNicknameTouched] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -44,7 +42,6 @@ export function RegisterPage() {
   }
 
   const usernameOk = username.length === 0 || usernamePattern.test(username);
-  const nicknameOk = nickname.length === 0 || nicknamePattern.test(nickname);
   const pw = checkPassword(password);
   const passwordOk = password.length === 0 || passwordPattern.test(password);
   const passwordsMatch =
@@ -52,7 +49,7 @@ export function RegisterPage() {
 
   const canSubmit =
     usernamePattern.test(username) &&
-    nicknamePattern.test(nickname) &&
+    nickname.length > 0 &&
     passwordPattern.test(password) &&
     password === confirmPassword &&
     !!email &&
@@ -115,14 +112,8 @@ export function RegisterPage() {
                 id="nickname"
                 value={nickname}
                 onChange={(e) => onNicknameChange(e.target.value)}
-                aria-invalid={!nicknameOk}
                 required
               />
-              {nickname.length > 0 && !nicknameOk && (
-                <p className="text-destructive text-xs">
-                  1-16 chars: letters, numbers, underscores, Chinese characters
-                </p>
-              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">password</Label>

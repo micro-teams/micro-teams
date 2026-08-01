@@ -68,10 +68,8 @@ class AgentProfileService(
     /** Rename [agentUserId] to [nickname], as the agent itself. */
     @Transactional(readOnly = true)
     fun setNickname(agentUserId: IdType, nickname: String) {
-        val trimmed = nickname.trim()
-        // A minimal client-side guard; identity remains the authority on what a name may be, and
-        // any refusal from it surfaces through putProfile below.
-        if (trimmed.isBlank()) throw BadRequestError("the agent's nickname must not be blank")
+        // The nickname is passed through as-is; identity is the sole authority on what a name may
+        // be, and any refusal from it surfaces through putProfile below.
         val profile =
             userProfileRepository.findByUserId(agentUserId.toInt()).orElseThrow {
                 NotFoundError("user", agentUserId)
@@ -81,7 +79,7 @@ class AgentProfileService(
         putProfile(
             agentUserId,
             profile,
-            nickname = trimmed,
+            nickname = nickname,
             intro = profile.intro ?: "",
             avatarId = profile.avatar?.id ?: error("agent $agentUserId has no avatar to preserve"),
             what = "nickname",

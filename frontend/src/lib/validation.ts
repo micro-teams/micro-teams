@@ -7,10 +7,6 @@ export const usernamePattern = /^[a-zA-Z0-9_-]{4,32}$/;
 export const usernameRule =
   "Username must be 4-32 characters long and can only contain letters, numbers, underscores and hyphens.";
 
-export const nicknamePattern = /^[a-zA-Z0-9_\u4e00-\u9fa5]{1,16}$/;
-export const nicknameRule =
-  "Nickname must be 1-16 characters long and can only contain letters, numbers, underscores, and Chinese characters.";
-
 // eslint-disable-next-line no-control-regex
 export const passwordPattern =
   /^(?=.*[a-zA-Z])(?=.*\d)(?=.*[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]).{8,}$/;
