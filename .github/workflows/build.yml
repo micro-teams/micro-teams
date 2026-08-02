@@ -83,6 +83,11 @@ jobs:
 
   build-applet:
     runs-on: ubuntu-latest
+    # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which
+    # requires an authenticated request even for a public package.
+    permissions:
+      contents: read
+      packages: read
     defaults:
       run:
         working-directory: applets
@@ -98,7 +103,11 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: applets/package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@micro-teams"
       - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
       - name: Upload applets
         uses: actions/upload-artifact@v7
