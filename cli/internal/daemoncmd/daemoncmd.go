@@ -27,12 +27,30 @@ import (
 
 	"github.com/micro-teams/micro-connector/cli/auth"
 	"github.com/micro-teams/micro-connector/cli/config"
+	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/update"
-	"github.com/micro-teams/microteams/cli/internal/service"
+	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/state"
 	"github.com/micro-teams/microteams/cli/internal/ui"
 )
+
+// hostRunner is what this product's service actually does: dial the backend and let it open screens
+// here. The library installs and supervises a service without knowing that — which is why the same
+// package serves a provisioning tool that has no daemon at all.
+func hostRunner(cfgPath string) service.Runner {
+	return func(ctx context.Context) error {
+		cfg, err := host.LoadConfig(cfgPath)
+		if err != nil {
+			return err
+		}
+		h, err := host.New(cfg, cfgPath)
+		if err != nil {
+			return err
+		}
+		return h.Run(ctx)
+	}
+}
 
 // Commands returns every lifecycle command to add to the `microteams` root.
 func Commands() []*cobra.Command {
@@ -403,7 +421,7 @@ func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *co
 		Short:  "Stay connected in the foreground (used by the service manager)",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return service.RunForeground(*cfgPath)
+			return service.RunForeground(*cfgPath, hostRunner(*cfgPath))
 		},
 	})
 }
