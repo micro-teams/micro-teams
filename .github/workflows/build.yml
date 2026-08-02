@@ -13,6 +13,13 @@ on:
 # One workflow builds all four parts in parallel, packages them into a deployment zip, then proves
 # the zip actually boots by bringing the docker-compose cluster up and waiting for every service to
 # report healthy.
+#
+# Artifact retention is short on purpose. Every run produces about 240 MB — a jar, a bundle, four
+# CLI binaries — and at the default 90 days that reached 63 GB and exhausted the account's storage,
+# which stops uploads and so turns every run red for a reason that has nothing to do with the code.
+# The intermediates exist only to reach package-zip inside the same run, so they keep for a day; the
+# deployment bundle is the one a person might want to download, so it keeps for a week. Anything
+# older is rebuilt by re-running the workflow, which is cheaper than storing it.
 
 jobs:
   build-jar:
@@ -58,6 +65,7 @@ jobs:
         with:
           name: jar
           path: backend/target/*.jar
+          retention-days: 1
 
   build-frontend:
     runs-on: ubuntu-latest
@@ -80,6 +88,7 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
+          retention-days: 1
 
   build-applet:
     runs-on: ubuntu-latest
@@ -114,6 +123,7 @@ jobs:
         with:
           name: applets
           path: applets/dist
+          retention-days: 1
 
   build-cli:
     runs-on: ubuntu-latest
@@ -156,6 +166,7 @@ jobs:
         with:
           name: cli-binaries
           path: cli/dist
+          retention-days: 1
 
   build-tmux:
     # A fully static tmux per Linux target, so a fresh machine needs nothing pre-installed:
@@ -197,6 +208,7 @@ jobs:
         with:
           name: tmux-linux-${{ matrix.arch }}
           path: dist/linux-${{ matrix.arch }}
+          retention-days: 1
 
   package-zip:
     needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux]
@@ -274,6 +286,7 @@ jobs:
         with:
           name: microteams-deploy
           path: microteams-deploy
+          retention-days: 7
 
   # The one test that exercises this system the way it is actually used: the shipped bundle, plus a
   # real machine with the real connector on it. `test-compose` used to stop at "the containers report
@@ -317,6 +330,7 @@ jobs:
         with:
           name: microteams-deploy
           path: microteams-deploy
+          retention-days: 7
       - name: Bring the cluster up and wait for every service to be healthy
         working-directory: microteams-deploy
         run: |
