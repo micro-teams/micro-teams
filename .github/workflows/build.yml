@@ -105,9 +105,7 @@ jobs:
           cache-dependency-path: applets/package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@micro-teams"
-      # `npm ci` until the lockfile catches up with the new dependency; the fallback is what lets
-      # this land before anyone has run an authenticated install locally.
-      - run: npm ci || npm install
+      - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
