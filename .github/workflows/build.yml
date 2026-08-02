@@ -330,7 +330,6 @@ jobs:
         with:
           name: microteams-deploy
           path: microteams-deploy
-          retention-days: 7
       - name: Bring the cluster up and wait for every service to be healthy
         working-directory: microteams-deploy
         run: |
