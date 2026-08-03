@@ -11,14 +11,16 @@ run **applets** on them. It carries **zero** knowledge of what those screens are
 is implemented in an applet** (server-supplied JavaScript, authored in the `applets/`
 module, bundled to goja JS). The two applet surfaces and their whole vocabulary:
 
-- **Screen applet** (`applets/src/screen/index.ts` → `claude.js`): drives a program in a
-  terminal. Primitives: read/write the terminal, `microteams.own`/`watch` (mirrored
-  variables), `microteams.expose`/`call` (functions both ways). Nothing program-specific
-  is in Go — the driver (backend `agent/driver`) picks the applet.
+- **Screen applet** (`claude.js`, `codex.js`): drives a program in a terminal. Primitives:
+  read/write the terminal, `own`/`watch` (mirrored variables), `expose`/`call` (functions both
+  ways). Nothing program-specific is in Go — the driver (backend `agent/driver`) picks the applet.
+  These are no longer written here: they are published from micro-connector as
+  `@micro-teams/connector-applets`, because understanding what a coding agent paints on a terminal
+  is the expensive part and it goes stale with every release of that agent.
 - **CLI applet** (`applets/src/cli/index.ts` → `cli.js`): defines the `microteams api`
   command tree. Primitives: `microteams.command` (declare a command), `microteams.http`
-  (one **authenticated** backend call — the agent-token exchange is handled for you in
-  `internal/apiauth`, never in the applet), `microteams.exec` (run a subprocess:
+  (one **authenticated** backend call — the agent-token exchange is handled by the connector,
+  never in the applet), `microteams.exec` (run a subprocess:
   `exec(name, args, {cwd})` → `{code, stdout, stderr}`), `microteams.fs` (sandboxed file
   IO), `microteams.print`.
 
@@ -40,7 +42,7 @@ to remove.
 Worked example (document-tree git flow): the applet runs `git` via `microteams.exec`
 (`git -C <dir>` for the working copy, `-c http.extraHeader="Authorization: Bearer <jwt>"`
 for auth) and gets `{gitUrl, token}` from a small **backend** endpoint via
-`microteams.http`. No Go change. (The agent JWT is sealed inside `internal/apiauth` and is
+`microteams.http`. No Go change. (The agent JWT is sealed inside the connector's credential layer and is
 never handed to applet JS — an agent "is just a user" with no loose token — so a `git`
 subprocess, which authenticates outside `microteams.http`, must be given its credential by
 the backend, not by a new host binding.)
