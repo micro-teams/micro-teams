@@ -1,13 +1,16 @@
 # microteams
 
-`microteams` is a **generic terminal-hosting mechanism**. You install one small
-binary on a machine, log it in to a server, and from then on the server can open
-**screens** on that machine and drive them — with no further client updates,
-ever. The CLI carries **zero** knowledge of what those screens are for; all the
-meaning lives on the server and in the scripts the server sends down.
+`microteams` is the binary a user installs on a machine so the MicroTeams backend can open
+**screens** there and drive them — with no further client updates, ever.
 
-It is self-contained: this directory builds a single static binary that depends
-on nothing but a system `tmux` and a POSIX pty.
+**Almost none of that mechanism is in this directory.** It lives in
+[micro-connector](https://github.com/micro-teams/micro-connector), the connector shared with the
+other products built on the same idea: the terminal, the applet runtime, screen lifecycle, both
+transports, enrolment, credentials, self-update and the service install are all library. What is
+here is what makes this connector *MicroTeams* rather than something else — six packages, about
+1,200 lines.
+
+The binary is still self-contained: it depends on nothing but a `tmux` and a POSIX pty.
 
 ## The model
 
@@ -46,17 +49,17 @@ Two groups mirror the two ideas — who this machine is, and whether it is
 connected:
 
 ```
-microteams auth login [server-url]   log this machine in (device flow); first login names it
+microteams auth login [server-url]   log this machine in (device flow)
 microteams auth logout               forget the credential (disconnects first)
-microteams devicename <name>         rename this machine
 
-microteams link connect              connect (runs login first if needed)
+microteams link connect [server-url] connect, and reconnect on every boot (runs login if needed)
+microteams link auto-connect         the same thing, said the other way
 microteams link disconnect           disconnect (warns if screens are running)
-microteams link status               login, connection and screen count at a glance
-microteams link auto-connect         connect now and reconnect on every boot
 microteams link no-auto-connect      disconnect and stop reconnecting on boot
 
-microteams api <operation> [args]    the server's full request/response API
+microteams status                    login, connection and screen count at a glance
+microteams api <command> [args]      the server-defined command tree (see below)
+microteams update                    fetch a new binary and hand off to it, keeping screens alive
 microteams uninstall                 remove the CLI entirely (service, config, binary)
 ```
 
@@ -77,8 +80,12 @@ entirely the server's business.
 **Self-contained tmux.** The host prefers a private tmux at
 `~/.config/microteams/bin/tmux` (placed there by an installer; `$MICROTEAMS_TMUX`
 overrides) and only falls back to the system tmux — so a machine without tmux
-works, and a machine with a quirky one is never at its mercy. Sockets live in a
-private per-run directory either way.
+works, and a machine with a quirky one is never at its mercy.
+
+Its socket lives at a **stable** per-user path, not a fresh one per run: the tmux server outlives
+this process, so a restarted or self-updated binary has to arrive back at the same socket to find
+the sessions it left behind. That is also why the path is part of the brand — two connectors from
+different products sharing it would each see the other's screens.
 
 **`microteams api`** runs the server-hosted **CLI applet** (`cli.js`): the applet
 declares the whole command tree with `microteams.command`, and the host turns that
@@ -106,11 +113,27 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o microteams-darwin-arm64 .
 
 Runtime needs `tmux` and a pty (Linux and macOS; no Windows).
 
+## What is actually in this directory
+
+```
+main.go             the command tree's root; declares the brand before anything reads a path
+internal/daemoncmd  the human-facing commands, and how they speak
+internal/host       assembles a connector out of the library, plus MicroTeams' own three
+                    decisions: the state file, what updating means, and the bargain that keeps
+                    agents alive across an update
+internal/mtbrand    which product this is — and that agents here are ordinary users, so a screen
+                    exchanges its token for the user's rather than borrowing the machine's
+internal/state      how many screens are live, so a disconnect can warn before killing work
+internal/ui         terminal output
+```
+
+Everything else comes from `github.com/micro-teams/micro-connector/cli`, pinned in `go.mod`.
+
 ## The consumer
 
-This monorepo's **backend** (`../backend`, the `mt` service) is the server that
-drives this host: `agent/driver` picks a screen applet (`claude.js`) to run Claude
-Code in a screen, and `agent/AppletController` serves the CLI applet (`cli.js`) that
-defines `microteams api`. Both applets are authored in `../applets`. Nothing in
-`internal/` knows any of that is about AI — read the host code and you cannot tell
-what it hosts, which is the point.
+This monorepo's **backend** (`../backend`, the `mt` service) is the server that drives this host:
+`agent/driver` picks a screen applet (`claude.js`) to run Claude Code in a screen, and
+`agent/AppletController` serves the CLI applet (`cli.js`) that defines `microteams api`. The CLI
+applet is authored in `../applets`; the screen applets come from the shared package. Nothing in the
+connector knows any of that is about AI — read it and you cannot tell what it hosts, which is the
+point.

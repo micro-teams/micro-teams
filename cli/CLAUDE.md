@@ -11,14 +11,16 @@ run **applets** on them. It carries **zero** knowledge of what those screens are
 is implemented in an applet** (server-supplied JavaScript, authored in the `applets/`
 module, bundled to goja JS). The two applet surfaces and their whole vocabulary:
 
-- **Screen applet** (`applets/src/screen/index.ts` → `claude.js`): drives a program in a
-  terminal. Primitives: read/write the terminal, `microteams.own`/`watch` (mirrored
-  variables), `microteams.expose`/`call` (functions both ways). Nothing program-specific
-  is in Go — the driver (backend `agent/driver`) picks the applet.
+- **Screen applet** (`claude.js`, `codex.js`): drives a program in a terminal. Primitives:
+  read/write the terminal, `own`/`watch` (mirrored variables), `expose`/`call` (functions both
+  ways). Nothing program-specific is in Go — the driver (backend `agent/driver`) picks the applet.
+  These are no longer written here: they are published from micro-connector as
+  `@micro-teams/connector-applets`, because understanding what a coding agent paints on a terminal
+  is the expensive part and it goes stale with every release of that agent.
 - **CLI applet** (`applets/src/cli/index.ts` → `cli.js`): defines the `microteams api`
   command tree. Primitives: `microteams.command` (declare a command), `microteams.http`
-  (one **authenticated** backend call — the agent-token exchange is handled for you in
-  `internal/apiauth`, never in the applet), `microteams.exec` (run a subprocess:
+  (one **authenticated** backend call — the agent-token exchange is handled by the connector,
+  never in the applet), `microteams.exec` (run a subprocess:
   `exec(name, args, {cwd})` → `{code, stdout, stderr}`), `microteams.fs` (sandboxed file
   IO), `microteams.print`.
 
@@ -40,32 +42,46 @@ to remove.
 Worked example (document-tree git flow): the applet runs `git` via `microteams.exec`
 (`git -C <dir>` for the working copy, `-c http.extraHeader="Authorization: Bearer <jwt>"`
 for auth) and gets `{gitUrl, token}` from a small **backend** endpoint via
-`microteams.http`. No Go change. (The agent JWT is sealed inside `internal/apiauth` and is
+`microteams.http`. No Go change. (The agent JWT is sealed inside the connector's credential layer and is
 never handed to applet JS — an agent "is just a user" with no loose token — so a `git`
 subprocess, which authenticates outside `microteams.http`, must be given its credential by
 the backend, not by a new host binding.)
 
-## 1. What the Go host owns (and may change carefully)
+## 1. What is here, and what is not
 
-- **The frozen wire protocol** (`internal/link`, `link.Msg`) between host and server. Treat
-  it as frozen — both ends must agree, and the server can't be updated in lockstep with
-  every machine. Extend additively, never break.
-- **Auth** (`internal/apiauth`): resolves how this machine authenticates — machine token, or
-  the per-screen agent-token exchange — and hands out an authenticated `http.Client`. This
-  is the one place the "an agent is an ordinary user" rule is implemented.
-- **The command tree** (`main.go`): `auth`, `link`, `status`, `run`, `update`, `uninstall`,
-  and `api` (loads the server's CLI applet). These are host lifecycle, not features.
+The connector itself is **not** here. Terminal, applet runtime, screen lifecycle, both transports,
+the wire protocol, enrolment, config, credentials, self-update and the service install all live in
+[micro-connector](https://github.com/micro-teams/micro-connector), pinned in `go.mod`. A change to
+any of them belongs in that repository — where it is guarded by an end-to-end test that drives a
+real Claude Code — and arrives here by bumping the dependency.
+
+What this directory owns:
+
+- **The command tree** (`main.go`, `internal/daemoncmd`): `auth`, `link`, `status`, `run`,
+  `update`, `uninstall`, and `api` (which loads the server's CLI applet). Lifecycle, not features.
+- **Composition** (`internal/host`): which transport, and MicroTeams' own three decisions — how
+  the live-screen count is published, what updating means, and the bargain that decides whether
+  agents survive an update (`KillServer` on stop; `syscall.Exec` on update, so they do).
+- **Identity** (`internal/mtbrand`): every name that makes this connector MicroTeams, plus one
+  security semantic — an agent here is an ordinary user, so inside a screen the machine token and
+  the screen token are exchanged for that user's own. A product with nobody behind its screens
+  sets nothing and speaks as the machine, which is the library's default.
+
+**The wire protocol is frozen**, wherever it lives: both ends must agree and machines are never
+upgraded in lockstep. Extend additively, never break.
 
 ## 2. Style
 
 - `gofmt` before committing. Interactive git flags are unavailable in this environment.
 - The module path is `github.com/micro-teams/microteams/cli`; the binary is `microteams`.
 - Unix only (Linux/macOS); Windows is intentionally excluded (`syscall.SIGUSR2`).
-- Tests: table/httptest style next to the code (`internal/commandapplet/commandapplet_test.go`
-  exercises the whole describe → cobra → run → http path against a fake server).
-- **Any test that touches tmux must build its Manager through `isolated(t)`** (or otherwise point
-  `TMPDIR` somewhere private) — never bare `NewManager()`. The socket path is a stable per-user one
-  by design, so a connector can find its own sessions after a restart; a test that shares it is
-  driving the live service's tmux, and tearing its server down at the end of the test kills every
-  agent on that machine. This has actually happened, and reads from the outside like tmux dying on
-  its own — no error, no OOM, just every screen gone at once.
+- Tests: table/httptest style next to the code. The connector's own tests — including the ones that
+  drive a real tmux and a real Claude Code — live in micro-connector, so a change to this directory
+  is verified by `.github/scripts/e2e.sh`, which builds the shipped bundle and puts a machine
+  through it.
+- **Never let a test touch the live tmux socket.** It is a stable per-user path by design, so a test
+  that builds a Manager without redirecting `TMPDIR` is driving whatever connector is running as
+  that user — and killing its server at the end of the test kills every agent on the machine. That
+  happened, twice in one evening, and reads from the outside exactly like tmux dying on its own: no
+  error, no OOM, every screen gone at once. The rule lives in micro-connector's CLAUDE.md too,
+  because that is where such a test would be written now.
