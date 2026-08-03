@@ -34,7 +34,7 @@
     "@openapitools/openapi-generator-cli": "^2.40.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.2",
-    "@types/react": "^19.2.17",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.5",
     "oxlint": "^1.76.0",
