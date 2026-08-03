@@ -56,6 +56,7 @@ jobs:
       - name: Upload jar
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: jar
           path: backend/target/*.jar
 
@@ -78,6 +79,7 @@ jobs:
       - name: Upload dist
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: frontend-dist
           path: frontend/dist
 
@@ -112,6 +114,7 @@ jobs:
       - name: Upload applets
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: applets
           path: applets/dist
 
@@ -154,6 +157,7 @@ jobs:
       - name: Upload cli binaries
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: cli-binaries
           path: cli/dist
 
@@ -195,6 +199,7 @@ jobs:
       - name: Upload tmux binary
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: tmux-linux-${{ matrix.arch }}
           path: dist/linux-${{ matrix.arch }}
 
@@ -272,6 +277,7 @@ jobs:
       # Uploading the dir means the downloaded artifact zip IS the bundle, one layer.
       - uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: microteams-deploy
           path: microteams-deploy
 
