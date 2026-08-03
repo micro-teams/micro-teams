@@ -19,8 +19,8 @@ import (
 	"github.com/micro-teams/micro-connector/cli/protocol"
 	"github.com/micro-teams/micro-connector/cli/screen"
 	"github.com/micro-teams/micro-connector/cli/terminal"
+	"github.com/micro-teams/micro-connector/cli/transport/ws"
 	"github.com/micro-teams/micro-connector/cli/update"
-	"github.com/micro-teams/microteams/cli/internal/link"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
@@ -54,7 +54,7 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewWithTransport(link.New(ctrlURL, cfg.Token, cfg.APIBase()), cfg, cfgPath)
+	return NewWithTransport(ws.New(ctrlURL, cfg.Token, cfg.APIBase()), cfg, cfgPath)
 }
 
 // NewWithTransport builds a Host on a caller-supplied transport.
