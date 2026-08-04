@@ -34,8 +34,22 @@
         <kotlin.version>2.1.10</kotlin.version>
     </properties>
 
-    <!-- Project Dependencies -->
     <dependencies>
+        <!--
+            Absorbs a write that arrives twice, so a client free to retry over another network path
+            cannot make the same thing happen twice. Adding the dependency IS the installation: no
+            annotation, no bean to inject, no business code changes. That is deliberate — a
+            controller that had to know about redundant paths would need re-auditing every time one
+            was added.
+
+            It de-duplicates in this JVM's heap, which is only correct while there is exactly one
+            backend instance. See the note in deploy/docker-compose.yml.
+        -->
+        <dependency>
+            <groupId>app.microteams.multipath</groupId>
+            <artifactId>multipath-spring-boot-starter</artifactId>
+            <version>0.1.0-main-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
@@ -221,6 +235,23 @@
             <version>7.7.0.202606012155-r</version>
         </dependency>
     </dependencies>
+
+    <!-- Project Dependencies -->
+    <repositories>
+        <!--
+            MultiPath is published to GitHub Packages, which requires authentication to read even
+            though the repository and the package are public. That is GitHub's rule and cannot be
+            turned off. CI passes the workflow's own GITHUB_TOKEN; locally, add a `github` server to
+            ~/.m2/settings.xml with a token that has read:packages (see backend/CLAUDE.md).
+        -->
+        <repository>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/micro-teams/multipath</url>
+        </repository>
+    </repositories>
 
     <!-- Build Configuration -->
     <build>

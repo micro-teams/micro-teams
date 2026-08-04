@@ -288,6 +288,42 @@ Note: this and the all-open trap (§3) were both latent — the tests never exer
 refactor added the first test that boots the full context with the lazy `UserProfile` graph. A
 green `-DskipTests` build proves nothing about either.
 
+## 10c. MultiPath — one instance, and a token to build
+
+The `multipath-spring-boot-starter` dependency absorbs a write that arrives twice, so a client free
+to retry over another network path cannot execute it twice. Adding the dependency **is** the
+installation: no annotation, no bean, no business code. That is a design constraint, not a
+convenience — a controller that had to know about redundant paths would need re-auditing every time
+one was added.
+
+Two things to know about it:
+
+- **It de-duplicates in this JVM's heap, so exactly one backend instance is correct.** Two instances
+  each keep their own table and a request landing on different ones executes twice, silently. The
+  note lives in `deploy/docker-compose.yml` too, because that is where someone would add a replica.
+- **Building needs a GitHub Packages credential.** It is published there, and GitHub requires an
+  authenticated read even for a public package. CI passes its own `GITHUB_TOKEN`; locally, add to
+  `~/.m2/settings.xml`:
+
+  ```xml
+  <servers>
+    <server>
+      <id>github</id>
+      <username>your-github-username</username>
+      <password>a-token-with-read:packages</password>
+    </server>
+  </servers>
+  ```
+
+  Without it the build fails at dependency resolution with a 401, which reads like a broken
+  repository rather than a missing credential.
+
+One quirk worth knowing before it confuses someone: the starter's own package is
+`app.microteams.multipath.*`, which sits *inside* the `app.microteams` root this application
+component-scans. Its beans are not registered twice, because `@SpringBootApplication` excludes
+auto-configuration classes from scanning — but if that library ever gains a plain `@Component`,
+this application would pick it up directly and the two would fight.
+
 ## 11. Commits (solo repo)
 
 - **Commit only code you have personally verified** (green integration tests). Do not let
