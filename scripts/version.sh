@@ -6,8 +6,9 @@
 # that number into every artifact that must ship it, and — just as importantly —
 # leaves alone the versions that are deliberately NOT the product version:
 #
-#   * cli/internal/link/link.go  const Version = N   -> wire-protocol version, bumped
-#                                                       only on a breaking protocol change
+#   * the wire-protocol version -> no longer lives here at all: it belongs to micro-connector
+#                                   (cli/protocol), pinned in cli/go.mod. It is bumped only on a
+#                                   breaking protocol change, and never alongside a product release.
 #   * deploy/tmux/build-static-tmux.sh  version=3.5a  -> the third-party tmux we vendor
 #   * backend/pom.xml  <parent><version> + <dependency> versions -> upstream libraries
 #
@@ -46,7 +47,7 @@ if [[ $# -eq 0 ]]; then
   printf '  %-28s %s\n' "applets/package.json"   "$(node -p "require('$APPLETS_PKG').version")"
   echo
   echo "independent (NOT touched by this script):"
-  printf '  %-28s %s\n' "link protocol Version"  "$(perl -ne 'print "$1\n" if /^const Version = (\d+)/' cli/internal/link/link.go)"
+  printf '  %-28s %s\n' "micro-connector (protocol)" "$(perl -ne 'print "$1\n" if m{micro-connector/cli (v\S+)}' cli/go.mod)"
   printf '  %-28s %s\n' "vendored tmux"          "$(perl -ne 'print "$1\n" if /^version="?([^"\n]+)"?/' deploy/tmux/build-static-tmux.sh)"
   exit 0
 fi
