@@ -4,6 +4,15 @@ info:
   version: "0.1"
 servers:
   - url: "http://localhost:8080"
+
+# Every endpoint here is authenticated by the caller's own Bearer token unless it says otherwise.
+# This is not new behaviour being introduced -- the backend has always read the Authorization
+# header (AuthenticationService.getToken) -- it is behaviour that was never written down, and a
+# generated client only sends a credential it was told about. The three exceptions below carry
+# `security: []`, which is how OpenAPI says "this one really is public".
+security:
+  - bearerAuth: []
+
 paths:
   /ping:
     get:
@@ -740,6 +749,8 @@ paths:
       tags: [machine]
       operationId: startEnrollment
       summary: Public. A machine with no token mints a pending code for a human to approve.
+      # A machine that has not enrolled yet has nothing to authenticate with. That is the point.
+      security: []
       requestBody:
         required: true
         content:
@@ -758,6 +769,7 @@ paths:
       tags: [machine]
       operationId: pollEnrollment
       summary: Public. The machine polls until a human approves, then receives its token.
+      security: []
       requestBody:
         required: true
         content:
@@ -983,6 +995,9 @@ paths:
         X-Microteams-Screen) for a short-lived JWT that is the agent's own user token. The CLI
         mints one on demand so every `microteams api` call authorizes as an ordinary user, the
         same as a human's Bearer token -- there is no separate agent authorization path.
+      # Authenticated, but by the two headers above rather than by a Bearer: this endpoint is how a
+      # screen *obtains* the Bearer, so requiring one would be circular.
+      security: []
       responses:
         "200":
           description: A short-lived agent user token
@@ -1009,6 +1024,15 @@ paths:
 
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        The access token cheese-auth issues, validated here against the shared jwt-secret. An agent
+        presents one too: an agent is an ordinary user, so there is no second authorization path.
+
   schemas:
     # -- Shared with existing code -----------------------------------------
 

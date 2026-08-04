@@ -37,6 +37,7 @@ interface ChatApi {
         operationId = "addThreadMember",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Added")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -59,6 +60,7 @@ interface ChatApi {
         operationId = "changeThreadMemberRole",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Role changed")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],
@@ -89,6 +91,7 @@ interface ChatApi {
                     content = [Content(schema = Schema(implementation = ThreadDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -111,6 +114,7 @@ interface ChatApi {
         operationId = "dissolveThread",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Dissolved")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/chat/{id}"])
     fun dissolveThread(
@@ -132,6 +136,7 @@ interface ChatApi {
                     content = [Content(schema = Schema(implementation = ThreadDetailDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -159,6 +164,7 @@ interface ChatApi {
                         [Content(schema = Schema(implementation = ListChatsResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -200,6 +206,7 @@ interface ChatApi {
                         [Content(schema = Schema(implementation = ListMessagesResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -241,6 +248,7 @@ interface ChatApi {
                         ],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -266,6 +274,7 @@ interface ChatApi {
                     content = [Content(schema = Schema(implementation = MessageDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -289,6 +298,7 @@ interface ChatApi {
         operationId = "removeThreadMember",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Removed")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/chat/{id}/members/{userId}"])
     fun removeThreadMember(
@@ -311,6 +321,7 @@ interface ChatApi {
                     content = [Content(schema = Schema(implementation = ThreadDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],

@@ -8,7 +8,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { chatApi, mtCall, setNtAccessToken, setNtReauthorize } from "./mtApi";
+import {
+  chatApi,
+  machineApi,
+  mtCall,
+  setNtAccessToken,
+  setNtReauthorize,
+} from "./mtApi";
 
 /** The fetch the app ends up calling, so the test can read what would have gone out. */
 let calls: Array<{ url: string; init: RequestInit }>;
@@ -47,11 +53,27 @@ describe("requests still go where they went before MultiPath", () => {
     expect(calls[0].url).toBe("/mt/chat?page_start=3&page_size=20");
   });
 
-  // Not asserted here, deliberately: the first attempt carries no Authorization at all. That is
-  // true before this change and after it, and it is a real defect — the contract declares no
-  // security scheme, so the generated client never reads the configured token and every call is
-  // answered 401, refreshed and retried. Fixing it changes what goes over the wire, so it belongs
-  // in its own change rather than inside one whose whole claim is that nothing moved.
+  // The assertion the previous change deliberately left out. Until the contract declared a security
+  // scheme, the generated client never read the token it was configured with, so the first attempt
+  // went out unauthenticated, was answered 401, and only the refresh-and-retry path — meant for a
+  // genuinely expired token — actually carried a credential. Every call cost two round trips, and
+  // it worked, which is why it survived.
+  it("authenticates on the first attempt", async () => {
+    await mtCall(chatApi().listChats({}));
+
+    expect(calls).toHaveLength(1);
+    expect(headerOf(calls[0].init, "authorization")).toBe("Bearer token-abc");
+  });
+
+  // The exception, and it has to stay one: a machine that has not enrolled yet has nothing to
+  // authenticate with, so declaring the scheme globally must not put a header on this one.
+  it("sends nothing on an endpoint that is genuinely public", async () => {
+    await mtCall(
+      machineApi().startEnrollment({ startEnrollmentRequest: { name: "box" } }),
+    );
+
+    expect(headerOf(calls[0].init, "authorization")).toBeNull();
+  });
 
   it("carries a write's body and content type unchanged", async () => {
     await mtCall(

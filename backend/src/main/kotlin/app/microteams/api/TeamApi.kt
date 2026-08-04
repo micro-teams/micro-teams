@@ -38,6 +38,7 @@ interface TeamApi {
         operationId = "addTeamMember",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Added")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -60,6 +61,7 @@ interface TeamApi {
         operationId = "bindTeamMachine",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Bound")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -82,6 +84,7 @@ interface TeamApi {
         operationId = "changeMemberRole",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Role changed")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],
@@ -112,6 +115,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = TeamDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -134,6 +138,7 @@ interface TeamApi {
         operationId = "deleteDocument",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Deleted")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/team/{id}/document"])
     fun deleteDocument(
@@ -153,6 +158,7 @@ interface TeamApi {
         operationId = "deleteTeam",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Deleted")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/team/{id}"])
     fun deleteTeam(
@@ -175,6 +181,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -223,6 +230,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = TeamDetailDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -256,6 +264,7 @@ interface TeamApi {
                         ],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -282,6 +291,7 @@ interface TeamApi {
                         [Content(schema = Schema(implementation = ListTeamsResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -318,6 +328,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],
@@ -346,6 +357,7 @@ interface TeamApi {
         operationId = "removeTeamMember",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Removed")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/team/{id}/members/{userId}"])
     fun removeTeamMember(
@@ -368,6 +380,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = TeamDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],
@@ -391,6 +404,7 @@ interface TeamApi {
         operationId = "unbindTeamMachine",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Unbound")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/team/{id}/machine/{machineId}"])
     fun unbindTeamMachine(
@@ -415,6 +429,7 @@ interface TeamApi {
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PUT],
