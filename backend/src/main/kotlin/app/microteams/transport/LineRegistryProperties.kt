@@ -14,10 +14,49 @@
 
 package app.microteams.transport
 
+import jakarta.annotation.PostConstruct
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 @ConfigurationProperties(prefix = "application.multipath")
 data class LineRegistryProperties(val lines: List<Line> = emptyList()) {
+
+    /**
+     * Reject a malformed registry at startup rather than serving it.
+     *
+     * The client validates too, and on failure keeps the same-origin line — which means a typo here
+     * would not break anything visibly, it would just quietly switch multi-line off and leave
+     * everyone wondering why the second route is never used. Refusing to start is louder and
+     * happens while the operator is still looking at the change they just made.
+     */
+    @PostConstruct
+    fun validate() {
+        val seen = mutableSetOf<String>()
+        lines.forEachIndexed { index, line ->
+            require(line.id.isNotBlank()) {
+                "application.multipath.lines[$index].id must not be empty"
+            }
+            require(seen.add(line.id)) {
+                "application.multipath.lines[$index].id is a duplicate: \"${line.id}\" — " +
+                    "duplicate ids make every metric and the developer panel lie about which " +
+                    "line served what"
+            }
+            require(line.url.isEmpty() || ORIGIN.matches(line.url)) {
+                "application.multipath.lines[$index].url must be an absolute origin with no path " +
+                    "and no trailing slash (or empty for same-origin), got \"${line.url}\""
+            }
+        }
+    }
+
+    /**
+     * Every configured line's origin, for the CORS allowlist. Same-origin entries contribute none.
+     */
+    fun origins(): List<String> = lines.map { it.url }.filter { it.isNotEmpty() }.distinct()
+
+    private companion object {
+        /** Mirrors the TS and Go registry parsers: scheme + host, nothing else. */
+        val ORIGIN = Regex("^https?://[^/]+$")
+    }
+
     /**
      * One route to this origin.
      *
