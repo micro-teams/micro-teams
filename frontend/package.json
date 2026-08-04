@@ -13,6 +13,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.ts\"",
     "preview": "vite preview",
+    "pretest": "npm run codegen",
     "test": "vitest run"
   },
   "dependencies": {
