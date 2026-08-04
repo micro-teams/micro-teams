@@ -9,6 +9,7 @@
 
 package app.microteams
 
+import app.microteams.transport.LineRegistryProperties
 import org.rucca.cheese.common.config.ApplicationConfig
 import org.slf4j.LoggerFactory
 import org.springframework.boot.SpringApplication
@@ -24,7 +25,7 @@ import org.springframework.context.annotation.Bean
 // so they can one day be extracted independently; everything else lives under
 // app.microteams. Component scan must therefore cover both roots.
 @SpringBootApplication(scanBasePackages = ["app.microteams", "org.rucca.cheese"])
-@EnableConfigurationProperties(ApplicationConfig::class)
+@EnableConfigurationProperties(ApplicationConfig::class, LineRegistryProperties::class)
 class BackendApplication(private val applicationConfig: ApplicationConfig) {
     @Bean
     fun applicationReadyListener(): ApplicationListener<ApplicationReadyEvent> {

@@ -6,10 +6,11 @@
 // changes a registry and nothing else. Doing it the other way round means introducing the plumbing
 // and the risk on the same day.
 //
-// The manager is deliberately not started: probing means a request every fifteen seconds to
-// GET /mt/probe, an endpoint that does not exist yet. With one line there is also nothing to rank.
-// When the endpoint lands, this file gains `manager.start()` and a registry fetched from
-// GET /mt/lines, and nothing else in the app has to know.
+// Startup now refreshes that registry from GET /mt/lines and begins measuring. Both are safe to
+// fail: the inline line is what the app was going to use anyway, so a registry that does not arrive
+// costs nothing, and a client that refused to start because it could not fetch a routing table
+// would have made the transport layer a startup dependency — exactly backwards for a thing whose
+// job is to survive one route being down.
 
 import {
   LineManager,
@@ -30,12 +31,11 @@ export const MT_PATH = "/mt";
 export const MT_BASE_PATH = SENTINEL_ORIGIN + MT_PATH;
 
 /**
- * One line, the page's own origin.
+ * The line the app starts with: the page's own origin.
  *
- * Inline rather than fetched, and not just because GET /mt/lines does not exist yet: the registry
- * is what tells the app where the backend is, so fetching it would mean asking the network where
- * the network is. A real deployment adds lines here (or from that endpoint once it exists); an
- * empty url means "wherever this page came from".
+ * Inline rather than fetched, because the registry is what tells the app where the backend is, and
+ * fetching it would mean asking the network where the network is. GET /mt/lines refines this; it
+ * cannot be what bootstraps it.
  */
 export const registry = parseRegistry({
   lines: [{ id: "origin", url: "", transport: "same-origin", weight: 100 }],
@@ -56,3 +56,26 @@ export const lineManager = new LineManager({
   // wrapper), and is invisible until one does.
   fetch: (input, init) => globalThis.fetch(input, init),
 });
+
+/**
+ * Adopt the deployment's real registry, then start measuring.
+ *
+ * Called once at startup. Everything here is best-effort by design:
+ *
+ * - a registry that does not arrive leaves the same-origin line in place, which is what the app
+ *   would have used anyway;
+ * - a *malformed* registry is likewise ignored rather than fatal, because the failure it would
+ *   otherwise cause — an app that will not start — is worse than the one it prevents.
+ *
+ * Probing begins after the swap so the first measurements are of the lines we will actually use.
+ */
+export async function startLineManagement(): Promise<void> {
+  try {
+    const response = await fetch(`${MT_PATH}/lines`, { cache: "no-store" });
+    if (response.ok)
+      lineManager.setRegistry(parseRegistry(await response.json()));
+  } catch {
+    // Keep the same-origin line. Reporting this would mean reporting it on every offline start.
+  }
+  lineManager.start();
+}

@@ -34,6 +34,42 @@ paths:
                   - code
                   - message
 
+  # -- Transport (MultiPath) ------------------------------------------------
+  #
+  # Both are public and both are read by the transport layer rather than by any feature. They exist
+  # so a client can answer two questions without being logged in: which paths lead here, and how
+  # fast is each one today.
+
+  /probe:
+    get:
+      tags: [transport]
+      operationId: probe
+      summary: >
+        Liveness and latency probe. Public, and deliberately the cheapest thing this service can
+        answer: it is called on every line every few seconds, so anything it touched would be
+        touched at that rate too. Not /ping -- that one is authenticated and means something else.
+      security: []
+      responses:
+        "204":
+          description: The line works. There is no body, on purpose.
+
+  /lines:
+    get:
+      tags: [transport]
+      operationId: listLines
+      summary: >
+        The network paths that lead to this origin. Public: a client needs it before it can log in,
+        and it describes routes rather than anything about a user. Maintained by hand -- which line
+        is worth keeping is a judgement, not something a health check should decide.
+      security: []
+      responses:
+        "200":
+          description: The line registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LineRegistry"
+
   # -- Chat threads ---------------------------------------------------------
 
   /chat:
@@ -1035,6 +1071,42 @@ components:
 
   schemas:
     # -- Shared with existing code -----------------------------------------
+
+    LineRegistry:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/Line"
+
+    Line:
+      type: object
+      required: [id, url]
+      properties:
+        id:
+          type: string
+          description: Stable identifier for this path -- "origin", "cf", "ipv6-1".
+        url:
+          type: string
+          description: >
+            Absolute origin for this line, with no path and no trailing slash, or the empty string
+            meaning "wherever this page came from". A single-origin deployment is one empty entry,
+            and produces exactly the requests it produced before MultiPath existed.
+        transport:
+          type: string
+          description: Free-form label, for diagnosis only.
+        weight:
+          type: integer
+          description: >
+            Static preference, higher first. Only breaks ties between lines that measure the same:
+            a hand-set number goes stale and a measurement does not.
+        foreignOrigin:
+          type: boolean
+          description: >
+            True when this line is not under our own domain -- a free proxy that cannot be CNAME'd.
+            It needs SameSite=None and explicit CORS, and is a fallback with reduced capability.
 
     User:
       type: object

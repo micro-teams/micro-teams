@@ -12,6 +12,7 @@ import { NewChatPage } from "@/pages/NewChatPage";
 import { ThreadPage } from "@/pages/ThreadPage";
 import { ChatInfoPage } from "@/pages/ChatInfoPage";
 import { ConnectPage } from "@/pages/ConnectPage";
+import LinesPage from "@/pages/LinesPage";
 import { AgentPresenceProvider } from "@/hooks/useAgentPresence";
 import { SceneProvider } from "@/hooks/useScene";
 import { SceneOverlay } from "@/components/SceneOverlay";
@@ -81,6 +82,9 @@ function MobileApp() {
           <Route path="/chats/:threadId" element={<ThreadPage />} />
           <Route path="/chats/:threadId/info" element={<ChatInfoPage />} />
           <Route path="/connect" element={<ConnectPage />} />
+          {/* Nothing links here: it is a diagnostic, and a diagnostic with a menu entry becomes a
+              feature people ask questions about. Type the URL when a line is misbehaving. */}
+          <Route path="/__lines" element={<LinesPage />} />
         </Route>
       </Route>
 
