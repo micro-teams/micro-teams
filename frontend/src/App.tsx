@@ -109,6 +109,17 @@ function DesktopApp() {
           </Authed>
         }
       />
+      {/* Before the catch-all below, which reads the URL itself: anything not named here reaches
+          DesktopShell and renders the application, so a route added only to the phone shell looks
+          like it silently does nothing on a desktop. */}
+      <Route
+        path="/__lines"
+        element={
+          <Authed>
+            <LinesPage />
+          </Authed>
+        }
+      />
       <Route
         path="/*"
         element={
