@@ -47,8 +47,12 @@ jobs:
       - name: Start dependencies (Postgres + cheese-auth)
         run: ./scripts/dependency-start.sh
 
+      # -s explicitly: setup-java writes the settings file to settings-path, and Maven only reads
+      # ~/.m2/settings.xml or the file it is handed. Without this the credentials it just wrote are
+      # never used, and the MultiPath dependency fails to resolve with a 401 that looks like a
+      # broken repository rather than an unread settings file.
       - name: Build with Maven (runs the integration tests)
-        run: ./mvnw install
+        run: ./mvnw -s "$GITHUB_WORKSPACE/backend/settings.xml" install
         env:
           MAVEN_USERNAME: ${{ github.actor }}
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
