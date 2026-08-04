@@ -38,6 +38,50 @@ function answers(body: unknown, ok = true) {
 }
 
 describe("startup registry", () => {
+  // The exact document our own backend serves for a line whose optional fields are unset: Jackson
+  // spells "no value" as null. The library used to reject the whole registry over it and the client
+  // silently kept one line, which looked identical to a healthy single-line deployment — it was
+  // found in production only when a real second line failed to appear.
+  it("adopts a registry whose optional fields are null", async () => {
+    answers({
+      lines: [
+        {
+          id: "origin",
+          url: "",
+          transport: null,
+          weight: null,
+          foreignOrigin: null,
+        },
+        {
+          id: "direct",
+          url: "https://direct.mt.example.app",
+          transport: "direct",
+          weight: 90,
+          foreignOrigin: null,
+        },
+      ],
+    });
+
+    await startLineManagement();
+
+    expect(lineManager.lines.map((line) => line.id)).toEqual([
+      "origin",
+      "direct",
+    ]);
+  });
+
+  // The fallback stays, but it stops being silent: a registry that arrived and could not be read is
+  // a misconfiguration, not the offline case.
+  it("says so when it throws a registry away", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    answers({ lines: [{ id: "a", url: "https://x.example/with/path" }] });
+
+    await startLineManagement();
+
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("adopts the lines the deployment reports", async () => {
     answers({
       lines: [
