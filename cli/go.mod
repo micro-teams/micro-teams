@@ -3,7 +3,7 @@ module github.com/micro-teams/microteams/cli
 go 1.26.0
 
 require (
-	github.com/micro-teams/micro-connector/cli v0.1.0
+	github.com/micro-teams/micro-connector/cli v0.1.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.30.0
 )
@@ -17,6 +17,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kardianos/service v1.3.0 // indirect
+	github.com/micro-teams/multipath/go v0.1.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
