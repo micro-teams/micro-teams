@@ -38,6 +38,10 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 @TestPropertySource(
     properties =
         [
+            // The public origin, named where a same-origin line cannot name it. Production found
+            // this the hard way: without it, a page on this origin racing a request to another line
+            // sends an Origin nothing here recognises, and its own CORS refuses every request.
+            "application.cors-origin=https://microteams.example.app",
             "application.multipath.lines[0].id=origin",
             "application.multipath.lines[0].url=",
             "application.multipath.lines[1].id=cf",
@@ -95,6 +99,43 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
             allowed != null && allowed.contains("Idempotency-Key", ignoreCase = true),
             "preflight did not allow Idempotency-Key, it answered: $allowed",
         )
+    }
+
+    /**
+     * The request that broke in production: the browser loaded the page over the same-origin line
+     * and raced this one to another line, so the Origin is the page's and the host is the other
+     * line's. Nothing derives the first from the second — it has to have been configured.
+     */
+    @Test
+    fun aRequestFromThePagesOwnOriginIsAllowedOverAnotherLine() {
+        mockMvc
+            .perform(
+                options("/chat")
+                    .header("Origin", "https://microteams.example.app")
+                    .header("X-Forwarded-Host", "cf.mt.example.app")
+                    .header("X-Forwarded-Proto", "https")
+                    .header("Access-Control-Request-Method", "GET")
+            )
+            .andExpect(status().isOk)
+            .andExpect(
+                header().string("Access-Control-Allow-Origin", "https://microteams.example.app")
+            )
+    }
+
+    /**
+     * And the same for an ordinary GET. The filter refuses a disallowed origin on a simple request
+     * too, not only on a preflight — which is why the broken deployment's probe eventually reported
+     * the line as down rather than leaving it looking healthy.
+     */
+    @Test
+    fun theProbeIsNotExemptFromCors() {
+        mockMvc
+            .perform(get("/probe").header("Origin", "https://not-our-line.example"))
+            .andExpect(status().isForbidden)
+
+        mockMvc
+            .perform(get("/probe").header("Origin", "https://microteams.example.app"))
+            .andExpect(status().isNoContent)
     }
 
     /** And the converse, or the allowlist would not be an allowlist. */

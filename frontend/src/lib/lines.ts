@@ -70,12 +70,29 @@ export const lineManager = new LineManager({
  * Probing begins after the swap so the first measurements are of the lines we will actually use.
  */
 export async function startLineManagement(): Promise<void> {
+  let document: unknown;
   try {
     const response = await fetch(`${MT_PATH}/lines`, { cache: "no-store" });
-    if (response.ok)
-      lineManager.setRegistry(parseRegistry(await response.json()));
+    if (!response.ok) return lineManager.start();
+    document = await response.json();
   } catch {
-    // Keep the same-origin line. Reporting this would mean reporting it on every offline start.
+    // Offline, or the endpoint is not there yet. Keep the same-origin line and say nothing: that is
+    // the ordinary case on a cold start with no network, and warning about it every time is noise.
+    return lineManager.start();
+  }
+
+  try {
+    lineManager.setRegistry(parseRegistry(document));
+  } catch (error) {
+    // A registry that arrived and could not be read is a different thing entirely, and it must not
+    // be silent. Falling back is still right — one line beats none — but it leaves the deployment
+    // believing multi-line is on while the client quietly uses one line, and that is invisible
+    // exactly while there is only one line to compare against. It is how a null field in this
+    // document went unnoticed until a real second line was added and did not appear.
+    console.warn(
+      "MultiPath: ignoring the line registry, keeping the same-origin line:",
+      error,
+    );
   }
   lineManager.start();
 }
