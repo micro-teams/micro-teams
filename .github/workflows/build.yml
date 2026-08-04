@@ -17,6 +17,11 @@ on:
 jobs:
   build-jar:
     runs-on: ubuntu-latest
+    # The MultiPath starter comes from GitHub Packages, which requires an authenticated read even
+    # for a public package — the same friction as the npm packages in the jobs below.
+    permissions:
+      contents: read
+      packages: read
     defaults:
       run:
         working-directory: backend
@@ -32,6 +37,10 @@ jobs:
           # backend/.gitignore excludes settings.xml/toolchains.xml relative to backend/; point
           # setup-java there too, or the spotless "uncommitted changes" check sees them as untracked.
           settings-path: ${{ github.workspace }}/backend
+          # Credentials for the `github` repository declared in backend/pom.xml.
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
 
       # Our tests are integration tests: they need a real Postgres (with the "microteams" schema) and
       # the real cheese-auth service. One script brings both up, mirroring the local setup.
@@ -41,6 +50,8 @@ jobs:
       - name: Build with Maven (runs the integration tests)
         run: ./mvnw install
         env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
 
       - name: Check uncommitted changes to ensure format applied

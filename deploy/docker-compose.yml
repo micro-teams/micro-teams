@@ -73,6 +73,16 @@ services:
       retries: 40
       start_period: 20s
 
+  # EXACTLY ONE INSTANCE. Do not add `deploy.replicas`, and do not run a second copy behind the
+  # proxy. Write de-duplication (MultiPath) keeps its table in this JVM's heap, so two instances each
+  # keep their own and a request arriving over two network paths that land on different instances is
+  # executed twice. It fails silently: no error, no log, just an occasional duplicate message or
+  # duplicate membership change, which is the hardest kind of bug to trace back to its cause.
+  #
+  # This is the same premise the whole design rests on — every line leads to one origin — not an
+  # oversight. If capacity ever demands a second instance, that layer has to move to shared storage
+  # first (IdempotencyStore is an interface for exactly this); it is not a change you can make here
+  # alone.
   backend:
     image: eclipse-temurin:21-jre
     restart: unless-stopped
