@@ -35,6 +35,7 @@ interface AgentApi {
         operationId = "closeAgent",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Closed")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/agent/{userId}"])
     fun closeAgent(
@@ -82,6 +83,7 @@ interface AgentApi {
                         [Content(schema = Schema(implementation = AgentGitWorkspaceDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -106,6 +108,7 @@ interface AgentApi {
                     content = [Content(schema = Schema(implementation = AgentDriversDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -131,6 +134,7 @@ interface AgentApi {
                         [Content(schema = Schema(implementation = ListAgentsResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -183,6 +187,7 @@ interface AgentApi {
                     content = [Content(schema = Schema(implementation = OpenedAgentDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -213,6 +218,7 @@ interface AgentApi {
                     content = [Content(schema = Schema(implementation = OpenedAgentDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -239,6 +245,7 @@ interface AgentApi {
                     content = [Content(schema = Schema(implementation = AgentDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PUT],
@@ -270,6 +277,7 @@ interface AgentApi {
                     content = [Content(schema = Schema(implementation = AgentDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PUT],

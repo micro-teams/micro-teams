@@ -32,6 +32,7 @@ interface PingApi {
                     content = [Content(schema = Schema(implementation = Ping200ResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],

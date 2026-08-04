@@ -40,6 +40,7 @@ interface MachineApi {
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.POST],
@@ -62,6 +63,7 @@ interface MachineApi {
         operationId = "forgetMachine",
         description = """""",
         responses = [ApiResponse(responseCode = "204", description = "Forgotten")],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(method = [RequestMethod.DELETE], value = ["/machine/{id}"])
     fun forgetMachine(
@@ -83,6 +85,7 @@ interface MachineApi {
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -110,6 +113,7 @@ interface MachineApi {
                         [Content(schema = Schema(implementation = ListMachinesResponseDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.GET],
@@ -184,6 +188,7 @@ interface MachineApi {
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
                 )
             ],
+        security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
         method = [RequestMethod.PATCH],
