@@ -103,9 +103,7 @@ jobs:
       - name: Check the launcher in a real browser
         run: |
           npx playwright install --with-deps chromium
-          node scripts/static-server.mjs "$PWD/dist" &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8931/ >/dev/null && break; sleep 1; done
-          npm run check:launcher
+          bash scripts/check-launcher.sh
 
       - name: Upload dist
         uses: actions/upload-artifact@v7

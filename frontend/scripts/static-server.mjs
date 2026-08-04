@@ -35,7 +35,13 @@ createServer(async (req, res) => {
   }
   try {
     const body = await readFile(file);
-    res.writeHead(200, { "content-type": types[path.extname(file)] ?? "application/octet-stream" });
+    res.writeHead(200, {
+      "content-type": types[path.extname(file)] ?? "application/octet-stream",
+      // What deploy/nginx.conf serves for static assets, and the reason it has to: the launcher
+      // imports the entry module from whichever line won the race, and a cross-origin module import
+      // without this header is refused by the browser.
+      "access-control-allow-origin": "*",
+    });
     res.end(body);
   } catch {
     res.writeHead(404); res.end("not found");

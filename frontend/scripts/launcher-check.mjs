@@ -90,6 +90,39 @@ check("the escape hatch clears the caches", after.caches === 0, JSON.stringify(a
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
+// --- and what happens the day a second line exists ------------------------------------------
+//
+// Everything above runs the single-line deployment we have. This runs the one we are about to
+// have, because the launcher behaves *differently* with two: it races the entry module across both
+// origins and imports it from the winner. That import is cross-origin, which the browser refuses
+// without a header on the static assets — a failure that cannot appear until the second line does,
+// and would then present as "the app does not start", intermittently, depending on who won.
+if (process.env.LAUNCHER_CHECK_SECOND_BASE) {
+  const raced = await browser.newContext();
+  const page2 = await raced.newPage();
+  const asked = new Set();
+  page2.on("request", (r) => {
+    const url = new URL(r.url());
+    if (url.pathname.startsWith("/assets/")) asked.add(url.origin);
+  });
+  const errors2 = [];
+  page2.on("pageerror", (e) => errors2.push(String(e)));
+
+  await page2.goto(BASE + "/", { waitUntil: "networkidle" });
+  await page2
+    .waitForFunction(() => (document.querySelector("#root")?.innerHTML.length ?? 0) > 0, null, {
+      timeout: 15000,
+    })
+    .catch(() => {});
+
+  const rendered = await page2.$eval("#root", (el) => el.innerHTML.length).catch(() => 0);
+  check("with two lines, the app still starts", rendered > 0, `${rendered} bytes`);
+  check("both lines were raced for the entry module", asked.size === 2, [...asked].join(" "));
+  check("no page errors with two lines", errors2.length === 0, errors2.slice(0, 2).join(" | "));
+
+  await raced.close();
+}
+
 await browser.close();
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall checks passed");
 process.exit(failures.length ? 1 : 0);
