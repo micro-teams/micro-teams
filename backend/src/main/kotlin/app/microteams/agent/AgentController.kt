@@ -55,6 +55,7 @@ import org.springframework.web.context.request.ServletRequestAttributes
 class AgentController(
     private val agentService: AgentService,
     private val agentProfileService: AgentProfileService,
+    private val agentKeepaliveService: AgentKeepaliveService,
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
     private val attribution: AgentAttribution,
@@ -277,6 +278,10 @@ class AgentController(
                 if (watchable)
                     screen?.vars?.entries?.mapNotNull { (k, v) -> v?.let { k to it } }?.toMap()
                 else null,
+            keepalive =
+                agentKeepaliveService.get(uid)?.let {
+                    AgentKeepaliveDTO(enabled = it.enabled, intervalSeconds = it.intervalSeconds)
+                },
         )
     }
 
@@ -359,6 +364,27 @@ class AgentController(
         setAgentNicknameRequestDTO: SetAgentNicknameRequestDTO,
     ): ResponseEntity<AgentDTO> {
         agentProfileService.setNickname(userId, setAgentNicknameRequestDTO.nickname)
+        val viewerAuth = authorizationService.currentAuthorization()
+        return ResponseEntity.ok(
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+        )
+    }
+
+    /**
+     * Turn the agent's cache keepalive on or off and set its interval. Same team-membership rule as
+     * the other manage-an-existing-agent actions: it only writes this server's own scheduling, so
+     * belonging to the agent's team is the whole permission question. See AgentKeepaliveService.
+     */
+    @Guard("change-agent-keepalive", "agent")
+    override fun setAgentKeepalive(
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
+        setAgentKeepaliveRequestDTO: SetAgentKeepaliveRequestDTO,
+    ): ResponseEntity<AgentDTO> {
+        agentKeepaliveService.setKeepalive(
+            userId,
+            setAgentKeepaliveRequestDTO.enabled,
+            setAgentKeepaliveRequestDTO.intervalSeconds,
+        )
         val viewerAuth = authorizationService.currentAuthorization()
         return ResponseEntity.ok(
             toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)

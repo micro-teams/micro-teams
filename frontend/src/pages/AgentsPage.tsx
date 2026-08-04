@@ -32,6 +32,7 @@ import {
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
 import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
+import { AgentKeepaliveControl } from "@/components/agents/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -423,6 +424,8 @@ function AgentInfoDialog({
         <p className="text-muted-foreground text-center text-xs">
           tap the avatar to change its picture
         </p>
+
+        <AgentKeepaliveControl agent={a} onChanged={onAvatarChanged} />
 
         <Button
           className="w-full"

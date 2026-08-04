@@ -18,6 +18,7 @@ import javax.validation.Valid
  * @param driver Which driver runs it (claude, codex, ...)
  * @param vars Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens). Opaque
  *   to the machine layer; the UI reads what it recognises.
+ * @param keepalive
  */
 data class AgentDTO(
     @Schema(example = "null", required = true, description = "")
@@ -55,4 +56,8 @@ data class AgentDTO(
     )
     @get:JsonProperty("vars")
     val vars: kotlin.collections.Map<kotlin.String, kotlin.Any>? = null,
+    @field:Valid
+    @Schema(example = "null", description = "")
+    @get:JsonProperty("keepalive")
+    val keepalive: AgentKeepaliveDTO? = null,
 ) {}

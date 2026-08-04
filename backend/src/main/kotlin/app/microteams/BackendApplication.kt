@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.runApplication
 import org.springframework.context.ApplicationListener
 import org.springframework.context.annotation.Bean
+import org.springframework.scheduling.annotation.EnableScheduling
 
 // The borrowed authorization infrastructure and the leaf kernel it depends on
 // (errors, config, IdType/BaseEntity) keep their original org.rucca.cheese packages,
@@ -26,6 +27,7 @@ import org.springframework.context.annotation.Bean
 // app.microteams. Component scan must therefore cover both roots.
 @SpringBootApplication(scanBasePackages = ["app.microteams", "org.rucca.cheese"])
 @EnableConfigurationProperties(ApplicationConfig::class, LineRegistryProperties::class)
+@EnableScheduling
 class BackendApplication(private val applicationConfig: ApplicationConfig) {
     @Bean
     fun applicationReadyListener(): ApplicationListener<ApplicationReadyEvent> {

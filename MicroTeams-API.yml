@@ -1022,6 +1022,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Agent"
+  /agent/{userId}/keepalive:
+    put:
+      tags: [agent]
+      operationId: setAgentKeepalive
+      summary: >
+        Turn the agent's cache keepalive on or off, and set its interval. When enabled, the server
+        periodically sends the agent a self-declared do-nothing message whose only purpose is to
+        touch its Claude Code prefix cache and refresh that cache's TTL, so an idle agent's context
+        never expires and never has to be rebuilt (a rebuild burns a large amount of the account's
+        rolling-window quota). The schedule is persisted, so a backend restart does not reset or
+        skip the timer -- what matters economically is that keepalive keeps firing across restarts.
+        The message is only ever sent while the agent's program is actually alive; a dead agent is
+        left dead (waking it would rebuild the very context this is meant to preserve).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAgentKeepaliveRequest"
+      responses:
+        "200":
+          description: Updated — the agent as it now reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
   /agent/token:
     post:
       tags: [agent]
@@ -1230,6 +1263,35 @@ components:
         nickname:
           type: string
           description: The agent's new display name.
+
+    SetAgentKeepaliveRequest:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether cache keepalive is on for this agent.
+        intervalSeconds:
+          type: integer
+          format: int64
+          description: >
+            Seconds between keepalive touches. Required (and must be positive) when enabling; the
+            interval should sit comfortably under the Claude Code cache TTL (~1h) so the cache never
+            lapses between touches. Ignored when disabling.
+
+    AgentKeepalive:
+      type: object
+      description: An agent's cache-keepalive schedule, present in the agent view once configured.
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+        intervalSeconds:
+          type: integer
+          format: int64
+          description: Seconds between keepalive touches; present when a schedule has been set.
 
     ChatMember:
       type: object
@@ -1728,6 +1790,8 @@ components:
             Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens).
             Opaque to the machine layer; the UI reads what it recognises.
           additionalProperties: true
+        keepalive:
+          $ref: "#/components/schemas/AgentKeepalive"
 
     OpenAgentRequest:
       type: object
