@@ -201,6 +201,7 @@
   function gitWorkspace() {
     return request({ method: "GET", path: "/agent/git-workspace" });
   }
+  var GIT_IDENTITY = ["-c", "user.name=agent", "-c", "user.email=agent@microteams.local"];
   function authedGit(token, args) {
     return microteams.exec("git", ["-c", `http.extraHeader=Authorization: Bearer ${token}`, ...args]);
   }
@@ -222,7 +223,7 @@
             microteams.print("cloned the document tree");
             return;
           }
-          const pulled = authedGit(ws.token, ["pull", "--rebase"]);
+          const pulled = authedGit(ws.token, [...GIT_IDENTITY, "pull", "--rebase"]);
           if (pulled.code !== 0)
             throw new Error(
               "docs sync: could not merge the latest changes. Resolve the conflict in the files, run `microteams api docs add`, then `microteams api docs sync` again.\n" + pulled.stderr
@@ -244,15 +245,7 @@
             return;
           }
           const message = ctx.flags["message"] ? String(ctx.flags["message"]) : "update documents";
-          const committed = microteams.exec("git", [
-            "-c",
-            "user.name=agent",
-            "-c",
-            "user.email=agent@microteams.local",
-            "commit",
-            "-m",
-            message
-          ]);
+          const committed = microteams.exec("git", [...GIT_IDENTITY, "commit", "-m", message]);
           if (committed.code !== 0) throw new Error("docs add (commit) failed: " + committed.stderr);
           microteams.print("recorded: " + message);
         }
