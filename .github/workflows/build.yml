@@ -154,7 +154,11 @@ jobs:
         working-directory: cli
         run: |
           command -v tmux >/dev/null || sudo apt-get install -y -qq tmux
-          go test ./...
+          # -race: the connector now races requests across lines and measures them from a background
+          # loop while short commands read the same cache, so "does it work" and "does it work
+          # concurrently" have stopped being the same question. micro-connector and multipath both
+          # run their Go tests this way.
+          go test -race ./...
       - name: Build binaries (one per OS/arch)
         run: |
           set -euo pipefail
