@@ -278,6 +278,14 @@ class RolePermissionService {
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                         customLogic = "is-member-of-agent-team",
                     ),
+                    // PUT /agent/{userId}/keepalive — turning cache keepalive on/off is managing an
+                    // existing agent, so the same team-membership rule as close/reboot/avatar/
+                    // nickname. It touches only this server's own scheduling, no identity profile.
+                    Permission(
+                        authorizedActions = listOf("change-agent-keepalive"),
+                        authorizedResource = AuthorizedResource(types = listOf("agent")),
+                        customLogic = "is-member-of-agent-team",
+                    ),
                 ),
         )
     }

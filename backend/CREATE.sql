@@ -81,6 +81,17 @@ START WITH
 
 CREATE
     TABLE
+        microteams.agent_keepalive(
+            enabled BOOLEAN NOT NULL,
+            agent_user_id BIGINT NOT NULL,
+            interval_seconds BIGINT NOT NULL,
+            last_fire_at TIMESTAMP(6) WITH TIME ZONE,
+            next_fire_at TIMESTAMP(6) WITH TIME ZONE,
+            PRIMARY KEY(agent_user_id)
+        );
+
+CREATE
+    TABLE
         microteams.agent_screen(
             agent_user_id BIGINT NOT NULL,
             created_at TIMESTAMP(6) NOT NULL,
@@ -215,6 +226,13 @@ CREATE
                 user_id
             )
         );
+
+CREATE
+    INDEX IDXdacnh6cebqp4bercjnb8stjbn ON
+    microteams.agent_keepalive(
+        enabled,
+        next_fire_at
+    );
 
 CREATE
     INDEX IDXgq97fo5233iohf7rnfx89ypne ON

@@ -12,6 +12,7 @@ import app.microteams.model.ListAgentsResponseDTO
 import app.microteams.model.OpenAgentRequestDTO
 import app.microteams.model.OpenedAgentDTO
 import app.microteams.model.SetAgentAvatarRequestDTO
+import app.microteams.model.SetAgentKeepaliveRequestDTO
 import app.microteams.model.SetAgentNicknameRequestDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
@@ -259,6 +260,38 @@ interface AgentApi {
         @Valid
         @RequestBody
         setAgentAvatarRequestDTO: SetAgentAvatarRequestDTO,
+    ): ResponseEntity<AgentDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
+            "Turn the agent's cache keepalive on or off, and set its interval. When enabled, the server periodically sends the agent a self-declared do-nothing message whose only purpose is to touch its Claude Code prefix cache and refresh that cache's TTL, so an idle agent's context never expires and never has to be rebuilt (a rebuild burns a large amount of the account's rolling-window quota). The schedule is persisted, so a backend restart does not reset or skip the timer -- what matters economically is that keepalive keeps firing across restarts. The message is only ever sent while the agent's program is actually alive; a dead agent is left dead (waking it would rebuild the very context this is meant to preserve). ",
+        operationId = "setAgentKeepalive",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "Updated — the agent as it now reads",
+                    content = [Content(schema = Schema(implementation = AgentDTO::class))],
+                )
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.PUT],
+        value = ["/agent/{userId}/keepalive"],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun setAgentKeepalive(
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
+        @Parameter(description = "", required = true)
+        @Valid
+        @RequestBody
+        setAgentKeepaliveRequestDTO: SetAgentKeepaliveRequestDTO,
     ): ResponseEntity<AgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }

@@ -26,6 +26,7 @@ import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ChangeAvatar } from "@/components/ChangeAvatar";
+import { AgentKeepaliveControl } from "@/components/agents/AgentKeepaliveControl";
 import {
   OpenAgentDialog,
   OnlineDot,
@@ -398,6 +399,8 @@ function AgentDetail({
         <p className="text-muted-foreground text-center text-xs">
           click the avatar to watch its live screen
         </p>
+
+        <AgentKeepaliveControl agent={a} onChanged={onAvatarChanged} />
 
         <div className="flex w-full flex-col gap-2">
           <Button onClick={onChat}>
