@@ -82,9 +82,27 @@ jobs:
       # to build your code.
       # ℹ️ Command-line programs to run using the OS shell.
       # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
+      # The backend depends on MultiPath from GitHub Packages, which requires an authenticated read
+      # even for a public package. Writing the credentials to ~/.m2/settings.xml here is what lets
+      # the build below stay a plain `./mvnw compile`.
+      - if: matrix.build-mode == 'manual'
+        name: Set up JDK 21 (with GitHub Packages credentials)
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+          cache-dependency-path: backend/pom.xml
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+
       - if: matrix.build-mode == 'manual'
         shell: bash
         working-directory: backend
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./mvnw compile
 

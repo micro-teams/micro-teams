@@ -34,10 +34,10 @@ jobs:
           distribution: "temurin"
           cache: "maven"
           cache-dependency-path: backend/pom.xml
-          # backend/.gitignore excludes settings.xml/toolchains.xml relative to backend/; point
-          # setup-java there too, or the spotless "uncommitted changes" check sees them as untracked.
-          settings-path: ${{ github.workspace }}/backend
-          # Credentials for the `github` repository declared in backend/pom.xml.
+          # Credentials for the `github` repository declared in backend/pom.xml, written to
+          # ~/.m2/settings.xml — where Maven looks on its own, so `./mvnw install` stays `./mvnw
+          # install`. Not settings-path: that puts the file inside the checkout, where Maven does not
+          # read it and where the spotless "uncommitted changes" check has to be told to ignore it.
           server-id: github
           server-username: MAVEN_USERNAME
           server-password: MAVEN_TOKEN
@@ -47,12 +47,8 @@ jobs:
       - name: Start dependencies (Postgres + cheese-auth)
         run: ./scripts/dependency-start.sh
 
-      # -s explicitly: setup-java writes the settings file to settings-path, and Maven only reads
-      # ~/.m2/settings.xml or the file it is handed. Without this the credentials it just wrote are
-      # never used, and the MultiPath dependency fails to resolve with a 401 that looks like a
-      # broken repository rather than an unread settings file.
       - name: Build with Maven (runs the integration tests)
-        run: ./mvnw -s "$GITHUB_WORKSPACE/backend/settings.xml" install
+        run: ./mvnw install
         env:
           MAVEN_USERNAME: ${{ github.actor }}
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
