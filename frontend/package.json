@@ -9,12 +9,14 @@
     "prebuild": "npm run codegen",
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/launcher.mjs",
     "lint": "oxlint",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.ts\"",
     "preview": "vite preview",
     "pretest": "npm run codegen",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:launcher": "node scripts/launcher-check.mjs"
   },
   "dependencies": {
     "@micro-teams/multipath": "0.1.1",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.40.1",
+    "@playwright/test": "^1.58.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
