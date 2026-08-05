@@ -11,6 +11,7 @@ import { MoreHorizontal } from "lucide-react";
 import type { Message, ThreadMember } from "@/api";
 import { chatApi, mtCall } from "@/lib/mtApi";
 import { getCache, setCache } from "@/lib/cache";
+import { mergeNewestPage, mergeOlderPage } from "@/lib/messages";
 import { useAuth } from "@/hooks/useAuth";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
@@ -27,6 +28,10 @@ const OWN_BG = "#95ec69";
 const OWN_FG = "#111111";
 const OTHER_BG = "#2c2c2e";
 const OTHER_FG = "#ffffff";
+
+// Messages per request — both for the newest page (polled) and for each older page
+// walked backwards through history.
+const PAGE_SIZE = 100;
 
 export function ThreadPage() {
   const { threadId: threadIdParam } = useParams();
@@ -135,6 +140,17 @@ function MessageList({
   // at the newest message); flips off once the user scrolls up to read history,
   // so the 4s poll never yanks them back down.
   const atBottomRef = useRef(true);
+  // Everything the pane currently holds, newest page + any older pages loaded by
+  // scrolling up. Kept in a ref as well as state because the poll folds into it.
+  const allRef = useRef<Message[]>([]);
+  // Cursor for the next OLDER page, plus whether one exists. While no older page
+  // has been loaded these track the newest page (its `nextStart` moves as new
+  // messages arrive); after the first load they only advance backwards.
+  const olderCursor = useRef<number | undefined>(undefined);
+  const hasOlder = useRef(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const walkedBack = useRef(false);
 
   // Initial load + a gentle 4s poll so messages from others show up without a
   // manual reload — chat has no live socket, so the phone polls the same way the
@@ -144,18 +160,27 @@ function MessageList({
     // Paint the cached messages for this thread at once (stale-while-revalidate);
     // only spin when we have nothing cached to show.
     const cached = getCache<Message[]>(msgKey);
-    setMessages(cached ?? []);
+    allRef.current = cached ?? [];
+    setMessages(allRef.current);
     setLoading(cached == null);
     atBottomRef.current = true;
+    olderCursor.current = undefined;
+    hasOlder.current = false;
+    walkedBack.current = false;
     const fetchOnce = () =>
-      mtCall(chatApi().listMessages({ id: threadId, pageSize: 200 }))
+      mtCall(chatApi().listMessages({ id: threadId, pageSize: PAGE_SIZE }))
         .then((res) => {
           if (!active) return;
           // Anything the server already has stops being pending — matched by clientToken, so a
           // send whose response was lost is recognised rather than sent twice.
           outbox.reconcile(res.messages);
-          setMessages(res.messages);
-          setCache(msgKey, res.messages);
+          if (!walkedBack.current) {
+            hasOlder.current = res.page.hasMore;
+            olderCursor.current = res.page.nextStart;
+          }
+          allRef.current = mergeNewestPage(allRef.current, res.messages);
+          setMessages(allRef.current);
+          setCache(msgKey, allRef.current.slice(-PAGE_SIZE));
         })
         .catch((err: unknown) => active && setError(errMsg(err)))
         .finally(() => active && setLoading(false));
@@ -168,14 +193,57 @@ function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
+  // Scrolling up past the top of what we hold walks the cursor backwards. The list
+  // grows upward, so the scroll position is restored by distance-from-the-bottom —
+  // otherwise inserting above the viewport would jump the user away from where they
+  // were reading.
+  async function loadOlder() {
+    if (loadingOlderRef.current || !hasOlder.current) return;
+    const cursor = olderCursor.current;
+    if (cursor == null) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const fromBottom = listRef.current
+      ? listRef.current.scrollHeight - listRef.current.scrollTop
+      : 0;
+    try {
+      const res = await mtCall(
+        chatApi().listMessages({
+          id: threadId,
+          pageStart: cursor,
+          pageSize: PAGE_SIZE,
+        }),
+      );
+      walkedBack.current = true;
+      hasOlder.current = res.page.hasMore;
+      olderCursor.current = res.page.nextStart;
+      allRef.current = mergeOlderPage(allRef.current, res.messages);
+      setMessages(allRef.current);
+      requestAnimationFrame(() => {
+        const el = listRef.current;
+        if (el) el.scrollTop = el.scrollHeight - fromBottom;
+      });
+    } catch (err: unknown) {
+      setError(errMsg(err));
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
+
   // Auto-scroll only when a NEW message arrives AND the user is at the bottom
   // (or just sent one). Keying on the last message id — not the whole array —
   // means a 4s poll that returns nothing new never re-scrolls, so reading a tall
   // last message (scrolled up within it) is never interrupted.
+  //
+  // Scrolling the container itself, not `bottomRef.scrollIntoView()`: the sentinel's
+  // bottom edge is above the list's own bottom padding, so aligning to it left that
+  // padding unscrolled and the thread opened a few pixels short of the end.
   const lastMessageId = messages.length ? messages[messages.length - 1].id : 0;
   useEffect(() => {
-    if (lastMessageId && atBottomRef.current)
-      bottomRef.current?.scrollIntoView({ block: "end" });
+    const el = listRef.current;
+    if (lastMessageId && atBottomRef.current && el)
+      el.scrollTop = el.scrollHeight;
   }, [lastMessageId]);
 
   function send(e: FormEvent) {
@@ -202,12 +270,18 @@ function MessageList({
         ref={listRef}
         onScroll={() => {
           const el = listRef.current;
-          if (el)
-            atBottomRef.current =
-              el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          if (!el) return;
+          atBottomRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          if (el.scrollTop < 200) void loadOlder();
         }}
         className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-1 overflow-y-auto px-3 py-3"
       >
+        {loadingOlder && (
+          <div className="py-2 text-center text-[11px] text-neutral-500">
+            loading earlier messages…
+          </div>
+        )}
         {loading && <Loading />}
         {error && (
           <Alert variant="destructive">
