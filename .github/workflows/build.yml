@@ -95,6 +95,16 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+      # The launcher and the Service Worker are browser behaviour, and none of it can be asserted
+      # any other way: whether the worker registers, what it stores, whether the app starts with the
+      # network off, and whether the escape hatch clears it. The first version of that build step
+      # passed every unit test and did not start offline.
+      - name: Check the launcher in a real browser
+        run: |
+          npx playwright install --with-deps chromium
+          bash scripts/check-launcher.sh
+
       - name: Upload dist
         uses: actions/upload-artifact@v7
         with:
