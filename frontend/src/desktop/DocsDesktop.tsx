@@ -97,6 +97,25 @@ export function DocsDesktop() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
+  // The tree is fetched on team change and never again, so a file an agent creates
+  // while you sit on this page does not appear until you switch teams or re-enter.
+  // Revalidate when the tab becomes visible or the window regains focus — the same
+  // treatment the document viewer got, which only covered files already open. No
+  // spinner: the cached tree stays on screen and is replaced when the answer lands.
+  // (T-053)
+  useEffect(() => {
+    if (teamId == null) return;
+    function revalidate() {
+      if (document.visibilityState === "visible") void load(teamId!, false);
+    }
+    document.addEventListener("visibilitychange", revalidate);
+    window.addEventListener("focus", revalidate);
+    return () => {
+      document.removeEventListener("visibilitychange", revalidate);
+      window.removeEventListener("focus", revalidate);
+    };
+  }, [teamId, load]);
+
   const currentTeam = ws.teams?.find((t) => t.id === teamId);
 
   async function onAction(node: DocNode, kind: NodeAction) {
