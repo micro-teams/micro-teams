@@ -14,6 +14,9 @@ import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { Terminal } from "@xterm/xterm";
+import { connectOverLines } from "@micro-teams/multipath";
+
+import { lineManager } from "@/lib/lines";
 import { getNtAccessToken, MT_BASE } from "@/lib/mtApi";
 
 type Vars = Record<string, unknown> | undefined;
@@ -108,8 +111,6 @@ export function TerminalViewer({
     const container = containerRef.current;
     if (!container) return;
     let destroyed = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectDelayMs = 500;
     let everOpened = false;
     let notifiedError = false;
 
@@ -230,53 +231,56 @@ export function TerminalViewer({
     window.addEventListener("resize", onResize);
     const sizeTimer = setInterval(() => sendSize(false), 3000);
 
-    function wsUrl(): string {
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = new URL(
-        `${MT_BASE}/machine/screen/${encodeURIComponent(sid)}`,
-        window.location.origin,
-      );
-      url.protocol = proto;
-      const token = getNtAccessToken();
-      if (token) url.searchParams.set("token", token);
-      return url.toString();
-    }
-
-    function connect() {
-      if (destroyed) return;
-      const ws = new WebSocket(wsUrl());
-      ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
-      ws.onopen = () => {
-        everOpened = true;
-        reconnectDelayMs = 500;
-        setTimeout(() => {
-          sendSize(true);
-          sendControl();
-        }, 30);
-      };
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === "string") term.write(ev.data);
-        else term.write(new Uint8Array(ev.data as ArrayBuffer));
-      };
-      ws.onclose = () => {
+    // The screen goes over a line too, and this is where it is chosen.
+    //
+    // It used to be pinned to the page's own origin, which meant the terminal was stuck on whichever
+    // route served the page no matter how slow that route was — the API had several paths to choose
+    // from and the thing people actually watch had one. Choosing here is safe in a way the API
+    // calls were not: this socket authenticates with the token in its query string rather than a
+    // cookie, and a WebSocket handshake is not subject to CORS.
+    //
+    // The library owns the reconnect loop because it also owns the part that is easy to get wrong:
+    // a route can serve requests perfectly and refuse to hold a WebSocket, so a line that drops the
+    // connection before it is stable is skipped for streams while remaining fine for everything
+    // else. Without that, reconnecting means going straight back to the route that just failed.
+    const socket = connectOverLines({
+      lines: () => lineManager.ranked(),
+      path: `${MT_BASE}/machine/screen/${encodeURIComponent(sid)}${tokenQuery()}`,
+      createSocket: (url) => {
+        const ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+        wsRef.current = ws;
+        ws.onopen = () => {
+          everOpened = true;
+          setTimeout(() => {
+            sendSize(true);
+            sendControl();
+          }, 30);
+        };
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") term.write(ev.data);
+          else term.write(new Uint8Array(ev.data as ArrayBuffer));
+        };
+        return ws;
+      },
+      onClose: () => {
         if (destroyed) return;
-        // If the very first connection never opened, the screen is gone / not watchable —
-        // tell the caller once instead of silently retrying into a black terminal.
+        // If the very first connection never opened, the screen is gone or not watchable — tell the
+        // caller once instead of silently retrying into a black terminal.
         if (!everOpened && !notifiedError) {
           notifiedError = true;
           onErrorRef.current?.();
         }
-        reconnectTimer = setTimeout(connect, reconnectDelayMs);
-        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10000);
-      };
-      ws.onerror = () => ws.close();
+      },
+    });
+
+    function tokenQuery(): string {
+      const token = getNtAccessToken();
+      return token ? `?token=${encodeURIComponent(token)}` : "";
     }
-    connect();
 
     return () => {
       destroyed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (scrollIdle) clearTimeout(scrollIdle);
       clearInterval(sizeTimer);
       window.removeEventListener("resize", onResize);
@@ -289,6 +293,7 @@ export function TerminalViewer({
       touchTarget.removeEventListener("touchend", onTouchEnd, {
         capture: true,
       } as EventListenerOptions);
+      socket.close();
       wsRef.current?.close();
       term.dispose();
       termRef.current = null;

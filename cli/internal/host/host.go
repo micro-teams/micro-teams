@@ -10,8 +10,11 @@ package host
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -44,9 +47,21 @@ type Host struct {
 	conn    protocol.Transport
 	tm      *terminal.Manager
 	cfgPath string // for the shared screen-count state file ("" disables)
+	lines   *multipath.Client
 	base    string // server origin, for self-update downloads
 
 	apiBase string // control-plane API root, for the line registry
+
+	// The control link's choice of network path, and the line it last chose. `microteams status`
+	// reads the latter out of the state file; the selector is what decides it.
+	linkLines *multipath.StreamSelector
+	lineMu    sync.Mutex
+	lastLine  state.Line
+	// The last screen count published, so recording a line change can rewrite the state file
+	// without asking tmux again. Asking would be wrong twice over: it happens on every dial
+	// attempt, and it would drag the tmux server into a code path that has nothing to do with
+	// screens — including in tests, where touching the live socket has killed real agents before.
+	lastScreens atomic.Int32
 
 	ctx      context.Context
 	updating atomic.Bool // guards against concurrent / re-entrant self-updates
@@ -60,7 +75,76 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewWithTransport(ws.New(ctrlURL, cfg.Token, cfg.APIBase()), cfg, cfgPath)
+
+	// The control link goes over a line too, and choosing one is a different question from choosing
+	// one for a request. A route can serve requests perfectly and refuse to hold a WebSocket — a
+	// cheap proxy that rejects the Upgrade, a middlebox that severs anything long-lived — so a line
+	// that fails to hold this connection is skipped for streams while remaining fine for everything
+	// else. That is the selector's whole job; the library keeps the reconnect loop, because backoff
+	// and heartbeats are about the protocol rather than about the network.
+	client := lines.New(cfgPath)
+	host := &Host{
+		linkLines: multipath.NewStreamSelector(client.Ranked, 0, 0, nil),
+		lines:     client,
+	}
+	conn := ws.NewWithOptions(ctrlURL, cfg.Token, cfg.APIBase(), ws.Options{
+		ChooseURL: func() string { return host.chooseLink(ctrlURL) },
+		Report:    host.reportLink,
+	})
+	if err := host.init(conn, cfg, cfgPath); err != nil {
+		return nil, err
+	}
+	return host, nil
+}
+
+// chooseLink names where the next dial attempt goes.
+//
+// The configured URL is the answer for the same-origin line and the fallback for everything else:
+// "wherever this machine already reaches the control plane" is a fact this process has and the
+// registry does not.
+func (h *Host) chooseLink(configured string) string {
+	line, ok := h.linkLines.Next()
+	if !ok || line.URL == "" {
+		h.rememberLine(state.Line{ID: "origin", URL: configured})
+		return configured
+	}
+
+	target := multipath.StreamURL(line, controlPath(configured))
+	h.rememberLine(state.Line{ID: line.ID, URL: target})
+	return target
+}
+
+// reportLink feeds the outcome back: a connection that never became stable is evidence about this
+// line's ability to carry a stream, which the selector turns into a temporary skip. One that lasted
+// and then dropped is an ordinary disconnection and costs the line nothing.
+func (h *Host) reportLink(url string, held time.Duration, _ error) {
+	for _, line := range h.lines.Ranked() {
+		if line.URL == "" || strings.HasPrefix(url, multipath.StreamURL(line, "")) {
+			h.linkLines.Closed(line, held)
+			return
+		}
+	}
+}
+
+func (h *Host) rememberLine(line state.Line) {
+	h.lineMu.Lock()
+	h.lastLine = line
+	h.lineMu.Unlock()
+	h.writeState(int(h.lastScreens.Load()))
+}
+
+func (h *Host) currentLine() state.Line {
+	h.lineMu.Lock()
+	defer h.lineMu.Unlock()
+	return h.lastLine
+}
+
+// controlPath is the path part of the configured control URL, to be joined to another line's origin.
+func controlPath(configured string) string {
+	if u, err := url.Parse(configured); err == nil {
+		return u.RequestURI()
+	}
+	return configured
 }
 
 // NewWithTransport builds a Host on a caller-supplied transport.
@@ -70,17 +154,24 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 // handling and the same applets over an HTTP exchange that ends when the command does. Everything
 // below this line is written to not care which it is.
 func NewWithTransport(conn protocol.Transport, cfg *config.Config, cfgPath string) (*Host, error) {
-	tm, err := terminal.NewManager()
-	if err != nil {
+	host := &Host{lines: lines.New(cfgPath)}
+	if err := host.init(conn, cfg, cfgPath); err != nil {
 		return nil, err
 	}
-	return &Host{
-		conn:    conn,
-		tm:      tm,
-		cfgPath: cfgPath,
-		base:    cfg.Base,
-		apiBase: cfg.APIBase(),
-	}, nil
+	return host, nil
+}
+
+func (h *Host) init(conn protocol.Transport, cfg *config.Config, cfgPath string) error {
+	tm, err := terminal.NewManager()
+	if err != nil {
+		return err
+	}
+	h.conn = conn
+	h.tm = tm
+	h.cfgPath = cfgPath
+	h.base = cfg.Base
+	h.apiBase = cfg.APIBase()
+	return nil
 }
 
 // Run connects and serves screens until ctx is cancelled, then tears down.
@@ -134,7 +225,7 @@ func (h *Host) Run(ctx context.Context) error {
 // Entirely best-effort. A machine that cannot reach the registry endpoint keeps the line it was
 // already using, which is the one it reached the control plane over.
 func (h *Host) measureLines(ctx context.Context) {
-	client := lines.New(h.cfgPath)
+	client := h.lines
 	if err := lines.Refresh(ctx, client, h.apiBase, h.cfgPath); err != nil {
 		// Said out loud rather than swallowed: a registry that arrived and could not be read means
 		// the deployment believes it has several paths while every machine quietly uses one, and
@@ -215,10 +306,11 @@ func (h *Host) performUpdate() {
 func (h *Host) publishState() { h.writeState(h.tm.LiveSessions()) }
 
 func (h *Host) writeState(live int) {
+	h.lastScreens.Store(int32(live))
 	if h.cfgPath == "" {
 		return
 	}
-	state.Write(h.cfgPath, live)
+	state.Write(h.cfgPath, live, h.currentLine())
 }
 
 func (h *Host) clearState() {
