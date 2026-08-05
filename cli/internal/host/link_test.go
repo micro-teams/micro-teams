@@ -9,11 +9,17 @@
 package host
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	multipath "github.com/micro-teams/multipath/go"
 
+	"github.com/micro-teams/micro-connector/cli/protocol"
+	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
@@ -111,4 +117,59 @@ func TestTheRecordedLineIsWhatStatusReads(t *testing.T) {
 	if got := state.CurrentLine(cfgPath); got.ID != "direct" {
 		t.Errorf("`microteams status` would report %+v", got)
 	}
+}
+
+// The signal handler's job, minus the signal: re-read the registry, measure, and ask the transport
+// for a fresh attempt. What matters is the last part — that it asks rather than stops, because
+// stopping is what kills the screens this machine hosts.
+type redialCounter struct {
+	protocol.Transport
+	redials atomic.Int32
+}
+
+func (r *redialCounter) Reconnect() { r.redials.Add(1) }
+
+func TestRemeasureAsksForANewAttemptRatherThanStopping(t *testing.T) {
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mt/lines":
+			_, _ = w.Write([]byte(`{"lines":[{"id":"origin","url":""}]}`))
+		case "/mt/probe":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer control.Close()
+
+	dir := t.TempDir()
+	host := hostWithLines(t, multipath.Line{ID: "origin", URL: ""})
+	host.cfgPath = dir + "/config.json"
+	host.apiBase = control.URL + "/mt"
+	host.lines = lines.New(host.cfgPath, control.URL)
+	transport := &redialCounter{}
+	host.conn = transport
+
+	host.remeasureAndRelink(context.Background())
+
+	if transport.redials.Load() != 1 {
+		t.Errorf("expected exactly one re-dial, got %d", transport.redials.Load())
+	}
+	// And it measured rather than merely re-dialling: a choice made on nothing is what this exists
+	// to avoid.
+	if health := host.lines.Health().Get("origin"); !health.Measured {
+		t.Error("re-dialled without measuring anything")
+	}
+}
+
+// A transport with nothing to re-dial — the one-shot HTTP one — must not be a crash.
+func TestRemeasureIsHarmlessOnATransportThatCannotRedial(t *testing.T) {
+	dir := t.TempDir()
+	host := hostWithLines(t, multipath.Line{ID: "origin", URL: ""})
+	host.cfgPath = dir + "/config.json"
+	host.apiBase = "http://127.0.0.1:1/mt"
+	host.lines = lines.New(host.cfgPath, "http://127.0.0.1:1")
+	host.conn = struct{ protocol.Transport }{}
+
+	host.remeasureAndRelink(context.Background())
 }

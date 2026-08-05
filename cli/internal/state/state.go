@@ -19,6 +19,13 @@ type snapshot struct {
 	// meaningless to anything else — a machine with one line always reports that one.
 	LineID  string `json:"lineId,omitempty"`
 	LineURL string `json:"lineUrl,omitempty"`
+	// Whether the running host understands the signal that asks it to re-measure and re-dial.
+	//
+	// A capability rather than a version, because the question is never "which build is this" but
+	// "will it survive being asked". The binary on disk updates without the service restarting, so
+	// a new command can easily meet an old process — and SIGHUP to a process that does not handle
+	// it terminates it, taking the machine offline. The flag is how the command knows not to.
+	Relink bool `json:"relink,omitempty"`
 }
 
 // Path derives the state file location from the config path (same directory).
@@ -42,6 +49,7 @@ func Write(cfgPath string, screens int, line Line) {
 		PID:     os.Getpid(),
 		LineID:  line.ID,
 		LineURL: line.URL,
+		Relink:  true,
 	})
 	if err != nil {
 		return
@@ -88,6 +96,20 @@ func RawPID(cfgPath string) int {
 
 // Screens reports the recorded screen count, verifying the writer is still
 // alive so a crashed host doesn't leave a scary stale warning behind.
+// CanRelink reports whether the running host handles the re-measure-and-re-dial signal. False for
+// an older host, which must be restarted instead — signalling it would kill it.
+func CanRelink(cfgPath string) bool {
+	data, err := os.ReadFile(Path(cfgPath))
+	if err != nil {
+		return false
+	}
+	var s snapshot
+	if json.Unmarshal(data, &s) != nil {
+		return false
+	}
+	return s.Relink
+}
+
 // CurrentLine reports the path the running host's control link is using, or an empty Line when
 // nothing is recorded — an older host, or none running.
 func CurrentLine(cfgPath string) Line {

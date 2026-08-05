@@ -25,12 +25,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	multipath "github.com/micro-teams/multipath/go"
+
+	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/auth"
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/host"
+	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 	"github.com/micro-teams/microteams/cli/internal/ui"
 )
@@ -356,8 +360,121 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 	}
 
 	group := &cobra.Command{Use: "link", Short: "Manage this machine's connection to the server"}
-	group.AddCommand(connect, disconnect, autoConnect, noAutoConnect)
+	group.AddCommand(connect, disconnect, autoConnect, noAutoConnect, retestCmd(cfgPath, withConfig))
 	return group
+}
+
+// retestCmd re-measures the network paths and asks the running service to dial again.
+//
+// It exists because the only way to make a machine reconsider its route used to be `link
+// disconnect` + `connect`, and that stops the service — which kills every screen on the machine.
+// "Try the lines again" and "stop everything" should not be the same operation, and until now they
+// were.
+//
+// What it prints is what it measured, from this process, against every line in the registry. The
+// service does its own measuring and its own choosing; showing this alongside the choice is what
+// makes the choice legible, and the two disagreeing is itself worth seeing.
+func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
+	return withConfig(&cobra.Command{
+		Use:   "retest",
+		Short: "Re-measure the network paths and re-dial the link (sessions keep running)",
+		Long: "Measures every network path this machine could reach the server over, then asks the\n" +
+			"running service to choose again and re-dial its control link.\n\n" +
+			"Sessions are not touched: nothing is stopped, so the terminals on this machine keep\n" +
+			"running throughout. A route added since the machine connected only takes effect on the\n" +
+			"next attempt, and this is how to ask for one.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			base := apiauth.APIBase()
+			client := lines.New(*cfgPath, base)
+
+			// Fetch first, so a line added five minutes ago appears here rather than after the
+			// service's hourly refresh.
+			if err := lines.Refresh(ctx, client, base, *cfgPath); err != nil {
+				ui.Hint("could not refresh the line list (%v) — measuring what was cached", err)
+			}
+
+			ui.Heading("network paths")
+			client.Probe(ctx, "/mt/probe")
+			ranked := client.Ranked()
+			// Padded to the longest id rather than to a fixed width: the point of this output is
+			// comparing numbers down a column, and a line id can be as long as an operator likes.
+			width := 0
+			for _, line := range ranked {
+				if len(line.ID) > width {
+					width = len(line.ID)
+				}
+			}
+			for i, line := range ranked {
+				label := fmt.Sprintf("%-*s", width, line.ID)
+				value := describe(client.Health().Get(line.ID), line.URL)
+				if i == 0 {
+					// Best first, and said out loud: the order is the answer, and a reader should
+					// not have to infer it from the numbers.
+					value += ui.Dim("  ← preferred")
+				}
+				fmt.Printf("  %s  %s\n", ui.Dim(label), value)
+			}
+
+			pid := state.PID(*cfgPath)
+			if pid == 0 {
+				ui.Hint("no service is running, so there is no link to re-dial")
+				return nil
+			}
+			// The binary on disk updates without the service restarting, so this command can meet a
+			// process older than itself — and the signal it is about to send terminates a process
+			// that does not handle it. Refusing is the only safe answer: the alternative takes the
+			// machine offline to ask a question about latency.
+			if !state.CanRelink(*cfgPath) {
+				ui.Hint("the running service predates this command; restart it to pick up the new")
+				ui.Hint("build (`microteams link connect`), then this will work — note that stopping")
+				ui.Hint("the service also stops the sessions on this machine")
+				return nil
+			}
+			if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+				return fmt.Errorf("signal running service (pid %d): %w", pid, err)
+			}
+
+			// The service measures and re-dials on its own clock; wait for the state file to name a
+			// line rather than guessing how long that takes.
+			before := state.CurrentLine(*cfgPath)
+			deadline := time.Now().Add(15 * time.Second)
+			for time.Now().Before(deadline) {
+				if now := state.CurrentLine(*cfgPath); now.ID != "" && now != before {
+					ui.OK("Re-dialled on %s (%s).", now.ID, now.URL)
+					return nil
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+
+			// Not an error: choosing the same line again is the most likely outcome, and it writes
+			// nothing new. Say what it is on rather than pretending something happened.
+			if now := state.CurrentLine(*cfgPath); now.ID != "" {
+				ui.OK("Re-dialled; still on %s (%s).", now.ID, now.URL)
+			} else {
+				ui.Hint("the service did not report a line — `microteams status` to check")
+			}
+			return nil
+		},
+	})
+}
+
+// describe renders one line's measurement the way somebody comparing routes wants to read it.
+func describe(health multipath.LineHealth, url string) string {
+	where := ui.Dim(url)
+	if url == "" {
+		where = ui.Dim("(this machine's own route to the server)")
+	}
+	switch {
+	case !health.Measured && health.ConsecutiveFailures > 0:
+		return ui.Red("unreachable") + " " + where
+	case !health.Measured:
+		return ui.Yellow("not measured") + " " + where
+	case health.State == multipath.StateDown:
+		return ui.Red(fmt.Sprintf("down after %d failures", health.ConsecutiveFailures)) + " " + where
+	default:
+		return ui.Bold(health.Latency.Round(time.Millisecond).String()) + " " + where
+	}
 }
 
 // statusCmd is the top-level `microteams status`: a compact, colored overview of
