@@ -28,7 +28,7 @@ func cfgPath(t *testing.T) string {
 }
 
 func TestNoCacheMeansOneSameOriginLine(t *testing.T) {
-	client := New(cfgPath(t))
+	client := New(cfgPath(t), "https://control.example/mt")
 
 	got := client.Lines()
 	if len(got) != 1 || got[0].URL != "" {
@@ -47,7 +47,7 @@ func TestASameOriginLineStillSendsRequests(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &http.Client{Transport: New(cfgPath(t)).RoundTripper()}
+	client := &http.Client{Transport: New(cfgPath(t), server.URL+"/mt").RoundTripper()}
 	resp, err := client.Get(server.URL + "/mt/chat")
 	if err != nil {
 		t.Fatalf("a machine with no cache could not send a request: %v", err)
@@ -64,7 +64,7 @@ func TestACorruptCacheIsIgnoredRatherThanFatal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := New(path).Lines()
+	got := New(path, "https://control.example/mt").Lines()
 	if len(got) != 1 || got[0].ID != "origin" {
 		t.Fatalf("expected the fallback, got %+v", got)
 	}
@@ -80,7 +80,7 @@ func TestAnInvalidCachedRegistryFallsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := New(path).Lines(); len(got) != 1 || got[0].ID != "origin" {
+	if got := New(path, "https://control.example/mt").Lines(); len(got) != 1 || got[0].ID != "origin" {
 		t.Fatalf("expected the fallback, got %+v", got)
 	}
 }
@@ -101,7 +101,7 @@ func TestRefreshAdoptsTheRegistryAndCachesItForShortCommands(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path)
+	client := New(path, control.URL+"/mt")
 	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err != nil {
 		t.Fatalf("refresh failed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRefreshAdoptsTheRegistryAndCachesItForShortCommands(t *testing.T) {
 	}
 
 	// The half that matters for `microteams api`: the next process must find it without asking.
-	next := New(path)
+	next := New(path, control.URL+"/mt")
 	if ids := ids(next.Lines()); len(ids) != 2 || ids[1] != "direct" {
 		t.Fatalf("a later command did not see the cached registry: %v", ids)
 	}
@@ -124,7 +124,7 @@ func TestRefreshKeepsWhatItHadWhenTheEndpointIsMissing(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path)
+	client := New(path, control.URL+"/mt")
 	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err != nil {
 		t.Errorf("a control plane without the endpoint is not an error here: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRefreshReportsAMalformedRegistry(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path)
+	client := New(path, control.URL+"/mt")
 	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err == nil {
 		t.Error("a malformed registry was accepted silently")
 	}
@@ -219,4 +219,46 @@ func ids(lines []multipath.Line) []string {
 		out = append(out, line.ID)
 	}
 	return out
+}
+
+// The defect this file did not catch until production did: a connector has no origin of its own, so
+// the same-origin entry cannot become a URL unless it is told what "same" means. Requests survived
+// it — they carry a host the transport can infer from — but a probe does not, so the origin line
+// failed every probe, went down after three, and the ranking was based on a fiction.
+func TestTheSameOriginLineIsProbable(t *testing.T) {
+	var probes atomic.Int32
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mt/probe" {
+			probes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer control.Close()
+
+	client := New(cfgPath(t), control.URL+"/mt")
+	client.Probe(context.Background(), "/mt/probe")
+
+	if probes.Load() == 0 {
+		t.Fatal("the same-origin line was never probed, so its health is a guess")
+	}
+	if health := client.Health().Get("origin"); !health.Measured || health.State != multipath.StateUp {
+		t.Errorf("the origin line is not measured as up: %+v", health)
+	}
+}
+
+// And the specific way the base can be wrong: the API base carries a path, every line in the
+// registry is a bare origin, and every request path already includes that prefix.
+func TestOnlyTheOriginOfTheAPIBaseIsUsed(t *testing.T) {
+	if got := originOf("https://microteams.app/mt"); got != "https://microteams.app" {
+		t.Errorf("kept the path: %q", got)
+	}
+	if got := originOf("https://rucnet-119pve.mt.microteams.app:43267/mt"); got != "https://rucnet-119pve.mt.microteams.app:43267" {
+		t.Errorf("lost the port or kept the path: %q", got)
+	}
+	// Nothing usable to parse: hand it back rather than inventing something.
+	if got := originOf("not a url"); got != "not a url" {
+		t.Errorf("mangled an unparseable base: %q", got)
+	}
 }

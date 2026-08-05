@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,8 +43,29 @@ func Path(cfgPath string) string {
 // Never fails: an unreadable or absent cache leaves the same-origin line, because a connector that
 // refused to run because it could not read a routing table would have made the transport layer a
 // prerequisite for reaching the network at all.
-func New(cfgPath string) *multipath.Client {
-	return multipath.New(multipath.Options{Registry: cached(cfgPath)})
+//
+// apiBase is what the same-origin line means here. A browser has an origin and never needs to be
+// told; a connector does, and without it the entry that says "wherever this machine already reaches
+// the control plane" cannot be turned into a URL at all. Requests survived that, because they carry
+// a host of their own for the transport to infer — the probe does not, so the origin line failed
+// every probe, went down after three, and was ranked last on a fiction. Where a second line existed
+// that looked like the right answer for the wrong reason; where it did not, the health table simply
+// described a working line as dead.
+//
+// Only the origin of it is kept, because that is what a line is. Every other line in the registry is
+// a bare origin and every path already carries the "/mt" prefix, so keeping the path here would
+// produce "/mt/mt/probe" — which a test caught immediately, and which in production would have read
+// as "this line answers 404" rather than as a mistake made here.
+func New(cfgPath, apiBase string) *multipath.Client {
+	return multipath.New(multipath.Options{Registry: cached(cfgPath), BaseURL: originOf(apiBase)})
+}
+
+func originOf(apiBase string) string {
+	parsed, err := url.Parse(apiBase)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return apiBase
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func cached(cfgPath string) multipath.Registry {

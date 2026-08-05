@@ -82,7 +82,7 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	// that fails to hold this connection is skipped for streams while remaining fine for everything
 	// else. That is the selector's whole job; the library keeps the reconnect loop, because backoff
 	// and heartbeats are about the protocol rather than about the network.
-	client := lines.New(cfgPath)
+	client := lines.New(cfgPath, cfg.APIBase())
 	host := &Host{
 		linkLines: multipath.NewStreamSelector(client.Ranked, 0, 0, nil),
 		lines:     client,
@@ -154,7 +154,7 @@ func controlPath(configured string) string {
 // handling and the same applets over an HTTP exchange that ends when the command does. Everything
 // below this line is written to not care which it is.
 func NewWithTransport(conn protocol.Transport, cfg *config.Config, cfgPath string) (*Host, error) {
-	host := &Host{lines: lines.New(cfgPath)}
+	host := &Host{lines: lines.New(cfgPath, cfg.APIBase())}
 	if err := host.init(conn, cfg, cfgPath); err != nil {
 		return nil, err
 	}

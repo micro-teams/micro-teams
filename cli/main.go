@@ -85,7 +85,8 @@ func main() {
 // (see internal/lines). With no cache that is one same-origin line and the request goes out exactly
 // as it did before any of this existed.
 func apiClient() *http.Client {
-	return apiauth.ClientOver(lines.New(filepath.Join(configDir(), "config.json")).RoundTripper())
+	client := lines.New(filepath.Join(configDir(), "config.json"), apiauth.APIBase())
+	return apiauth.ClientOver(client.RoundTripper())
 }
 
 // loadAPICommands fetches the CLI applet and hangs its commands under apiCmd.
