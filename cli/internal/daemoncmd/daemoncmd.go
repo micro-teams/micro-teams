@@ -403,6 +403,14 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			}
 			ui.Field("screens", screens)
 
+			// Which network path the long connection is on. With one line it always says the same
+			// thing, and that is the point of showing it: when there are several, "why is this
+			// machine slow" and "which route is it on" stop being answerable from the outside, and
+			// this is the only place the answer exists.
+			if line := state.CurrentLine(*cfgPath); line.ID != "" {
+				ui.Field("link line", ui.Bold(line.ID)+" "+ui.Dim(line.URL))
+			}
+
 			if serr != nil {
 				ui.Hint("run `microteams link connect` to connect")
 			}

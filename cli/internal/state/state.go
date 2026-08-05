@@ -15,6 +15,10 @@ import (
 type snapshot struct {
 	Screens int `json:"screens"`
 	PID     int `json:"pid"`
+	// Which network path the control link is using. Written by the host, read by `status`, and
+	// meaningless to anything else — a machine with one line always reports that one.
+	LineID  string `json:"lineId,omitempty"`
+	LineURL string `json:"lineUrl,omitempty"`
 }
 
 // Path derives the state file location from the config path (same directory).
@@ -22,9 +26,23 @@ func Path(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), "state.json")
 }
 
-// Write records the current number of hosted screens.
-func Write(cfgPath string, screens int) {
-	data, err := json.Marshal(snapshot{Screens: screens, PID: os.Getpid()})
+// Line names a network path the control link is using.
+type Line struct {
+	ID  string
+	URL string
+}
+
+// Write records the current number of hosted screens and the line carrying the control link.
+//
+// Both together, in one write, because the host is the only writer and knows both. Two writers each
+// owning a field would race on the file and each would occasionally erase the other's.
+func Write(cfgPath string, screens int, line Line) {
+	data, err := json.Marshal(snapshot{
+		Screens: screens,
+		PID:     os.Getpid(),
+		LineID:  line.ID,
+		LineURL: line.URL,
+	})
 	if err != nil {
 		return
 	}
@@ -70,6 +88,20 @@ func RawPID(cfgPath string) int {
 
 // Screens reports the recorded screen count, verifying the writer is still
 // alive so a crashed host doesn't leave a scary stale warning behind.
+// CurrentLine reports the path the running host's control link is using, or an empty Line when
+// nothing is recorded — an older host, or none running.
+func CurrentLine(cfgPath string) Line {
+	data, err := os.ReadFile(Path(cfgPath))
+	if err != nil {
+		return Line{}
+	}
+	var s snapshot
+	if json.Unmarshal(data, &s) != nil {
+		return Line{}
+	}
+	return Line{ID: s.LineID, URL: s.LineURL}
+}
+
 func Screens(cfgPath string) int {
 	data, err := os.ReadFile(Path(cfgPath))
 	if err != nil {
