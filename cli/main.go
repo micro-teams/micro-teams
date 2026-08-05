@@ -115,22 +115,37 @@ func fetchCLIApplet() (string, error) {
 	base := apiauth.APIBase()
 	cache := filepath.Join(configDir(), "cli-applet.js")
 
+	// Why it failed, kept for the error below. Without it this reports "could not fetch it" and
+	// nothing else — the same message whether the server is down, the name does not resolve, or the
+	// answer was a 500 — and the person reading it is an agent that cannot investigate.
+	reason := "no response"
 	resp, err := apiClient().Get(base + "/agent/cli-applet")
-	if err == nil {
+	switch {
+	case err != nil:
+		reason = err.Error()
+	default:
 		defer resp.Body.Close()
 		if resp.StatusCode == 200 {
 			data, rerr := io.ReadAll(resp.Body)
-			if rerr == nil && len(data) > 0 {
+			switch {
+			case rerr != nil:
+				reason = rerr.Error()
+			case len(data) == 0:
+				reason = "the server sent an empty applet"
+			default:
 				_ = os.MkdirAll(filepath.Dir(cache), 0o700)
 				_ = os.WriteFile(cache, data, 0o600)
 				return string(data), nil
 			}
+		} else {
+			reason = fmt.Sprintf("the server answered %d", resp.StatusCode)
 		}
 	}
 	if data, cerr := os.ReadFile(cache); cerr == nil {
 		return string(data), nil
 	}
-	return "", fmt.Errorf("could not fetch the CLI applet from %s (and no cached copy)", base)
+	return "", fmt.Errorf(
+		"could not fetch the CLI applet from %s (%s), and no cached copy at %s", base, reason, cache)
 }
 
 func configDir() string {
