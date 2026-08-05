@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/commandapplet"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
+	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/mtbrand"
 )
 
@@ -72,6 +74,20 @@ func main() {
 	}
 }
 
+// apiClient is the HTTP client every `microteams api` call goes out on: authenticated by the
+// library, routed by MultiPath underneath.
+//
+// The order is the point, and it is why apiauth grew a seam rather than MultiPath being wedged in
+// somewhere: the credential is decided by looking at the API host, so it has to be attached before
+// anything rewrites that host to whichever line is currently best.
+//
+// A short command has measured nothing, so it ranks on whatever the resident service last cached
+// (see internal/lines). With no cache that is one same-origin line and the request goes out exactly
+// as it did before any of this existed.
+func apiClient() *http.Client {
+	return apiauth.ClientOver(lines.New(filepath.Join(configDir(), "config.json")).RoundTripper())
+}
+
 // loadAPICommands fetches the CLI applet and hangs its commands under apiCmd.
 func loadAPICommands(apiCmd *cobra.Command) error {
 	source, err := fetchCLIApplet()
@@ -79,7 +95,7 @@ func loadAPICommands(apiCmd *cobra.Command) error {
 		return err
 	}
 	applet, err := commandapplet.Load(source, commandapplet.Options{
-		Client:  apiauth.Client(),
+		Client:  apiClient(),
 		APIBase: apiauth.APIBase(),
 		FsRoot:  os.Getenv("MICROTEAMS_FS_ROOT"),
 	})
@@ -99,7 +115,7 @@ func fetchCLIApplet() (string, error) {
 	base := apiauth.APIBase()
 	cache := filepath.Join(configDir(), "cli-applet.js")
 
-	resp, err := apiauth.Client().Get(base + "/agent/cli-applet")
+	resp, err := apiClient().Get(base + "/agent/cli-applet")
 	if err == nil {
 		defer resp.Body.Close()
 		if resp.StatusCode == 200 {

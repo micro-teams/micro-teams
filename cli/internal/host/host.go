@@ -14,6 +14,9 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
+
+	multipath "github.com/micro-teams/multipath/go"
 
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/protocol"
@@ -21,6 +24,7 @@ import (
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/transport/ws"
 	"github.com/micro-teams/micro-connector/cli/update"
+	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
@@ -41,6 +45,8 @@ type Host struct {
 	tm      *terminal.Manager
 	cfgPath string // for the shared screen-count state file ("" disables)
 	base    string // server origin, for self-update downloads
+
+	apiBase string // control-plane API root, for the line registry
 
 	ctx      context.Context
 	updating atomic.Bool // guards against concurrent / re-entrant self-updates
@@ -73,6 +79,7 @@ func NewWithTransport(conn protocol.Transport, cfg *config.Config, cfgPath strin
 		tm:      tm,
 		cfgPath: cfgPath,
 		base:    cfg.Base,
+		apiBase: cfg.APIBase(),
 	}, nil
 }
 
@@ -112,7 +119,45 @@ func (h *Host) Run(ctx context.Context) error {
 		}
 	}()
 
+	go h.measureLines(ctx)
+
 	return h.conn.Run(ctx, h.mgr.Dispatch)
+}
+
+// measureLines keeps this machine's view of the network paths current, and publishes it.
+//
+// Two jobs, and the second is the one that is easy to miss: the short `microteams api` commands
+// cannot afford to fetch a routing table or measure anything — they exist for a few hundred
+// milliseconds — so they read what this loop cached. A resident process is the only thing here that
+// can pay for measurement, so it pays for everybody.
+//
+// Entirely best-effort. A machine that cannot reach the registry endpoint keeps the line it was
+// already using, which is the one it reached the control plane over.
+func (h *Host) measureLines(ctx context.Context) {
+	client := lines.New(h.cfgPath)
+	if err := lines.Refresh(ctx, client, h.apiBase, h.cfgPath); err != nil {
+		// Said out loud rather than swallowed: a registry that arrived and could not be read means
+		// the deployment believes it has several paths while every machine quietly uses one, and
+		// that is invisible from the outside for exactly as long as one path still works.
+		fmt.Fprintf(os.Stderr, "microteams: line registry unavailable, using one line: %v\n", err)
+	}
+
+	prober := client.Prober(multipath.ProberOptions{ProbePath: "/mt/probe"})
+	go prober.Run(ctx)
+
+	// The registry itself changes only when an operator adds or removes a path, which is rare —
+	// hourly is often enough to pick it up without asking a question nobody has changed the answer
+	// to.
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = lines.Refresh(ctx, client, h.apiBase, h.cfgPath)
+		}
+	}
 }
 
 // performUpdate updates the `microteams` binary in place and hands this process off to

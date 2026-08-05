@@ -62,6 +62,11 @@ What this directory owns:
 - **Composition** (`internal/host`): which transport, and MicroTeams' own three decisions — how
   the live-screen count is published, what updating means, and the bargain that decides whether
   agents survive an update (`KillServer` on stop; `syscall.Exec` on update, so they do).
+- **Network paths** (`internal/lines`): which public routes reach the control plane, and the
+  measuring of them. Split by what a connector is: the resident service measures and caches, the
+  short `microteams api` commands read that cache. A command that fetched a routing table before
+  doing its work would add a round trip to every call, which for a latency feature would be a poor
+  joke. No cache means one same-origin line — exactly what this binary did before.
 - **Identity** (`internal/mtbrand`): every name that makes this connector MicroTeams, plus one
   security semantic — an agent here is an ordinary user, so inside a screen the machine token and
   the screen token are exchanged for that user's own. A product with nobody behind its screens
