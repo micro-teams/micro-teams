@@ -246,9 +246,6 @@ export function AgentsPage() {
                       agent={a}
                       machineName={machineLabel(a.machineId, machineList)}
                       onInfo={() => setInfoAgent(a)}
-                      onRename={() => setRenamingAgent(a)}
-                      onChat={() => chat(a)}
-                      onClose={() => close(a)}
                     />
                   ))}
                 </ul>
@@ -292,27 +289,26 @@ export function AgentsPage() {
           machineName={machineLabel(infoAgent.machineId, machineList)}
           open
           onOpenChange={(o) => !o && setInfoAgent(null)}
+          onRename={() => setRenamingAgent(infoAgent)}
           onChat={() => chat(infoAgent)}
+          onClose={() => close(infoAgent)}
         />
       )}
     </>
   );
 }
 
+// One agent, one action: tap the row's info button to open the detail modal, where
+// rename / chat / close all live now. Keeping a single button per row is the whole
+// point — the phone list stays uncluttered and every per-agent action is one place.
 function AgentRow({
   agent: a,
   machineName,
   onInfo,
-  onRename,
-  onChat,
-  onClose,
 }: {
   agent: Agent;
   machineName?: string;
   onInfo: () => void;
-  onRename: () => void;
-  onChat: () => void;
-  onClose: () => void;
 }) {
   return (
     <li className="bg-card flex items-center gap-3 rounded-lg border px-3 py-2.5">
@@ -341,34 +337,6 @@ function AgentRow({
       >
         <Info className="size-4" />
       </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        onClick={onRename}
-        aria-label="rename agent"
-        title="rename"
-      >
-        <Pencil className="size-4" />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="secondary"
-        onClick={onChat}
-        aria-label="chat with agent"
-        title="chat"
-      >
-        <MessageSquarePlus className="size-4" />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        onClick={onClose}
-        aria-label="close agent"
-        title="close agent"
-        className="text-destructive"
-      >
-        <Trash2 className="size-4" />
-      </Button>
     </li>
   );
 }
@@ -381,14 +349,18 @@ function AgentInfoDialog({
   machineName,
   open,
   onOpenChange,
+  onRename,
   onChat,
+  onClose,
   onAvatarChanged,
 }: {
   agent: Agent;
   machineName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onRename: () => void;
   onChat: () => void;
+  onClose: () => void;
   onAvatarChanged: () => void;
 }) {
   return (
@@ -427,15 +399,35 @@ function AgentInfoDialog({
 
         <AgentKeepaliveControl agent={a} onChanged={onAvatarChanged} />
 
-        <Button
-          className="w-full"
-          onClick={() => {
-            onOpenChange(false);
-            onChat();
-          }}
-        >
-          <MessageSquarePlus className="size-4" /> chat with agent
-        </Button>
+        {/* Every per-agent action lives here now — the phone row is just the info button. */}
+        <div className="flex w-full flex-col gap-2">
+          <Button
+            onClick={() => {
+              onOpenChange(false);
+              onChat();
+            }}
+          >
+            <MessageSquarePlus className="size-4" /> chat with agent
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              onOpenChange(false);
+              onRename();
+            }}
+          >
+            <Pencil className="size-4" /> rename
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              onOpenChange(false);
+              onClose();
+            }}
+          >
+            <Trash2 className="size-4" /> close agent
+          </Button>
+        </div>
       </div>
     </Modal>
   );
