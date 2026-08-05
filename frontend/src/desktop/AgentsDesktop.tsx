@@ -252,7 +252,7 @@ export function AgentsDesktop() {
                       <li
                         key={a.userId}
                         className={cn(
-                          "group flex items-center rounded-md",
+                          "flex items-center rounded-md",
                           a.userId === selectedId
                             ? "bg-accent"
                             : "hover:bg-accent/60",
@@ -275,15 +275,6 @@ export function AgentsDesktop() {
                           </span>
                           <OnlineDot online={a.online} label={false} />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setRenamingAgent(a)}
-                          className="text-muted-foreground hover:text-foreground mr-1 shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
-                          aria-label="rename agent"
-                          title="rename"
-                        >
-                          <Pencil className="size-3.5" />
-                        </button>
                       </li>
                     ))}
                   </ul>
@@ -300,6 +291,7 @@ export function AgentsDesktop() {
           key={selected.userId}
           agent={selected}
           machineName={machineLabel(selected.machineId, machineList)}
+          onRename={() => setRenamingAgent(selected)}
           onChat={() => chat(selected)}
           onClose={() => close(selected)}
           onAvatarChanged={() => agents.reload()}
@@ -356,12 +348,14 @@ export function AgentsDesktop() {
 function AgentDetail({
   agent: a,
   machineName,
+  onRename,
   onChat,
   onClose,
   onAvatarChanged,
 }: {
   agent: Agent;
   machineName?: string;
+  onRename: () => void;
   onChat: () => void;
   onClose: () => void;
   onAvatarChanged: () => void;
@@ -405,6 +399,9 @@ function AgentDetail({
         <div className="flex w-full flex-col gap-2">
           <Button onClick={onChat}>
             <MessageSquarePlus className="size-4" /> chat with agent
+          </Button>
+          <Button variant="secondary" onClick={onRename}>
+            <Pencil className="size-4" /> rename
           </Button>
           <Button variant="destructive" onClick={onClose}>
             <Trash2 className="size-4" /> close agent
