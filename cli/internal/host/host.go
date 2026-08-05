@@ -210,6 +210,28 @@ func (h *Host) Run(ctx context.Context) error {
 		}
 	}()
 
+	// SIGHUP asks the same question again: which network path should this machine be on?
+	//
+	// A separate signal from the update one, and deliberately a cheap one. The route is chosen per
+	// dial attempt, so a link that is up stays where it is — right, since dropping a healthy
+	// connection every time a ranking wobbles is worse than the wobble. But a line added an hour ago
+	// then has no effect until something breaks, and the only way to force the question used to be
+	// stopping the service, which kills every screen on the machine. This does not: it re-reads the
+	// registry, measures, and drops just the control connection, which the loop immediately redials.
+	relink := make(chan os.Signal, 1)
+	signal.Notify(relink, syscall.SIGHUP)
+	defer signal.Stop(relink)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-relink:
+				go h.remeasureAndRelink(ctx)
+			}
+		}
+	}()
+
 	go h.measureLines(ctx)
 
 	return h.conn.Run(ctx, h.mgr.Dispatch)
@@ -248,6 +270,22 @@ func (h *Host) measureLines(ctx context.Context) {
 		case <-ticker.C:
 			_ = lines.Refresh(ctx, client, h.apiBase, h.cfgPath)
 		}
+	}
+}
+
+// remeasureAndRelink re-reads the registry, measures every line, and asks the transport for a fresh
+// attempt so the choice is made again with what was just measured.
+//
+// Nothing here touches tmux, and that is the whole point of it existing.
+func (h *Host) remeasureAndRelink(ctx context.Context) {
+	if err := lines.Refresh(ctx, h.lines, h.apiBase, h.cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "microteams: line registry unavailable: %v\n", err)
+	}
+	h.lines.Probe(ctx, "/mt/probe")
+
+	// Only a transport that can be asked; the HTTP-polling one has no connection to drop.
+	if redialer, ok := h.conn.(interface{ Reconnect() }); ok {
+		redialer.Reconnect()
 	}
 }
 

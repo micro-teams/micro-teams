@@ -59,6 +59,10 @@ What this directory owns:
 
 - **The command tree** (`main.go`, `internal/daemoncmd`): `auth`, `link`, `status`, `run`,
   `update`, `uninstall`, and `api` (which loads the server's CLI applet). Lifecycle, not features.
+  One rule the tree has to keep: **stopping the service kills every session on the machine**, so a
+  command that only wants the connector to reconsider something must never be built on stop/start.
+  `link retest` is the worked example — it signals the running process instead, and refuses to
+  signal one that predates the handler, because SIGHUP to a process that ignores it is a kill.
 - **Composition** (`internal/host`): which transport, and MicroTeams' own three decisions — how
   the live-screen count is published, what updating means, and the bargain that decides whether
   agents survive an update (`KillServer` on stop; `syscall.Exec` on update, so they do).
