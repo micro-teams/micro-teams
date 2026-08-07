@@ -15,9 +15,10 @@ import {
   Server,
   Settings2,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
-import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
+import { agentApi, machineApi, teamApi, mtCall } from "@/lib/mtApi";
 import { startChatWithAgent, machineLabel } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAsync, errMsg } from "@/hooks/useAsync";
@@ -31,6 +32,7 @@ import {
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
+import { ShareMachineDialog } from "@/components/agents/ShareMachineDialog";
 import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
 import { AgentKeepaliveControl } from "@/components/agents/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
@@ -51,6 +53,7 @@ export function AgentsPage() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
+  const [shareDlg, setShareDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
@@ -100,6 +103,23 @@ export function AgentsPage() {
       await mtCall(agentApi().closeAgent({ userId: a.userId }));
       toast.success("agent closed");
       agents.reload();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  // The inverse of "use existing": stop serving this team, while other teams keep it.
+  // Guarded to machines that serve more than one team — see the button.
+  async function unbind(m: Machine) {
+    if (teamId == null) return;
+    if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
+      return;
+    try {
+      await mtCall(
+        teamApi().unbindTeamMachine({ id: teamId, machineId: m.id }),
+      );
+      toast.success("machine removed from this team");
+      machines.reload();
     } catch (err) {
       toast.error(errMsg(err));
     }
@@ -164,13 +184,22 @@ export function AgentsPage() {
                 <h2 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
                   machines
                 </h2>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setAddDeviceDlg(true)}
-                >
-                  <PlusCircle className="size-4" /> add device
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setShareDlg(true)}
+                  >
+                    <Server className="size-4" /> use existing
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setAddDeviceDlg(true)}
+                  >
+                    <PlusCircle className="size-4" /> add device
+                  </Button>
+                </div>
               </div>
               {machines.loading && !machines.data && <Loading />}
               {machines.error && (
@@ -180,8 +209,8 @@ export function AgentsPage() {
               )}
               {machines.data && machineList.length === 0 && (
                 <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-4 text-sm">
-                  no machines serve this team. enroll a host with the CLI, then
-                  approve it in team management.
+                  no machines serve this team. enroll a host with the CLI, or
+                  add one you already have with "use existing".
                 </p>
               )}
               {machineList.length > 0 && (
@@ -203,6 +232,21 @@ export function AgentsPage() {
                       >
                         <Pencil className="size-4" />
                       </Button>
+                      {/* Only offered while another team still has it: unbinding
+                          the LAST team orphans the machine and the backend then
+                          forgets it outright, which is not what "remove from this
+                          team" looks like it does. */}
+                      {m.teamIds.length > 1 && (
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          onClick={() => void unbind(m)}
+                          aria-label="remove machine from this team"
+                          title="remove from this team"
+                        >
+                          <Unlink className="size-4" />
+                        </Button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -263,6 +307,15 @@ export function AgentsPage() {
         onOpened={() => agents.reload()}
       />
       <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
+      {teamId != null && (
+        <ShareMachineDialog
+          teamId={teamId}
+          teamName={currentTeam?.name}
+          open={shareDlg}
+          onOpenChange={setShareDlg}
+          onBound={() => machines.reload()}
+        />
+      )}
       {renaming && (
         <RenameMachineDialog
           key={renaming.id}

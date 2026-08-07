@@ -17,9 +17,10 @@ import {
   Server,
   Settings2,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
-import { agentApi, machineApi, mtCall } from "@/lib/mtApi";
+import { agentApi, machineApi, teamApi, mtCall } from "@/lib/mtApi";
 import { startChatWithAgent, machineLabel } from "@/lib/agents";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAsync, errMsg } from "@/hooks/useAsync";
@@ -33,6 +34,7 @@ import {
 } from "@/components/agents/OpenAgentDialog";
 import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
 import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
+import { ShareMachineDialog } from "@/components/agents/ShareMachineDialog";
 import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +55,7 @@ export function AgentsDesktop() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
+  const [shareDlg, setShareDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
 
@@ -109,6 +112,23 @@ export function AgentsDesktop() {
       toast.success("agent closed");
       agents.reload();
       if (selectedId === a.userId) navigate("/agents");
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  // The inverse of "use existing": stop serving this team, while other teams keep it.
+  // Guarded to machines that serve more than one team — see the button.
+  async function unbind(m: Machine) {
+    if (teamId == null) return;
+    if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
+      return;
+    try {
+      await mtCall(
+        teamApi().unbindTeamMachine({ id: teamId, machineId: m.id }),
+      );
+      toast.success("machine removed from this team");
+      machines.reload();
     } catch (err) {
       toast.error(errMsg(err));
     }
@@ -171,13 +191,22 @@ export function AgentsDesktop() {
                   <h2 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
                     machines
                   </h2>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setAddDeviceDlg(true)}
-                  >
-                    <PlusCircle className="size-4" /> add device
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setShareDlg(true)}
+                    >
+                      <Server className="size-4" /> use existing
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setAddDeviceDlg(true)}
+                    >
+                      <PlusCircle className="size-4" /> add device
+                    </Button>
+                  </div>
                 </div>
                 {machines.loading && !machines.data && <Loading />}
                 {machines.error && (
@@ -187,7 +216,8 @@ export function AgentsDesktop() {
                 )}
                 {machines.data && machineList.length === 0 && (
                   <p className="text-muted-foreground px-1 pb-1 text-xs">
-                    no machines serve this team.
+                    no machines serve this team — enrol one, or add one you
+                    already have with "use existing".
                   </p>
                 )}
                 {machineList.length > 0 && (
@@ -211,6 +241,21 @@ export function AgentsDesktop() {
                         >
                           <Pencil className="size-3.5" />
                         </button>
+                        {/* Only offered while another team still has it:
+                            unbinding the LAST team orphans the machine and the
+                            backend then forgets it outright, which is not what
+                            "remove from this team" looks like it does. */}
+                        {m.teamIds.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => void unbind(m)}
+                            className="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
+                            aria-label="remove machine from this team"
+                            title="remove from this team"
+                          >
+                            <Unlink className="size-3.5" />
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -323,6 +368,15 @@ export function AgentsDesktop() {
         }}
       />
       <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
+      {teamId != null && (
+        <ShareMachineDialog
+          teamId={teamId}
+          teamName={currentTeam?.name}
+          open={shareDlg}
+          onOpenChange={setShareDlg}
+          onBound={() => machines.reload()}
+        />
+      )}
       {renaming && (
         <RenameMachineDialog
           key={renaming.id}
