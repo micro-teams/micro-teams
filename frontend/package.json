@@ -27,7 +27,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.4.12",
     "lucide-react": "^1.28.0",
-    "marked": "^18.0.7",
+    "marked": "^18.0.9",
     "mermaid": "^11.16.0",
     "radix-ui": "^1.6.7",
     "react": "^19.2.7",
