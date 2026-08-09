@@ -4,7 +4,7 @@
 // and the two things a human needs, "chat with it" (creates a thread including the
 // agent and jumps to it) and "close it". Selection lives in the URL (/agents/:id)
 // so deep links and the browser back button work; the rail switches sections.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useSectionLocation } from "@/desktop/sectionKeepAlive";
 import {
@@ -20,22 +20,20 @@ import {
   Unlink,
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
-import { agentApi, machineApi, teamApi, mtCall } from "@/lib/mtApi";
-import { startChatWithAgent, machineLabel } from "@/lib/agents";
+import { machineLabel } from "@/lib/agents";
+import { useTeamAgents } from "@/features/agents/useTeamAgents";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { useAsync, errMsg } from "@/hooks/useAsync";
-import { useToast } from "@/hooks/useToast";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ChangeAvatar } from "@/components/ChangeAvatar";
-import { AgentKeepaliveControl } from "@/components/agents/AgentKeepaliveControl";
+import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
 import {
   OpenAgentDialog,
   OnlineDot,
-} from "@/components/agents/OpenAgentDialog";
-import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
-import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
-import { ShareMachineDialog } from "@/components/agents/ShareMachineDialog";
-import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
+} from "@/features/agents/components/OpenAgentDialog";
+import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
+import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
+import { ShareMachineDialog } from "@/features/agents/components/ShareMachineDialog";
+import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -51,7 +49,6 @@ export function AgentsDesktop() {
   const ws = useWorkspace();
   const navigate = useNavigate();
   const location = useSectionLocation();
-  const toast = useToast();
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
@@ -64,74 +61,26 @@ export function AgentsDesktop() {
     return m ? Number(m[1]) : null;
   }, [location.pathname]);
 
-  const machines = useAsync(
-    () =>
-      teamId != null
-        ? mtCall(machineApi().listMachines({ teamId, pageSize: 100 }))
-        : Promise.resolve(null),
-    [teamId],
-    teamId != null ? `machines:${teamId}` : undefined,
-  );
-  const agents = useAsync(
-    () =>
-      teamId != null
-        ? mtCall(agentApi().listAgents({ teamId, pageSize: 100 }))
-        : Promise.resolve(null),
-    [teamId],
-    teamId != null ? `agents:${teamId}` : undefined,
-  );
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      agents.reload();
-      machines.reload();
-    }, 4000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamId]);
+  const team = useTeamAgents(teamId);
 
   const currentTeam = ws.teams?.find((t) => t.id === teamId);
-  const agentList = agents.data?.agents ?? [];
-  const machineList = machines.data?.machines ?? [];
+  const agentList = team.agents;
+  const machineList = team.machines;
   const selected = agentList.find((a) => a.userId === selectedId) ?? null;
-
-  async function chat(a: Agent) {
-    try {
-      const id = await startChatWithAgent(a);
-      navigate(`/chats/${id}`);
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
-  }
 
   async function close(a: Agent) {
     if (!confirm(`Close ${a.nickname || "this agent"}? Its live session ends.`))
       return;
-    try {
-      await mtCall(agentApi().closeAgent({ userId: a.userId }));
-      toast.success("agent closed");
-      agents.reload();
-      if (selectedId === a.userId) navigate("/agents");
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
+    await team.close(a);
+    if (selectedId === a.userId) navigate("/agents");
   }
 
   // The inverse of "use existing": stop serving this team, while other teams keep it.
   // Guarded to machines that serve more than one team — see the button.
-  async function unbind(m: Machine) {
-    if (teamId == null) return;
+  function unbind(m: Machine) {
     if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
       return;
-    try {
-      await mtCall(
-        teamApi().unbindTeamMachine({ id: teamId, machineId: m.id }),
-      );
-      toast.success("machine removed from this team");
-      machines.reload();
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
+    void team.unbind(m);
   }
 
   return (
@@ -208,13 +157,13 @@ export function AgentsDesktop() {
                     </Button>
                   </div>
                 </div>
-                {machines.loading && !machines.data && <Loading />}
-                {machines.error && (
+                {team.machinesLoading && !team.machinesLoaded && <Loading />}
+                {team.machinesError && (
                   <Alert variant="destructive">
-                    <AlertDescription>{machines.error}</AlertDescription>
+                    <AlertDescription>{team.machinesError}</AlertDescription>
                   </Alert>
                 )}
-                {machines.data && machineList.length === 0 && (
+                {team.machinesLoaded && machineList.length === 0 && (
                   <p className="text-muted-foreground px-1 pb-1 text-xs">
                     no machines serve this team — enrol one, or add one you
                     already have with "use existing".
@@ -276,13 +225,13 @@ export function AgentsDesktop() {
                     <Bot className="size-4" /> open agent
                   </Button>
                 </div>
-                {agents.loading && !agents.data && <Loading />}
-                {agents.error && (
+                {team.agentsLoading && !team.agentsLoaded && <Loading />}
+                {team.agentsError && (
                   <Alert variant="destructive">
-                    <AlertDescription>{agents.error}</AlertDescription>
+                    <AlertDescription>{team.agentsError}</AlertDescription>
                   </Alert>
                 )}
-                {agents.data && agentList.length === 0 && (
+                {team.agentsLoaded && agentList.length === 0 && (
                   <div className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-center text-sm">
                     <Bot className="size-8 opacity-50" />
                     no agents running
@@ -337,9 +286,9 @@ export function AgentsDesktop() {
           agent={selected}
           machineName={machineLabel(selected.machineId, machineList)}
           onRename={() => setRenamingAgent(selected)}
-          onChat={() => chat(selected)}
+          onChat={() => void team.chat(selected)}
           onClose={() => close(selected)}
-          onAvatarChanged={() => agents.reload()}
+          onAvatarChanged={team.reloadAgents}
         />
       ) : (
         <section className="text-muted-foreground flex min-w-0 flex-1 flex-col items-center justify-center gap-3">
@@ -363,7 +312,7 @@ export function AgentsDesktop() {
         teams={ws.teams ?? []}
         initialTeamId={teamId}
         onOpened={(opened) => {
-          agents.reload();
+          team.reloadAgents();
           navigate(`/agents/${opened.agentUserId}`);
         }}
       />
@@ -374,7 +323,7 @@ export function AgentsDesktop() {
           teamName={currentTeam?.name}
           open={shareDlg}
           onOpenChange={setShareDlg}
-          onBound={() => machines.reload()}
+          onBound={team.reloadMachines}
         />
       )}
       {renaming && (
@@ -383,7 +332,7 @@ export function AgentsDesktop() {
           machine={renaming}
           open
           onOpenChange={(o) => !o && setRenaming(null)}
-          onRenamed={() => machines.reload()}
+          onRenamed={team.reloadMachines}
         />
       )}
       {renamingAgent && (
@@ -392,7 +341,7 @@ export function AgentsDesktop() {
           agent={renamingAgent}
           open
           onOpenChange={(o) => !o && setRenamingAgent(null)}
-          onRenamed={() => agents.reload()}
+          onRenamed={team.reloadAgents}
         />
       )}
     </div>
