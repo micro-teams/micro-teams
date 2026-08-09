@@ -206,16 +206,30 @@ class AgentController(
         val live = agentRegistry.screenAgents().associateBy { it.userId }
 
         // Every agent we know of, live or not, then narrowed by whichever filters were given.
-        var candidates: Set<IdType> =
-            (live.keys + agentScreenRepository.findAll().map { it.agentUserId }).toSet()
+        //
+        // The rows are kept, not just their ids: an agent is a persisted AgentScreen row, and the
+        // registry holds only what this server has re-adopted since it started. So a filter that
+        // reads the live entry alone answers "no" for every agent after a restart, and for every
+        // agent whose machine is offline — the exact moment a human goes looking for it. `toDTO`
+        // below already describes such an agent from its row; the filters have to agree.
+        val rows = agentScreenRepository.findAll().groupBy { it.agentUserId }
+        var candidates: Set<IdType> = (live.keys + rows.keys).toSet()
         userId?.let { ids -> candidates = candidates.filter { it in ids }.toSet() }
         threadId?.let { tid ->
             val members =
                 threadMemberRepository.findByThreadId(tid).mapNotNull { it.userId }.toSet()
             candidates = candidates.filter { it in members }.toSet()
         }
-        teamId?.let { t -> candidates = candidates.filter { live[it]?.teamId == t }.toSet() }
-        machineId?.let { m -> candidates = candidates.filter { live[it]?.machineId == m }.toSet() }
+        teamId?.let { t ->
+            candidates =
+                candidates.filter { (live[it]?.teamId ?: rows[it]?.first()?.teamId) == t }.toSet()
+        }
+        machineId?.let { m ->
+            candidates =
+                candidates
+                    .filter { (live[it]?.machineId ?: rows[it]?.first()?.machineId) == m }
+                    .toSet()
+        }
         online?.let { o -> candidates = candidates.filter { (it in live) == o }.toSet() }
 
         val agents = candidates.sorted().map { toDTO(it, live[it], viewerAuth) }
