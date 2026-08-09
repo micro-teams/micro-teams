@@ -44,7 +44,30 @@ describe("the startup manifest", () => {
 
     expect(urls).toContain("/favicon.svg");
     expect(urls).toContain("/icons.svg");
-    expect(urls).toHaveLength(5);
+    // Named rather than counted: a count says "six things" and leaves the next person to work out
+    // which six, and which one they just added or lost.
+    expect(urls).toEqual([
+      "/",
+      "/assets/index-Dr1UTpes.js",
+      "/assets/index-CU0iHlG7.css",
+      "/favicon.svg",
+      "/icons.svg",
+      "/manifest.webmanifest",
+    ]);
+  });
+
+  // An installed window opens start_url from this cache. A manifest fetched from the network at
+  // that moment would be the one request in the start path that could fail.
+  it("includes the web app manifest", () => {
+    expect(startupManifest(INDEX).urls).toContain("/manifest.webmanifest");
+  });
+
+  // The icon PNGs are read by the OS when the app is INSTALLED, which is an online act. Precaching
+  // ~180KB of them would tax every start to serve one.
+  it("leaves the icon PNGs out of the startup set", () => {
+    expect(
+      startupManifest(INDEX).urls.filter((u) => u.endsWith(".png")),
+    ).toEqual([]);
   });
 
   // A build that changed shape must not silently produce a launcher pointing at nothing.

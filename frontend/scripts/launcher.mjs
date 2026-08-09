@@ -33,6 +33,11 @@ import { buildLauncher } from "@micro-teams/multipath";
  * Fonts are deliberately out for the same reason — 2MB, and without them text renders in a fallback
  * face rather than not at all.
  */
+/** Where the Web App Manifest is served from — public/manifest.webmanifest, copied by vite. */
+const MANIFEST_URL = "/manifest.webmanifest";
+/** Matches --background in index.css and background_color in the manifest. */
+const THEME_COLOR = "#060606";
+
 async function exists(file) {
   try {
     await access(file);
@@ -54,7 +59,15 @@ export function startupManifest(indexHtml) {
   //
   // Separate lists, not one: the stylesheets also have to be linked from the launcher document, and
   // deriving them back out of a flat manifest is how /favicon.svg ended up as a stylesheet once.
-  return { entry, styles, urls: ["/", entry, ...styles, "/favicon.svg", "/icons.svg"] };
+  // The web app manifest joins them: an installed window opens start_url from this cache, and a
+  // manifest fetched from the network at that moment would be the one request that could fail.
+  // The icon PNGs deliberately stay out — the OS reads them when the app is INSTALLED, which is
+  // an online act, so precaching 180KB of them would tax every start to serve one.
+  return {
+    entry,
+    styles,
+    urls: ["/", entry, ...styles, "/favicon.svg", "/icons.svg", MANIFEST_URL],
+  };
 }
 
 /**
@@ -160,6 +173,23 @@ const UNREGISTER_HTML = `<!doctype html>
 </html>
 `;
 
+/**
+ * Put the head tags the built document declared, and the launcher does not, back into the launcher.
+ *
+ * The manifest link has to be in <head> specifically: browsers only honour `<link rel="manifest">`
+ * there, and one placed in the body is ignored silently — the page works, the app simply never
+ * becomes installable, with nothing anywhere saying why.
+ */
+export function withAppHead(html) {
+  if (!html.includes("</head>")) throw new Error("launcher document has no </head> to write into");
+  const tags = [
+    html.includes('rel="manifest"') ? null : `<link rel="manifest" href="${MANIFEST_URL}">`,
+    html.includes('name="theme-color"') ? null : `<meta name="theme-color" content="${THEME_COLOR}">`,
+  ].filter(Boolean);
+  if (tags.length === 0) return html;
+  return html.replace("</head>", `${tags.map((t) => `  ${t}`).join("\n")}\n</head>`);
+}
+
 export async function build(dist, { registry } = {}) {
   // Idempotent: after the first run the plain document lives in app.html and index.html is the
   // launcher, so reading index.html again would find no entry script — or, worse, overwrite the
@@ -177,8 +207,11 @@ export async function build(dist, { registry } = {}) {
     await rename(source, path.join(dist, "app.html"));
   }
 
-  await writeFile(
-    path.join(dist, "index.html"),
+  // The launcher REPLACES the built document, so anything index.html declared in <head> is gone
+  // unless it is put back here. The manifest link is one of those: without it in the launcher —
+  // which is the document an installed app actually opens — the app is not installable at all,
+  // and index.html having had the link would prove nothing.
+  const launcher = withAppHead(
     buildLauncher({
       appEntry: entry,
       serviceWorker: "/sw.js",
@@ -194,8 +227,8 @@ export async function build(dist, { registry } = {}) {
         styles.map((href) => `<link rel="stylesheet" href="${href}">`).join("\n") +
         '\n<div id="root"></div>',
     }),
-    "utf8",
   );
+  await writeFile(path.join(dist, "index.html"), launcher, "utf8");
 
   // Hashed after the launcher exists, because the launcher is in the manifest: the version has to
   // change when the document changes, and the document carries the inlined registry.
