@@ -15,7 +15,6 @@ import {
   Server,
   Settings2,
   Trash2,
-  Unlink,
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
 import { machineLabel } from "@/lib/agents";
@@ -29,7 +28,7 @@ import {
   OnlineDot,
 } from "@/features/agents/components/OpenAgentDialog";
 import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
-import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
+import { MachineDetail } from "@/features/agents/components/MachineDetail";
 import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
@@ -49,7 +48,7 @@ export function AgentsPage() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [renaming, setRenaming] = useState<Machine | null>(null);
+  const [infoMachine, setInfoMachine] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
 
@@ -61,14 +60,6 @@ export function AgentsPage() {
     if (!confirm(`Close ${a.nickname || "this agent"}? Its live session ends.`))
       return;
     void team.close(a);
-  }
-
-  // The inverse of "use existing": stop serving this team, while other teams keep it.
-  // Guarded to machines that serve more than one team — see the button.
-  function unbind(m: Machine) {
-    if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
-      return;
-    void team.unbind(m);
   }
 
   const agentList = team.agents;
@@ -155,44 +146,25 @@ export function AgentsPage() {
                   {machineList.map((m) => (
                     // Same shape as an AgentRow — a leading 44px tile, then name over a meta
                     // line — so the machine's status dot lands at the same x as the agent's
-                    // below it, and the two lists read as one column of live/dead.
-                    <li
-                      key={m.id}
-                      className="flex items-center gap-3 px-3 py-2.5 text-sm"
-                    >
-                      <span className="bg-muted flex size-11 shrink-0 items-center justify-center rounded-lg">
-                        <Server className="text-muted-foreground size-5" />
-                      </span>
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-medium">{m.name}</span>
-                        <span className="text-muted-foreground flex items-center gap-2 text-xs">
-                          <OnlineDot online={m.online} />
-                        </span>
-                      </div>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => setRenaming(m)}
-                        aria-label="rename machine"
-                        title="rename"
+                    // below it, and the two lists read as one column of live/dead. The whole
+                    // row opens the machine; what used to be two icon buttons lives there now.
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => setInfoMachine(m)}
+                        className="hover:bg-accent/60 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm"
                       >
-                        <Pencil className="size-4" />
-                      </Button>
-                      {/* Only offered while another team still has it: unbinding
-                          the LAST team orphans the machine and the backend then
-                          forgets it outright, which is not what "remove from this
-                          team" looks like it does. */}
-                      {m.teamIds.length > 1 && (
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          onClick={() => void unbind(m)}
-                          aria-label="remove machine from this team"
-                          title="remove from this team"
-                        >
-                          <Unlink className="size-4" />
-                        </Button>
-                      )}
+                        <span className="bg-muted flex size-11 shrink-0 items-center justify-center rounded-lg">
+                          <Server className="text-muted-foreground size-5" />
+                        </span>
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate font-medium">{m.name}</span>
+                          <span className="text-muted-foreground flex items-center gap-2 text-xs">
+                            <OnlineDot online={m.online} />
+                          </span>
+                        </div>
+                        <Info className="text-muted-foreground size-4 shrink-0" />
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -258,14 +230,26 @@ export function AgentsPage() {
         teamId={teamId}
         onBound={team.reloadMachines}
       />
-      {renaming && (
-        <RenameMachineDialog
-          key={renaming.id}
-          machine={renaming}
+      {infoMachine && (
+        <Modal
           open
-          onOpenChange={(o) => !o && setRenaming(null)}
-          onRenamed={team.reloadMachines}
-        />
+          onOpenChange={(o) => !o && setInfoMachine(null)}
+          title="machine"
+        >
+          <MachineDetail
+            key={infoMachine.id}
+            machineId={infoMachine.id}
+            teamId={teamId}
+            teams={ws.teams ?? []}
+            agents={agentList}
+            onChanged={team.reloadMachines}
+            onGone={() => setInfoMachine(null)}
+            onOpenAgent={(a) => {
+              setInfoMachine(null);
+              setInfoAgent(a);
+            }}
+          />
+        </Modal>
       )}
       {renamingAgent && (
         <RenameAgentDialog

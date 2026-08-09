@@ -17,9 +17,8 @@ import {
   Server,
   Settings2,
   Trash2,
-  Unlink,
 } from "lucide-react";
-import type { Agent, Machine } from "@/api";
+import type { Agent } from "@/api";
 import { machineLabel } from "@/lib/agents";
 import { useTeamAgents } from "@/features/agents/useTeamAgents";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -31,7 +30,7 @@ import {
   OnlineDot,
 } from "@/features/agents/components/OpenAgentDialog";
 import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
-import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
+import { MachineDetail } from "@/features/agents/components/MachineDetail";
 import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,12 +50,19 @@ export function AgentsDesktop() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [renaming, setRenaming] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
 
   const selectedId = useMemo(() => {
     const m = location.pathname.match(/^\/agents\/(\d+)/);
     return m ? Number(m[1]) : null;
+  }, [location.pathname]);
+  // Machines live under the agents section rather than a top-level path: the rail, the keep-alive
+  // frozen URLs and sectionOf() all key off the "/agents" prefix, and a machine is something you
+  // look at while you are in this section anyway. "machine" can never be read as an agent id, so
+  // the two selectors cannot collide.
+  const selectedMachineId = useMemo(() => {
+    const m = location.pathname.match(/^\/agents\/machine\/(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
   }, [location.pathname]);
 
   const team = useTeamAgents(teamId);
@@ -71,14 +77,6 @@ export function AgentsDesktop() {
       return;
     await team.close(a);
     if (selectedId === a.userId) navigate("/agents");
-  }
-
-  // The inverse of "use existing": stop serving this team, while other teams keep it.
-  // Guarded to machines that serve more than one team — see the button.
-  function unbind(m: Machine) {
-    if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
-      return;
-    void team.unbind(m);
   }
 
   return (
@@ -161,42 +159,29 @@ export function AgentsDesktop() {
                   <ul className="flex flex-col gap-0.5">
                     {machineList.map((m) => (
                       // px-2 and the dot LAST, both to match the agent rows below: their dot
-                      // is the last thing inside a px-2 button, so anything after it here — the
-                      // hover actions keep their width even while invisible — would push this
-                      // one out of that column.
-                      <li
-                        key={m.id}
-                        className="group hover:bg-accent/60 flex items-center gap-2 rounded-md px-2 py-1 text-sm"
-                      >
-                        <Server className="text-muted-foreground size-4 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">
-                          {m.name}
-                        </span>
+                      // is the last thing inside a px-2 button, so anything after it here would
+                      // push this one out of that column.
+                      <li key={m.id}>
                         <button
                           type="button"
-                          onClick={() => setRenaming(m)}
-                          className="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
-                          aria-label="rename machine"
-                          title="rename"
+                          onClick={() =>
+                            navigate(
+                              `/agents/machine/${encodeURIComponent(m.id)}`,
+                            )
+                          }
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm",
+                            m.id === selectedMachineId
+                              ? "bg-accent"
+                              : "hover:bg-accent/60",
+                          )}
                         >
-                          <Pencil className="size-3.5" />
+                          <Server className="text-muted-foreground size-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">
+                            {m.name}
+                          </span>
+                          <OnlineDot online={m.online} label={false} />
                         </button>
-                        {/* Only offered while another team still has it:
-                            unbinding the LAST team orphans the machine and the
-                            backend then forgets it outright, which is not what
-                            "remove from this team" looks like it does. */}
-                        {m.teamIds.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => void unbind(m)}
-                            className="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100"
-                            aria-label="remove machine from this team"
-                            title="remove from this team"
-                          >
-                            <Unlink className="size-3.5" />
-                          </button>
-                        )}
-                        <OnlineDot online={m.online} label={false} />
                       </li>
                     ))}
                   </ul>
@@ -272,7 +257,22 @@ export function AgentsDesktop() {
       </aside>
 
       {/* ---- detail ---- */}
-      {selected ? (
+      {selectedMachineId ? (
+        <section className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-2xl p-6">
+            <MachineDetail
+              key={selectedMachineId}
+              machineId={selectedMachineId}
+              teamId={teamId}
+              teams={ws.teams ?? []}
+              agents={agentList}
+              onChanged={team.reloadMachines}
+              onGone={() => navigate("/agents")}
+              onOpenAgent={(a) => navigate(`/agents/${a.userId}`)}
+            />
+          </div>
+        </section>
+      ) : selected ? (
         <AgentDetail
           key={selected.userId}
           agent={selected}
@@ -314,15 +314,6 @@ export function AgentsDesktop() {
         teamId={teamId}
         onBound={team.reloadMachines}
       />
-      {renaming && (
-        <RenameMachineDialog
-          key={renaming.id}
-          machine={renaming}
-          open
-          onOpenChange={(o) => !o && setRenaming(null)}
-          onRenamed={team.reloadMachines}
-        />
-      )}
       {renamingAgent && (
         <RenameAgentDialog
           key={renamingAgent.userId}
