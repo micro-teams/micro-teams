@@ -1,10 +1,8 @@
-import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Plus, MessagesSquare, MessageSquarePlus } from "lucide-react";
 import type { ChatLastMessage, ChatMember, ChatSummary } from "@/api";
-import { chatApi, mtCall } from "@/lib/mtApi";
 import { useAuth } from "@/hooks/useAuth";
-import { useAsync } from "@/hooks/useAsync";
+import { useChats } from "@/features/chats/useChats";
 import { PageHeader } from "@/components/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
 import { MemberGrid } from "@/components/MemberGrid";
@@ -16,21 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export function ChatsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const chats = useAsync(
-    () =>
-      mtCall(chatApi().listChats({ pageSize: 100, queryIsMemberAgent: true })),
-    [],
-    "chats",
-  );
-  const { data, error, loading } = chats;
-  // A steady poll keeps the list fresh while sitting on it — new messages, moved
-  // previews, reordering — mirroring the desktop chat list (ChatsDesktop) and the
-  // in-conversation polling. Without it the phone list only refreshed on navigation.
-  useEffect(() => {
-    const t = setInterval(() => chats.reload(), 5000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { data, error, loading } = useChats();
 
   return (
     <>

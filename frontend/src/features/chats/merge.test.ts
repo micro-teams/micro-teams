@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergeNewestPage, mergeOlderPage } from "./messages";
+import { mergeNewestPage, mergeOlderPage } from "./merge";
 import type { Message } from "@/api";
 
 const msg = (id: number, content = `m${id}`): Message =>
