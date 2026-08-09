@@ -45,14 +45,6 @@ export function DesktopRail({
 
   return (
     <nav className="bg-card flex w-16 shrink-0 flex-col items-center border-r py-3">
-      {/* brand mark */}
-      <div
-        className="text-primary mb-3 flex size-9 items-center justify-center rounded-lg border font-bold"
-        title="MicroTeams"
-      >
-        M
-      </div>
-
       <div className="flex flex-1 flex-col items-center gap-1">
         {ITEMS.map(({ section: s, label, icon: Icon }) => {
           const active = s === section;
