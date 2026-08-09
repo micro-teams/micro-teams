@@ -32,7 +32,6 @@ import {
 } from "@/features/agents/components/OpenAgentDialog";
 import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
 import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
-import { ShareMachineDialog } from "@/features/agents/components/ShareMachineDialog";
 import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +51,6 @@ export function AgentsDesktop() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [shareDlg, setShareDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
 
@@ -140,22 +138,13 @@ export function AgentsDesktop() {
                   <h2 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
                     machines
                   </h2>
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setShareDlg(true)}
-                    >
-                      <Server className="size-4" /> use existing
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setAddDeviceDlg(true)}
-                    >
-                      <PlusCircle className="size-4" /> add device
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setAddDeviceDlg(true)}
+                  >
+                    <PlusCircle className="size-4" /> add device
+                  </Button>
                 </div>
                 {team.machinesLoading && !team.machinesLoaded && <Loading />}
                 {team.machinesError && (
@@ -165,22 +154,24 @@ export function AgentsDesktop() {
                 )}
                 {team.machinesLoaded && machineList.length === 0 && (
                   <p className="text-muted-foreground px-1 pb-1 text-xs">
-                    no machines serve this team — enrol one, or add one you
-                    already have with "use existing".
+                    no machines serve this team — use "add device".
                   </p>
                 )}
                 {machineList.length > 0 && (
                   <ul className="flex flex-col gap-0.5">
                     {machineList.map((m) => (
+                      // px-2 and the dot LAST, both to match the agent rows below: their dot
+                      // is the last thing inside a px-2 button, so anything after it here — the
+                      // hover actions keep their width even while invisible — would push this
+                      // one out of that column.
                       <li
                         key={m.id}
-                        className="group hover:bg-accent/60 flex items-center gap-2 rounded-md px-1 py-1 text-sm"
+                        className="group hover:bg-accent/60 flex items-center gap-2 rounded-md px-2 py-1 text-sm"
                       >
                         <Server className="text-muted-foreground size-4 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">
                           {m.name}
                         </span>
-                        <OnlineDot online={m.online} label={false} />
                         <button
                           type="button"
                           onClick={() => setRenaming(m)}
@@ -205,6 +196,7 @@ export function AgentsDesktop() {
                             <Unlink className="size-3.5" />
                           </button>
                         )}
+                        <OnlineDot online={m.online} label={false} />
                       </li>
                     ))}
                   </ul>
@@ -316,16 +308,12 @@ export function AgentsDesktop() {
           navigate(`/agents/${opened.agentUserId}`);
         }}
       />
-      <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
-      {teamId != null && (
-        <ShareMachineDialog
-          teamId={teamId}
-          teamName={currentTeam?.name}
-          open={shareDlg}
-          onOpenChange={setShareDlg}
-          onBound={team.reloadMachines}
-        />
-      )}
+      <AddDeviceDialog
+        open={addDeviceDlg}
+        onOpenChange={setAddDeviceDlg}
+        teamId={teamId}
+        onBound={team.reloadMachines}
+      />
       {renaming && (
         <RenameMachineDialog
           key={renaming.id}

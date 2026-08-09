@@ -1,12 +1,23 @@
-// "Add device" — there is no client-side device flow to trigger from the
-// browser (enrollment happens on the machine itself, via the CLI), so this is
-// purely a tutorial: what to run on the new host, and what to do with the link
-// it prints. That link opens /connect (ConnectPage), the same page a human
-// lands on either way — this dialog and that page are two ends of one flow.
-import { useRef, useState } from "react";
-import { Check, Copy, Laptop } from "lucide-react";
+// "Add device" — the one place a machine joins this team, by either of the two ways that exist.
+//
+// Enrolling a NEW host is not something the browser can do (it happens on the machine, via the
+// CLI), so that half is purely a tutorial: what to run there, and what to do with the link it
+// prints. That link opens /connect, the same page a human lands on either way.
+//
+// Reusing a machine you ALREADY have is the other half, and it used to be a second button beside
+// this one. It is the same intent — "let this team run agents on a machine" — so it is the same
+// dialog, offered first because it is the cheaper path, and absent entirely when there is nothing
+// to reuse.
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy, Laptop, Server } from "lucide-react";
+import type { Machine } from "@/api";
+import { machineApi, teamApi, mtCall } from "@/lib/mtApi";
+import { errMsg } from "@/hooks/useAsync";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { OnlineDot } from "@/features/agents/components/OpenAgentDialog";
 import { cn } from "@/lib/utils";
 
 function CodeLine({ children }: { children: string }) {
@@ -83,15 +94,32 @@ function CodeLine({ children }: { children: string }) {
 export function AddDeviceDialog({
   open,
   onOpenChange,
+  teamId,
+  onBound,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The team the machine will serve. Omitted while no team is selected. */
+  teamId?: number | null;
+  /** Called after an existing machine is bound, so the machine list refetches. */
+  onBound?: () => void;
 }) {
   const origin = window.location.origin;
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="add a device">
       <div className="flex flex-col gap-4 text-sm">
+        {teamId != null && (
+          <ReuseExisting
+            teamId={teamId}
+            open={open}
+            onBound={() => {
+              onOpenChange(false);
+              onBound?.();
+            }}
+          />
+        )}
+
         <p className="text-muted-foreground">
           run these two commands on the new machine (the one you want to run
           agents on):
@@ -125,5 +153,98 @@ export function AddDeviceDialog({
         <Button onClick={() => onOpenChange(false)}>close</Button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The machines you already have that do not serve this team yet.
+ *
+ * `GET /machine` with no teamId filter is exactly the question "machines I could add here"; the
+ * ones already serving this team are filtered out client-side, so the answer to "why is that one
+ * missing" is in data we already hold. Renders nothing at all when there is nothing to offer —
+ * a first-time user should not be told about a path that is empty for them.
+ */
+function ReuseExisting({
+  teamId,
+  open,
+  onBound,
+}: {
+  teamId: number;
+  open: boolean;
+  onBound: () => void;
+}) {
+  const [candidates, setCandidates] = useState<Machine[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setCandidates(null);
+    setError(null);
+    mtCall(machineApi().listMachines({ pageSize: 100 }))
+      .then((res) => {
+        if (!active) return;
+        setCandidates(res.machines.filter((m) => !m.teamIds.includes(teamId)));
+      })
+      .catch((err: unknown) => active && setError(errMsg(err)));
+    return () => {
+      active = false;
+    };
+  }, [open, teamId]);
+
+  async function bind(m: Machine) {
+    setError(null);
+    setBusyId(m.id);
+    try {
+      await mtCall(
+        teamApi().bindTeamMachine({
+          id: teamId,
+          bindMachineRequest: { machineId: m.id },
+        }),
+      );
+      onBound();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Still asking, or nothing to offer: say nothing. The dialog's own subject — enrolling a new
+  // host — reads perfectly well on its own, and a spinner above it would only delay it.
+  if (error == null && (candidates === null || candidates.length === 0))
+    return null;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <p className="text-muted-foreground text-xs">
+        a machine can serve several teams at once — add one you already have:
+      </p>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {candidates && candidates.length > 0 && (
+        <ul className="divide-y overflow-hidden rounded-md border">
+          {candidates.map((m) => (
+            <li key={m.id} className="flex items-center gap-3 px-3 py-2">
+              <Server className="text-muted-foreground size-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{m.name}</span>
+              <OnlineDot online={m.online} label={false} />
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={() => void bind(m)}
+                className="text-primary shrink-0 text-sm font-medium disabled:opacity-50"
+              >
+                {busyId === m.id ? <Spinner className="size-4" /> : "add"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
