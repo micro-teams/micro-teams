@@ -2,7 +2,7 @@
 // machines that serve it and the agents currently open on them, open a new agent,
 // talk to one, or close it. Reuses UserAvatar so every agent here carries its
 // inference ring and click-to-watch exactly like everywhere else in the app.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import {
   Bot,
@@ -18,23 +18,21 @@ import {
   Unlink,
 } from "lucide-react";
 import type { Agent, Machine } from "@/api";
-import { agentApi, machineApi, teamApi, mtCall } from "@/lib/mtApi";
-import { startChatWithAgent, machineLabel } from "@/lib/agents";
+import { machineLabel } from "@/lib/agents";
+import { useTeamAgents } from "@/features/agents/useTeamAgents";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { useAsync, errMsg } from "@/hooks/useAsync";
-import { useToast } from "@/hooks/useToast";
 import { PageHeader } from "@/components/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ChangeAvatar } from "@/components/ChangeAvatar";
 import {
   OpenAgentDialog,
   OnlineDot,
-} from "@/components/agents/OpenAgentDialog";
-import { AddDeviceDialog } from "@/components/agents/AddDeviceDialog";
-import { RenameMachineDialog } from "@/components/agents/RenameMachineDialog";
-import { ShareMachineDialog } from "@/components/agents/ShareMachineDialog";
-import { RenameAgentDialog } from "@/components/agents/RenameAgentDialog";
-import { AgentKeepaliveControl } from "@/components/agents/AgentKeepaliveControl";
+} from "@/features/agents/components/OpenAgentDialog";
+import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
+import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
+import { ShareMachineDialog } from "@/features/agents/components/ShareMachineDialog";
+import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
+import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +47,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export function AgentsPage() {
   const ws = useWorkspace();
   const navigate = useNavigate();
-  const toast = useToast();
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
@@ -58,75 +55,26 @@ export function AgentsPage() {
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
 
-  const machines = useAsync(
-    () =>
-      teamId != null
-        ? mtCall(machineApi().listMachines({ teamId, pageSize: 100 }))
-        : Promise.resolve(null),
-    [teamId],
-    teamId != null ? `machines:${teamId}` : undefined,
-  );
-  const agents = useAsync(
-    () =>
-      teamId != null
-        ? mtCall(agentApi().listAgents({ teamId, pageSize: 100 }))
-        : Promise.resolve(null),
-    [teamId],
-    teamId != null ? `agents:${teamId}` : undefined,
-  );
-
-  // Keep live status fresh — agents open, go busy, and close out of band.
-  useEffect(() => {
-    const t = setInterval(() => {
-      agents.reload();
-      machines.reload();
-    }, 4000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamId]);
+  const team = useTeamAgents(teamId);
 
   const currentTeam = ws.teams?.find((t) => t.id === teamId);
 
-  async function chat(a: Agent) {
-    try {
-      const id = await startChatWithAgent(a);
-      navigate(`/chats/${id}`);
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
-  }
-
-  async function close(a: Agent) {
+  function close(a: Agent) {
     if (!confirm(`Close ${a.nickname || "this agent"}? Its live session ends.`))
       return;
-    try {
-      await mtCall(agentApi().closeAgent({ userId: a.userId }));
-      toast.success("agent closed");
-      agents.reload();
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
+    void team.close(a);
   }
 
   // The inverse of "use existing": stop serving this team, while other teams keep it.
   // Guarded to machines that serve more than one team — see the button.
-  async function unbind(m: Machine) {
-    if (teamId == null) return;
+  function unbind(m: Machine) {
     if (!confirm(`Stop using "${m.name}" in this team? Other teams keep it.`))
       return;
-    try {
-      await mtCall(
-        teamApi().unbindTeamMachine({ id: teamId, machineId: m.id }),
-      );
-      toast.success("machine removed from this team");
-      machines.reload();
-    } catch (err) {
-      toast.error(errMsg(err));
-    }
+    void team.unbind(m);
   }
 
-  const agentList = agents.data?.agents ?? [];
-  const machineList = machines.data?.machines ?? [];
+  const agentList = team.agents;
+  const machineList = team.machines;
 
   return (
     <>
@@ -201,13 +149,13 @@ export function AgentsPage() {
                   </Button>
                 </div>
               </div>
-              {machines.loading && !machines.data && <Loading />}
-              {machines.error && (
+              {team.machinesLoading && !team.machinesLoaded && <Loading />}
+              {team.machinesError && (
                 <Alert variant="destructive">
-                  <AlertDescription>{machines.error}</AlertDescription>
+                  <AlertDescription>{team.machinesError}</AlertDescription>
                 </Alert>
               )}
-              {machines.data && machineList.length === 0 && (
+              {team.machinesLoaded && machineList.length === 0 && (
                 <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-4 text-sm">
                   no machines serve this team. enroll a host with the CLI, or
                   add one you already have with "use existing".
@@ -267,13 +215,13 @@ export function AgentsPage() {
                   <Bot className="size-4" /> open agent
                 </Button>
               </div>
-              {agents.loading && !agents.data && <Loading />}
-              {agents.error && (
+              {team.agentsLoading && !team.agentsLoaded && <Loading />}
+              {team.agentsError && (
                 <Alert variant="destructive">
-                  <AlertDescription>{agents.error}</AlertDescription>
+                  <AlertDescription>{team.agentsError}</AlertDescription>
                 </Alert>
               )}
-              {agents.data && agentList.length === 0 && (
+              {team.agentsLoaded && agentList.length === 0 && (
                 <div className="text-muted-foreground flex flex-col items-center gap-2 py-10 text-sm">
                   <Bot className="size-8 opacity-50" />
                   no agents running — open one
@@ -304,7 +252,7 @@ export function AgentsPage() {
         onOpenChange={setOpenDlg}
         teams={ws.teams ?? []}
         initialTeamId={teamId}
-        onOpened={() => agents.reload()}
+        onOpened={team.reloadAgents}
       />
       <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
       {teamId != null && (
@@ -313,7 +261,7 @@ export function AgentsPage() {
           teamName={currentTeam?.name}
           open={shareDlg}
           onOpenChange={setShareDlg}
-          onBound={() => machines.reload()}
+          onBound={team.reloadMachines}
         />
       )}
       {renaming && (
@@ -322,7 +270,7 @@ export function AgentsPage() {
           machine={renaming}
           open
           onOpenChange={(o) => !o && setRenaming(null)}
-          onRenamed={() => machines.reload()}
+          onRenamed={team.reloadMachines}
         />
       )}
       {renamingAgent && (
@@ -331,19 +279,19 @@ export function AgentsPage() {
           agent={renamingAgent}
           open
           onOpenChange={(o) => !o && setRenamingAgent(null)}
-          onRenamed={() => agents.reload()}
+          onRenamed={team.reloadAgents}
         />
       )}
       {infoAgent && (
         <AgentInfoDialog
-          onAvatarChanged={() => agents.reload()}
+          onAvatarChanged={team.reloadAgents}
           key={infoAgent.userId}
           agent={infoAgent}
           machineName={machineLabel(infoAgent.machineId, machineList)}
           open
           onOpenChange={(o) => !o && setInfoAgent(null)}
           onRename={() => setRenamingAgent(infoAgent)}
-          onChat={() => chat(infoAgent)}
+          onChat={() => void team.chat(infoAgent)}
           onClose={() => close(infoAgent)}
         />
       )}

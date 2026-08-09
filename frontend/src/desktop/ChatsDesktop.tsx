@@ -2,33 +2,39 @@
 // conversation with a slim header. Right (toggled): group info drawer. The
 // selected thread lives in the URL (/chats/:id) so deep links and the browser
 // back button work; the rail switches sections, this owns selection.
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useSectionLocation } from "@/desktop/sectionKeepAlive";
-import { Plus, MessagesSquare, Info, Users, X, Trash2 } from "lucide-react";
+import { Plus, MessagesSquare, Info, X, Trash2 } from "lucide-react";
 import type {
   ChatLastMessage,
   ChatMember,
   ChatSummary,
   ThreadMember,
-  TeamMemberRoleEnum as Role,
 } from "@/api";
-import { chatApi, mtCall } from "@/lib/mtApi";
 import { useAuth } from "@/hooks/useAuth";
-import { useAsync, errMsg } from "@/hooks/useAsync";
+import { errMsg } from "@/hooks/useAsync";
 import { UserAvatar } from "@/components/UserAvatar";
 import { MemberGrid } from "@/components/MemberGrid";
 import { usePublicAgentMember } from "@/hooks/usePublicAgentMember";
 import { Conversation } from "@/desktop/Conversation";
+import {
+  useChats,
+  useCreateThread,
+  useThread,
+} from "@/features/chats/useChats";
+import { NewChatFields } from "@/features/chats/components/NewChatFields";
+import { useThreadInfo } from "@/features/chats/useThreadInfo";
+import {
+  AddMemberModal,
+  ThreadMembers,
+  ThreadTitleForm,
+} from "@/features/chats/components/ThreadInfoPieces";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Loading, Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
-
-const ROLE_ORDER: Record<Role, number> = { OWNER: 0, ADMIN: 1, MEMBER: 2 };
 
 export function ChatsDesktop() {
   const location = useSectionLocation();
@@ -42,29 +48,11 @@ export function ChatsDesktop() {
   const [newOpen, setNewOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
 
-  const chats = useAsync(
-    () =>
-      mtCall(chatApi().listChats({ pageSize: 100, queryIsMemberAgent: true })),
-    [],
-    "chats",
-  );
-  // A steady 5s poll keeps the list previews and unread state fresh.
-  useEffect(() => {
-    const t = setInterval(() => chats.reload(), 5000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const chats = useChats();
 
   // The selected thread's detail (title + members), owned here so the header and
   // the info drawer share one fetch with the conversation.
-  const detail = useAsync(
-    () =>
-      selectedId
-        ? mtCall(chatApi().getThread({ id: selectedId }))
-        : Promise.resolve(null),
-    [selectedId],
-    selectedId ? `thread:${selectedId}` : undefined,
-  );
+  const detail = useThread(selectedId);
 
   const title =
     detail.data?.thread.title || (selectedId ? `thread #${selectedId}` : "");
@@ -155,6 +143,7 @@ export function ChatsDesktop() {
       {selectedId && infoOpen && (
         <ChatInfoPanel
           threadId={selectedId}
+          title={detail.data?.thread.title ?? ""}
           members={detail.data?.members ?? []}
           loading={detail.loading}
           reload={detail.reload}
@@ -264,6 +253,7 @@ function NewChatModal({
   onOpenChange: (o: boolean) => void;
   onCreated: (id: number) => void;
 }) {
+  const createThread = useCreateThread();
   const [title, setTitle] = useState("");
   const [members, setMembers] = useState("");
   const [busy, setBusy] = useState(false);
@@ -271,21 +261,10 @@ function NewChatModal({
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const memberIds = members
-      .split(/[,\s]+/)
-      .map((s) => Number(s.trim()))
-      .filter((n) => Number.isInteger(n) && n > 0);
     setError(null);
     setBusy(true);
     try {
-      const thread = await mtCall(
-        chatApi().createThread({
-          createThreadRequest: {
-            title: title.trim(),
-            memberIds: memberIds.length ? memberIds : undefined,
-          },
-        }),
-      );
+      const thread = await createThread(title, members);
       setTitle("");
       setMembers("");
       onOpenChange(false);
@@ -300,32 +279,13 @@ function NewChatModal({
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="new chat">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="nc-title">title</Label>
-          <Input
-            id="nc-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="general"
-            autoFocus
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="nc-members" className="gap-1">
-            <Users className="size-3.5" /> member ids (optional)
-          </Label>
-          <Input
-            id="nc-members"
-            value={members}
-            onChange={(e) => setMembers(e.target.value)}
-            placeholder="12, 34, 56"
-            inputMode="numeric"
-          />
-          <p className="text-muted-foreground text-xs">
-            comma or space separated user ids
-          </p>
-        </div>
+        <NewChatFields
+          title={title}
+          setTitle={setTitle}
+          members={members}
+          setMembers={setMembers}
+          idPrefix="nc"
+        />
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -340,8 +300,12 @@ function NewChatModal({
 }
 
 // ---- info drawer (member grid + owner controls) ------------------------------
+// A side panel rather than a pushed page, denser grid, dissolve at full width — and nothing else
+// that differs from the phone's chat info. Rename came along for free when this stopped having its
+// own copy of everything.
 function ChatInfoPanel({
   threadId,
+  title,
   members: memberList,
   loading,
   reload,
@@ -349,48 +313,15 @@ function ChatInfoPanel({
   onDissolved,
 }: {
   threadId: number;
+  title: string;
   members: ThreadMember[];
   loading: boolean;
   reload: () => void;
   onClose: () => void;
   onDissolved: () => void;
 }) {
-  const { user } = useAuth();
+  const info = useThreadInfo(threadId, memberList, reload);
   const [addOpen, setAddOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const myRole = memberList.find((m) => m.userId === user?.id)?.role;
-  const canManage = myRole === "OWNER" || myRole === "ADMIN";
-  const isOwner = myRole === "OWNER";
-  const members = [...memberList].sort(
-    (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role],
-  );
-
-  async function remove(userId: number) {
-    setError(null);
-    setBusy(true);
-    try {
-      await mtCall(chatApi().removeThreadMember({ id: threadId, userId }));
-      reload();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onDissolve() {
-    if (!confirm("Dissolve this chat? This cannot be undone.")) return;
-    setBusy(true);
-    try {
-      await mtCall(chatApi().dissolveThread({ id: threadId }));
-      onDissolved();
-    } catch (err) {
-      setError(errMsg(err));
-      setBusy(false);
-    }
-  }
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-l">
@@ -406,72 +337,46 @@ function ChatInfoPanel({
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {loading && members.length === 0 && <Loading />}
-        {(members.length > 0 || !loading) && (
+        {loading && info.members.length === 0 && <Loading />}
+        {(info.members.length > 0 || !loading) && (
           <>
-            <div className="grid grid-cols-4 gap-x-2 gap-y-4">
-              {members.map((m) => (
-                <div
-                  key={m.userId}
-                  className="flex flex-col items-center gap-1"
-                >
-                  <div className="relative">
-                    <UserAvatar
-                      userId={m.userId}
-                      nickname={m.nickname}
-                      avatarId={m.avatarId}
-                      className="size-12"
-                    />
-                    {canManage &&
-                      m.role !== "OWNER" &&
-                      m.userId !== user?.id && (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => remove(m.userId)}
-                          className="bg-destructive absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full text-white"
-                          aria-label={`remove user ${m.userId}`}
-                        >
-                          <X className="size-3" />
-                        </button>
-                      )}
-                  </div>
-                  <span className="w-full truncate text-center text-[11px] text-neutral-400">
-                    {m.userId === user?.id
-                      ? "you"
-                      : (m.nickname ?? `#${m.userId}`)}
-                  </span>
-                </div>
-              ))}
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={() => setAddOpen(true)}
-                  className="flex flex-col items-center gap-1"
-                  aria-label="add member"
-                >
-                  <span className="flex size-12 items-center justify-center rounded-lg border border-dashed text-neutral-500">
-                    <Plus className="size-5" />
-                  </span>
-                </button>
-              )}
-            </div>
+            <ThreadMembers
+              members={info.members}
+              myUserId={info.myUserId}
+              canManage={info.canManage}
+              busy={info.busy}
+              density="panel"
+              onRemove={(id) => void info.remove(id)}
+              onAdd={() => setAddOpen(true)}
+            />
 
-            {error && (
+            {info.error && (
               <div className="mt-4">
                 <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{info.error}</AlertDescription>
                 </Alert>
               </div>
             )}
 
-            {isOwner && (
+            {info.isOwner && (
+              <ThreadTitleForm
+                title={title}
+                onRename={info.rename}
+                className="mt-6 flex flex-col border-t pt-4"
+              />
+            )}
+
+            {info.isOwner && (
               <div className="mt-6 border-t pt-4">
                 <Button
                   variant="destructive"
                   className="w-full"
-                  disabled={busy}
-                  onClick={onDissolve}
+                  disabled={info.busy}
+                  onClick={async () => {
+                    if (!confirm("Dissolve this chat? This cannot be undone."))
+                      return;
+                    if (await info.dissolve()) onDissolved();
+                  }}
                 >
                   <Trash2 className="size-4" /> dissolve chat
                 </Button>
@@ -484,74 +389,9 @@ function ChatInfoPanel({
       <AddMemberModal
         open={addOpen}
         onOpenChange={setAddOpen}
-        threadId={threadId}
-        onChanged={reload}
+        onAdd={info.add}
       />
     </aside>
-  );
-}
-
-function AddMemberModal({
-  open,
-  onOpenChange,
-  threadId,
-  onChanged,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  threadId: number;
-  onChanged: () => void;
-}) {
-  const [userId, setUserId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const id = Number(userId);
-    if (!Number.isInteger(id) || id <= 0) {
-      setError("enter a numeric user id");
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      await mtCall(
-        chatApi().addThreadMember({
-          id: threadId,
-          addMemberRequest: { userId: id },
-        }),
-      );
-      setUserId("");
-      onOpenChange(false);
-      onChanged();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange} title="add member">
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <Input
-          inputMode="numeric"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="user id, e.g. 123"
-          autoFocus
-        />
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <Button type="submit" disabled={busy || !userId.trim()}>
-          {busy ? <Spinner /> : "add"}
-        </Button>
-      </form>
-    </Modal>
   );
 }
 

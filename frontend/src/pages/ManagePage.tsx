@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { Plus, ChevronRight, FolderGit2 } from "lucide-react";
-import { mtCall, teamApi } from "@/lib/mtApi";
+import { createTeam } from "@/features/teams/api";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
@@ -100,9 +100,7 @@ function CreateTeamModal({
     setError(null);
     setBusy(true);
     try {
-      const team = await mtCall(
-        teamApi().createTeam({ createTeamRequest: { name: name.trim() } }),
-      );
+      const team = await createTeam(name);
       setName("");
       onOpenChange(false);
       await onCreated(team.id);

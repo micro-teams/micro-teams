@@ -18,7 +18,7 @@ import { errMsg } from "@/hooks/useAsync";
 import { Modal } from "@/components/ui/modal";
 import { Spinner, Loading } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { OnlineDot } from "@/components/agents/OpenAgentDialog";
+import { OnlineDot } from "@/features/agents/components/OpenAgentDialog";
 
 export function ShareMachineDialog({
   teamId,

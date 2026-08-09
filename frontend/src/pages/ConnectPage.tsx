@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useSearchParams, Link } from "react-router";
 import { CheckCircle2, FolderGit2, Link2 } from "lucide-react";
-import { machineApi, teamApi, mtCall } from "@/lib/mtApi";
+import { approveEnrollment, listTeams } from "@/features/teams/api";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,7 @@ export function ConnectPage() {
   const [params] = useSearchParams();
   const code = params.get("code") ?? "";
 
-  const teams = useAsync(
-    () => mtCall(teamApi().listTeams({ pageSize: 100 })),
-    [],
-    "teams",
-  );
+  const teams = useAsync(() => listTeams(), [], "teams");
   const teamList = teams.data?.teams ?? [];
 
   const [teamIds, setTeamIds] = useState<number[]>([]);
@@ -51,11 +47,7 @@ export function ConnectPage() {
     }
     setBusy(true);
     try {
-      const m = await mtCall(
-        machineApi().approveEnrollment({
-          approveEnrollmentRequest: { code, teamIds },
-        }),
-      );
+      const m = await approveEnrollment(code, teamIds);
       setMachine(m);
     } catch (err) {
       setError(errMsg(err));
