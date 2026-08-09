@@ -57,6 +57,42 @@ const cached = await page.evaluate(async () => {
 });
 check("the entry module is on disk", cached.some((p) => p.startsWith("/assets/") && p.endsWith(".js")), cached.join(" "));
 check("no API response was cached", !cached.some((p) => p.startsWith("/mt/")), cached.filter((p) => p.startsWith("/mt/")).join(" "));
+check("the web app manifest is on disk", cached.includes("/manifest.webmanifest"), cached.join(" "));
+
+// Installability, as the browser sees it — not as the source claims it. The launcher REPLACES the
+// built document, so a manifest link present in index.html says nothing about the document an
+// installed app would actually open; only reading it back from the served page does.
+const manifest = await page.evaluate(async () => {
+  const link = document.querySelector('link[rel="manifest"]');
+  if (!link) return { linked: false };
+  const res = await fetch(link.href);
+  const body = await res.json().catch(() => null);
+  return { linked: true, status: res.status, body };
+});
+check("the launcher links a manifest from <head>", manifest.linked === true);
+check("the manifest is served and parses", manifest.body != null, `status ${manifest.status}`);
+check(
+  "the manifest asks for a standalone window",
+  manifest.body?.display === "standalone",
+  String(manifest.body?.display),
+);
+check(
+  "the manifest offers a 512px and a maskable icon",
+  manifest.body?.icons?.some((i) => i.sizes === "512x512" && i.purpose === "any") &&
+    manifest.body?.icons?.some((i) => i.purpose === "maskable"),
+  JSON.stringify(manifest.body?.icons?.map((i) => `${i.sizes} ${i.purpose}`) ?? []),
+);
+const iconsOk = await page.evaluate(async (icons) => {
+  const results = await Promise.all(
+    icons.map(async (src) => [src, (await fetch(src)).status]),
+  );
+  return results.filter(([, status]) => status !== 200);
+}, (await page.evaluate(async () => {
+  const link = document.querySelector('link[rel="manifest"]');
+  const body = await (await fetch(link.href)).json();
+  return body.icons.map((i) => i.src);
+})));
+check("every declared icon is actually served", iconsOk.length === 0, JSON.stringify(iconsOk));
 
 // The claim the whole precache exists for: it starts with no network at all.
 await context.setOffline(true);
