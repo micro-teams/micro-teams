@@ -1,18 +1,18 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Save, Settings, History as HistoryIcon, Trash2 } from "lucide-react";
-import type { DocCommit, DocNode } from "@/api";
-import { baseName, parentPath } from "@/lib/docs";
-import { renderMarkdown } from "@/lib/markdown";
-import { renderMermaidIn } from "@/lib/mermaid";
-import { mtCall, teamApi } from "@/lib/mtApi";
-import { useAsync, errMsg } from "@/hooks/useAsync";
+// Docs — phone layout for one document. Full-screen push with a back button, one pane at a time
+// (preview / edit / history) chosen by a segmented control, and a settings sheet for move+delete.
+//
+// Layout only: what a document is, when it saves, and when it refreshes live in features/docs.
+import { useState } from "react";
+import { useParams, useSearchParams } from "react-router";
+import { Save, Settings } from "lucide-react";
+import { baseName } from "@/features/docs/api";
+import { useDoc } from "@/features/docs/useDoc";
+import { DocPreview } from "@/features/docs/components/DocPreview";
+import { DocHistory } from "@/features/docs/components/DocHistory";
+import { FileSettingsModal } from "@/features/docs/components/FileSettingsModal";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Modal } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { Loading, Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -26,91 +26,12 @@ export function FilePage() {
   const path = params.get("path") ?? "";
   const isNew = params.get("new") === "1";
 
-  const navigate = useNavigate();
   // Reading dominates editing, so an existing doc opens in preview; a brand-new
   // file opens straight in edit (there is nothing to read yet).
   const [tab, setTab] = useState<Tab>(isNew ? "edit" : "preview");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [content, setContent] = useState("");
-  const [savedContent, setSavedContent] = useState<string | null>(
-    isNew ? "" : null,
-  );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Load existing content once (skipped for a brand-new file).
-  const load = useAsync(
-    () =>
-      isNew
-        ? Promise.resolve<DocNode | null>(null)
-        : mtCall(teamApi().getDocument({ id: teamId, path, content: true })),
-    [teamId, path, isNew],
-    isNew ? undefined : `doc:${teamId}:${path}`,
-  );
-
-  // Seed local state from the loaded doc — on first load, and again when a
-  // background revalidation brings newer server content. Only adopt it when the
-  // user has no unsaved edits (content === savedContent), so we never clobber.
-  useEffect(() => {
-    if (!load.data) return;
-    const incoming = load.data.content ?? "";
-    if (
-      savedContent === null ||
-      (content === savedContent && incoming !== savedContent)
-    ) {
-      setContent(incoming);
-      setSavedContent(incoming);
-    }
-  }, [load.data, content, savedContent]);
-
-  const dirty = savedContent !== null && content !== savedContent;
-
-  // The doc viewer loads once on mount; without this it would keep showing stale
-  // content after a teammate edits or `docs sync` pulls a newer version. Refetch
-  // when the tab becomes visible or the window regains focus — but not while the
-  // user has unsaved edits, to avoid interrupting them (the seed effect above
-  // also guards against clobbering). (T-053)
-  const reloadDoc = load.reload;
-  useEffect(() => {
-    if (isNew) return;
-    function revalidate() {
-      if (document.visibilityState === "visible" && !dirty) reloadDoc();
-    }
-    document.addEventListener("visibilitychange", revalidate);
-    window.addEventListener("focus", revalidate);
-    return () => {
-      document.removeEventListener("visibilitychange", revalidate);
-      window.removeEventListener("focus", revalidate);
-    };
-  }, [isNew, dirty, reloadDoc]);
-
-  // After the preview HTML is in the DOM, turn any ```mermaid blocks into diagrams.
-  const previewRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (tab === "preview") void renderMermaidIn(previewRef.current);
-  }, [tab, content]);
-
-  async function save() {
-    setError(null);
-    setSaving(true);
-    try {
-      await mtCall(
-        teamApi().writeDocument({ id: teamId, path, body: content }),
-      );
-      setSavedContent(content);
-      if (isNew) {
-        // Drop the ?new flag so a reload reads the now-existing file.
-        navigate(`/teams/${teamId}/file?path=${encodeURIComponent(path)}`, {
-          replace: true,
-        });
-      }
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setSaving(false);
-    }
-  }
+  const doc = useDoc({ teamId, path, isNew });
 
   return (
     <>
@@ -123,11 +44,11 @@ export function FilePage() {
             {tab === "edit" && (
               <Button
                 size="sm"
-                onClick={save}
-                disabled={saving || !dirty}
+                onClick={() => void doc.save()}
+                disabled={doc.saving || !doc.dirty}
                 aria-label="save"
               >
-                {saving ? <Spinner /> : <Save className="size-4" />}
+                {doc.saving ? <Spinner /> : <Save className="size-4" />}
                 save
               </Button>
             )}
@@ -158,28 +79,18 @@ export function FilePage() {
           />
         )}
 
-        {error && (
+        {doc.error && (
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{doc.error}</AlertDescription>
           </Alert>
         )}
 
         {tab === "preview" && !isNew && (
           <>
-            {load.loading && <Loading />}
-            {load.error && (
-              <Alert variant="destructive">
-                <AlertDescription>{load.error}</AlertDescription>
-              </Alert>
-            )}
-            {(load.data || savedContent !== null) &&
-              (content.trim() ? (
-                <div
-                  ref={previewRef}
-                  className="doc-preview"
-                  // The team's own document; sanitized in renderMarkdown.
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-                />
+            {doc.loading && <Loading />}
+            {doc.ready &&
+              (doc.content.trim() ? (
+                <DocPreview content={doc.content} />
               ) : (
                 <p className="text-muted-foreground py-10 text-center text-sm">
                   empty document — switch to{" "}
@@ -191,30 +102,25 @@ export function FilePage() {
 
         {tab === "edit" && (
           <>
-            {load.loading && !isNew && <Loading />}
-            {load.error && (
-              <Alert variant="destructive">
-                <AlertDescription>{load.error}</AlertDescription>
-              </Alert>
-            )}
-            {(isNew || load.data || savedContent !== null) && (
+            {doc.loading && <Loading />}
+            {doc.ready && (
               <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
+                value={doc.content}
+                onChange={(e) => doc.setContent(e.target.value)}
                 placeholder="# start typing…"
                 spellCheck={false}
                 className="min-h-[60svh] font-mono text-sm leading-relaxed"
                 autoFocus={isNew}
               />
             )}
-            {dirty && (
-              <p className="text-muted-foreground text-xs">unsaved changes</p>
-            )}
+            <p className="text-muted-foreground text-xs">
+              {doc.saving ? "saving…" : doc.dirty ? "unsaved changes" : "saved"}
+            </p>
           </>
         )}
 
         {tab === "history" && !isNew && (
-          <HistoryTab teamId={teamId} path={path} />
+          <DocHistory teamId={teamId} path={path} />
         )}
       </div>
 
@@ -227,221 +133,5 @@ export function FilePage() {
         />
       )}
     </>
-  );
-}
-
-function fmtTime(ts: number): string {
-  return new Date(ts).toLocaleString();
-}
-
-function HistoryTab({ teamId, path }: { teamId: number; path: string }) {
-  const { data, error, loading } = useAsync(
-    () => mtCall(teamApi().getDocument({ id: teamId, path, history: true })),
-    [teamId, path],
-    `doc-history:${teamId}:${path}`,
-  );
-  const [diffSha, setDiffSha] = useState<string | null>(null);
-
-  return (
-    <div className="flex flex-col gap-2">
-      {loading && <Loading />}
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {data && (data.history?.length ?? 0) === 0 && (
-        <div className="text-muted-foreground flex flex-col items-center gap-2 py-14 text-sm">
-          <HistoryIcon className="size-8 opacity-50" />
-          no history
-        </div>
-      )}
-      {data?.history && (
-        <ul className="flex flex-col divide-y overflow-hidden rounded-lg border">
-          {data.history.map((c: DocCommit) => (
-            <li key={c.sha}>
-              <button
-                type="button"
-                onClick={() => setDiffSha(c.sha)}
-                className="hover:bg-accent flex w-full flex-col gap-1 px-4 py-3 text-left"
-              >
-                <span className="truncate text-sm font-medium">
-                  {c.message}
-                </span>
-                <span className="text-muted-foreground flex gap-2 text-xs">
-                  <span className="font-mono">{c.sha.slice(0, 7)}</span>
-                  <span>{c.author}</span>
-                  <span>{fmtTime(c.timestamp)}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {diffSha && (
-        <DiffModal
-          teamId={teamId}
-          path={path}
-          sha={diffSha}
-          onClose={() => setDiffSha(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function DiffModal({
-  teamId,
-  path,
-  sha,
-  onClose,
-}: {
-  teamId: number;
-  path: string;
-  sha: string;
-  onClose: () => void;
-}) {
-  const { data, error, loading } = useAsync(
-    () => mtCall(teamApi().getDocument({ id: teamId, path, diff: sha })),
-    [teamId, path, sha],
-  );
-
-  return (
-    <Modal
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title={`diff ${sha.slice(0, 7)}`}
-    >
-      {loading && <Loading />}
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {data && (
-        <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs leading-relaxed">
-          <DiffText diff={data.diff ?? "(no changes)"} />
-        </pre>
-      )}
-    </Modal>
-  );
-}
-
-/** Minimal unified-diff colouring: +added / -removed / @@ hunks. */
-function DiffText({ diff }: { diff: string }) {
-  return (
-    <>
-      {diff.split("\n").map((line, i) => {
-        let cls = "text-muted-foreground";
-        if (line.startsWith("+") && !line.startsWith("+++"))
-          cls = "text-primary";
-        else if (line.startsWith("-") && !line.startsWith("---"))
-          cls = "text-destructive";
-        else if (line.startsWith("@@")) cls = "text-foreground/70";
-        return (
-          <div key={i} className={cls}>
-            {line || " "}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function FileSettingsModal({
-  open,
-  onOpenChange,
-  teamId,
-  path,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  teamId: number;
-  path: string;
-}) {
-  const navigate = useNavigate();
-  const [newPath, setNewPath] = useState(path);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onMove(e: FormEvent) {
-    e.preventDefault();
-    const clean = newPath.trim().replace(/^\/+/, "");
-    if (!clean || clean === path) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await mtCall(
-        teamApi().moveDocument({
-          id: teamId,
-          path,
-          moveDocumentRequest: { newPath: clean },
-        }),
-      );
-      navigate(`/teams/${teamId}/file?path=${encodeURIComponent(clean)}`, {
-        replace: true,
-      });
-    } catch (err) {
-      setError(errMsg(err));
-      setBusy(false);
-    }
-  }
-
-  async function onDelete() {
-    if (!confirm(`Delete ${baseName(path)}?`)) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await mtCall(teamApi().deleteDocument({ id: teamId, path }));
-      const parent = parentPath(path);
-      navigate(
-        `/teams/${teamId}?tab=docs${parent ? `&path=${encodeURIComponent(parent)}` : ""}`,
-        { replace: true },
-      );
-    } catch (err) {
-      setError(errMsg(err));
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange} title="file settings">
-      <div className="flex flex-col gap-5">
-        <form onSubmit={onMove} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="move-path">path</Label>
-            <Input
-              id="move-path"
-              value={newPath}
-              onChange={(e) => setNewPath(e.target.value)}
-              className="font-mono"
-              required
-            />
-            <p className="text-muted-foreground text-xs">
-              rename or move by editing the path
-            </p>
-          </div>
-          <Button
-            type="submit"
-            disabled={busy || !newPath.trim() || newPath.trim() === path}
-          >
-            {busy ? <Spinner /> : "move"}
-          </Button>
-        </form>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        <div className="flex flex-col gap-2 border-t pt-4">
-          <Button variant="destructive" disabled={busy} onClick={onDelete}>
-            <Trash2 className="size-4" /> delete file
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }

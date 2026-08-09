@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { DocNode } from "@/api";
-import { baseName, isKeepFile } from "@/lib/docs";
+import { baseName, isKeepFile } from "@/features/docs/api";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";

@@ -1,21 +1,20 @@
-// Desktop document editor — the right pane of the docs view. Edit / split /
-// preview toggle, debounced autosave (1.2s after you stop typing) plus explicit
-// save, and a dirty indicator. Markdown preview is rendered with marked +
-// DOMPurify. Same team/document API the phone FilePage uses.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { Save, Check } from "lucide-react";
-import type { DocNode } from "@/api";
-import { baseName } from "@/lib/docs";
-import { renderMarkdown } from "@/lib/markdown";
-import { renderMermaidIn } from "@/lib/mermaid";
-import { mtCall, teamApi } from "@/lib/mtApi";
-import { errMsg } from "@/hooks/useAsync";
+// Docs — desktop layout for one document: the right pane of the master-detail view. Wide enough to
+// show the source and the rendering at once, so it offers a split view the phone cannot, and it
+// keeps the save state in the header rather than behind a tab.
+//
+// Layout only: what a document is, when it saves, and when it refreshes live in features/docs.
+import { useState } from "react";
+import { Save, Check, Settings } from "lucide-react";
+import { baseName } from "@/features/docs/api";
+import { useDoc } from "@/features/docs/useDoc";
+import { DocPreview } from "@/features/docs/components/DocPreview";
+import { DocHistory } from "@/features/docs/components/DocHistory";
+import { FileSettingsModal } from "@/features/docs/components/FileSettingsModal";
 import { Segmented } from "@/components/ui/segmented";
 import { Loading, Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-type View = "edit" | "split" | "preview";
+type View = "edit" | "split" | "preview" | "history";
 
 export function DocEditor({
   teamId,
@@ -26,117 +25,11 @@ export function DocEditor({
   path: string;
   isNew: boolean;
 }) {
-  const navigate = useNavigate();
   // Reading dominates editing, so an existing doc opens in preview; a brand-new
   // file opens in edit (there is nothing to read yet).
   const [view, setView] = useState<View>(isNew ? "edit" : "preview");
-  const [content, setContent] = useState("");
-  const [savedContent, setSavedContent] = useState<string | null>(
-    isNew ? "" : null,
-  );
-  const [loading, setLoading] = useState(!isNew);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Load existing content once per (team, path). A brand-new file starts empty.
-  useEffect(() => {
-    let active = true;
-    if (isNew) {
-      setContent("");
-      setSavedContent("");
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setSavedContent(null);
-    mtCall(teamApi().getDocument({ id: teamId, path, content: true }))
-      .then((node: DocNode) => {
-        if (!active) return;
-        setContent(node.content ?? "");
-        setSavedContent(node.content ?? "");
-      })
-      .catch((err: unknown) => active && setError(errMsg(err)))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [teamId, path, isNew]);
-
-  const dirty = savedContent !== null && content !== savedContent;
-
-  // The editor loads once per (team, path); without this it would keep showing
-  // stale content after a teammate edits or `docs sync` pulls a newer version.
-  // Refetch when the tab becomes visible or the window regains focus, and adopt
-  // the server content only when there are no unsaved edits — read live via a
-  // ref so the listener never captures a stale `dirty`. (T-053)
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
-  useEffect(() => {
-    if (isNew) return;
-    let active = true;
-    function revalidate() {
-      if (document.visibilityState !== "visible" || dirtyRef.current) return;
-      mtCall(teamApi().getDocument({ id: teamId, path, content: true }))
-        .then((node: DocNode) => {
-          if (!active || dirtyRef.current) return;
-          setContent(node.content ?? "");
-          setSavedContent(node.content ?? "");
-        })
-        .catch(() => {
-          // Keep showing current content if a background refresh fails.
-        });
-    }
-    document.addEventListener("visibilitychange", revalidate);
-    window.addEventListener("focus", revalidate);
-    return () => {
-      active = false;
-      document.removeEventListener("visibilitychange", revalidate);
-      window.removeEventListener("focus", revalidate);
-    };
-  }, [teamId, path, isNew]);
-
-  const save = useCallback(
-    async (body: string) => {
-      setError(null);
-      setSaving(true);
-      try {
-        await mtCall(teamApi().writeDocument({ id: teamId, path, body }));
-        setSavedContent(body);
-        if (isNew) {
-          // Drop the ?new flag so a reload reads the now-existing file.
-          navigate(`/teams/${teamId}/file?path=${encodeURIComponent(path)}`, {
-            replace: true,
-          });
-        }
-      } catch (err) {
-        setError(errMsg(err));
-      } finally {
-        setSaving(false);
-      }
-    },
-    [teamId, path, isNew, navigate],
-  );
-
-  // Debounced autosave: 1.2s after the last keystroke, if dirty and loaded.
-  useEffect(() => {
-    if (savedContent === null || content === savedContent) return;
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(() => void save(content), 1200);
-    return () => {
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    };
-  }, [content, savedContent, save]);
-
-  const html = view === "edit" ? "" : renderMarkdown(content);
-
-  // Render any ```mermaid blocks once the preview HTML is in the DOM (re-run whenever
-  // the HTML changes, since dangerouslySetInnerHTML re-inserts the raw code blocks).
-  const previewRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    void renderMermaidIn(previewRef.current);
-  }, [html]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const doc = useDoc({ teamId, path, isNew });
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
@@ -145,11 +38,11 @@ export function DocEditor({
           {baseName(path) || "untitled"}
         </h2>
         <span className="text-muted-foreground flex items-center gap-1 text-xs">
-          {saving ? (
+          {doc.saving ? (
             <>
               <Spinner className="size-3" /> saving…
             </>
-          ) : dirty ? (
+          ) : doc.dirty ? (
             "unsaved"
           ) : (
             <>
@@ -160,38 +53,64 @@ export function DocEditor({
         <Segmented<View>
           value={view}
           onChange={setView}
-          options={[
-            { value: "edit", label: "edit" },
-            { value: "split", label: "split" },
-            { value: "preview", label: "preview" },
-          ]}
+          options={
+            isNew
+              ? [
+                  { value: "edit", label: "edit" },
+                  { value: "split", label: "split" },
+                  { value: "preview", label: "preview" },
+                ]
+              : [
+                  { value: "edit", label: "edit" },
+                  { value: "split", label: "split" },
+                  { value: "preview", label: "preview" },
+                  { value: "history", label: "history" },
+                ]
+          }
         />
         <button
           type="button"
-          onClick={() => void save(content)}
-          disabled={saving || !dirty}
+          onClick={() => void doc.save()}
+          disabled={doc.saving || !doc.dirty}
           className="bg-primary text-primary-foreground flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium disabled:opacity-40"
         >
           <Save className="size-4" /> save
         </button>
+        {!isNew && (
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="text-muted-foreground hover:text-foreground rounded-md p-1"
+            aria-label="file settings"
+            title="move or delete"
+          >
+            <Settings className="size-4" />
+          </button>
+        )}
       </header>
 
-      {error && (
+      {doc.error && (
         <div className="p-3">
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{doc.error}</AlertDescription>
           </Alert>
         </div>
       )}
 
-      {loading ? (
+      {doc.loading ? (
         <Loading />
+      ) : view === "history" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <div className="mx-auto max-w-3xl">
+            <DocHistory teamId={teamId} path={path} />
+          </div>
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1">
           {(view === "edit" || view === "split") && (
             <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
+              value={doc.content}
+              onChange={(e) => doc.setContent(e.target.value)}
               placeholder="# start typing…"
               spellCheck={false}
               autoFocus={isNew}
@@ -203,15 +122,19 @@ export function DocEditor({
           )}
           {(view === "preview" || view === "split") && (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
-              <div
-                ref={previewRef}
-                className="doc-preview mx-auto max-w-3xl"
-                // Content is the team's own document; still sanitized above.
-                dangerouslySetInnerHTML={{ __html: html }}
-              />
+              <DocPreview content={doc.content} className="mx-auto max-w-3xl" />
             </div>
           )}
         </div>
+      )}
+
+      {!isNew && (
+        <FileSettingsModal
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          teamId={teamId}
+          path={path}
+        />
       )}
     </section>
   );
