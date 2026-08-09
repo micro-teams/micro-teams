@@ -1,4 +1,4 @@
-// Rename an agent — change its profile nickname. Mirrors RenameMachineDialog:
+// Rename an agent — change its profile nickname. Same shape as the machine name form:
 // shared by the phone (AgentsPage) and desktop (AgentsDesktop) agent lists so both
 // surfaces behave identically. The agent's profile is not ours to write, so mt does
 // the change AS THE AGENT (setAgentNickname); see AgentProfileService on the backend.
