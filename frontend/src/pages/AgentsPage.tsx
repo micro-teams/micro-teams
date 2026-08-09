@@ -30,7 +30,6 @@ import {
 } from "@/features/agents/components/OpenAgentDialog";
 import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
 import { RenameMachineDialog } from "@/features/agents/components/RenameMachineDialog";
-import { ShareMachineDialog } from "@/features/agents/components/ShareMachineDialog";
 import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
@@ -50,7 +49,6 @@ export function AgentsPage() {
   const teamId = ws.teamId;
   const [openDlg, setOpenDlg] = useState(false);
   const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [shareDlg, setShareDlg] = useState(false);
   const [renaming, setRenaming] = useState<Machine | null>(null);
   const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
@@ -132,22 +130,13 @@ export function AgentsPage() {
                 <h2 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
                   machines
                 </h2>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setShareDlg(true)}
-                  >
-                    <Server className="size-4" /> use existing
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setAddDeviceDlg(true)}
-                  >
-                    <PlusCircle className="size-4" /> add device
-                  </Button>
-                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setAddDeviceDlg(true)}
+                >
+                  <PlusCircle className="size-4" /> add device
+                </Button>
               </div>
               {team.machinesLoading && !team.machinesLoaded && <Loading />}
               {team.machinesError && (
@@ -157,20 +146,29 @@ export function AgentsPage() {
               )}
               {team.machinesLoaded && machineList.length === 0 && (
                 <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-4 text-sm">
-                  no machines serve this team. enroll a host with the CLI, or
-                  add one you already have with "use existing".
+                  no machines serve this team. use "add device" — either enrol a
+                  new host, or add one you already have.
                 </p>
               )}
               {machineList.length > 0 && (
                 <ul className="divide-y overflow-hidden rounded-lg border">
                   {machineList.map((m) => (
+                    // Same shape as an AgentRow — a leading 44px tile, then name over a meta
+                    // line — so the machine's status dot lands at the same x as the agent's
+                    // below it, and the two lists read as one column of live/dead.
                     <li
                       key={m.id}
                       className="flex items-center gap-3 px-3 py-2.5 text-sm"
                     >
-                      <Server className="text-muted-foreground size-4 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                      <OnlineDot online={m.online} />
+                      <span className="bg-muted flex size-11 shrink-0 items-center justify-center rounded-lg">
+                        <Server className="text-muted-foreground size-5" />
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate font-medium">{m.name}</span>
+                        <span className="text-muted-foreground flex items-center gap-2 text-xs">
+                          <OnlineDot online={m.online} />
+                        </span>
+                      </div>
                       <Button
                         size="icon-sm"
                         variant="ghost"
@@ -254,16 +252,12 @@ export function AgentsPage() {
         initialTeamId={teamId}
         onOpened={team.reloadAgents}
       />
-      <AddDeviceDialog open={addDeviceDlg} onOpenChange={setAddDeviceDlg} />
-      {teamId != null && (
-        <ShareMachineDialog
-          teamId={teamId}
-          teamName={currentTeam?.name}
-          open={shareDlg}
-          onOpenChange={setShareDlg}
-          onBound={team.reloadMachines}
-        />
-      )}
+      <AddDeviceDialog
+        open={addDeviceDlg}
+        onOpenChange={setAddDeviceDlg}
+        teamId={teamId}
+        onBound={team.reloadMachines}
+      />
       {renaming && (
         <RenameMachineDialog
           key={renaming.id}
