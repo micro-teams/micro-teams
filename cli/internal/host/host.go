@@ -128,13 +128,57 @@ func (h *Host) chooseLink(configured string) string {
 // reportLink feeds the outcome back: a connection that never became stable is evidence about this
 // line's ability to carry a stream, which the selector turns into a temporary skip. One that lasted
 // and then dropped is an ordinary disconnection and costs the line nothing.
-func (h *Host) reportLink(url string, held time.Duration, _ error) {
+//
+// It also says what happened out loud, which it did not before: the error argument used to be `_`.
+// The transport's reconnect loop is the only place that knows why a dial failed, it hands that
+// reason to exactly one callback, and this was that callback — so a machine that could not reach
+// the server wrote NOTHING to its log while retrying forever. A real machine sat like that and the
+// log showed only the successful sessions on either side of the gap, which is the failure mode that
+// costs the most: the silence is indistinguishable from health.
+func (h *Host) reportLink(url string, held time.Duration, err error) {
+	h.logLink(url, held, err)
 	for _, line := range h.lines.Ranked() {
 		if line.URL == "" || strings.HasPrefix(url, multipath.StreamURL(line, "")) {
 			h.linkLines.Closed(line, held)
 			return
 		}
 	}
+}
+
+// linkLogEvery bounds how often a machine that cannot connect repeats itself. The loop retries
+// every few seconds and can stay down for days, so logging every attempt would be the same fact
+// tens of thousands of times — and on a small container, a log file that fills the disk.
+const linkLogEvery = time.Minute
+
+// logLink narrates the control link: every state change, and a heartbeat while it stays broken.
+//
+// What a reader needs from this is the transition and the reason, not the tally. So the FIRST
+// failure is always logged (that is the moment the machine went away) and later ones are summarised
+// at most once a minute — carrying the attempt count, so a quiet stretch reads as suppression
+// rather than as nothing having happened.
+//
+// A drop after time held is logged unconditionally: it is rare, and it doubles as the record that
+// the link had been up for that long, which is how a reader learns the machine recovered at all.
+// (The transport reports an outcome only once a connection has ENDED, so there is no earlier moment
+// to announce success from — see the reconnect loop in transport/ws.)
+func (h *Host) logLink(url string, held time.Duration, err error) {
+	h.linkLogMu.Lock()
+	defer h.linkLogMu.Unlock()
+
+	now := h.clock()
+	if held > 0 {
+		h.linkFails = 0
+		h.linkLoggedAt = now
+		h.logf("microteams: control link dropped after %s (%s): %v", held.Round(time.Second), url, err)
+		return
+	}
+
+	h.linkFails++
+	if h.linkFails > 1 && now.Sub(h.linkLoggedAt) < linkLogEvery {
+		return
+	}
+	h.linkLoggedAt = now
+	h.logf("microteams: control link cannot connect (attempt %d): %s: %v", h.linkFails, url, err)
 }
 
 // logf writes one line where the machine's operator will find it. Under sysv the service script
