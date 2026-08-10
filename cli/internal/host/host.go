@@ -10,6 +10,7 @@ package host
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -62,6 +63,16 @@ type Host struct {
 	// attempt, and it would drag the tmux server into a code path that has nothing to do with
 	// screens — including in tests, where touching the live socket has killed real agents before.
 	lastScreens atomic.Int32
+
+	// Narration of the control link, and the two seams that let a test read it: where the lines go
+	// (nil means stderr) and what time it is (nil means the real clock). Both exist because the
+	// thing being tested here IS the log text — asserting on it is the only way to know the machine
+	// says something when it goes silent.
+	linkLogMu    sync.Mutex
+	linkFails    int
+	linkLoggedAt time.Time
+	logw         io.Writer
+	now          func() time.Time
 
 	ctx      context.Context
 	updating atomic.Bool // guards against concurrent / re-entrant self-updates
@@ -124,6 +135,23 @@ func (h *Host) reportLink(url string, held time.Duration, _ error) {
 			return
 		}
 	}
+}
+
+// logf writes one line where the machine's operator will find it. Under sysv the service script
+// redirects stderr to a file; under systemd it lands in the journal.
+func (h *Host) logf(format string, args ...any) {
+	out := h.logw
+	if out == nil {
+		out = os.Stderr
+	}
+	fmt.Fprintf(out, format+"\n", args...)
+}
+
+func (h *Host) clock() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
 }
 
 func (h *Host) rememberLine(line state.Line) {
