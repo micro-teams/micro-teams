@@ -34,15 +34,41 @@ microteams.command({
     const body = { content: text }
     const msg = request<Message>({ method: 'POST', path: `/chat/${threadId}/messages`, body })
     microteams.print(JSON.stringify(msg))
-    // Success, said in words rather than left to be inferred from a JSON blob. Reaching this line
-    // means the post returned — `request` throws otherwise — so there is a fact to state, and an
-    // agent that cannot tell whether its message went out has one bad option: send it again.
+    // Success, said in words rather than left to be inferred from a JSON blob — and said by
+    // QUOTING BACK what the server stored, read out of the thread as a separate request.
+    //
+    // A bare "sent, id 4699" only proves a row exists. The failure this has to catch is the one
+    // where a row exists and holds the WRONG TEXT: an over-long `--text` truncated in transit, a
+    // quote eaten by a shell, an escape that swallowed half the argument. Every one of those
+    // returns 201 and looks perfect (T-057). Reading the message back and showing its two ends is
+    // what makes the damage visible in the same breath as the send: whatever the agent meant to
+    // finish with is either there or it is not.
+    //
+    // Both ends, never just the head — truncation takes the TAIL, so a head-only preview is
+    // precisely the view that cannot see it.
     //
     // It matters most in company with the hint below. That hint is advice about the NEXT message,
     // but arriving alone under a JSON dump it reads like a complaint about this one, and "your
     // message used **bold**" is easy to mistake for "your message was rejected". So the sentence
     // that says it worked comes first, and the advice follows something unambiguous.
-    microteams.print(`Sent to thread ${threadId} (message #${msg.id}).`)
+    const stored = readBack(threadId, msg.id)
+    if (stored == null) {
+      // The send SUCCEEDED — that is what `msg` is. Only the read-back failed, and saying anything
+      // that sounds like failure here would provoke the resend this whole line exists to prevent.
+      microteams.print(`Sent to thread ${threadId} (could not read it back to quote it).`)
+    } else {
+      microteams.print(`Sent to thread ${threadId}, stored as: ${ends(stored, 60, 60)}`)
+      // The read-back's other half: what came out is compared with what went in. An agent cannot
+      // eyeball a 2000-character message against its own intent, but the two strings either match
+      // or they do not, and only the applet is in a position to check.
+      if (stored !== text) {
+        microteams.print(
+          `WARNING: what the server stored is not what was sent — ${text.length} characters went ` +
+            `out, ${stored.length} came back. The message above is what other people will read. ` +
+            `Check for a quoting or escaping problem in how --text was passed.`,
+        )
+      }
+    }
     // Told AFTER sending, never blocking it: the message is already fine to read, and an agent that
     // learns from the feedback writes the next one better. See markdownHint.
     const hint = markdownHint(text)
@@ -285,6 +311,52 @@ function chatLine(c: ChatSummary, withMembers: boolean): string {
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim()
   return flat.length > max ? flat.slice(0, max) + '…' : flat
+}
+
+/**
+ * A one-line view of a long text that shows BOTH ENDS: `head … tail`, with the length stated.
+ *
+ * The head alone is the one view that cannot see truncation — a message cut short still begins
+ * exactly the way it was meant to. So the tail is the part that carries the information, and the
+ * character count is what makes "this looks about right" checkable rather than a feeling.
+ *
+ * Newlines are flattened because this is one line of terminal output; the intent is a fingerprint
+ * of the stored text, not a reproduction of it.
+ */
+function ends(text: string, head: number, tail: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const shown =
+    flat.length <= head + tail + 1 ? flat : `${flat.slice(0, head)} … ${flat.slice(flat.length - tail)}`
+  return `“${shown}” (${text.length} chars)`
+}
+
+/**
+ * Read one message back out of its thread, or null if it cannot be had.
+ *
+ * A separate GET rather than trusting the POST response, deliberately: the point is to see what
+ * the THREAD now holds — what everyone else will read — and a response echoing the request would
+ * agree with a truncated send just as happily as with a good one.
+ *
+ * The listing is newest-first and its cursor is inclusive, so one page of size 1 starting at this
+ * id is exactly this message. The returned id is checked anyway: a cursor that ever meant "after
+ * this" instead of "from this" would otherwise quote a DIFFERENT message back as if it were the
+ * one just sent, which is worse than quoting nothing.
+ *
+ * Never throws. A failed read-back must not be reported as a failed send — the send already
+ * succeeded, and an agent that concludes otherwise sends the message twice.
+ */
+function readBack(threadId: number, id: number): string | null {
+  try {
+    const page = request<ListMessagesResponse>({
+      method: 'GET',
+      path: `/chat/${threadId}/messages?page_start=${id}&page_size=1`,
+    })
+    const found = page.messages?.[0]
+    if (!found || found.id !== id) return null
+    return String(found.content ?? '')
+  } catch {
+    return null
+  }
 }
 
 // The team document tree, worked as an ordinary local git checkout. The agent edits files with its
