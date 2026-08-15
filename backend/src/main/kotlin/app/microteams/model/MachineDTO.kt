@@ -1,6 +1,9 @@
 package app.microteams.model
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonSetter
+import com.fasterxml.jackson.annotation.Nulls
 import io.swagger.v3.oas.annotations.media.Schema
 
 /**
@@ -13,27 +16,29 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param createdAt
  */
 data class MachineDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("id")
     @get:JsonProperty("id", required = true)
     val id: kotlin.String,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("name")
     @get:JsonProperty("name", required = true)
     val name: kotlin.String,
-    @Schema(
-        example = "null",
-        required = true,
-        description = "Whether its control channel is connected right now",
-    )
+    @Schema(required = true, description = "Whether its control channel is connected right now")
+    @param:JsonProperty("online")
     @get:JsonProperty("online", required = true)
     val online: kotlin.Boolean,
     @Schema(
-        example = "null",
         required = true,
         description = "The teams it serves. Symmetric and owner-less -- a machine may serve many.",
     )
+    @param:JsonProperty("teamIds")
     @get:JsonProperty("teamIds", required = true)
     val teamIds: kotlin.collections.List<kotlin.Long>,
-    @Schema(example = "null", description = "")
+    @Schema(description = "")
+    @field:JsonInclude(JsonInclude.Include.NON_NULL)
+    @field:JsonSetter(nulls = Nulls.SKIP)
+    @param:JsonProperty("createdAt")
     @get:JsonProperty("createdAt")
     val createdAt: java.time.OffsetDateTime? = null,
 ) {}

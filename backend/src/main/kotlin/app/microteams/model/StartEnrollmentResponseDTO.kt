@@ -8,10 +8,12 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param approveUrl
  */
 data class StartEnrollmentResponseDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("code")
     @get:JsonProperty("code", required = true)
     val code: kotlin.String,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("approveUrl")
     @get:JsonProperty("approveUrl", required = true)
     val approveUrl: kotlin.String,
 ) {}

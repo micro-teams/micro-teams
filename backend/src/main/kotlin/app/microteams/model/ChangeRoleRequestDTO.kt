@@ -7,7 +7,8 @@ import io.swagger.v3.oas.annotations.media.Schema
 
 /** @param role */
 data class ChangeRoleRequestDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("role")
     @get:JsonProperty("role", required = true)
     val role: ChangeRoleRequestDTO.Role
 ) {
@@ -23,7 +24,8 @@ data class ChangeRoleRequestDTO(
             @JvmStatic
             @JsonCreator
             fun forValue(value: kotlin.String): Role {
-                return values().first { it -> it.value == value }
+                return values().firstOrNull { it -> it.value == value }
+                    ?: throw IllegalArgumentException("Unexpected value '$value' for enum 'Role'")
             }
         }
     }
