@@ -34,6 +34,15 @@ microteams.command({
     const body = { content: text }
     const msg = request<Message>({ method: 'POST', path: `/chat/${threadId}/messages`, body })
     microteams.print(JSON.stringify(msg))
+    // Success, said in words rather than left to be inferred from a JSON blob. Reaching this line
+    // means the post returned — `request` throws otherwise — so there is a fact to state, and an
+    // agent that cannot tell whether its message went out has one bad option: send it again.
+    //
+    // It matters most in company with the hint below. That hint is advice about the NEXT message,
+    // but arriving alone under a JSON dump it reads like a complaint about this one, and "your
+    // message used **bold**" is easy to mistake for "your message was rejected". So the sentence
+    // that says it worked comes first, and the advice follows something unambiguous.
+    microteams.print(`Sent to thread ${threadId} (message #${msg.id}).`)
     // Told AFTER sending, never blocking it: the message is already fine to read, and an agent that
     // learns from the feedback writes the next one better. See markdownHint.
     const hint = markdownHint(text)
