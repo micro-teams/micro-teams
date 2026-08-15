@@ -4,6 +4,25 @@ updates:
     directory: '/backend'
     schedule:
       interval: 'daily'
+    # Some libraries here are one release train that MUST move as a unit — bumping a
+    # single artifact against its siblings breaks the build (Kotlin: compiler vs. its
+    # -maven-noarg/-allopen plugins → AbstractMethodError; Jersey: one 4.x artifact drags
+    # jersey-common 4.x under a 3.1.x client → NoClassDefFoundError). Group them so a bump
+    # arrives as one coherent PR instead of N always-red single-artifact PRs.
+    groups:
+      kotlin:
+        patterns:
+          - 'org.jetbrains.kotlin:*'
+      jersey:
+        patterns:
+          - 'org.glassfish.jersey.*:*'
+      # spring-boot-starter-parent + spring-framework move with the Jakarta EE baseline;
+      # a major bump (Boot 4) is a tracked migration, not an automatic merge, but grouping
+      # keeps the family together whenever it does move.
+      spring:
+        patterns:
+          - 'org.springframework.boot:*'
+          - 'org.springframework:*'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
@@ -19,3 +38,9 @@ updates:
     directory: '/frontend'
     schedule:
       interval: 'daily'
+    # Batch the low-risk minor/patch bumps into one PR; majors still come individually.
+    groups:
+      frontend-minor:
+        update-types:
+          - 'minor'
+          - 'patch'
