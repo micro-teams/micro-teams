@@ -29,7 +29,7 @@
     "dompurify": "^3.4.13",
     "lucide-react": "^1.31.0",
     "marked": "^18.0.9",
-    "mermaid": "^11.16.0",
+    "mermaid": "^11.16.1",
     "radix-ui": "^1.6.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.8",
