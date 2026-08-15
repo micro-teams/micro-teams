@@ -10,11 +10,13 @@ import javax.validation.Valid
  */
 data class ThreadDetailDTO(
     @field:Valid
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("thread")
     @get:JsonProperty("thread", required = true)
     val thread: ThreadDTO,
     @field:Valid
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("members")
     @get:JsonProperty("members", required = true)
     val members: kotlin.collections.List<ThreadMemberDTO>,
 ) {}

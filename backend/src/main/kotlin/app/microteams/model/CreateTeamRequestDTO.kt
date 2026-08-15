@@ -5,7 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema
 
 /** @param name */
 data class CreateTeamRequestDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("name")
     @get:JsonProperty("name", required = true)
     val name: kotlin.String
 ) {}

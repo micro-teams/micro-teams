@@ -8,10 +8,12 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param defaultDriver
  */
 data class AgentDriversDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("drivers")
     @get:JsonProperty("drivers", required = true)
     val drivers: kotlin.collections.List<kotlin.String>,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("defaultDriver")
     @get:JsonProperty("defaultDriver", required = true)
     val defaultDriver: kotlin.String,
 ) {}

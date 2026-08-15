@@ -8,10 +8,12 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param message
  */
 data class Ping200ResponseDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("code")
     @get:JsonProperty("code", required = true)
     val code: kotlin.Int,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("message")
     @get:JsonProperty("message", required = true)
     val message: kotlin.String,
 ) {}

@@ -10,10 +10,12 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param role
  */
 data class AddTeamMemberRequestDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("userId")
     @get:JsonProperty("userId", required = true)
     val userId: kotlin.Long,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("role")
     @get:JsonProperty("role", required = true)
     val role: AddTeamMemberRequestDTO.Role,
 ) {
@@ -29,7 +31,8 @@ data class AddTeamMemberRequestDTO(
             @JvmStatic
             @JsonCreator
             fun forValue(value: kotlin.String): Role {
-                return values().first { it -> it.value == value }
+                return values().firstOrNull { it -> it.value == value }
+                    ?: throw IllegalArgumentException("Unexpected value '$value' for enum 'Role'")
             }
         }
     }

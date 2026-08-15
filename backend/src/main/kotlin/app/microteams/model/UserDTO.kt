@@ -12,20 +12,25 @@ import javax.validation.constraints.Min
  * @param username username
  */
 data class UserDTO(
-    @Schema(example = "null", required = true, description = "avatar id")
+    @Schema(required = true, description = "avatar id")
+    @param:JsonProperty("avatarId")
     @get:JsonProperty("avatarId", required = true)
     val avatarId: kotlin.Long,
-    @get:Min(1L)
-    @Schema(example = "null", required = true, description = "user id")
+    @get:Min(value = 1L)
+    @Schema(required = true, description = "user id")
+    @param:JsonProperty("id")
     @get:JsonProperty("id", required = true)
     val id: kotlin.Long,
-    @Schema(example = "null", required = true, description = "short bio")
+    @Schema(required = true, description = "short bio")
+    @param:JsonProperty("intro")
     @get:JsonProperty("intro", required = true)
     val intro: kotlin.String = "This user has not set an introduction yet.",
-    @Schema(example = "null", required = true, description = "nickname")
+    @Schema(required = true, description = "nickname")
+    @param:JsonProperty("nickname")
     @get:JsonProperty("nickname", required = true)
     val nickname: kotlin.String,
-    @Schema(example = "null", required = true, description = "username")
+    @Schema(required = true, description = "username")
+    @param:JsonProperty("username")
     @get:JsonProperty("username", required = true)
     val username: kotlin.String,
 ) {}

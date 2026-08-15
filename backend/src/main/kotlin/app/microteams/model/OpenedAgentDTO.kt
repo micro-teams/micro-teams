@@ -10,16 +10,20 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param screenToken
  */
 data class OpenedAgentDTO(
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("agentUserId")
     @get:JsonProperty("agentUserId", required = true)
     val agentUserId: kotlin.Long,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("sid")
     @get:JsonProperty("sid", required = true)
     val sid: kotlin.String,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("machineId")
     @get:JsonProperty("machineId", required = true)
     val machineId: kotlin.String,
-    @Schema(example = "null", required = true, description = "")
+    @Schema(required = true, description = "")
+    @param:JsonProperty("screenToken")
     @get:JsonProperty("screenToken", required = true)
     val screenToken: kotlin.String,
 ) {}
