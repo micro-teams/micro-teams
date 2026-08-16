@@ -85,11 +85,10 @@ class AgentController(
             // would not
             // open and no way to ask for it to be fixed. The row outlives every restart, so ask it
             // when the registry is empty.
-            val agentUserId =
-                sid?.let { s ->
-                    agentRegistry.bySid(s)?.userId
-                        ?: agentScreenRepository.findById(s).orElse(null)?.agentUserId
-                }
+            val agentUserId = sid?.let { s ->
+                agentRegistry.bySid(s)?.userId
+                    ?: agentScreenRepository.findById(s).orElse(null)?.agentUserId
+            }
             agentUserId != null && sharesGroup(userId, agentUserId)
         }
 

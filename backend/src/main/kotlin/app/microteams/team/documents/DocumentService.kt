@@ -120,15 +120,14 @@ class DocumentService(private val gitService: GitService) {
                     .add(e.copy(path = e.path.substring(slash + 1)))
             }
         }
-        val folders =
-            dirs.map { (dirName, children) ->
-                val full = join(prefix, dirName)
-                DocNodeDTO(
-                    path = full,
-                    isFolder = true,
-                    children = if (recursive) buildTree(children, full, true) else null,
-                )
-            }
+        val folders = dirs.map { (dirName, children) ->
+            val full = join(prefix, dirName)
+            DocNodeDTO(
+                path = full,
+                isFolder = true,
+                children = if (recursive) buildTree(children, full, true) else null,
+            )
+        }
         return folders + files
     }
 }
