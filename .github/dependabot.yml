@@ -9,6 +9,17 @@ updates:
     # -maven-noarg/-allopen plugins → AbstractMethodError; Jersey: one 4.x artifact drags
     # jersey-common 4.x under a 3.1.x client → NoClassDefFoundError). Group them so a bump
     # arrives as one coherent PR instead of N always-red single-artifact PRs.
+    ignore:
+      # Jersey 4.x = Jakarta EE 11; Spring Boot 3.4's BOM force-pins the transitive
+      # jersey-common / jakarta.ws.rs-api to the EE 10 (3.1.x) train, so a 4.x bump always
+      # resolves to a mixed train (client 4.0.2 + common 3.1.10) that crashes at runtime.
+      # Jersey can only cross to 4.x together with Spring Boot 4 — tracked as backlog T-079.
+      - dependency-name: 'org.glassfish.jersey.*'
+        update-types: ['version-update:semver-major']
+      # Spring Boot 4 is a coordinated migration (Framework 7 + Jakarta EE 11 + Jackson 3),
+      # not an auto-merge; hold the major here and drive it via T-079.
+      - dependency-name: 'org.springframework.boot:*'
+        update-types: ['version-update:semver-major']
     groups:
       kotlin:
         patterns:
