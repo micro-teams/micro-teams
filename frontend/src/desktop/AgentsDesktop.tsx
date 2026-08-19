@@ -4,7 +4,7 @@
 // and the two things a human needs, "chat with it" (creates a thread including the
 // agent and jumps to it) and "close it". Selection lives in the URL (/agents/:id)
 // so deep links and the browser back button work; the rail switches sections.
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useSectionLocation } from "@/desktop/sectionKeepAlive";
 import {
@@ -20,18 +20,14 @@ import {
 } from "lucide-react";
 import type { Agent } from "@/api";
 import { machineLabel } from "@/lib/agents";
-import { useTeamAgents } from "@/features/agents/useTeamAgents";
+import { useAgentsShell } from "@/features/agents/useAgentsShell";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ChangeAvatar } from "@/components/ChangeAvatar";
 import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
-import {
-  OpenAgentDialog,
-  OnlineDot,
-} from "@/features/agents/components/OpenAgentDialog";
-import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
+import { OnlineDot } from "@/features/agents/components/OpenAgentDialog";
+import { AgentDialogs } from "@/features/agents/components/AgentDialogs";
 import { MachineDetail } from "@/features/agents/components/MachineDetail";
-import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
@@ -48,9 +44,9 @@ export function AgentsDesktop() {
   const navigate = useNavigate();
   const location = useSectionLocation();
   const teamId = ws.teamId;
-  const [openDlg, setOpenDlg] = useState(false);
-  const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
+  const shell = useAgentsShell(teamId);
+  const { team, setOpenDlg, setAddDeviceDlg, setRenamingAgent, closeAgent } =
+    shell;
 
   const selectedId = useMemo(() => {
     const m = location.pathname.match(/^\/agents\/(\d+)/);
@@ -65,18 +61,15 @@ export function AgentsDesktop() {
     return m ? decodeURIComponent(m[1]) : null;
   }, [location.pathname]);
 
-  const team = useTeamAgents(teamId);
-
   const currentTeam = ws.teams?.find((t) => t.id === teamId);
   const agentList = team.agents;
   const machineList = team.machines;
   const selected = agentList.find((a) => a.userId === selectedId) ?? null;
 
   async function close(a: Agent) {
-    if (!confirm(`Close ${a.nickname || "this agent"}? Its live session ends.`))
-      return;
-    await team.close(a);
-    if (selectedId === a.userId) navigate("/agents");
+    await closeAgent(a, (closed) => {
+      if (selectedId === closed.userId) navigate("/agents");
+    });
   }
 
   return (
@@ -298,31 +291,15 @@ export function AgentsDesktop() {
         </section>
       )}
 
-      <OpenAgentDialog
-        open={openDlg}
-        onOpenChange={setOpenDlg}
+      <AgentDialogs
         teams={ws.teams ?? []}
-        initialTeamId={teamId}
+        teamId={teamId}
+        shell={shell}
         onOpened={(opened) => {
           team.reloadAgents();
           navigate(`/agents/${opened.agentUserId}`);
         }}
       />
-      <AddDeviceDialog
-        open={addDeviceDlg}
-        onOpenChange={setAddDeviceDlg}
-        teamId={teamId}
-        onBound={team.reloadMachines}
-      />
-      {renamingAgent && (
-        <RenameAgentDialog
-          key={renamingAgent.userId}
-          agent={renamingAgent}
-          open
-          onOpenChange={(o) => !o && setRenamingAgent(null)}
-          onRenamed={team.reloadAgents}
-        />
-      )}
     </div>
   );
 }
