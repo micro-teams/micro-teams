@@ -10,6 +10,10 @@
  *               A viewer is authenticated by its ?token= JWT and authorized to a screen only
  *               if it shares the screen's team or a chat group with the agent.
  *
+ *               Outbound screen bytes do not go straight onto the socket: each viewer owns a
+ *               ViewerPump, because the hub fans data out on the MACHINE's receive thread and a
+ *               browser that cannot keep up must never be allowed to park it.
+ *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
  *
@@ -50,6 +54,7 @@ class ViewerHandler(
         val machineId: String,
         val sid: String,
         val transport: ViewerTransport,
+        val pump: ViewerPump,
     )
 
     private val states = ConcurrentHashMap<String, ViewerState>()
@@ -73,15 +78,38 @@ class ViewerHandler(
         session.binaryMessageSizeLimit = 1 shl 20
         session.textMessageSizeLimit = 1 shl 20
         // Raw machine bytes -> a binary frame to the browser (web-claude writes it straight
-        // into xterm). Serialize sends: the hub's fan-out thread and any control replies
-        // share the one session.
-        val transport = ViewerTransport { raw ->
-            synchronized(session) {
-                if (session.isOpen)
-                    session.sendMessage(BinaryMessage(java.nio.ByteBuffer.wrap(raw)))
-            }
-        }
-        val state = ViewerState(screen.machineId, screen.sid, transport)
+        // into xterm), by way of this viewer's own queue and thread.
+        //
+        // The queue is not an optimisation. The hub fans screen data out on the machine's
+        // control-channel receive thread, so writing to the browser here used to mean a viewer on a
+        // slow relay could park that thread — freezing everything the machine was saying, on every
+        // screen, until the socket drained. See ViewerPump for the whole story.
+        val pump =
+            ViewerPump(
+                label = session.id,
+                write = { raw ->
+                    // Still serialized, because the pump is not the only writer: control replies
+                    // reach the same session from the request thread.
+                    synchronized(session) {
+                        if (session.isOpen)
+                            session.sendMessage(BinaryMessage(java.nio.ByteBuffer.wrap(raw)))
+                    }
+                },
+                giveUp = {
+                    logger.warn("live screen: closing viewer {} — it could not keep up", session.id)
+                    try {
+                        session.close(CloseStatus.SESSION_NOT_RELIABLE)
+                    } catch (e: Exception) {
+                        logger.debug(
+                            "live screen: closing viewer {} failed: {}",
+                            session.id,
+                            e.toString(),
+                        )
+                    }
+                },
+            )
+        val transport = ViewerTransport { raw -> pump.offer(raw) }
+        val state = ViewerState(screen.machineId, screen.sid, transport, pump)
         states[session.id] = state
         hub.attachViewer(screen.machineId, screen.sid, transport)
     }
@@ -119,6 +147,9 @@ class ViewerHandler(
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val state = states.remove(session.id) ?: return
+        // Stop the pump first: with the socket already gone, anything still queued would only
+        // produce write errors, and its thread must not outlive the viewer.
+        state.pump.close()
         hub.detachViewer(state.machineId, state.sid, state.transport)
     }
 }
