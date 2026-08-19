@@ -14,6 +14,7 @@ import { ChatInfoPage } from "@/pages/ChatInfoPage";
 import { ConnectPage } from "@/pages/ConnectPage";
 import LinesPage from "@/pages/LinesPage";
 import { AgentPresenceProvider } from "@/hooks/useAgentPresence";
+import { UpdatesProvider } from "@/hooks/useUpdates";
 import { SceneProvider } from "@/hooks/useScene";
 import { SceneOverlay } from "@/components/SceneOverlay";
 import { ToastProvider } from "@/hooks/useToast";
@@ -32,17 +33,22 @@ function FullScreen() {
 
 // The signed-in providers, shared by both shells: one WorkspaceProvider so the
 // selected team / expanded folders / doc-tree cache survive navigation, agent
-// presence + the one app-global live-screen viewer overlay.
+// presence, the updates socket + the one app-global live-screen viewer overlay.
+//
+// UpdatesProvider renders nothing and changes nothing on screen: it opens one socket that tells
+// subscribers a topic moved. Every screen still fetches exactly as it did.
 function Authed({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
-      <AgentPresenceProvider>
-        <SceneProvider>
-          {children}
-          {/* One app-global live-screen viewer, opened by any agent avatar. */}
-          <SceneOverlay />
-        </SceneProvider>
-      </AgentPresenceProvider>
+      <UpdatesProvider>
+        <AgentPresenceProvider>
+          <SceneProvider>
+            {children}
+            {/* One app-global live-screen viewer, opened by any agent avatar. */}
+            <SceneOverlay />
+          </SceneProvider>
+        </AgentPresenceProvider>
+      </UpdatesProvider>
     </RequireAuth>
   );
 }

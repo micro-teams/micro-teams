@@ -12,5 +12,16 @@
 
 package app.microteams.chat.message
 
-/** Emitted by ThreadService.postMessage once the message row is persisted. */
-data class MessagePostedEvent(val threadId: Long, val senderId: Long, val content: String)
+/**
+ * Emitted by ThreadService.postMessage once the message row is persisted.
+ *
+ * `messageId` is nullable only because this event is also raised by paths that have no row to point
+ * at; a listener that needs a cursor (the updates topic does) must treat null as "nothing to say"
+ * rather than invent a number.
+ */
+data class MessagePostedEvent(
+    val threadId: Long,
+    val senderId: Long,
+    val content: String,
+    val messageId: Long? = null,
+)
