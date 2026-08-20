@@ -34,15 +34,18 @@ class Endpoints {
     return '$base/mt/updates$query';
   }
 
-  /// A viewer connection for one screen. Same reasoning as [updatesSocket].
-  String screenSocket(int screenId, String? token) {
+  /// A viewer connection for one live screen. Same reasoning as [updatesSocket].
+  ///
+  /// The path mirrors MachineWebSocketConfig's `/machine/screen/*` mapping. The screen id is a
+  /// string, not a number: it is the session id the connector chose.
+  String screenSocket(String sessionId, String? token) {
     final base = origin.isEmpty
         ? _pageOriginAsWebSocket()
         : origin.replaceFirst(RegExp('^http'), 'ws');
     final query = token == null || token.isEmpty
         ? ''
         : '?token=${Uri.encodeComponent(token)}';
-    return '$base/mt/screen/$screenId$query';
+    return '$base/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query';
   }
 }
 

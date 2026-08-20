@@ -20,6 +20,7 @@ import 'app_providers.dart';
 import 'features/auth/login_screen.dart';
 import 'features/chats/chats_screen.dart';
 import 'features/chats/thread_screen.dart';
+import 'features/terminal/terminal_screen.dart';
 import 'ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
@@ -105,6 +106,15 @@ GoRouter _buildRouter(WidgetRef ref) {
                 },
               ),
             ],
+          ),
+          // Reachable by URL before the agents screen that will normally lead here has been
+          // migrated, so the hardest part of this rewrite can be judged on a real device now
+          // rather than after everything else is done.
+          GoRoute(
+            path: '/screen/:sessionId',
+            builder: (context, state) => TerminalScreen(
+              sessionId: state.pathParameters['sessionId'] ?? '',
+            ),
           ),
           GoRoute(
             path: '/teams',
