@@ -28,6 +28,7 @@ import (
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/transport/ws"
 	"github.com/micro-teams/micro-connector/cli/update"
+	"github.com/micro-teams/microteams/cli/internal/hostlog"
 	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
@@ -68,6 +69,8 @@ type Host struct {
 	// (nil means stderr) and what time it is (nil means the real clock). Both exist because the
 	// thing being tested here IS the log text — asserting on it is the only way to know the machine
 	// says something when it goes silent.
+	linkMu       sync.Mutex
+	link         state.Link
 	linkLogMu    sync.Mutex
 	linkFails    int
 	linkLoggedAt time.Time
@@ -102,6 +105,7 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 		ChooseURL: func() string { return host.chooseLink(ctrlURL) },
 		Report:    host.reportLink,
 	})
+	host.logw = hostlog.Open(cfgPath)
 	if err := host.init(conn, cfg, cfgPath); err != nil {
 		return nil, err
 	}
@@ -137,6 +141,7 @@ func (h *Host) chooseLink(configured string) string {
 // costs the most: the silence is indistinguishable from health.
 func (h *Host) reportLink(url string, held time.Duration, err error) {
 	h.logLink(url, held, err)
+	h.markLinkDown(err)
 	for _, line := range h.lines.Ranked() {
 		if line.URL == "" || strings.HasPrefix(url, multipath.StreamURL(line, "")) {
 			h.linkLines.Closed(line, held)
@@ -188,7 +193,9 @@ func (h *Host) logf(format string, args ...any) {
 	if out == nil {
 		out = os.Stderr
 	}
-	fmt.Fprintf(out, format+"\n", args...)
+	// Stamped, because the questions asked of this log are all about time: when did it stop
+	// connecting, how long has it been like this, did it recover on its own.
+	fmt.Fprintf(out, "%s "+format+"\n", append([]any{h.clock().Format(time.RFC3339)}, args...)...)
 }
 
 func (h *Host) clock() time.Time {
@@ -196,6 +203,40 @@ func (h *Host) clock() time.Time {
 		return h.now()
 	}
 	return time.Now()
+}
+
+// markLinkUp records that the control link is established, and publishes it.
+func (h *Host) markLinkUp() {
+	h.linkMu.Lock()
+	already := h.link.Up
+	h.link = state.Link{Up: true, Since: time.Now()}
+	h.linkMu.Unlock()
+	if !already {
+		h.logf("microteams: control link established")
+	}
+	h.writeState(int(h.lastScreens.Load()))
+}
+
+// markLinkDown records that it is not, and why if we know.
+//
+// "Why" is deliberately kept from the last attempt: a machine that has been failing for an hour
+// should still be able to tell you what the failure was, and the alternative — clearing it on every
+// retry — leaves whoever is looking with an empty reason exactly when they need one.
+func (h *Host) markLinkDown(err error) {
+	h.linkMu.Lock()
+	h.link.Up = false
+	h.link.Since = time.Time{}
+	if err != nil {
+		h.link.Error = err.Error()
+	}
+	h.linkMu.Unlock()
+	h.writeState(int(h.lastScreens.Load()))
+}
+
+func (h *Host) currentLink() state.Link {
+	h.linkMu.Lock()
+	defer h.linkMu.Unlock()
+	return h.link
 }
 
 func (h *Host) rememberLine(line state.Line) {
@@ -306,6 +347,11 @@ func (h *Host) Run(ctx context.Context) error {
 
 	go h.measureLines(ctx)
 
+	// Measure before choosing, and keep asking whether the choice still holds. Both matter and for
+	// different reasons — see warmUpLines and reviewLines.
+	h.warmUpLines(ctx)
+	go h.reviewLines(ctx)
+
 	return h.conn.Run(ctx, h.dispatch)
 }
 
@@ -323,11 +369,144 @@ var Build = "dev"
 // exactly when a machine attaches, so it asks then — which also means the answer is refreshed at
 // the one moment it matters most, after an update has swapped this process for a new one.
 func (h *Host) dispatch(msg protocol.Msg) {
+	// Anything arriving at all proves the control link is established — but `welcome` is the frame
+	// that marks a NEW connection, so it is the one that stamps when this link came up.
+	//
+	// Taken from the wire rather than from the transport because the library reports how a
+	// connection ENDED, not that one began; and a fact this important should come from evidence
+	// that the other end is really talking to us, not from a dial returning without an error.
+	if msg.T == "welcome" {
+		h.markLinkUp()
+	}
 	if msg.T == "machine.info" {
 		_ = h.conn.Send(protocol.Msg{T: "machine.info", Name: "version", Value: Build})
 		return
 	}
 	h.mgr.Dispatch(msg)
+}
+
+// How many times each line is probed before the first route decision, and how long that may take.
+//
+// The first probe of a line is not a measurement of the line: it pays DNS, the TCP handshake and
+// the TLS handshake, all of which are gone by the second one. Deciding on it means deciding on a
+// number that is systematically too high and unusually noisy — and because the health table blends
+// samples, one bad first reading takes several more probes to forget.
+//
+// Bounded, because this delays the first connection: if the network is slow enough that warming up
+// takes longer than this, connecting matters more than choosing well, and reviewLines will correct
+// the choice shortly afterwards.
+const (
+	warmUpProbes  = 4
+	warmUpBudget  = 3 * time.Second
+	reviewEvery   = 5 * time.Minute
+	minHold       = 10 * time.Minute
+	betterBy      = 0.25
+	betterByFloor = 30 * time.Millisecond
+)
+
+// warmUpLines probes every line a few times before anything picks one.
+//
+// Without this the first dial happens with NO measurement at all — the prober has only just been
+// started and the registry may not even have arrived — so the machine takes whatever the fallback
+// is and, because a healthy connection is never reconsidered, stays there for as long as it holds.
+func (h *Host) warmUpLines(ctx context.Context) {
+	if len(h.lines.Ranked()) < 2 {
+		return // one line: there is nothing to choose between, and nothing to wait for
+	}
+	deadline := time.Now().Add(warmUpBudget)
+	for i := 0; i < warmUpProbes; i++ {
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			break
+		}
+		h.lines.Probe(ctx, "/mt/probe")
+	}
+	h.logf("microteams: measured %s", h.lineSummary())
+}
+
+// lineSummary is what we measured, for the log and for `status` — "which route and why" is
+// otherwise unanswerable from outside the process.
+func (h *Host) lineSummary() string {
+	health := h.lines.Health()
+	parts := make([]string, 0, 4)
+	for _, line := range h.lines.Ranked() {
+		entry := health.Get(line.ID)
+		if !entry.Measured {
+			parts = append(parts, fmt.Sprintf("%s=?", line.ID))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", line.ID, entry.Latency.Round(time.Millisecond)))
+	}
+	return strings.Join(parts, " ")
+}
+
+// reviewLines asks, occasionally, whether the line this machine is on is still the right one.
+//
+// The route is chosen when a dial happens, and a connection that keeps working never dials again —
+// so without this, a choice made in the first seconds of the process lasts until something breaks.
+// That is how a machine ends up on a route that measured badly for hours after the network changed.
+//
+// Deliberately reluctant: it moves only when another line is clearly and repeatedly better, and
+// never while the current connection is young. A chooser that switches on every wobble is worse
+// than one that never switches, because each move costs a reconnect — cheap now that screens are
+// re-adopted, but not free, and a flapping link is harder to reason about than a merely suboptimal
+// one.
+func (h *Host) reviewLines(ctx context.Context) {
+	ticker := time.NewTicker(reviewEvery)
+	defer ticker.Stop()
+	agreed := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			better, ok := h.betterLine()
+			if !ok {
+				agreed = 0
+				continue
+			}
+			// Twice in a row before acting: one review is a moment, two is a trend.
+			agreed++
+			if agreed < 2 {
+				continue
+			}
+			agreed = 0
+			h.logf("microteams: switching to line %s — measured %s", better, h.lineSummary())
+			h.remeasureAndRelink(ctx)
+		}
+	}
+}
+
+// betterLine reports a line worth moving to, if there is one.
+func (h *Host) betterLine() (string, bool) {
+	link := h.currentLink()
+	if !link.Up || link.Since.IsZero() || h.clock().Sub(link.Since) < minHold {
+		return "", false // not connected, or not connected long enough to be worth disturbing
+	}
+	current := h.currentLine().ID
+	if current == "" {
+		return "", false
+	}
+	health := h.lines.Health()
+	mine := health.Get(current)
+	if !mine.Measured {
+		return "", false // nothing to compare against; leave it alone
+	}
+	for _, line := range h.lines.Ranked() {
+		if line.ID == current {
+			continue
+		}
+		entry := health.Get(line.ID)
+		if !entry.Measured || entry.State != multipath.StateUp {
+			continue
+		}
+		gain := mine.Latency - entry.Latency
+		// Both a proportion and a floor: 25% of 4ms is not worth a reconnect, and 30ms off a
+		// 500ms link is not worth one either.
+		if gain > betterByFloor && float64(gain) > float64(mine.Latency)*betterBy {
+			return line.ID, true
+		}
+	}
+	return "", false
 }
 
 // measureLines keeps this machine's view of the network paths current, and publishes it.
@@ -441,7 +620,7 @@ func (h *Host) writeState(live int) {
 	if h.cfgPath == "" {
 		return
 	}
-	state.Write(h.cfgPath, live, h.currentLine())
+	state.Write(h.cfgPath, live, h.currentLine(), h.currentLink())
 }
 
 func (h *Host) clearState() {

@@ -16,6 +16,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -34,7 +36,9 @@ import (
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/host"
+	"github.com/micro-teams/microteams/cli/internal/hostlog"
 	"github.com/micro-teams/microteams/cli/internal/lines"
+	"github.com/micro-teams/microteams/cli/internal/netcfg"
 	"github.com/micro-teams/microteams/cli/internal/state"
 	"github.com/micro-teams/microteams/cli/internal/ui"
 )
@@ -68,6 +72,8 @@ func Commands() []*cobra.Command {
 		authCmd(&cfgPath, withConfig),
 		linkCmd(&cfgPath, withConfig),
 		statusCmd(&cfgPath, withConfig),
+		logsCmd(&cfgPath, withConfig),
+		proxyCmd(&cfgPath, withConfig),
 		runCmd(&cfgPath, withConfig),
 		updateCmd(&cfgPath, withConfig),
 		uninstallCmd(&cfgPath, withConfig),
@@ -296,7 +302,22 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 			if err := service.Control(*cfgPath, "start"); err != nil {
 				return err
 			}
-			ui.OK("Connected. The server can now open screens on this machine.")
+			// Starting the service is not connecting. Wait for the host to say it reached the
+			// control plane, and if it does not, say what happened instead of claiming success —
+			// this line used to print unconditionally, and a machine that never connected was told
+			// it had.
+			switch link := awaitLink(*cfgPath, connectWait); {
+			case link.Up:
+				ui.OK("Connected. The server can now open screens on this machine.")
+			case link.Error != "":
+				ui.Warn("Started, but not connected: %s", link.Error)
+				ui.Hint("`microteams status` to check again · `microteams logs` for the full story")
+				return nil
+			default:
+				ui.Warn("Started, but not connected yet.")
+				ui.Hint("`microteams status` to check again · `microteams logs` for the full story")
+				return nil
+			}
 			ui.Hint("`microteams status` to check · `microteams link disconnect` to disconnect")
 			return nil
 		},
@@ -477,6 +498,213 @@ func describe(health multipath.LineHealth, url string) string {
 	}
 }
 
+// How long `link connect` waits for the host to establish the control link before reporting what
+// it sees. Long enough for a healthy dial (including a slow relay), short enough that a person is
+// not left staring at a prompt; the answer at the end is honest either way, so being wrong here
+// costs a re-run of `status` rather than a wrong claim.
+const connectWait = 8 * time.Second
+
+// awaitLink polls the host's own record until it says connected, it says why not, or we give up.
+func awaitLink(cfgPath string, within time.Duration) state.Link {
+	deadline := time.Now().Add(within)
+	var last state.Link
+	for time.Now().Before(deadline) {
+		last = state.CurrentLink(cfgPath)
+		if last.Up || last.Error != "" {
+			return last
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return last
+}
+
+// proxyCmd is `microteams proxy`: tell this machine how to reach the network.
+//
+// The setting lives in a file this product owns and is applied by the connector to itself at
+// startup, so it survives being started by an init system that scrubs the environment — which is
+// the situation that made a correctly-configured global proxy simply not reach the service. See
+// internal/netcfg.
+func proxyCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
+	cmd := withConfig(&cobra.Command{
+		Use:   "proxy",
+		Short: "Show or set the proxy this machine's connector uses",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			s := netcfg.Load(*cfgPath)
+			if s.Proxy == "" {
+				ui.Field("proxy", ui.Dim("not set"))
+				// The environment may still be providing one when run by hand, and saying so
+				// prevents the obvious wrong conclusion when the service behaves differently.
+				if env := netcfg.Effective("https://example.invalid"); env != "" {
+					ui.Field("environment", env)
+					ui.Hint("that comes from this shell — a service started by the system will NOT have it")
+				}
+				ui.Hint("`microteams proxy set http://user:pass@host:port` to configure one")
+				return nil
+			}
+			ui.Field("proxy", redactProxy(s.Proxy))
+			if s.NoProxy != "" {
+				ui.Field("no proxy", s.NoProxy)
+			}
+			ui.Hint("applies to the control link, the API and line probing · `microteams proxy clear` to remove")
+			return nil
+		},
+	})
+	// Every subcommand gets --config too. Without this the flag exists only on the parent, and
+	// `microteams proxy set … --config X` fails with "unknown flag" — which is exactly how it was
+	// first written, and exactly the kind of thing that compiles and passes CI.
+	set := withConfig(&cobra.Command{
+		Use:   "set <url>",
+		Short: "Use this proxy (http:// or socks5://), for the service too",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			raw := args[0]
+			parsed, err := url.Parse(raw)
+			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+				return fmt.Errorf("not a usable proxy URL: %s (want e.g. http://host:3128)", raw)
+			}
+			s := netcfg.Load(*cfgPath)
+			s.Proxy = raw
+			if err := netcfg.Save(*cfgPath, s); err != nil {
+				return err
+			}
+			ui.OK("Proxy set to %s", redactProxy(raw))
+			ui.Hint("restart the connector to pick it up — `microteams link connect`")
+			return nil
+		},
+	})
+	noProxy := withConfig(&cobra.Command{
+		Use:   "no-proxy <list>",
+		Short: "Hosts to reach directly (comma-separated), as in NO_PROXY",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			s := netcfg.Load(*cfgPath)
+			s.NoProxy = args[0]
+			if err := netcfg.Save(*cfgPath, s); err != nil {
+				return err
+			}
+			ui.OK("Direct for: %s", args[0])
+			return nil
+		},
+	})
+	clear := withConfig(&cobra.Command{
+		Use:   "clear",
+		Short: "Stop using a configured proxy",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := netcfg.Save(*cfgPath, netcfg.Settings{}); err != nil {
+				return err
+			}
+			ui.OK("Proxy cleared.")
+			ui.Hint("restart the connector to pick it up")
+			return nil
+		},
+	})
+	cmd.AddCommand(set, noProxy, clear)
+	return cmd
+}
+
+// redactProxy hides the password in a proxy URL. These routinely carry credentials, and this string
+// is printed by `status`, which people paste into chats when asking for help.
+func redactProxy(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return parsed.Redacted()
+}
+
+// logsCmd is `microteams logs`: the connector's own log, wherever this machine keeps it.
+//
+// It exists because "where are the logs" had no single answer — journald under systemd, a file
+// under the sysv fallback, elsewhere under launchd — and the machine that most needs its logs read
+// is a container with no journalctl to run. The connector now always writes its own file
+// (internal/hostlog); this command is how a human reaches it without knowing any of that.
+func logsCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
+	var follow bool
+	var lines int
+	cmd := withConfig(&cobra.Command{
+		Use:   "logs",
+		Short: "Show this machine's connector log",
+		Long: "Prints the connector's own log file — the same place the reason a control link\n" +
+			"cannot connect is written. Works the same on every init system, and inside a\n" +
+			"container with no journald.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			path := hostlog.Path(*cfgPath)
+			if _, err := os.Stat(path); err != nil {
+				// Say where we looked. "No logs" with no path is the kind of answer that sends
+				// someone hunting through /var/log for an hour.
+				ui.Warn("No log yet at %s", path)
+				ui.Hint("the log appears once the connector runs — `microteams link connect`")
+				return nil
+			}
+			if err := tailFile(path, lines); err != nil {
+				return err
+			}
+			if !follow {
+				ui.Hint("%s · `microteams logs -f` to follow", path)
+				return nil
+			}
+			return followFile(path)
+		},
+	})
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing as new lines arrive")
+	cmd.Flags().IntVarP(&lines, "lines", "n", 200, "how many trailing lines to show first")
+	return cmd
+}
+
+// tailFile prints the last n lines. Reads the whole file, which is bounded by hostlog's rotation —
+// a log that cannot exceed a few megabytes does not need a smarter tail.
+func tailFile(path string, n int) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if n > 0 && len(all) > n {
+		all = all[len(all)-n:]
+	}
+	for _, line := range all {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+// followFile keeps printing what is appended, and survives the rotation that hostlog performs:
+// when the file it holds is replaced, it reopens rather than going quiet forever on a file nobody
+// writes to any more.
+func followFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+	buf := make([]byte, 8192)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			os.Stdout.Write(buf[:n])
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return err
+		}
+		time.Sleep(300 * time.Millisecond)
+		// Rotated out from under us: the path now names a different file than the one we hold.
+		if info, statErr := os.Stat(path); statErr == nil {
+			if here, herr := f.Stat(); herr == nil && !os.SameFile(info, here) {
+				reopened, oerr := os.Open(path)
+				if oerr != nil {
+					continue
+				}
+				f.Close()
+				f = reopened
+			}
+		}
+	}
+}
+
 // statusCmd is the top-level `microteams status`: a compact, colored overview of
 // login, connection, and the screens this machine is hosting.
 func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
@@ -495,14 +723,31 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			ui.Field("machine", ui.Dim(cfg.MachineID))
 			ui.Field("server", cfg.Base)
 
+			// Two different questions, and conflating them is what made this lie for so long: the
+			// service manager knows whether the PROCESS is running, and only the process knows
+			// whether it reached the control plane. Ask both, and say which is which.
 			st, serr := service.Status(*cfgPath)
+			link := state.CurrentLink(*cfgPath)
 			switch {
 			case serr != nil:
-				ui.Field("link", ui.Yellow("not connected"))
-			case st == "running":
-				ui.Field("link", ui.Green("connected"))
-			default:
+				ui.Field("link", ui.Yellow("not connected")+" "+ui.Dim("(service not installed)"))
+			case st != "running":
 				ui.Field("link", ui.Yellow(st))
+			case link.Up:
+				since := ""
+				if !link.Since.IsZero() {
+					since = " " + ui.Dim("since "+link.Since.Format("15:04:05"))
+				}
+				ui.Field("link", ui.Green("connected")+since)
+			case link.Error != "":
+				// Running, not connected, and we know why. This is the case that used to say
+				// "connected" while the live screen would not open.
+				ui.Field("link", ui.Red("not connected")+" "+ui.Dim(link.Error))
+			default:
+				// Running but nothing established yet — a process seconds old looks like this, and
+				// so does an older host that does not record the link at all. Neither is a failure
+				// to report as one.
+				ui.Field("link", ui.Yellow("service running, not connected yet"))
 			}
 
 			// Ask tmux, not the state file. The file records what the host published when screens
@@ -528,6 +773,14 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 				ui.Field("link line", ui.Bold(line.ID)+" "+ui.Dim(line.URL))
 			}
 
+			// Whether this machine goes through a proxy is invisible from outside the process, and
+			// it is the first thing worth knowing when a machine connects but cannot fetch the line
+			// registry. Show what the SERVICE will use (the configured one), not what this shell
+			// happens to have — those differ exactly when it matters.
+			if px := netcfg.Load(*cfgPath); px.Proxy != "" {
+				ui.Field("proxy", redactProxy(px.Proxy))
+			}
+
 			if serr != nil {
 				ui.Hint("run `microteams link connect` to connect")
 			}
@@ -546,6 +799,11 @@ func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *co
 		Short:  "Stay connected in the foreground (used by the service manager)",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			// Before anything dials. A service is started with an environment we do not control
+			// (Debian's `service` uses `env -i`; a systemd unit inherits nobody's shell), so the
+			// machine's own proxy setting is applied by this process to itself — and it must happen
+			// here, because http.ProxyFromEnvironment reads the environment once and remembers it.
+			netcfg.Apply(*cfgPath)
 			return service.RunForeground(*cfgPath, hostRunner(*cfgPath))
 		},
 	})
