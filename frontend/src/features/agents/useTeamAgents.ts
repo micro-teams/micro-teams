@@ -3,16 +3,15 @@
 // Both shells fetched both lists, polled both on their own timer, and each implemented close,
 // unbind and "start a chat with this agent" separately. The lists are the same question either way;
 // only the arrangement differs.
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useNavigate } from "react-router";
 import type { Agent, Machine } from "@/api";
 import { agentApi, machineApi, teamApi, mtCall } from "@/lib/mtApi";
 import { useAsync, errMsg } from "@/hooks/useAsync";
 import { useToast } from "@/hooks/useToast";
 import { startChatWithAgent } from "@/lib/agents";
-
-/** Agents open, go busy and close out of band, so the lists are refreshed on a timer (T-065). */
-const POLL_MS = 4000;
+import { useUpdatesTopic } from "@/hooks/useUpdates";
+import { teamTopic } from "@/lib/updates/topics";
 
 export interface TeamAgents {
   machines: Machine[];
@@ -56,13 +55,28 @@ export function useTeamAgents(teamId: number | null): TeamAgents {
 
   const reloadMachines = machines.reload;
   const reloadAgents = agents.reload;
-  useEffect(() => {
-    const t = setInterval(() => {
+
+  // Was a 4s poll on both lists. Agents open, go busy and close out of band, and machines come and
+  // go — all of which the server already knows the moment it happens, so it says so.
+  //
+  // The digest mirrors TeamQuery.digest: machines, how many are connected, how many agents. It
+  // deliberately leaves out whether each agent's program is alive — the server and this list mean
+  // slightly different things by "online", and checking one against the other would raise false
+  // alarms forever. Liveness still arrives as an event; it is just not what gets verified.
+  useUpdatesTopic(
+    teamId != null ? teamTopic(teamId) : null,
+    () => {
       reloadAgents();
       reloadMachines();
-    }, POLL_MS);
-    return () => clearInterval(t);
-  }, [reloadAgents, reloadMachines]);
+    },
+    () => {
+      const m = machines.data?.machines;
+      const a = agents.data?.agents;
+      if (!m || !a) return null;
+      const online = m.filter((x) => x.online).length;
+      return `${m.length}:${online}:${a.length}`;
+    },
+  );
 
   const close = useCallback(
     async (agent: Agent) => {

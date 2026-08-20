@@ -36,7 +36,15 @@ data class UpdateFrame(
     /** `event`: the topic that moved, and how far. */
     val topic: String? = null,
     val seq: Long? = null,
+    /**
+     * Where this topic stood immediately before this event. A client whose cursor is something else
+     * missed a frame and refetches on the spot, rather than finding out at the next poll. Null the
+     * first time we say anything about a topic — there is no earlier state to point at.
+     */
+    val prev: Long? = null,
     val kind: String? = null,
+    /** `state`: what the query's result should look like right now, asked of the data source. */
+    val digest: String? = null,
     /** `ack`: which topics were granted, and where each stands now. */
     val granted: List<String>? = null,
     val refused: List<String>? = null,
@@ -45,13 +53,22 @@ data class UpdateFrame(
     val message: String? = null,
 ) {
     companion object {
-        fun event(topic: String, seq: Long, kind: String) =
-            UpdateFrame(t = "event", topic = topic, seq = seq, kind = kind)
+        fun event(topic: String, seq: Long, prev: Long?, kind: String) =
+            UpdateFrame(t = "event", topic = topic, seq = seq, prev = prev, kind = kind)
+
+        /**
+         * The periodic "your copy should look like this" frame. It is what makes silence mean
+         * something: without it, a topic that is quiet and a topic whose events are never being
+         * published look exactly alike.
+         */
+        fun state(topic: String, seq: Long, digest: String) =
+            UpdateFrame(t = "state", topic = topic, seq = seq, digest = digest)
 
         fun ack(granted: List<String>, refused: List<String>, cursors: Map<String, Long>) =
             UpdateFrame(t = "ack", granted = granted, refused = refused, cursors = cursors)
 
-        fun gap(topic: String, seq: Long) = UpdateFrame(t = "gap", topic = topic, seq = seq)
+        /** `seq` may be null: "refetch, and tell me where you land" is a legitimate answer. */
+        fun gap(topic: String, seq: Long?) = UpdateFrame(t = "gap", topic = topic, seq = seq)
 
         fun pong() = UpdateFrame(t = "pong")
 
@@ -73,4 +90,6 @@ data class ClientFrame(
 /** The kinds a topic can report. Additive only — an old client ignores what it does not know. */
 object UpdateKind {
     const val MESSAGE_CREATED = "message.created"
+    const val CHATS_CHANGED = "chats.changed"
+    const val TEAM_CHANGED = "team.changed"
 }
