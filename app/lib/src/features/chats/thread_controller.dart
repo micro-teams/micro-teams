@@ -116,7 +116,13 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     return fetched;
   }
 
-  Future<ThreadState> _fetchNewest(List<Message> held) async {
+  /// [knownHasOlder] is passed in rather than read from `state`, because this runs during build
+  /// too — and reading `state` before the first value exists throws. A ternary that only avoids
+  /// that by short-circuiting is a trap for the next person.
+  Future<ThreadState> _fetchNewest(
+    List<Message> held, {
+    bool knownHasOlder = false,
+  }) async {
     final client = ref.read(mtClientProvider);
     final response = await mtCall(
       client.chat.listMessages(id: _threadId, pageSize: pageSize),
@@ -134,25 +140,31 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     return ThreadState(
       messages: merged,
       pending: _outbox?.pending ?? const [],
-      hasOlder: _walkedBack
-          ? (state.value?.hasOlder ?? false)
-          : (body?.page.hasMore ?? false),
+      hasOlder: _walkedBack ? knownHasOlder : (body?.page.hasMore ?? false),
     );
   }
 
   /// Refetch the newest page. Called by the sync layer, and by a pull-to-refresh.
   Future<void> refresh() async {
-    final held = state.value?.messages ?? const <Message>[];
+    final current = state.value;
     try {
-      final next = await _fetchNewest(held);
+      final next = await _fetchNewest(
+        current?.messages ?? const <Message>[],
+        knownHasOlder: current?.hasOlder ?? false,
+      );
       state = AsyncValue.data(next);
-    } on MtError catch (e) {
+    } catch (e) {
+      // Deliberately every error, not just MtError: this is called from the sync layer's callback,
+      // where nothing is awaiting it, so anything that escapes becomes an unhandled async error
+      // that kills the zone instead of one conversation's refresh.
+      //
       // Keep showing what we hold. A failed refresh is not a reason to blank a conversation.
-      final current = state.value;
       if (current == null) {
         state = AsyncValue.error(e, StackTrace.current);
       } else {
-        state = AsyncValue.data(current.copyWith(error: e.message));
+        state = AsyncValue.data(
+          current.copyWith(error: e is MtError ? e.message : '$e'),
+        );
       }
     }
   }
