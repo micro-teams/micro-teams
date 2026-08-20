@@ -306,7 +306,28 @@ func (h *Host) Run(ctx context.Context) error {
 
 	go h.measureLines(ctx)
 
-	return h.conn.Run(ctx, h.mgr.Dispatch)
+	return h.conn.Run(ctx, h.dispatch)
+}
+
+// Build is what this binary calls itself, set from main at link time. It is reported to the control
+// plane on request so an operator can tell which machines are running which build — on a machine
+// nobody can log into, that is often the only thing there is to go on, and without it a forced
+// update is a button whose result cannot be observed.
+var Build = "dev"
+
+// dispatch handles the few messages that are this product's own business and hands everything else
+// to the shared screen manager.
+//
+// Answering rather than announcing is deliberate. There is no "just connected" hook to announce
+// from, and a message sent before the socket is up would simply be dropped; but the server knows
+// exactly when a machine attaches, so it asks then — which also means the answer is refreshed at
+// the one moment it matters most, after an update has swapped this process for a new one.
+func (h *Host) dispatch(msg protocol.Msg) {
+	if msg.T == "machine.info" {
+		_ = h.conn.Send(protocol.Msg{T: "machine.info", Name: "version", Value: Build})
+		return
+	}
+	h.mgr.Dispatch(msg)
 }
 
 // measureLines keeps this machine's view of the network paths current, and publishes it.

@@ -71,6 +71,10 @@ docker compose ps       # wait until every service shows "healthy"
 
 That's it. When all four services are healthy the stack is up, listening on **port 80**.
 
+Nothing else is required to run this. If you also want to be able to see which machines are out
+there and what build each is running — and to push one of them an update — see
+[Operator access](#operator-access-off-by-default) below; it is off unless you switch it on.
+
 ### Email (SMTP) — required, or nobody can register
 
 Registration emails a verification code through **cheese-auth**, so **without working SMTP the
@@ -108,6 +112,159 @@ your proxy sets, so the **same bundle works behind any domain**. Your proxy must
 
 **Cloudflare Tunnel** works with no extra config: `cloudflared` sets the forwarded headers and
 handles WebSocket automatically. Just point a tunnel at `http://<host>:80`.
+
+## Operator access (off by default)
+
+There is a second, deliberately separate HTTP surface for whoever runs this deployment: enough to
+answer "which machines are out there, what build is each running" and to push one machine an update,
+**without opening a database client and without any user account gaining that power**.
+
+It does not exist unless you turn it on. That is not a policy — with no management port configured,
+the code that serves these endpoints is never constructed, and a request for `/ops/...` on the normal
+port is an ordinary 404. There is no privileged role on the public API, so nothing you can do to a
+user account grants any of this.
+
+### Turning it on
+
+Three settings, all three required. In `docker-compose.yml`, add to the backend's
+`SPRING_APPLICATION_JSON` (mind the comma on the line above):
+
+```json
+        "management.server.port":9090,
+        "application.ops.token":"${OPS_TOKEN}"
+```
+
+publish that port **to the host's loopback only**, and point the healthcheck at its new home:
+
+```yaml
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9090/actuator/health/readiness || exit 1"]
+```
+
+then put a long random secret in `.env`:
+
+```bash
+echo "OPS_TOKEN=$(openssl rand -hex 32)" >> .env
+docker compose up -d
+```
+
+**Two things here bite if you skip them.**
+
+*The healthcheck.* Actuator moves with the management port. Add the port without moving the
+healthcheck and the backend never reports healthy — nothing is wrong with it, compose is just asking
+the old address.
+
+*The bind address.* Inside a container, do **not** set `management.server.address=127.0.0.1`: that
+binds to the *container's* loopback, and your published port then reaches nothing. The loopback
+restriction belongs on the host side, which is what `127.0.0.1:9090:9090` above does — the port is
+reachable from that host and from nowhere else.
+
+With `application.ops.token` unset the endpoints answer 404 even with the port open. A blank token
+does not mean "no authentication"; it means the surface is closed. That is on purpose: the common
+mistake is forgetting to set a secret, and forgetting must fail closed.
+
+### Reaching it
+
+It is not on the internet, and should not be put there. From your laptop:
+
+```bash
+ssh -N -L 9090:127.0.0.1:9090 you@your-server
+```
+
+Everything below then runs against `http://127.0.0.1:9090` through that tunnel. Even if the token
+leaks, it is not something anyone can use from outside the host.
+
+### What's out there
+
+```bash
+curl -s -H "X-Ops-Token: $OPS_TOKEN" http://127.0.0.1:9090/ops/machines | jq
+```
+
+```json
+[
+  {
+    "id": "dev7f3c91a2b4e8",
+    "name": "eu-build-01",
+    "online": true,
+    "build": "0.1.14",
+    "connectedAt": "2026-08-20T04:11:52.331Z",
+    "screens": 3,
+    "updateRequestedAt": null,
+    "buildWhenRequested": null
+  }
+]
+```
+
+`build` is what the machine itself reported. **`null` means it has not told us — not that it is
+old.** A connector predating this feature never answers the question, and so does a machine that has
+not reconnected since you upgraded the backend. Treat null as "unknown" and go and look.
+
+`connectedAt` is when the machine last attached *to this backend process*, so it resets when you
+restart the backend. That is exactly what you want when checking whether a machine came back.
+
+### Pushing one machine an update
+
+```bash
+curl -s -X POST -H "X-Ops-Token: $OPS_TOKEN" \
+     http://127.0.0.1:9090/ops/machines/dev7f3c91a2b4e8/update | jq
+```
+
+```json
+{
+  "outcome": "requested",
+  "machineId": "dev7f3c91a2b4e8",
+  "buildBefore": "0.1.13",
+  "requestedAt": "2026-08-20T09:02:44.118Z",
+  "note": "The machine was asked to update. Whether it did is only knowable by looking: watch it drop, reconnect, and report a build. GET /ops/machines."
+}
+```
+
+**It says `requested`, and it will never say `updated`.** The machine downloads a new binary and
+replaces its own running process; the moment it does, this connection is gone. Nothing on this side
+can honestly report the outcome. You establish that by looking: within a few seconds `online` goes
+false, then true again, and `build` is the new version. Its agents survive — the update re-execs and
+keeps the tmux sessions, so nobody's session dies.
+
+If it does **not** come back, that machine is now down and needs a hand on the box. Which is the
+whole reason for the next part.
+
+### Do one, watch it, then do the rest
+
+There is no batch endpoint, on purpose. The way a forced update goes wrong is a binary that does not
+start, and a batch is how one of those takes out every machine at once.
+
+```bash
+# 1. one machine you can afford to lose, ideally one you can reach another way
+curl -s -X POST -H "X-Ops-Token: $OPS_TOKEN" http://127.0.0.1:9090/ops/machines/$ID/update
+
+# 2. watch it leave and come back on the new build
+while sleep 2; do
+  curl -s -H "X-Ops-Token: $OPS_TOKEN" http://127.0.0.1:9090/ops/machines \
+    | jq -r --arg id "$ID" '.[] | select(.id==$id) | "\(.online) \(.build)"'
+done
+
+# 3. only then the others, one at a time, checking between each
+```
+
+Refusals you should expect, all of them deliberate:
+
+| Response | Meaning |
+|---|---|
+| `409` + `"machine is offline"` | Nothing was sent. Offline updates are **not** queued: one firing days later, long after you stopped watching, is worse than a failure you can see. |
+| `429` | You already asked for this machine inside the last two minutes. A double-click must not mean two re-execs. |
+| `404` (with a valid token) | No machine with that id. |
+| `401` | Bad or missing `X-Ops-Token`. |
+| `404` on **every** ops path | The surface is off — no token configured, or you are talking to the public port. |
+
+### First time through
+
+Version reporting is answered by the connector, so right after you deploy this the `build` column is
+`null` everywhere until each machine reconnects. Restarting the backend is enough to make them all
+reconnect and report. Machines still running a connector older than this feature never report at all
+— for those, the first update is necessarily blind, and after they come back you will see a version
+for the first time. That is a one-time bootstrap, not a permanent state.
 
 ## State (all under `app_data/`, plain host directories — no docker volumes)
 
