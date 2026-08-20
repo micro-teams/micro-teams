@@ -83,11 +83,10 @@ class TeamController(
         pageStart: Long?,
         pageSize: Int,
     ): ResponseEntity<ListTeamsResponseDTO> {
-        val roleFilter =
-            role?.let {
-                runCatching { TeamMemberRole.valueOf(it) }
-                    .getOrElse { throw BadRequestError("invalid role: $role") }
-            }
+        val roleFilter = role?.let {
+            runCatching { TeamMemberRole.valueOf(it) }
+                .getOrElse { throw BadRequestError("invalid role: $role") }
+        }
         val (teams, page) =
             teamService.listMyTeams(currentUserId(), roleFilter, pageStart, pageSize)
         return ResponseEntity.ok(ListTeamsResponseDTO(teams = teams, page = page))
