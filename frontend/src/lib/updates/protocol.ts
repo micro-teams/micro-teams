@@ -18,7 +18,21 @@ export type ServerFrame =
       v?: number;
       topic: string;
       seq: number;
+      /**
+       * Where the topic stood before this event. Message ids are not contiguous, so this is the
+       * only way to notice a frame that never arrived — without it, 9134 looks the same whether or
+       * not 9120 happened. Absent on the first thing ever said about a topic.
+       */
+      prev?: number;
       kind: string;
+    }
+  | {
+      /** What the query's result should look like right now, asked of the data source. */
+      t: "state";
+      v?: number;
+      topic: string;
+      seq: number;
+      digest: string;
     }
   | {
       t: "ack";
@@ -27,7 +41,7 @@ export type ServerFrame =
       refused: string[];
       cursors: Record<string, number>;
     }
-  | { t: "gap"; v?: number; topic: string; seq: number }
+  | { t: "gap"; v?: number; topic: string; seq?: number }
   | { t: "pong"; v?: number }
   | { t: "err"; v?: number; message?: string };
 
@@ -53,13 +67,30 @@ export function parseFrame(raw: string): ServerFrame | null {
   const frame = value as { t?: unknown };
   switch (frame.t) {
     case "event": {
-      const f = value as { topic?: unknown; seq?: unknown; kind?: unknown };
+      const f = value as {
+        topic?: unknown;
+        seq?: unknown;
+        prev?: unknown;
+        kind?: unknown;
+      };
       if (typeof f.topic !== "string" || typeof f.seq !== "number") return null;
       return {
         t: "event",
         topic: f.topic,
         seq: f.seq,
+        prev: typeof f.prev === "number" ? f.prev : undefined,
         kind: typeof f.kind === "string" ? f.kind : "",
+      };
+    }
+    case "state": {
+      const f = value as { topic?: unknown; seq?: unknown; digest?: unknown };
+      if (typeof f.topic !== "string" || typeof f.digest !== "string")
+        return null;
+      return {
+        t: "state",
+        topic: f.topic,
+        seq: typeof f.seq === "number" ? f.seq : 0,
+        digest: f.digest,
       };
     }
     case "ack": {
@@ -81,10 +112,12 @@ export function parseFrame(raw: string): ServerFrame | null {
     case "gap": {
       const f = value as { topic?: unknown; seq?: unknown };
       if (typeof f.topic !== "string") return null;
+      // seq may legitimately be absent: "refetch, and tell me where you land" is a real answer
+      // from a server that has just restarted and knows it knows nothing.
       return {
         t: "gap",
         topic: f.topic,
-        seq: typeof f.seq === "number" ? f.seq : 0,
+        seq: typeof f.seq === "number" ? f.seq : undefined,
       };
     }
     case "pong":

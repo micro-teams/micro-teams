@@ -12,6 +12,7 @@
 package app.microteams.updates
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -91,6 +92,72 @@ class UpdatesRegistryTest {
 
         assertEquals(listOf("gap"), back.kinds())
         assertEquals(10L, back.frames.single().seq)
+    }
+
+    /**
+     * The restart case. Our cursor is gone but the browser still holds 9134; answering "you are
+     * current" would be false and silent, so an unknown cursor always answers gap.
+     */
+    @Test
+    fun `a server that remembers nothing answers gap, not silence`() {
+        val registry = UpdatesRegistry()
+        val back = FakeSink(1)
+
+        val cursor = registry.subscribe("thread:7", back, since = 9134)
+
+        assertEquals(listOf("gap"), back.kinds())
+        assertNull(cursor)
+        assertNull(back.frames.single().seq)
+    }
+
+    /** Same situation from the other side: a client ahead of us means WE are stale. */
+    @Test
+    fun `a client ahead of the server is told gap rather than assumed wrong`() {
+        val registry = UpdatesRegistry()
+        val early = FakeSink(1)
+        registry.subscribe("thread:7", early, since = null)
+        registry.publish("thread:7", 100, UpdateKind.MESSAGE_CREATED)
+
+        val ahead = FakeSink(1)
+        registry.subscribe("thread:7", ahead, since = 9134)
+
+        assertEquals(listOf("gap"), ahead.kinds())
+    }
+
+    /** Every event says where the topic stood before it, so a hole is visible on the next frame. */
+    @Test
+    fun `events chain through prev`() {
+        val registry = UpdatesRegistry()
+        val sink = FakeSink(1)
+        registry.subscribe("thread:7", sink, since = null)
+
+        registry.publish("thread:7", 100, UpdateKind.MESSAGE_CREATED)
+        registry.publish("thread:7", 101, UpdateKind.MESSAGE_CREATED)
+
+        val events = sink.frames.filter { it.t == "event" }
+        assertNull(events[0].prev) // nothing was known before the first one
+        assertEquals(100L, events[1].prev)
+    }
+
+    /** A cursor learned from the data source counts as knowledge, and only moves forward. */
+    @Test
+    fun `a seeded cursor is adopted and never walks backwards`() {
+        val registry = UpdatesRegistry()
+        registry.seedCursor("thread:7", 500)
+        assertEquals(500L, registry.cursorOf("thread:7"))
+
+        registry.seedCursor("thread:7", 400)
+        assertEquals(500L, registry.cursorOf("thread:7"))
+    }
+
+    @Test
+    fun `only topics with listeners are worth verifying`() {
+        val registry = UpdatesRegistry()
+        val sink = FakeSink(1)
+        registry.subscribe("thread:7", sink, since = null)
+        registry.publish("thread:8", 1, UpdateKind.MESSAGE_CREATED) // nobody watching
+
+        assertEquals(listOf("thread:7"), registry.activeTopics())
     }
 
     @Test

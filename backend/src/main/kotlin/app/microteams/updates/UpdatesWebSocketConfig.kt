@@ -42,12 +42,18 @@ class UpdatesWebSocketConfig {
     /** One registry for the whole application: it is the shared state the sockets talk about. */
     @Bean fun updatesRegistry(): UpdatesRegistry = UpdatesRegistry()
 
+    /**
+     * Every declared query, collected by type. A new topic is a new @Component implementing
+     * SyncedQuery and nothing else — there is no list to remember to add it to.
+     */
+    @Bean fun topicCatalog(queries: List<SyncedQuery<*>>): TopicCatalog = TopicCatalog(queries)
+
     @Bean
     fun updatesHandler(
         registry: UpdatesRegistry,
-        authorizer: TopicAuthorizer,
+        catalog: TopicCatalog,
         objectMapper: ObjectMapper,
-    ): UpdatesHandler = UpdatesHandler(registry, authorizer, objectMapper)
+    ): UpdatesHandler = UpdatesHandler(registry, catalog, objectMapper)
 
     @Bean
     fun updatesWsRequestHandler(

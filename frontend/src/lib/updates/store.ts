@@ -1,13 +1,36 @@
-// Who is subscribed to what, and what the socket has said about it. No React, no WebSocket — both
-// are wired in from outside, which is what makes the awkward cases (a resubscribe after a drop, two
-// components watching the same thread, a gap) testable without a browser.
+// Who is subscribed to what, what the server has said about it, and — the part that earns this
+// file's keep — whether what we hold still agrees with what the server says it should be.
 //
-// What this deliberately does NOT do: hold any chat data. It holds cursors and hands out "this
-// topic moved, go and look". Keeping the data out of here is the whole reason the protocol is
-// allowed to lose a frame — there is only ever one path by which data reaches the screen, and it is
-// the same fetch that was there before this file existed.
+// No React, no WebSocket: both are wired in from outside, which is what makes the awkward cases (a
+// hole in the stream, a reconnect, a server that restarted, a digest that disagrees) testable
+// without a browser.
+//
+// What this deliberately does NOT hold is data. It holds cursors, digests and callbacks, and tells
+// a feature "go and look". Keeping the data out is what keeps exactly one path to the screen, which
+// is the whole reason a lost or duplicated frame here can never show a wrong message.
+//
+// A subscriber may supply `digest`, a function over the data it already holds. That is the one
+// thing a feature must provide beyond "refetch me", and it has to: only the feature knows what it
+// is holding. Without it the periodic check still arrives — it just cannot be compared, so a topic
+// with no digest falls back to trusting the event stream.
 
-export type TopicListener = (reason: "event" | "gap" | "reconnect") => void;
+export type SyncReason =
+  /** An ordinary event: the topic moved. */
+  | "event"
+  /** A frame never arrived — the event chain does not line up with our cursor. */
+  | "hole"
+  /** The server cannot catch us up (it restarted, or we were away too long). */
+  | "gap"
+  /** The socket came back; we cannot know what happened while it was down. */
+  | "reconnect"
+  /** What we hold disagrees with what the server says it should be. This one is a bug report. */
+  | "mismatch";
+
+export interface TopicListener {
+  onChange: (reason: SyncReason) => void;
+  /** A short description of what this subscriber currently holds, or null if it holds nothing yet. */
+  digest?: () => string | null;
+}
 
 export interface UpdatesTransport {
   /** Send a frame. May be dropped while disconnected — resubscription is the store's job. */
@@ -23,10 +46,13 @@ export class UpdatesStore {
   readonly refused = new Set<string>();
 
   /**
-   * Attach a live socket. Called on every (re)connect: everything currently listened to is
-   * resubscribed in one frame, carrying the cursors we hold so the server can either replay what we
-   * missed or tell us it cannot.
+   * How many times a periodic check found us out of date. Zero on a healthy system: an event was
+   * published for everything that happened. Anything else means the push side missed something,
+   * and the log line names which topic — which is the difference between this and a poll, because
+   * a poll repairs the same symptom and tells nobody.
    */
+  mismatches = 0;
+
   connected(transport: UpdatesTransport) {
     this.transport = transport;
     const topics = [...this.listeners.keys()];
@@ -37,9 +63,8 @@ export class UpdatesStore {
       if (at != null) since[topic] = at;
     }
     transport.send({ t: "sub", topics, since });
-    // A reconnect is itself a reason to refetch: we cannot know what happened while the socket was
-    // down until the server answers, and the answer may be a gap. Costing one fetch per reconnect
-    // is the cheap half of this trade.
+    // We cannot know what happened while the socket was down until the server answers, and the
+    // answer may be a gap. One fetch per reconnect is the cheap half of that trade.
     for (const topic of topics) this.fire(topic, "reconnect");
   }
 
@@ -47,7 +72,19 @@ export class UpdatesStore {
     this.transport = null;
   }
 
-  /** Subscribe a listener to a topic. Returns the unsubscribe. Reference-counted per topic. */
+  /**
+   * The tab came back to the front. Everything being watched refetches once.
+   *
+   * This is the one backstop that should never be removed, and it is not a poll: it costs one fetch
+   * per time a human looks at the page, which is bounded by the human. It is what covers the cases
+   * the digests deliberately leave out (an edit, a rename, a change that keeps every count the
+   * same) and the case where this client was suspended by the OS and cannot know what it missed.
+   */
+  refocused() {
+    for (const topic of this.listeners.keys()) this.fire(topic, "reconnect");
+  }
+
+  /** Subscribe. Returns the unsubscribe. Reference-counted per topic. */
   subscribe(topic: string, listener: TopicListener): () => void {
     let set = this.listeners.get(topic);
     if (!set) {
@@ -66,7 +103,6 @@ export class UpdatesStore {
     };
   }
 
-  /** Where we believe a topic stands. Exposed for tests and for reporting a disagreement. */
   cursorOf(topic: string): number | undefined {
     return this.cursors.get(topic);
   }
@@ -76,6 +112,8 @@ export class UpdatesStore {
     t: string;
     topic?: string;
     seq?: number;
+    prev?: number;
+    digest?: string;
     granted?: string[];
     refused?: string[];
     cursors?: Record<string, number>;
@@ -83,8 +121,18 @@ export class UpdatesStore {
     switch (frame.t) {
       case "event": {
         if (!frame.topic) return;
+        const at = this.cursors.get(frame.topic);
+        // The chain does not line up: something was published that never reached us. Refetching on
+        // the spot beats finding out whenever the next check happens to run.
+        const hole = frame.prev != null && at != null && frame.prev !== at;
         if (frame.seq != null) this.advance(frame.topic, frame.seq);
-        this.fire(frame.topic, "event");
+        this.fire(frame.topic, hole ? "hole" : "event");
+        return;
+      }
+      case "state": {
+        if (!frame.topic || frame.digest == null) return;
+        if (frame.seq != null) this.advance(frame.topic, frame.seq);
+        this.check(frame.topic, frame.digest);
         return;
       }
       case "gap": {
@@ -108,17 +156,41 @@ export class UpdatesStore {
     }
   }
 
+  /**
+   * Compare what each subscriber holds against what the server says the answer is.
+   *
+   * A subscriber that holds nothing yet (null) is not a disagreement — it is mid-load, and telling
+   * it to refetch would just fight with the fetch already in flight.
+   */
+  private check(topic: string, expected: string) {
+    const set = this.listeners.get(topic);
+    if (!set) return;
+    for (const listener of [...set]) {
+      const mine = listener.digest?.();
+      if (mine == null || mine === expected) continue;
+      this.mismatches += 1;
+      console.warn(
+        `updates: ${topic} should be "${expected}" but we hold "${mine}" — refetching; an event for this was never delivered`,
+      );
+      try {
+        listener.onChange("mismatch");
+      } catch {
+        /* a listener that throws is that component's bug, not everyone else's */
+      }
+    }
+  }
+
   private advance(topic: string, seq: number) {
     const at = this.cursors.get(topic);
     if (at == null || seq > at) this.cursors.set(topic, seq);
   }
 
-  private fire(topic: string, reason: "event" | "gap" | "reconnect") {
+  private fire(topic: string, reason: SyncReason) {
     const set = this.listeners.get(topic);
     if (!set) return;
     for (const listener of [...set]) {
       try {
-        listener(reason);
+        listener.onChange(reason);
       } catch {
         // A listener that throws is a bug in that component; it must not stop the others from
         // being told, or one broken pane would silently freeze the rest of the app.
