@@ -19,16 +19,7 @@ import { threadTopic } from "@/lib/updates/topics";
 
 /** Messages per request — the newest page (polled) and each older page walked backwards. */
 const PAGE_SIZE = 100;
-/**
- * How often to ask for the newest page.
- *
- * The push channel (T-065) now also triggers this fetch, but the poll deliberately stays: a
- * heartbeat proves the socket is alive, and nothing proves an event was ever published. The two
- * cover different failures, so removing this on the same day the socket arrives would be trading a
- * known cost for an unknown one. It comes out once the backstop below has been quiet in
- * production — see the note there.
- */
-const POLL_MS = 4000;
+
 /** Within this many px of the end counts as "at the bottom" — a new message may scroll us. */
 const AT_BOTTOM_PX = 100;
 /** Scrolling within this many px of the top asks for an older page. */
@@ -65,7 +56,7 @@ export function useThreadMessages(
   const listRef = useRef<HTMLDivElement>(null);
   // Set by the effect below, so the push channel can trigger the very same fetch. A ref rather than
   // a callback dependency: the fetch closes over this thread's cursors and must not be rebuilt.
-  const refetch = useRef<((source: "poll" | "push") => void) | null>(null);
+  const refetch = useRef<(() => void) | null>(null);
 
   // Messages the user has sent that the server has not confirmed yet. The outbox keeps retrying
   // them (and survives a reload), so a bad network never turns into a lost message or a scary
@@ -110,11 +101,10 @@ export function useThreadMessages(
     olderCursor.current = undefined;
     hasOlder.current = false;
     walkedBack.current = false;
-    const fetchOnce = (source: "poll" | "push" = "poll") =>
+    const fetchOnce = () =>
       mtCall(chatApi().listMessages({ id: threadId, pageSize: PAGE_SIZE }))
         .then((res) => {
           if (!active) return;
-          const before = allRef.current.length;
           // Anything the server already has stops being pending — matched by clientToken, so a
           // send whose response was lost is recognised rather than sent twice.
           outbox.reconcile(res.messages);
@@ -125,32 +115,37 @@ export function useThreadMessages(
           allRef.current = mergeNewestPage(allRef.current, res.messages);
           setMessages(allRef.current);
           setCache(msgKey, allRef.current.slice(-PAGE_SIZE));
-          // The backstop's self-check. Once the push channel works, the poll should never be the
-          // one to find something new; when it is, the socket missed an event and this line says
-          // which thread it missed. A silent redundancy would only cost requests — this one also
-          // reports on the thing it is backing up.
-          if (source === "poll" && allRef.current.length > before)
-            console.info(
-              `updates: the poll found ${allRef.current.length - before} message(s) the socket did not announce (thread ${threadId})`,
-            );
         })
         .catch((err: unknown) => active && setError(errMsg(err)))
         .finally(() => active && setLoading(false));
-    refetch.current = (source) => void fetchOnce(source);
+    refetch.current = () => void fetchOnce();
     void fetchOnce();
-    const poll = setInterval(() => void fetchOnce("poll"), POLL_MS);
     return () => {
       active = false;
       refetch.current = null;
-      clearInterval(poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
-  // The push channel: when the server says this thread moved, run the same fetch the poll runs.
-  // It is an accelerator and nothing more — no data arrives over the socket, so a missed event
-  // costs one late refresh and can never put a wrong message on screen.
-  useUpdatesTopic(threadTopic(threadId), () => refetch.current?.("push"));
+  // The 4s poll used to live here. What replaced it is not "the same thing over a socket": the
+  // server says when this thread moved, AND periodically says what the thread should look like, so
+  // a message that failed to publish an event is now reported by name instead of being silently
+  // repaired by the next tick.
+  //
+  // The digest mirrors ThreadQuery.digest: the newest id and how many messages, over the newest
+  // PAGE_SIZE — the same window on both sides, which is the only reason the two are comparable at
+  // all. (Scrolling up loads older pages, so what we hold can be larger than that window; the
+  // digest is taken over the newest slice of it.) Edits are not covered — see ThreadQuery.
+  useUpdatesTopic(
+    threadTopic(threadId),
+    () => refetch.current?.(),
+    () => {
+      const held = allRef.current;
+      if (held.length === 0) return loading ? null : "empty";
+      const page = held.slice(-PAGE_SIZE);
+      return `${page[page.length - 1].id}:${page.length}`;
+    },
+  );
 
   // Scrolling up past the top of what we hold walks the cursor backwards. The list grows upward,
   // so the scroll position is restored by distance-from-the-bottom — otherwise inserting above the

@@ -56,6 +56,14 @@ export function openUpdatesSocket(store: UpdatesStore): UpdatesSocket {
     }
   }, PING_MS);
 
+  // Coming back to the tab refetches everything once — see UpdatesStore.refocused for why this
+  // stays forever even though the polls are gone.
+  const onVisible = () => {
+    if (!closed && document.visibilityState === "visible") store.refocused();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", onVisible);
+
   const connection = connectOverLines({
     lines: () => lineManager.ranked(),
     path: `${MT_PATH}/updates${tokenQuery()}`,
@@ -90,6 +98,8 @@ export function openUpdatesSocket(store: UpdatesStore): UpdatesSocket {
   return {
     close: () => {
       closed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
       window.clearInterval(ping);
       store.disconnected();
       connection.close();

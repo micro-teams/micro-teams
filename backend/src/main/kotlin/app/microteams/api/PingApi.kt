@@ -29,7 +29,8 @@ interface PingApi {
                 ApiResponse(
                     responseCode = "200",
                     description = "OK",
-                    content = [Content(schema = Schema(implementation = Ping200ResponseDTO::class))],
+                    content =
+                        [Content(schema = Schema(implementation = Ping200ResponseDTO::class))],
                 )
             ],
         security = [SecurityRequirement(name = "bearerAuth")],

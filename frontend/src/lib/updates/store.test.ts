@@ -17,7 +17,7 @@ describe("UpdatesStore", () => {
   it("tells a listener when its topic moves", () => {
     const store = new UpdatesStore();
     const seen: string[] = [];
-    store.subscribe("thread:7", (reason) => seen.push(reason));
+    store.subscribe("thread:7", { onChange: (reason) => seen.push(reason) });
 
     store.handle({ t: "event", topic: "thread:7", seq: 100 });
 
@@ -28,7 +28,7 @@ describe("UpdatesStore", () => {
   it("does not tell a listener about someone else's topic", () => {
     const store = new UpdatesStore();
     const listener = vi.fn();
-    store.subscribe("thread:7", listener);
+    store.subscribe("thread:7", { onChange: listener });
 
     store.handle({ t: "event", topic: "thread:8", seq: 100 });
 
@@ -39,8 +39,8 @@ describe("UpdatesStore", () => {
     const store = new UpdatesStore();
     const t = transport();
     store.connected(t);
-    const offA = store.subscribe("thread:7", () => {});
-    const offB = store.subscribe("thread:7", () => {});
+    const offA = store.subscribe("thread:7", { onChange: () => {} });
+    const offB = store.subscribe("thread:7", { onChange: () => {} });
 
     expect(t.sent).toEqual([{ t: "sub", topics: ["thread:7"] }]);
 
@@ -53,7 +53,7 @@ describe("UpdatesStore", () => {
 
   it("resubscribes everything on reconnect, carrying its cursors", () => {
     const store = new UpdatesStore();
-    store.subscribe("thread:7", () => {});
+    store.subscribe("thread:7", { onChange: () => {} });
     store.handle({ t: "event", topic: "thread:7", seq: 100 });
 
     const t = transport();
@@ -67,7 +67,7 @@ describe("UpdatesStore", () => {
   it("treats a reconnect as a reason to refetch", () => {
     const store = new UpdatesStore();
     const seen: string[] = [];
-    store.subscribe("thread:7", (reason) => seen.push(reason));
+    store.subscribe("thread:7", { onChange: (reason) => seen.push(reason) });
 
     store.connected(transport());
 
@@ -79,7 +79,7 @@ describe("UpdatesStore", () => {
   it("passes a gap on as its own reason", () => {
     const store = new UpdatesStore();
     const seen: string[] = [];
-    store.subscribe("thread:7", (reason) => seen.push(reason));
+    store.subscribe("thread:7", { onChange: (reason) => seen.push(reason) });
 
     store.handle({ t: "gap", topic: "thread:7", seq: 900 });
 
@@ -122,10 +122,12 @@ describe("UpdatesStore", () => {
   it("keeps telling the other listeners when one of them throws", () => {
     const store = new UpdatesStore();
     const good = vi.fn();
-    store.subscribe("thread:7", () => {
-      throw new Error("a broken pane");
+    store.subscribe("thread:7", {
+      onChange: () => {
+        throw new Error("a broken pane");
+      },
     });
-    store.subscribe("thread:7", good);
+    store.subscribe("thread:7", { onChange: good });
 
     store.handle({ t: "event", topic: "thread:7", seq: 1 });
 
@@ -136,7 +138,7 @@ describe("UpdatesStore", () => {
     const store = new UpdatesStore();
     const first = transport();
     store.connected(first);
-    store.subscribe("thread:7", () => {});
+    store.subscribe("thread:7", { onChange: () => {} });
     store.disconnected();
 
     const second = transport();
@@ -145,6 +147,96 @@ describe("UpdatesStore", () => {
     expect(second.sent).toEqual([
       { t: "sub", topics: ["thread:7"], since: {} },
     ]);
+  });
+});
+
+describe("UpdatesStore verification", () => {
+  it("refetches when the event chain does not line up", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", { onChange: (r) => seen.push(r) });
+
+    store.handle({ t: "event", topic: "thread:7", seq: 100 });
+    // 101 never arrived; 102 says it should have.
+    store.handle({ t: "event", topic: "thread:7", seq: 102, prev: 101 });
+
+    expect(seen).toEqual(["event", "hole"]);
+  });
+
+  it("does not cry hole on the first event it ever sees", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", { onChange: (r) => seen.push(r) });
+
+    store.handle({ t: "event", topic: "thread:7", seq: 100, prev: 99 });
+
+    expect(seen).toEqual(["event"]);
+  });
+
+  it("refetches and counts a mismatch when what we hold disagrees", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", {
+      onChange: (r) => seen.push(r),
+      digest: () => "100:5:-",
+    });
+
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 101,
+      digest: "101:6:-",
+    });
+
+    expect(seen).toEqual(["mismatch"]);
+    expect(store.mismatches).toBe(1);
+  });
+
+  it("says nothing when what we hold agrees", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", {
+      onChange: (r) => seen.push(r),
+      digest: () => "100:5:-",
+    });
+
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 100,
+      digest: "100:5:-",
+    });
+
+    expect(seen).toEqual([]);
+    expect(store.mismatches).toBe(0);
+  });
+
+  it("does not treat a subscriber that holds nothing yet as a disagreement", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", {
+      onChange: (r) => seen.push(r),
+      digest: () => null, // still loading
+    });
+
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 100,
+      digest: "100:5:-",
+    });
+
+    expect(seen).toEqual([]);
+  });
+
+  it("accepts a gap with no cursor — a server that knows it knows nothing", () => {
+    const store = new UpdatesStore();
+    const seen: string[] = [];
+    store.subscribe("thread:7", { onChange: (r) => seen.push(r) });
+
+    store.handle({ t: "gap", topic: "thread:7" });
+
+    expect(seen).toEqual(["gap"]);
   });
 });
 
@@ -177,6 +269,25 @@ describe("parseFrame", () => {
       seq: 9,
       kind: "message.created",
     });
+  });
+
+  it("reads a state frame", () => {
+    expect(
+      parseFrame(
+        JSON.stringify({
+          t: "state",
+          topic: "thread:7",
+          seq: 9,
+          digest: "9:2:-",
+        }),
+      ),
+    ).toEqual({ t: "state", topic: "thread:7", seq: 9, digest: "9:2:-" });
+  });
+
+  it("ignores a state frame with no digest", () => {
+    expect(
+      parseFrame(JSON.stringify({ t: "state", topic: "thread:7" })),
+    ).toBeNull();
   });
 
   it("survives an ack with fields missing", () => {

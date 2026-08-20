@@ -59,10 +59,9 @@ class TransportController(private val lines: LineRegistryProperties) : ProbeApi,
                     foreignOrigin = it.foreignOrigin,
                 )
             }
-        val registry =
-            configured.ifEmpty {
-                listOf(LineDTO(id = "origin", url = "", transport = "same-origin", weight = 100))
-            }
+        val registry = configured.ifEmpty {
+            listOf(LineDTO(id = "origin", url = "", transport = "same-origin", weight = 100))
+        }
         return ResponseEntity.ok(LineRegistryDTO(lines = registry))
     }
 }

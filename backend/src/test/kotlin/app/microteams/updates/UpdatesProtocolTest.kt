@@ -47,7 +47,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class UpdatesProtocolTest
 @Autowired
-constructor(private val userCreatorService: UserCreatorService) {
+constructor(
+    private val userCreatorService: UserCreatorService,
+    private val verifier: TopicVerifier,
+) {
 
     @LocalServerPort private var port: Int = 0
 
@@ -139,6 +142,60 @@ constructor(private val userCreatorService: UserCreatorService) {
         }
     }
 
+    /**
+     * The verifier is the only thing in this system that can see a write nobody announced, so the
+     * test that matters is not "it sends a frame" — it is that the frame carries what the DATABASE
+     * says, not what we remember publishing. Here the message is inserted through the normal API
+     * but the topic has never had an event published on it (nobody was subscribed at the time), and
+     * the state frame must still report the real newest id.
+     */
+    @Test
+    fun `the periodic check reports what the database says, not what we published`() {
+        val quietThread = createChat(listOf(otherMemberId))
+        // Nobody is watching, so this message publishes to an empty room: the registry learns
+        // nothing about the topic from it.
+        val postedId = postMessage(quietThread, "posted while nobody was listening")
+
+        val client = connect(memberToken)
+        try {
+            client.send("""{"t":"sub","topics":["thread:$quietThread"]}""")
+            assertEquals("ack", client.next().getString("t"))
+
+            verifier.verify()
+
+            val state = client.awaitFrame("state")
+            assertEquals("thread:$quietThread", state.getString("topic"))
+            assertEquals(postedId, state.getLong("seq"))
+            assertTrue(
+                state.getString("digest").startsWith("$postedId:"),
+                "the digest must describe the real newest message",
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    /** A topic nobody watches is not worth asking the database about. */
+    @Test
+    fun `the periodic check ignores topics with no listeners`() {
+        val unwatched = createChat(listOf(otherMemberId))
+        postMessage(unwatched, "nobody cares")
+
+        val client = connect(memberToken)
+        try {
+            client.send("""{"t":"sub","topics":["thread:$threadId"]}""")
+            assertEquals("ack", client.next().getString("t"))
+
+            verifier.verify()
+
+            // Whatever arrives must be about the watched thread, never the unwatched one.
+            val state = client.awaitFrame("state")
+            assertEquals("thread:$threadId", state.getString("topic"))
+        } finally {
+            client.close()
+        }
+    }
+
     @Test
     fun `a handshake without a token is rejected`() {
         val failed =
@@ -167,6 +224,15 @@ constructor(private val userCreatorService: UserCreatorService) {
             return JSONObject(raw)
         }
 
+        /** Skip past anything else and take the first frame of this type. */
+        fun awaitFrame(type: String): JSONObject {
+            repeat(10) {
+                val frame = next()
+                if (frame.getString("t") == type) return frame
+            }
+            throw AssertionError("no '$type' frame arrived")
+        }
+
         fun close() = session.close()
     }
 
@@ -188,6 +254,10 @@ constructor(private val userCreatorService: UserCreatorService) {
                 .get(5, TimeUnit.SECONDS)
         return Client(session, inbox)
     }
+
+    private fun postMessage(thread: IdType, content: String): Long =
+        JSONObject(post("/chat/$thread/messages", """{"content":"$content"}""", memberToken))
+            .getLong("id")
 
     private fun createChat(memberIds: List<IdType>): IdType {
         val body =

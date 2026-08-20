@@ -37,7 +37,7 @@ const val UPDATES_QUEUE_DEPTH = 512
 
 class UpdatesHandler(
     private val registry: UpdatesRegistry,
-    private val authorizer: TopicAuthorizer,
+    private val catalog: TopicCatalog,
     private val objectMapper: ObjectMapper,
 ) : TextWebSocketHandler() {
 
@@ -134,12 +134,14 @@ class UpdatesHandler(
         val refused = mutableListOf<String>()
         val cursors = mutableMapOf<String, Long>()
         for (raw in frame.topics.orEmpty()) {
-            val topic = Topic.parse(raw)
-            if (topic == null || !authorizer.mayRead(sink.userId, topic)) {
+            val topic = catalog.parse(raw)
+            if (topic == null || !catalog.mayRead(sink.userId, topic)) {
                 refused.add(raw)
                 continue
             }
-            cursors[raw] = registry.subscribe(raw, sink, frame.since?.get(raw))
+            // A null cursor means we do not know where this topic stands; leaving it out of the
+            // ack is how the client is told that, and subscribe() has already sent it a gap.
+            registry.subscribe(raw, sink, frame.since?.get(raw))?.let { cursors[raw] = it }
             granted.add(raw)
         }
         sink.send(UpdateFrame.ack(granted, refused, cursors))

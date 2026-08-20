@@ -1,15 +1,13 @@
 /*
- *  Description: What a client can subscribe to, spelled exactly once.
+ *  Description: The topics themselves — the identity half of a synced query.
  *
- *               A topic is three things at the same time: the unit of subscription, the unit of
- *               authorization, and the thing a cursor counts along. Keeping the string "thread:12"
- *               assembled and parsed in this one file is what stops the third meaning from drifting
- *               away from the first two.
+ *               A topic is three things at once: what you subscribe to, what you are authorized
+ *               for, and what a cursor counts along. Keeping its wire spelling in one place is what
+ *               stops those three meanings from drifting apart.
  *
- *               Only `thread:` exists today. The rest of the table in
- *               todo/microteams/realtime-ws.md §3 (chats, agent, machines, docs, screen) lands one
- *               at a time, and the landing order there is deliberate: one topic first, with the
- *               polling left alone, so the whole chain is proven before anything is taken away.
+ *               How a topic behaves — who may read it, what its result looks like — is NOT here. It
+ *               lives in the SyncedQuery declaration that owns the prefix (see map/), so a topic
+ *               cannot exist without something that can authorize and verify it.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -22,23 +20,42 @@ sealed interface Topic {
     /** The wire form. The only place a topic string is built. */
     val name: String
 
+    /** Which declaration owns this topic. */
+    val prefix: String
+
     /** Messages appearing, changing or going away in one thread. Cursor: the message id. */
     data class Thread(val threadId: Long) : Topic {
         override val name: String = "$PREFIX$threadId"
+        override val prefix: String = PREFIX
 
         companion object {
             const val PREFIX = "thread:"
         }
     }
 
-    companion object {
-        /** Parse a wire topic. Null for anything unknown or malformed — never an exception. */
-        fun parse(raw: String): Topic? {
-            if (raw.startsWith(Thread.PREFIX)) {
-                val id = raw.removePrefix(Thread.PREFIX).toLongOrNull() ?: return null
-                return Thread(id)
-            }
-            return null
+    /**
+     * The chat list as one user sees it: which groups, in what order, with which last message.
+     * Cursor: the newest message id across that user's groups, which is what reorders the list.
+     */
+    data class Chats(val userId: Long) : Topic {
+        override val name: String = "$PREFIX$userId"
+        override val prefix: String = PREFIX
+
+        companion object {
+            const val PREFIX = "chats:"
+        }
+    }
+
+    /**
+     * The agents and machines serving one team — who exists, who is online, what they are on.
+     * Cursor: a counter, because liveness lives in memory rather than in any row with an id.
+     */
+    data class Team(val teamId: Long) : Topic {
+        override val name: String = "$PREFIX$teamId"
+        override val prefix: String = PREFIX
+
+        companion object {
+            const val PREFIX = "team:"
         }
     }
 }
