@@ -181,7 +181,12 @@ describe("UpdatesStore verification", () => {
       digest: () => "100:5:-",
     });
 
-    store.handle({ t: "state", topic: "thread:7", seq: 101, digest: "101:6:-" });
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 101,
+      digest: "101:6:-",
+    });
 
     expect(seen).toEqual(["mismatch"]);
     expect(store.mismatches).toBe(1);
@@ -195,7 +200,12 @@ describe("UpdatesStore verification", () => {
       digest: () => "100:5:-",
     });
 
-    store.handle({ t: "state", topic: "thread:7", seq: 100, digest: "100:5:-" });
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 100,
+      digest: "100:5:-",
+    });
 
     expect(seen).toEqual([]);
     expect(store.mismatches).toBe(0);
@@ -209,7 +219,12 @@ describe("UpdatesStore verification", () => {
       digest: () => null, // still loading
     });
 
-    store.handle({ t: "state", topic: "thread:7", seq: 100, digest: "100:5:-" });
+    store.handle({
+      t: "state",
+      topic: "thread:7",
+      seq: 100,
+      digest: "100:5:-",
+    });
 
     expect(seen).toEqual([]);
   });
@@ -259,13 +274,20 @@ describe("parseFrame", () => {
   it("reads a state frame", () => {
     expect(
       parseFrame(
-        JSON.stringify({ t: "state", topic: "thread:7", seq: 9, digest: "9:2:-" }),
+        JSON.stringify({
+          t: "state",
+          topic: "thread:7",
+          seq: 9,
+          digest: "9:2:-",
+        }),
       ),
     ).toEqual({ t: "state", topic: "thread:7", seq: 9, digest: "9:2:-" });
   });
 
   it("ignores a state frame with no digest", () => {
-    expect(parseFrame(JSON.stringify({ t: "state", topic: "thread:7" }))).toBeNull();
+    expect(
+      parseFrame(JSON.stringify({ t: "state", topic: "thread:7" })),
+    ).toBeNull();
   });
 
   it("survives an ack with fields missing", () => {

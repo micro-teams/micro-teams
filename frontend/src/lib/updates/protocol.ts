@@ -84,7 +84,8 @@ export function parseFrame(raw: string): ServerFrame | null {
     }
     case "state": {
       const f = value as { topic?: unknown; seq?: unknown; digest?: unknown };
-      if (typeof f.topic !== "string" || typeof f.digest !== "string") return null;
+      if (typeof f.topic !== "string" || typeof f.digest !== "string")
+        return null;
       return {
         t: "state",
         topic: f.topic,
