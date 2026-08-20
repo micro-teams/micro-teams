@@ -17,9 +17,13 @@
  *
  *               Two more things carry as much weight as the token:
  *
- *               The port binds to loopback by default. That matters more than the secret does: an
- *               operator reaches it through an SSH tunnel, so even a leaked token is not something
- *               the internet can use. Deployments that need otherwise must say so explicitly.
+ *               The port must not be public, and that matters more than the secret does: an operator
+ *               reaches it through an SSH tunnel, so even a leaked token is not something the
+ *               internet can use. Where the restriction goes depends on how this runs — bind the
+ *               management port to 127.0.0.1 directly, or, in the bundled container deployment,
+ *               publish it as `127.0.0.1:9090:9090` on the host (binding to the CONTAINER's loopback
+ *               instead would make the published port reach nothing). deploy/README.md spells this
+ *               out, because it is the kind of detail that is silently got wrong.
  *
  *               With no token configured the surface does not exist. A blank default would mean a
  *               deployment that forgot to set one is wide open to anything that can reach the port,
