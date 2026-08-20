@@ -16,20 +16,16 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import type { Agent, Machine } from "@/api";
+import type { Agent } from "@/api";
 import { machineLabel } from "@/lib/agents";
-import { useTeamAgents } from "@/features/agents/useTeamAgents";
+import { useAgentsShell } from "@/features/agents/useAgentsShell";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { PageHeader } from "@/components/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ChangeAvatar } from "@/components/ChangeAvatar";
-import {
-  OpenAgentDialog,
-  OnlineDot,
-} from "@/features/agents/components/OpenAgentDialog";
-import { AddDeviceDialog } from "@/features/agents/components/AddDeviceDialog";
+import { OnlineDot } from "@/features/agents/components/OpenAgentDialog";
+import { AgentDialogs } from "@/features/agents/components/AgentDialogs";
 import { MachineDetail } from "@/features/agents/components/MachineDetail";
-import { RenameAgentDialog } from "@/features/agents/components/RenameAgentDialog";
 import { AgentKeepaliveControl } from "@/features/agents/components/AgentKeepaliveControl";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
@@ -46,20 +42,22 @@ export function AgentsPage() {
   const ws = useWorkspace();
   const navigate = useNavigate();
   const teamId = ws.teamId;
-  const [openDlg, setOpenDlg] = useState(false);
-  const [addDeviceDlg, setAddDeviceDlg] = useState(false);
-  const [infoMachine, setInfoMachine] = useState<Machine | null>(null);
-  const [renamingAgent, setRenamingAgent] = useState<Agent | null>(null);
   const [infoAgent, setInfoAgent] = useState<Agent | null>(null);
-
-  const team = useTeamAgents(teamId);
+  const shell = useAgentsShell(teamId);
+  const {
+    team,
+    setOpenDlg,
+    setAddDeviceDlg,
+    setRenamingAgent,
+    infoMachine,
+    setInfoMachine,
+    closeAgent,
+  } = shell;
 
   const currentTeam = ws.teams?.find((t) => t.id === teamId);
 
   function close(a: Agent) {
-    if (!confirm(`Close ${a.nickname || "this agent"}? Its live session ends.`))
-      return;
-    void team.close(a);
+    void closeAgent(a);
   }
 
   const agentList = team.agents;
@@ -217,18 +215,11 @@ export function AgentsPage() {
         )}
       </div>
 
-      <OpenAgentDialog
-        open={openDlg}
-        onOpenChange={setOpenDlg}
+      <AgentDialogs
         teams={ws.teams ?? []}
-        initialTeamId={teamId}
-        onOpened={team.reloadAgents}
-      />
-      <AddDeviceDialog
-        open={addDeviceDlg}
-        onOpenChange={setAddDeviceDlg}
         teamId={teamId}
-        onBound={team.reloadMachines}
+        shell={shell}
+        onOpened={team.reloadAgents}
       />
       {infoMachine && (
         <Modal
@@ -250,15 +241,6 @@ export function AgentsPage() {
             }}
           />
         </Modal>
-      )}
-      {renamingAgent && (
-        <RenameAgentDialog
-          key={renamingAgent.userId}
-          agent={renamingAgent}
-          open
-          onOpenChange={(o) => !o && setRenamingAgent(null)}
-          onRenamed={team.reloadAgents}
-        />
       )}
       {infoAgent && (
         <AgentInfoDialog
