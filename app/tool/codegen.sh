@@ -13,6 +13,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo="$(cd "$here/.." && pwd)"
 out="$here/packages/mt_api"
 
+# Run from app/, so the pinned generator version in app/openapitools.json is the one used. An
+# unpinned npx would silently follow whatever is newest, and a generator that changes under you is
+# a contract that changes under you.
+cd "$here"
+
 npx --yes @openapitools/openapi-generator-cli generate \
   -i "$repo/MicroTeams-API.yml" \
   -g dart-dio \
