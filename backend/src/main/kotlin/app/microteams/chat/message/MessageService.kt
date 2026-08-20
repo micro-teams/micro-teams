@@ -87,7 +87,7 @@ class MessageService(
         val dto = m.toDTO()
         messagingTemplate?.convertAndSend("/topic/thread/$threadId", dto)
         // Wake any agent members of the thread (connector listens after commit).
-        eventPublisher.publishEvent(MessagePostedEvent(threadId, userId, body.content))
+        eventPublisher.publishEvent(MessagePostedEvent(threadId, userId, body.content, dto.id))
         return dto
     }
 
