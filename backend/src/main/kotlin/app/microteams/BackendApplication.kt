@@ -25,7 +25,25 @@ import org.springframework.scheduling.annotation.EnableScheduling
 // (errors, config, IdType/BaseEntity) keep their original org.rucca.cheese packages,
 // so they can one day be extracted independently; everything else lives under
 // app.microteams. Component scan must therefore cover both roots.
-@SpringBootApplication(scanBasePackages = ["app.microteams", "org.rucca.cheese"])
+//
+// app.microteams.ops is deliberately EXCLUDED, and this exclusion is load-bearing rather than
+// tidiness. The operator surface must exist only on the management port; anything Spring finds by
+// component scan here is mounted on the PUBLIC application, and a Filter bean found here is applied
+// to every public request. Those beans are declared instead by OpsManagementConfiguration, which
+// Spring Boot loads into the management child context alone. If this exclusion is ever removed, the
+// operator endpoints and their token check appear on the public port — quietly, and while every
+// test still passes except the one written for exactly this (OpsSurfaceTest).
+@SpringBootApplication(scanBasePackages = ["app.microteams", "org.rucca.cheese"], exclude = [])
+@org.springframework.context.annotation.ComponentScan(
+    basePackages = ["app.microteams", "org.rucca.cheese"],
+    excludeFilters =
+        [
+            org.springframework.context.annotation.ComponentScan.Filter(
+                type = org.springframework.context.annotation.FilterType.REGEX,
+                pattern = ["app\\.microteams\\.ops\\..*"],
+            )
+        ],
+)
 @EnableConfigurationProperties(ApplicationConfig::class, LineRegistryProperties::class)
 @EnableScheduling
 class BackendApplication(private val applicationConfig: ApplicationConfig) {

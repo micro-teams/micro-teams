@@ -99,6 +99,12 @@ constructor(
         assertEquals(1, welcome["v"].asInt())
         assertTrue(machineHub.isOnline(machineId), "machine should be online after handshake")
 
+        // …followed by the server asking which build this machine runs. Asked on attach rather than
+        // announced, so the answer is refreshed exactly when it matters most: after an update has
+        // replaced the process. A connector too old to know the question simply never answers.
+        val ask = nextFrame(collector)
+        assertEquals("machine.info", ask["t"].asText())
+
         // 2) server opens a screen -> client receives the exact session.create
         val screen =
             machineHub.openScreen(

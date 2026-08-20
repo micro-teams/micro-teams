@@ -19,6 +19,7 @@ import (
 	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/commandapplet"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
+	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/mtbrand"
 )
@@ -44,6 +45,9 @@ func main() {
 		SilenceUsage:  true,
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
+
+	// Tell the host what to answer when the control plane asks which build this machine runs.
+	host.Build = version
 
 	// The user-facing service lifecycle: auth / link / status / run / update / uninstall.
 	for _, c := range daemoncmd.Commands() {

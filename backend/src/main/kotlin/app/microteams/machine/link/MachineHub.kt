@@ -131,6 +131,19 @@ class HubMachine(val machineId: String) {
      * them.
      */
     @Volatile var origin: String? = null
+
+    /**
+     * Which build of the connector this machine is running, as it reported when asked.
+     *
+     * Null means it has not answered — an older connector that does not know the question, or one
+     * that has not answered yet. Null is therefore "unknown", never "old": an operator deciding
+     * whether an update landed must be able to tell those apart.
+     */
+    @Volatile var build: String? = null
+
+    /** When this machine last attached. Null if it has not connected since this server started. */
+    @Volatile var connectedAt: java.time.Instant? = null
+
     val screens: MutableMap<String, HubScreen> = ConcurrentHashMap()
     val execSeq = AtomicInteger(0)
     val callSeq = AtomicInteger(0)
@@ -227,7 +240,13 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         // Record the endpoint the CLI dialed on this connection (null when an older client did not
         // report one); it becomes MICROTEAMS_API for screens opened while this connection lives.
         if (origin != null) machine.origin = origin
+        machine.connectedAt = java.time.Instant.now()
         machine.send(LinkMsg(t = "welcome", v = PROTOCOL_VERSION))
+        // Ask which build it runs. Asking on attach rather than having it announce means the answer
+        // is refreshed at the one moment it matters most — right after an update has replaced the
+        // process — and an older connector that does not know the question simply never answers,
+        // which reads as "unknown" rather than as a lie.
+        machine.send(LinkMsg(t = "machine.info"))
     }
 
     fun detachMachine(machineId: String, transport: MachineTransport) {
@@ -243,6 +262,14 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
      * The base URL the machine reported on its live connection, or null (offline / not reported).
      */
     fun originOf(machineId: String): String? = machines[machineId]?.origin
+
+    /** The connector build this machine reported, or null if it has not said. */
+    fun buildOf(machineId: String): String? = machines[machineId]?.build
+
+    fun connectedAtOf(machineId: String): java.time.Instant? = machines[machineId]?.connectedAt
+
+    /** How many screens this machine currently holds. */
+    fun screensOf(machineId: String): Int = machines[machineId]?.screens?.size ?: 0
 
     fun onlineMachineIds(): List<String> =
         machines.values.filter { it.transport != null }.map { it.machineId }
@@ -576,6 +603,12 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                         PROTOCOL_VERSION,
                     )
                 }
+            }
+            // The machine answering what we asked on attach. One shape for anything a machine can
+            // tell us about itself, so a second fact later is a new name rather than a new message.
+            "machine.info" -> {
+                if (m.name == "version")
+                    machine.build = m.value?.toString()?.takeIf { it.isNotBlank() }
             }
             "heartbeat",
             "session.ready" -> {}
