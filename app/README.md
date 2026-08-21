@@ -21,7 +21,7 @@ which is also what lets the httpOnly refresh cookie work at all.
 ## Tests
 
     flutter test                       # unit and widget tests
-    flutter build web --release && node tool/make-sw.mjs build/web
+    flutter build web --release && node tool/launcher.mjs build/web && node tool/make-sw.mjs build/web
     npm ci && npx playwright install chromium && bash tool/check-web.sh
 
 The second one is not optional in CI, and it is the only thing that can answer the questions that

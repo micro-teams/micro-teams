@@ -11,9 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/auth/auth_api.dart';
-import 'package:microteams/src/common/cache.dart';
 import 'package:microteams/src/common/config.dart';
-import 'package:microteams/src/common/mt_client.dart';
+import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/team_scope.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/providers.dart';
@@ -91,7 +90,6 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
     endpointsProvider.overrideWithValue(
       const Endpoints(origin: 'http://backend.test'),
     ),
-    cacheProvider.overrideWithValue(ReadCache.inMemory()),
     mtClientProvider.overrideWithValue(
       MtClient(
         baseUrl: 'http://backend.test/mt',
@@ -126,9 +124,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Typed on Object, because the menu now carries the generated role enum itself rather than a
+    // 'role:NAME' string — see the comment on the button.
     final menus = tester
-        .widgetList<PopupMenuButton<String>>(
-          find.byType(PopupMenuButton<String>),
+        .widgetList<PopupMenuButton<Object>>(
+          find.byType(PopupMenuButton<Object>),
         )
         .toList();
     expect(menus, hasLength(2));
@@ -146,7 +146,7 @@ void main() {
     await tester.pumpAndSettle();
     backend.asked.clear();
 
-    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.tap(find.byType(PopupMenuButton<Object>).last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('make admin'));
     await tester.pumpAndSettle();

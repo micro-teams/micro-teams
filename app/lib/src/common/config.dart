@@ -23,15 +23,25 @@ class Endpoints {
   /// nt: teams, chats, machines, agents. Raw DTOs, bearer auth.
   String get mt => '$origin/mt';
 
+  /// A websocket URL under [over], which is a line's origin — or this app's own when the line is
+  /// same-origin, or when there is no line manager yet.
+  ///
+  /// Streams are the one thing MultiPath cannot race, so which line carries them is a decision made
+  /// once per connection and remade on every reconnect. Taking the origin as an argument is what
+  /// lets that decision live in the socket rather than here.
+  String socketUrl(String over, String path) {
+    final base = over.isEmpty
+        ? _pageOriginAsWebSocket()
+        : over.replaceFirst(RegExp('^http'), 'ws');
+    return '$base$path';
+  }
+
   /// The updates socket. ws:// or wss:// derived from the origin — on the web from the page's.
   String updatesSocket(String? token) {
-    final base = origin.isEmpty
-        ? _pageOriginAsWebSocket()
-        : origin.replaceFirst(RegExp('^http'), 'ws');
     final query = token == null || token.isEmpty
         ? ''
         : '?token=${Uri.encodeComponent(token)}';
-    return '$base/mt/updates$query';
+    return socketUrl(origin, '/mt/updates$query');
   }
 
   /// A viewer connection for one live screen. Same reasoning as [updatesSocket].
@@ -39,13 +49,13 @@ class Endpoints {
   /// The path mirrors MachineWebSocketConfig's `/machine/screen/*` mapping. The screen id is a
   /// string, not a number: it is the session id the connector chose.
   String screenSocket(String sessionId, String? token) {
-    final base = origin.isEmpty
-        ? _pageOriginAsWebSocket()
-        : origin.replaceFirst(RegExp('^http'), 'ws');
     final query = token == null || token.isEmpty
         ? ''
         : '?token=${Uri.encodeComponent(token)}';
-    return '$base/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query';
+    return socketUrl(
+      origin,
+      '/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query',
+    );
   }
 }
 

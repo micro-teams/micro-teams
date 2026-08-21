@@ -13,7 +13,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
-import '../common/mt_client.dart';
+import '../common/api.dart';
 import '../common/team_scope.dart';
 import '../providers.dart';
 
@@ -21,9 +21,10 @@ import '../providers.dart';
 class TeamRosterController extends FamilyAsyncNotifier<List<TeamMember>, int> {
   @override
   Future<List<TeamMember>> build(int arg) async {
-    final response = await mtCall(
-      ref.watch(mtClientProvider).team.listTeamMembers(id: arg),
-    );
+    final response = await ref
+        .watch(mtClientProvider)
+        .team
+        .listTeamMembers(id: arg);
     return response.data ?? const <TeamMember>[];
   }
 }
@@ -43,19 +44,17 @@ class TeamAdmin {
   MtClient get _client => _ref.read(mtClientProvider);
 
   Future<Team?> create(String name) async {
-    final response = await mtCall(
-      _client.team.createTeam(createTeamRequest: CreateTeamRequest(name: name)),
+    final response = await _client.team.createTeam(
+      createTeamRequest: CreateTeamRequest(name: name),
     );
     _ref.invalidate(teamsProvider);
     return response.data;
   }
 
   Future<void> rename(int teamId, String name) async {
-    await mtCall(
-      _client.team.renameTeam(
-        id: teamId,
-        renameTeamRequest: RenameTeamRequest(name: name),
-      ),
+    await _client.team.renameTeam(
+      id: teamId,
+      renameTeamRequest: RenameTeamRequest(name: name),
     );
     _ref.invalidate(teamsProvider);
   }
@@ -65,7 +64,7 @@ class TeamAdmin {
   /// Otherwise the app keeps asking the server about a team that no longer exists, and every screen
   /// scoped to it shows an error nobody can act on.
   Future<void> delete(int teamId) async {
-    await mtCall(_client.team.deleteTeam(id: teamId));
+    await _client.team.deleteTeam(id: teamId);
     if (_ref.read(selectedTeamProvider) == teamId) {
       _ref.read(selectedTeamProvider.notifier).select(null);
     }
@@ -75,20 +74,18 @@ class TeamAdmin {
   /// Somebody joins as a plain member. Promoting is a separate, deliberate act — a screen that
   /// let you add an owner in one step makes handing over a team a slip rather than a decision.
   Future<void> addMember(int teamId, int userId) async {
-    await mtCall(
-      _client.team.addTeamMember(
-        id: teamId,
-        addTeamMemberRequest: AddTeamMemberRequest(
-          userId: userId,
-          role: AddTeamMemberRequestRoleEnum.MEMBER,
-        ),
+    await _client.team.addTeamMember(
+      id: teamId,
+      addTeamMemberRequest: AddTeamMemberRequest(
+        userId: userId,
+        role: AddTeamMemberRequestRoleEnum.MEMBER,
       ),
     );
     _ref.invalidate(teamRosterProvider(teamId));
   }
 
   Future<void> removeMember(int teamId, int userId) async {
-    await mtCall(_client.team.removeTeamMember(id: teamId, userId: userId));
+    await _client.team.removeTeamMember(id: teamId, userId: userId);
     _ref.invalidate(teamRosterProvider(teamId));
   }
 
@@ -97,12 +94,10 @@ class TeamAdmin {
     int userId,
     ChangeRoleRequestRoleEnum role,
   ) async {
-    await mtCall(
-      _client.team.changeMemberRole(
-        id: teamId,
-        userId: userId,
-        changeRoleRequest: ChangeRoleRequest(role: role),
-      ),
+    await _client.team.changeMemberRole(
+      id: teamId,
+      userId: userId,
+      changeRoleRequest: ChangeRoleRequest(role: role),
     );
     _ref.invalidate(teamRosterProvider(teamId));
   }

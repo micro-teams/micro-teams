@@ -11,9 +11,16 @@ import 'package:mt_api/mt_api.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers.dart';
-import 'mt_client.dart';
 
 const String _selectedTeamKey = 'microteams.teamId';
+
+/// The request whose answer seeds the team list on a cold start.
+///
+/// Written out because the cache is keyed by the REQUEST rather than by a name a screen chose —
+/// which is what stops two screens caching the same data under two names. `cached_reads_test.dart`
+/// makes the real call against a fake and reads it back, so this cannot drift.
+const int _teamsPageSize = 100;
+const String teamsPath = '/mt/team?page_size=$_teamsPageSize';
 
 class TeamsController extends AsyncNotifier<List<Team>> {
   @override
@@ -21,19 +28,21 @@ class TeamsController extends AsyncNotifier<List<Team>> {
     final session = ref.watch(sessionProvider).value;
     if (session == null) return const [];
 
-    final response = await mtCall(
-      ref.read(mtClientProvider).team.listTeams(pageSize: 100),
-    );
-    final teams = response.data?.teams ?? const <Team>[];
-    ref
-        .read(cacheProvider)
-        .set<List<Object?>>('teams', teams.map((t) => t.toJson()).toList());
-    return teams;
+    final response = await ref
+        .read(mtClientProvider)
+        .team
+        .listTeams(pageSize: _teamsPageSize);
+    // Nothing is stored here: the client records every successful GET under the request's own key.
+    return response.data?.teams ?? const <Team>[];
   }
 
+  /// What the last run got for the same request, or nothing.
   List<Team> cached() {
-    final raw = ref.read(cacheProvider).get<List<Object?>>('teams');
-    if (raw == null) return const [];
+    final body = ref
+        .read(mtClientProvider)
+        .cached<Map<String, Object?>>('GET', teamsPath);
+    final raw = body?['teams'];
+    if (raw is! List) return const [];
     return raw.whereType<Map<String, Object?>>().map(Team.fromJson).toList();
   }
 }

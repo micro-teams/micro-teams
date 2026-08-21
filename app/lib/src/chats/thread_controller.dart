@@ -17,13 +17,21 @@ import 'package:mt_api/mt_api.dart';
 
 import '../providers.dart';
 import '../common/errors.dart';
-import '../common/mt_client.dart';
 import '../common/updates/topics.dart';
 import 'merge.dart';
 import 'outbox.dart';
 
 /// Messages per request — the newest page, and each older page walked backwards.
 const int pageSize = 100;
+
+/// The request whose answer seeds a conversation on a cold start.
+///
+/// Written out because the cache is keyed by the REQUEST — which is what stops two screens
+/// inventing two names for the same data, at the cost of a caller wanting yesterday's answer having
+/// to name the question. `cached_reads_test.dart` makes the real call against a fake and reads it
+/// back, so this cannot drift from what the generated client actually sends.
+String newestPagePath(int threadId) =>
+    '/mt/chat/$threadId/messages?page_size=$pageSize';
 
 class ThreadState {
   const ThreadState({
@@ -75,13 +83,12 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
   @override
   Future<ThreadState> build(int arg) async {
     _threadId = arg;
-    final cache = ref.watch(cacheProvider);
     final client = ref.watch(mtClientProvider);
 
     _outbox = Outbox(
       threadId: _threadId,
       client: client,
-      cache: cache,
+      store: ref.watch(stateStoreProvider),
       onSent: _adoptSent,
       onChanged: _publishPending,
     );
@@ -104,13 +111,14 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     // Paint what we already have at once, then revalidate. On a phone this is most of the
     // experience: the app was killed, and a spinner where a conversation used to be reads as
     // data loss.
-    final cached = cache.get<List<Object?>>('messages:$_threadId');
-    final seeded = cached == null
-        ? const <Message>[]
-        : cached
-              .whereType<Map<String, Object?>>()
-              .map(Message.fromJson)
-              .toList();
+    final cached = client.cached<Map<String, Object?>>(
+      'GET',
+      newestPagePath(_threadId),
+    );
+    final seeded = (cached?['messages'] as List<Object?>? ?? const [])
+        .whereType<Map<String, Object?>>()
+        .map(Message.fromJson)
+        .toList();
 
     final fetched = await _fetchNewest(seeded);
     return fetched;
@@ -124,8 +132,9 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     bool knownHasOlder = false,
   }) async {
     final client = ref.read(mtClientProvider);
-    final response = await mtCall(
-      client.chat.listMessages(id: _threadId, pageSize: pageSize),
+    final response = await client.chat.listMessages(
+      id: _threadId,
+      pageSize: pageSize,
     );
     final body = response.data;
     final page = body?.messages ?? const <Message>[];
@@ -136,7 +145,6 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     }
 
     final merged = mergeNewestPage(held, page);
-    _cacheNewest(merged);
     return ThreadState(
       messages: merged,
       pending: _outbox?.pending ?? const [],
@@ -181,12 +189,10 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
       current.copyWith(loadingOlder: true, clearError: true),
     );
     try {
-      final response = await mtCall(
-        ref
-            .read(mtClientProvider)
-            .chat
-            .listMessages(id: _threadId, pageStart: cursor, pageSize: pageSize),
-      );
+      final response = await ref
+          .read(mtClientProvider)
+          .chat
+          .listMessages(id: _threadId, pageStart: cursor, pageSize: pageSize);
       final body = response.data;
       _walkedBack = true;
       _olderCursor = body?.page.nextStart;
@@ -224,7 +230,6 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     if (current == null) return;
     if (current.messages.any((m) => m.id == message.id)) return;
     final merged = [...current.messages, message];
-    _cacheNewest(merged);
     state = AsyncValue.data(
       current.copyWith(messages: merged, pending: _outbox?.pending ?? const []),
     );
@@ -236,20 +241,6 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
     state = AsyncValue.data(
       current.copyWith(pending: _outbox?.pending ?? const []),
     );
-  }
-
-  /// Only the newest page is cached. History someone scrolled up to read is cheap to fetch again
-  /// and expensive to store on a phone.
-  void _cacheNewest(List<Message> merged) {
-    final tail = merged.length <= pageSize
-        ? merged
-        : merged.sublist(merged.length - pageSize);
-    ref
-        .read(cacheProvider)
-        .set<List<Object?>>(
-          'messages:$_threadId',
-          tail.map((m) => m.toJson()).toList(),
-        );
   }
 }
 

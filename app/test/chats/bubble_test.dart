@@ -15,10 +15,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/auth/auth_api.dart';
-import 'package:microteams/src/common/cache.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/chats/thread_screen.dart';
-import 'package:microteams/src/common/mt_client.dart';
+import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/ui/avatar.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 
@@ -95,7 +94,6 @@ Future<void> _pumpThread(WidgetTester tester, {bool asPane = false}) async {
         endpointsProvider.overrideWithValue(
           const Endpoints(origin: 'http://backend.test'),
         ),
-        cacheProvider.overrideWithValue(ReadCache.inMemory()),
         mtClientProvider.overrideWithValue(
           MtClient(
             baseUrl: 'http://backend.test/mt',

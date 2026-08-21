@@ -41,6 +41,12 @@ class UpdatesSocket {
   /// yesterday's token is refused, and looks exactly like a server that has gone quiet.
   final String Function() url;
 
+  /// Told when a dial succeeds and when it ends, so the line policy can learn which lines can hold
+  /// a stream at all — a different question from which answers requests quickly. Optional because
+  /// the terminal's socket and the tests do not have a policy to inform.
+  void Function()? onOpened;
+  void Function()? onClosed;
+
   WebSocketChannel? _channel;
   StreamSubscription<Object?>? _messages;
   Timer? _ping;
@@ -78,11 +84,15 @@ class UpdatesSocket {
     if (_closed) return;
     try {
       final channel = WebSocketChannel.connect(Uri.parse(url()));
+      onOpened?.call();
       _channel = channel;
       _lastHeard = DateTime.now();
       _messages = channel.stream.listen(
         _onMessage,
-        onDone: _onClosed,
+        onDone: () {
+          onClosed?.call();
+          _onClosed();
+        },
         onError: (Object _) => _onClosed(),
         cancelOnError: true,
       );

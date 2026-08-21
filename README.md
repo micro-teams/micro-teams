@@ -154,7 +154,7 @@ For a build you can serve, plus the browser checks that assert it actually start
 offline):
 
 ```sh
-flutter build web --release && node tool/make-sw.mjs build/web
+flutter build web --release && node tool/launcher.mjs build/web && node tool/make-sw.mjs build/web
 npm ci && npx playwright install chromium && bash tool/check-web.sh
 ```
 

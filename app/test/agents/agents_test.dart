@@ -17,10 +17,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/auth/auth_api.dart';
-import 'package:microteams/src/common/cache.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/agents/agents_screen.dart';
-import 'package:microteams/src/common/mt_client.dart';
+import 'package:microteams/src/common/api.dart';
 
 /// Answers the four calls this screen makes, and records what it was asked to do.
 class _FakeBackend implements HttpClientAdapter {
@@ -103,7 +102,6 @@ Widget host(_FakeBackend backend, {void Function(int threadId)? onOpenChat}) =>
         endpointsProvider.overrideWithValue(
           const Endpoints(origin: 'http://backend.test'),
         ),
-        cacheProvider.overrideWithValue(ReadCache.inMemory()),
         mtClientProvider.overrideWithValue(
           MtClient(
             baseUrl: 'http://backend.test/mt',
@@ -119,6 +117,18 @@ Widget host(_FakeBackend backend, {void Function(int threadId)? onOpenChat}) =>
         ),
       ),
     );
+
+/// Open the one agent's sheet. Every per-agent action lives in there now — the row is the agent,
+/// not a strip of icon buttons, so a test that taps an action taps it where a person would.
+Future<void> openAgent(WidgetTester tester) async {
+  await tester.tap(find.text('agent3'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> openMachine(WidgetTester tester) async {
+  await tester.tap(find.text('box'));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('lists a team\'s agents and machines together', (tester) async {
@@ -142,7 +152,8 @@ void main() {
       await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Chat'));
+      await openAgent(tester);
+      await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 9);
@@ -161,7 +172,8 @@ void main() {
       await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Chat'));
+      await openAgent(tester);
+      await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 77);
@@ -182,7 +194,8 @@ void main() {
       await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Chat'));
+      await openAgent(tester);
+      await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 77);
@@ -195,9 +208,10 @@ void main() {
     ) async {
       await tester.pumpWidget(host(_FakeBackend(machineTeams: const [1])));
       await tester.pumpAndSettle();
+      await openMachine(tester);
 
       expect(
-        find.byTooltip('Remove from this team'),
+        find.text('Remove from this team'),
         findsNothing,
         reason:
             'unbinding the last team orphans the machine and the backend forgets '
@@ -208,8 +222,9 @@ void main() {
     testWidgets('is offered when another team still holds it', (tester) async {
       await tester.pumpWidget(host(_FakeBackend(machineTeams: const [1, 2])));
       await tester.pumpAndSettle();
+      await openMachine(tester);
 
-      expect(find.byTooltip('Remove from this team'), findsOneWidget);
+      expect(find.text('Remove from this team'), findsOneWidget);
     });
   });
 
@@ -218,7 +233,8 @@ void main() {
     await tester.pumpWidget(host(backend));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Close session'));
+    await openAgent(tester);
+    await tester.tap(find.text('Close agent'));
     await tester.pumpAndSettle();
 
     expect(find.text('Close agent3?'), findsOneWidget);

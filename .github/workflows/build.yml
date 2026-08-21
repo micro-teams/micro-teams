@@ -103,6 +103,14 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: flutter build web --release
+      # The first request cannot be spread across lines, so it is made small and given one job:
+      # register the worker, carry the registry inline, and start Flutter on whichever line answers
+      # first. Before make-sw, because the launcher IS the document the worker precaches and hashes.
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: node tool/launcher.mjs build/web
+
       # Stamps the service worker with a hash of the build and removes Flutter's deprecated one.
       # Part of the build, not a nicety: an unstamped worker serves the first build it ever cached
       # for as long as the browser lives.
@@ -114,7 +122,6 @@ jobs:
       # and did not start offline; that is why its check existed, and why this one replaces it.
       - name: Check the built app in a real browser
         run: |
-          npm ci
           npx playwright install --with-deps chromium
           bash tool/check-web.sh
 
