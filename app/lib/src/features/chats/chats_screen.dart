@@ -19,13 +19,24 @@ import 'package:mt_api/mt_api.dart';
 import '../../app_providers.dart';
 import '../../ui/avatar.dart';
 import '../../ui/chat_time.dart';
+import '../../ui/theme.dart';
 import 'chats_controller.dart';
 
 class ChatsScreen extends ConsumerWidget {
-  const ChatsScreen({required this.onOpen, this.selectedId, super.key});
+  const ChatsScreen({
+    required this.onOpen,
+    this.selectedId,
+    this.dense = false,
+    super.key,
+  });
 
   final void Function(ChatSummary thread) onOpen;
   final int? selectedId;
+
+  /// Beside an open conversation the list is the narrower, 14px variant the React desktop shell
+  /// used; on a phone it is the roomier 16px one. Same widget, two measured densities — not two
+  /// widgets, which is how the two shells drifted apart last time.
+  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,6 +51,7 @@ class ChatsScreen extends ConsumerWidget {
         onOpen: onOpen,
         selectedId: selectedId,
         me: me,
+        dense: dense,
         stale: true,
       ),
       error: (error, _) => Center(
@@ -62,6 +74,7 @@ class ChatsScreen extends ConsumerWidget {
           onOpen: onOpen,
           selectedId: selectedId,
           me: me,
+          dense: dense,
           stale: false,
         ),
       ),
@@ -75,6 +88,7 @@ class _List extends StatelessWidget {
     required this.onOpen,
     required this.selectedId,
     required this.me,
+    required this.dense,
     required this.stale,
   });
 
@@ -82,6 +96,7 @@ class _List extends StatelessWidget {
   final void Function(ChatSummary thread) onOpen;
   final int? selectedId;
   final int? me;
+  final bool dense;
   final bool stale;
 
   @override
@@ -113,6 +128,7 @@ class _List extends StatelessWidget {
       itemBuilder: (context, index) => _ChatRow(
         chat: threads[index],
         me: me,
+        dense: dense,
         selected: threads[index].id == selectedId,
         onOpen: () => onOpen(threads[index]),
       ),
@@ -124,12 +140,14 @@ class _ChatRow extends StatelessWidget {
   const _ChatRow({
     required this.chat,
     required this.me,
+    required this.dense,
     required this.selected,
     required this.onOpen,
   });
 
   final ChatSummary chat;
   final int? me;
+  final bool dense;
   final bool selected;
   final VoidCallback onOpen;
 
@@ -160,7 +178,9 @@ class _ChatRow extends StatelessWidget {
       child: InkWell(
         onTap: onOpen,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          // 10/12, measured off the React row. The row's height is not set: it is whatever the
+          // text column comes to, which is what makes the phone row taller than the dense one.
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -169,7 +189,7 @@ class _ChatRow extends StatelessWidget {
                       userId: others.first.userId,
                       nickname: others.first.nickname,
                       avatarId: others.first.avatarId,
-                      size: 48,
+                      size: Metrics.avatarInList,
                     )
                   : MemberGridAvatar(
                       members: [
@@ -184,7 +204,7 @@ class _ChatRow extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
                     border: Border(
                       bottom: BorderSide(color: scheme.outlineVariant),
@@ -203,6 +223,10 @@ class _ChatRow extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: text.bodyLarge?.copyWith(
+                                fontSize: dense
+                                    ? Metrics.rowTitleDense
+                                    : Metrics.rowTitlePhone,
+                                height: dense ? 1.4 : 1.5,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -216,12 +240,13 @@ class _ChatRow extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 2),
                       Text(
                         preview,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: text.bodyMedium?.copyWith(
+                          fontSize: 14,
+                          height: 1.4,
                           color: scheme.onSurfaceVariant,
                         ),
                       ),

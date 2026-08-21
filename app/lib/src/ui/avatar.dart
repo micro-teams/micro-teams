@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app_providers.dart';
+import 'theme.dart';
 
 const List<Color> _palette = [
   Color(0xFF4E6EF2),
@@ -30,7 +31,7 @@ class UserAvatar extends ConsumerWidget {
     required this.userId,
     this.nickname,
     this.avatarId,
-    this.size = 40,
+    this.size = Metrics.avatarInBubble,
     super.key,
   });
 
@@ -45,7 +46,8 @@ class UserAvatar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final radius = BorderRadius.circular(size <= 28 ? 6 : 8);
+    // One radius at every size — the React `Avatar` had one `rounded-lg` and so does this.
+    final radius = BorderRadius.circular(Metrics.avatarRadius);
     final label = (nickname ?? '$userId').trim();
     final initial = label.isEmpty ? '#' : label.characters.first.toUpperCase();
 
@@ -87,7 +89,11 @@ class UserAvatar extends ConsumerWidget {
 
 /// A group's avatar: up to four members in a grid, the way WeChat draws one.
 class MemberGridAvatar extends StatelessWidget {
-  const MemberGridAvatar({required this.members, this.size = 48, super.key});
+  const MemberGridAvatar({
+    required this.members,
+    this.size = Metrics.avatarInList,
+    super.key,
+  });
 
   /// (userId, nickname, avatarId) for as many members as the caller has.
   final List<({int userId, String nickname, int? avatarId})> members;

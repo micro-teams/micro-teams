@@ -93,20 +93,20 @@ GoRouter _buildRouter(WidgetRef ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/login', pageBuilder: _page(const LoginScreen())),
       ShellRoute(
         builder: (context, state, child) => _Shell(child: child),
         routes: [
           GoRoute(
             path: '/chats',
-            builder: (context, state) => const _ChatsPane(),
+            pageBuilder: _page(const _ChatsPane()),
             routes: [
               GoRoute(
                 path: ':threadId',
-                builder: (context, state) {
+                pageBuilder: (context, state) {
                   final id =
                       int.tryParse(state.pathParameters['threadId'] ?? '') ?? 0;
-                  return _ChatsPane(openThreadId: id);
+                  return NoTransitionPage(child: _ChatsPane(openThreadId: id));
                 },
               ),
             ],
@@ -116,32 +116,45 @@ GoRouter _buildRouter(WidgetRef ref) {
           // rather than after everything else is done.
           GoRoute(
             path: '/screen/:sessionId',
-            builder: (context, state) => TerminalScreen(
-              sessionId: state.pathParameters['sessionId'] ?? '',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: TerminalScreen(
+                sessionId: state.pathParameters['sessionId'] ?? '',
+              ),
             ),
           ),
           GoRoute(
             path: '/teams',
-            builder: (context, state) => const _NotYetMigrated(name: 'docs'),
+            pageBuilder: _page(const _NotYetMigrated(name: 'docs')),
           ),
           GoRoute(
             path: '/agents',
-            builder: (context, state) => AgentsScreen(
-              // An agent with no session has no screen to watch, and the row does not offer one —
-              // so reaching here means there is a sid.
-              onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
-              onOpenChat: (threadId) => context.go('/chats/$threadId'),
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: AgentsScreen(
+                // An agent with no session has no screen to watch, and the row does not offer one —
+                // so reaching here means there is a sid.
+                onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
+                onOpenChat: (threadId) => context.go('/chats/$threadId'),
+              ),
             ),
           ),
           GoRoute(
             path: '/profile',
-            builder: (context, state) => const _NotYetMigrated(name: 'me'),
+            pageBuilder: _page(const _NotYetMigrated(name: 'me')),
           ),
         ],
       ),
     ],
   );
 }
+
+/// Every route is a [NoTransitionPage].
+///
+/// Material's default page transition slides and fades a screen in. That is right for a phone push
+/// — a screen arriving on top of another — and wrong for everything this app actually does, which
+/// is switch between tabs and between conversations. Those are not arrivals; there is no hierarchy
+/// to animate. The React client had no such effect and nobody missed it.
+GoRouterPageBuilder _page(Widget child) =>
+    (context, state) => NoTransitionPage(child: child);
 
 /// Rebuilds the router when the session changes, so the redirect above runs again.
 class _SessionListenable extends ChangeNotifier {
@@ -178,11 +191,17 @@ class _ChatsPane extends ConsumerWidget {
       body: Row(
         children: [
           SizedBox(
-            width: 340,
+            width: Metrics.listPaneWidth,
             child: Scaffold(
-              appBar: AppBar(title: const Text('chats')),
+              // The list is not something you can go back FROM — it is always there. Material
+              // would add an arrow here just because /chats/1 can pop to /chats.
+              appBar: AppBar(
+                automaticallyImplyLeading: false,
+                title: const Text('chats'),
+              ),
               body: ChatsScreen(
                 selectedId: open,
+                dense: true,
                 onOpen: (thread) => context.go('/chats/${thread.id}'),
               ),
             ),
@@ -191,7 +210,12 @@ class _ChatsPane extends ConsumerWidget {
           Expanded(
             child: open == null
                 ? const Center(child: Text('pick a conversation'))
-                : ThreadScreen(key: ValueKey(open), threadId: open),
+                // asPane: beside the list, not on top of it. No back button — see ThreadScreen.
+                : ThreadScreen(
+                    key: ValueKey(open),
+                    threadId: open,
+                    asPane: true,
+                  ),
           ),
         ],
       ),
@@ -255,16 +279,24 @@ class _Shell extends StatelessWidget {
       return Scaffold(
         body: Row(
           children: [
+            // 64px and icon-first, which is what the React desktop rail was. Material's default
+            // rail is wider and puts the label beside the icon; that difference alone moved every
+            // pane beside it.
             NavigationRail(
               selectedIndex: index,
               labelType: NavigationRailLabelType.all,
+              minWidth: Metrics.railWidth,
+              groupAlignment: -1,
               onDestinationSelected: (i) => context.go(_destinations[i].path),
               destinations: [
                 for (final d in _destinations)
                   NavigationRailDestination(
                     icon: Icon(d.icon),
                     selectedIcon: Icon(d.selected),
-                    label: Text(d.label),
+                    label: Text(
+                      d.label,
+                      style: const TextStyle(fontSize: Metrics.railLabelSize),
+                    ),
                   ),
               ],
             ),

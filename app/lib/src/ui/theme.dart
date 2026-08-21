@@ -90,14 +90,21 @@ ThemeData darkTheme() {
       scrolledUnderElevation: 0,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: text.titleLarge?.copyWith(color: _ink, fontSize: 20),
+      // 16px, regular. Measured off the React header, not chosen: Material's default title is
+      // 20px and half a weight heavier, which is most of why screens "felt bigger than before".
+      toolbarHeight: 56,
+      titleTextStyle: text.titleMedium?.copyWith(
+        color: _ink,
+        fontSize: 16,
+        fontWeight: FontWeight.w400,
+      ),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: _page,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       indicatorColor: Colors.transparent,
-      height: 60,
+      height: 55,
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => text.labelMedium?.copyWith(
           color: states.contains(WidgetState.selected) ? brandGreen : _inkMuted,
@@ -157,6 +164,44 @@ OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
   borderRadius: BorderRadius.circular(6),
   borderSide: BorderSide(color: color),
 );
+
+/// The measurements, in one place, all read off the React client in a browser rather than chosen.
+/// They are here rather than inline so that "the same size as before" is a thing this file can be
+/// asked about, instead of a property spread across five widgets.
+class Metrics {
+  const Metrics._();
+
+  /// The desktop rail: 64px wide, 44px targets, a 10px label under each icon.
+  static const double railWidth = 64;
+  static const double railItemSize = 44;
+  static const double railLabelSize = 10;
+
+  /// The chat list beside an open conversation.
+  static const double listPaneWidth = 320;
+
+  /// A conversation does not run the full width of a wide window; it sits in a centred column.
+  /// 768px, which is what makes a bubble cap out at 553px there.
+  static const double readingColumn = 768;
+
+  /// Avatars. Two sizes, and only two: the list uses the larger, a message bubble the smaller.
+  /// The React client used exactly these, and the same rounded-square radius for both.
+  static const double avatarInList = 48;
+  static const double avatarInBubble = 40;
+  static const double avatarRadius = 6;
+
+  /// Bubbles: 6px corners, 8/12 padding, 14px text, capped at 72% of the column.
+  static const double bubbleRadius = 6;
+  static const EdgeInsets bubblePadding = EdgeInsets.symmetric(
+    horizontal: 12,
+    vertical: 8,
+  );
+  static const double bubbleTextSize = 14;
+  static const double bubbleMaxFraction = 0.72;
+
+  /// A chat row is taller on a phone (16px title) than beside a conversation (14px).
+  static const double rowTitlePhone = 16;
+  static const double rowTitleDense = 14;
+}
 
 /// Breakpoint between the phone layout (one screen at a time) and the desktop one (list beside
 /// detail). One number, named, because two screens disagreeing about where "wide" starts is how a

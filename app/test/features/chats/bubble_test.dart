@@ -19,6 +19,7 @@ import 'package:microteams/src/core/cache.dart';
 import 'package:microteams/src/core/config.dart';
 import 'package:microteams/src/features/chats/thread_screen.dart';
 import 'package:microteams/src/mt/client.dart';
+import 'package:microteams/src/ui/avatar.dart';
 import 'package:microteams/src/ui/theme.dart';
 
 /// A conversation between user 1 (us, see the session override below) and user 2.
@@ -73,7 +74,7 @@ class _SignedIn extends SessionController {
   );
 }
 
-Future<void> _pumpThread(WidgetTester tester) async {
+Future<void> _pumpThread(WidgetTester tester, {bool asPane = false}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -92,7 +93,7 @@ Future<void> _pumpThread(WidgetTester tester) async {
       ],
       child: MaterialApp(
         theme: darkTheme(),
-        home: const ThreadScreen(threadId: 7),
+        home: ThreadScreen(threadId: 7, asPane: asPane),
       ),
     ),
   );
@@ -179,6 +180,32 @@ void main() {
 
     expect(copied, 'mine');
     expect(find.text('copied'), findsOneWidget);
+  });
+
+  testWidgets('a conversation beside the list is not something you entered', (
+    tester,
+  ) async {
+    // Picking a different conversation on a wide window is picking, not navigating. Material adds
+    // a back arrow whenever the router COULD pop, which is a fact about the history stack and not
+    // about the layout — so it has to be turned off explicitly, and therefore asserted.
+    await _pumpThread(tester, asPane: true);
+    expect(find.byType(BackButton), findsNothing);
+    expect(find.byIcon(Icons.arrow_back), findsNothing);
+  });
+
+  testWidgets('there are exactly two avatar sizes, and these are they', (
+    tester,
+  ) async {
+    // One control, two measured sizes — 48 in the chat list, 40 beside a bubble, both taken from
+    // the React client. They drifted apart once already.
+    await _pumpThread(tester);
+    final avatars = tester.widgetList<UserAvatar>(find.byType(UserAvatar));
+    expect(avatars, isNotEmpty);
+    for (final avatar in avatars) {
+      expect(avatar.size, Metrics.avatarInBubble);
+    }
+    expect(Metrics.avatarInBubble, 40);
+    expect(Metrics.avatarInList, 48);
   });
 
   testWidgets('the conversation is named after the other person', (

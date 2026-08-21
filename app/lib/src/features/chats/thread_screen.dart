@@ -44,10 +44,23 @@ import 'thread_controller.dart';
 import 'thread_info_controller.dart';
 
 class ThreadScreen extends ConsumerStatefulWidget {
-  const ThreadScreen({required this.threadId, this.title, super.key});
+  const ThreadScreen({
+    required this.threadId,
+    this.title,
+    this.asPane = false,
+    super.key,
+  });
 
   final int threadId;
   final String? title;
+
+  /// True when this sits BESIDE the chat list rather than replacing it.
+  ///
+  /// A pane has no back button and no centred title, because nothing was entered: picking a
+  /// different conversation is picking, not navigating. The React desktop shell drew it exactly
+  /// this way, and the first cut got a back arrow purely because Material adds one whenever the
+  /// router could pop — which says something about the history stack, not about the layout.
+  final bool asPane;
 
   @override
   ConsumerState<ThreadScreen> createState() => _ThreadScreenState();
@@ -95,10 +108,10 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
         const ThreadInfo();
 
     return Scaffold(
-      // Centred, as the React thread header was: a conversation's name is the one title in the
-      // app that is not a section heading, and it sits between a back button and (once the info
-      // screen is migrated) a menu.
-      appBar: AppBar(centerTitle: true, title: Text(_title(info, me))),
+      appBar: AppBar(
+        automaticallyImplyLeading: !widget.asPane,
+        title: Text(_title(info, me)),
+      ),
       body: Column(
         children: [
           Expanded(
@@ -213,35 +226,37 @@ class _MessageList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = _rows();
-    return ListView.builder(
-      controller: scroll,
-      reverse: true,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: rows.length,
-      itemBuilder: (context, index) {
-        final row = rows[index];
-        return switch (row) {
-          _PendingRow(:final pending) => _PendingBubble(
-            pending: pending,
-            onRetry: () => onRetry(pending.clientToken),
-            onDiscard: () => onDiscard(pending.clientToken),
-          ),
-          _MessageRow(:final message, :final separator) => _Bubble(
-            message: message,
-            mine: message.senderId == me,
-            name: info.nameOf(message.senderId),
-            avatarId: info.avatarOf(message.senderId),
-            // A 1:1 does not need the other person's name written above every bubble; there is
-            // only one other person, and their avatar is right there.
-            showName: message.senderId != me && info.members.length > 2,
-            separator: separator,
-          ),
-          _EdgeRow() => _HistoryEdge(
-            loading: state.loadingOlder,
-            hasOlder: state.hasOlder,
-          ),
-        };
-      },
+    return _ReadingColumn(
+      child: ListView.builder(
+        controller: scroll,
+        reverse: true,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: rows.length,
+        itemBuilder: (context, index) {
+          final row = rows[index];
+          return switch (row) {
+            _PendingRow(:final pending) => _PendingBubble(
+              pending: pending,
+              onRetry: () => onRetry(pending.clientToken),
+              onDiscard: () => onDiscard(pending.clientToken),
+            ),
+            _MessageRow(:final message, :final separator) => _Bubble(
+              message: message,
+              mine: message.senderId == me,
+              name: info.nameOf(message.senderId),
+              avatarId: info.avatarOf(message.senderId),
+              // A 1:1 does not need the other person's name written above every bubble; there is
+              // only one other person, and their avatar is right there.
+              showName: message.senderId != me && info.members.length > 2,
+              separator: separator,
+            ),
+            _EdgeRow() => _HistoryEdge(
+              loading: state.loadingOlder,
+              hasOlder: state.hasOlder,
+            ),
+          };
+        },
+      ),
     );
   }
 }
@@ -324,7 +339,6 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -339,7 +353,7 @@ class _Bubble extends StatelessWidget {
                 userId: message.senderId,
                 nickname: name,
                 avatarId: avatarId,
-                size: 36,
+                size: Metrics.avatarInBubble,
               ),
               const SizedBox(width: 8),
               Flexible(
@@ -361,11 +375,7 @@ class _Bubble extends StatelessWidget {
                               ),
                         ),
                       ),
-                    ConstrainedBox(
-                      // 72% of the window, as the React client had it. The first cut used a flat
-                      // 560px, which on a phone is wider than the screen — so every bubble filled
-                      // the row and "mine" and "theirs" looked identically left-aligned.
-                      constraints: BoxConstraints(maxWidth: width * 0.72),
+                    _BubbleWidth(
                       child: _CopyOnLongPress(
                         text: message.content,
                         child: _BubbleBody(
@@ -383,6 +393,29 @@ class _Bubble extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 72% of the column the conversation is drawn in — not of the window.
+///
+/// The first cut used a flat 560px cap, which on a phone is wider than the screen: every bubble
+/// filled its row, so "mine" and "theirs" looked identically left-aligned. Reading the code said
+/// it was correct; only measuring said otherwise.
+class _BubbleWidth extends StatelessWidget {
+  const _BubbleWidth({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: constraints.maxWidth * Metrics.bubbleMaxFraction,
+        ),
+        child: child,
+      ),
     );
   }
 }
@@ -451,16 +484,16 @@ class _BubbleBody extends StatelessWidget {
           ),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: Metrics.bubblePadding,
           decoration: BoxDecoration(
             color: background,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(Metrics.bubbleRadius),
           ),
           child: Text(
             text,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: foreground,
-              fontSize: 14,
+              fontSize: Metrics.bubbleTextSize,
               height: 1.35,
             ),
           ),
@@ -487,7 +520,6 @@ class _PendingBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final width = MediaQuery.sizeOf(context).width;
     final labels = Theme.of(context).textTheme.labelSmall;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
@@ -503,8 +535,7 @@ class _PendingBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: width * 0.72),
+                _BubbleWidth(
                   child: Opacity(
                     opacity: pending.isStuck ? 1 : 0.6,
                     child: _BubbleBody(
@@ -601,23 +632,31 @@ class _Composer extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.newline,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  decoration: const InputDecoration(hintText: 'message…'),
+          padding: const EdgeInsets.all(12),
+          child: _ReadingColumn(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    minLines: 1,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.newline,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    decoration: const InputDecoration(hintText: 'message…'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: onSend, child: const Text('send')),
-            ],
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 44,
+                  child: FilledButton(
+                    onPressed: onSend,
+                    child: const Text('send'),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -651,4 +690,25 @@ class _Failed extends StatelessWidget {
 
 void unawaited(Future<void> future) {
   future.catchError((Object _) {});
+}
+
+/// A conversation does not run the full width of a wide window.
+///
+/// The React desktop shell put the messages and the composer in one centred 768px column, and a
+/// bubble capped at 72% of THAT rather than of the window — which is why a message never became a
+/// single 1200px line. On a phone the column is simply the screen.
+class _ReadingColumn extends StatelessWidget {
+  const _ReadingColumn({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: Metrics.readingColumn),
+        child: child,
+      ),
+    );
+  }
 }
