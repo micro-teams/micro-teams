@@ -14,7 +14,6 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
-import '../common/mt_client.dart';
 import '../common/team_scope.dart';
 import '../common/updates/topics.dart';
 import '../providers.dart';
@@ -29,12 +28,10 @@ class DocsTreeController extends AsyncNotifier<DocNode?> {
     // Somebody else committing a file is exactly the event this screen exists to show.
     watchTopic(ref, teamTopic(team.id), onChange: (_) => ref.invalidateSelf());
 
-    final response = await mtCall(
-      ref
-          .read(mtClientProvider)
-          .team
-          .getDocument(id: team.id, path: '', recursive: true),
-    );
+    final response = await ref
+        .read(mtClientProvider)
+        .team
+        .getDocument(id: team.id, path: '', recursive: true);
     return response.data;
   }
 }
@@ -49,12 +46,10 @@ class DocController extends FamilyAsyncNotifier<String, String> {
   Future<String> build(String arg) async {
     final team = ref.watch(currentTeamProvider);
     if (team == null || arg.isEmpty) return '';
-    final response = await mtCall(
-      ref
-          .read(mtClientProvider)
-          .team
-          .getDocument(id: team.id, path: arg, content: true),
-    );
+    final response = await ref
+        .read(mtClientProvider)
+        .team
+        .getDocument(id: team.id, path: arg, content: true);
     return response.data?.content ?? '';
   }
 
@@ -65,12 +60,10 @@ class DocController extends FamilyAsyncNotifier<String, String> {
   Future<void> save(String content) async {
     final team = ref.read(currentTeamProvider);
     if (team == null) return;
-    await mtCall(
-      ref
-          .read(mtClientProvider)
-          .team
-          .writeDocument(id: team.id, path: arg, body: content),
-    );
+    await ref
+        .read(mtClientProvider)
+        .team
+        .writeDocument(id: team.id, path: arg, body: content);
     state = AsyncValue.data(content);
     ref.invalidate(docsTreeProvider);
   }
@@ -89,28 +82,24 @@ class DocsAdmin {
   Future<void> create(String path, String content) async {
     final team = _ref.read(currentTeamProvider);
     if (team == null) return;
-    await mtCall(
-      _ref
-          .read(mtClientProvider)
-          .team
-          .writeDocument(id: team.id, path: path, body: content),
-    );
+    await _ref
+        .read(mtClientProvider)
+        .team
+        .writeDocument(id: team.id, path: path, body: content);
     _ref.invalidate(docsTreeProvider);
   }
 
   Future<void> move(String from, String to) async {
     final team = _ref.read(currentTeamProvider);
     if (team == null) return;
-    await mtCall(
-      _ref
-          .read(mtClientProvider)
-          .team
-          .moveDocument(
-            id: team.id,
-            path: from,
-            moveDocumentRequest: MoveDocumentRequest(newPath: to),
-          ),
-    );
+    await _ref
+        .read(mtClientProvider)
+        .team
+        .moveDocument(
+          id: team.id,
+          path: from,
+          moveDocumentRequest: MoveDocumentRequest(newPath: to),
+        );
     // Both, and in this order: the old path's provider is now about a file that does not exist.
     _ref.invalidate(docProvider(from));
     _ref.invalidate(docsTreeProvider);
@@ -119,9 +108,10 @@ class DocsAdmin {
   Future<void> delete(String path) async {
     final team = _ref.read(currentTeamProvider);
     if (team == null) return;
-    await mtCall(
-      _ref.read(mtClientProvider).team.deleteDocument(id: team.id, path: path),
-    );
+    await _ref
+        .read(mtClientProvider)
+        .team
+        .deleteDocument(id: team.id, path: path);
     _ref.invalidate(docProvider(path));
     _ref.invalidate(docsTreeProvider);
   }

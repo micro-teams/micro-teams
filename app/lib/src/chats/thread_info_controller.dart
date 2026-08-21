@@ -13,7 +13,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../providers.dart';
-import '../common/mt_client.dart';
 
 class ThreadInfo {
   const ThreadInfo({this.title = '', this.members = const {}});
@@ -41,9 +40,7 @@ class ThreadInfo {
 class ThreadInfoController extends FamilyAsyncNotifier<ThreadInfo, int> {
   @override
   Future<ThreadInfo> build(int arg) async {
-    final response = await mtCall(
-      ref.watch(mtClientProvider).chat.getThread(id: arg),
-    );
+    final response = await ref.watch(mtClientProvider).chat.getThread(id: arg);
     final detail = response.data;
     return ThreadInfo(
       title: detail?.thread.title ?? '',

@@ -263,6 +263,15 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  multipath:
+    dependency: "direct main"
+    description:
+      path: dart
+      ref: "feat/dart-line-manager"
+      resolved-ref: ac480bf7a5d43dd3024dec50eff1f7eb546c8c35
+      url: "https://github.com/micro-teams/multipath.git"
+    source: git
+    version: "0.1.1"
   path:
     dependency: transitive
     description:

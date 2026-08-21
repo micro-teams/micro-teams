@@ -11,9 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/auth/auth_api.dart';
-import 'package:microteams/src/common/cache.dart';
 import 'package:microteams/src/common/config.dart';
-import 'package:microteams/src/common/mt_client.dart';
+import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/team_scope.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/providers.dart';
@@ -91,7 +90,6 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
     endpointsProvider.overrideWithValue(
       const Endpoints(origin: 'http://backend.test'),
     ),
-    cacheProvider.overrideWithValue(ReadCache.inMemory()),
     mtClientProvider.overrideWithValue(
       MtClient(
         baseUrl: 'http://backend.test/mt',

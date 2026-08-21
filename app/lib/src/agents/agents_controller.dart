@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../providers.dart';
-import '../common/mt_client.dart';
 import '../common/updates/topics.dart';
 import '../common/team_scope.dart';
 
@@ -61,8 +60,8 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
     // Both lists answer one question about one team, so they are asked together rather than by two
     // screens that each think they own half of it.
     final responses = await Future.wait([
-      mtCall(client.machine.listMachines(teamId: team.id, pageSize: 100)),
-      mtCall(client.agent.listAgents(teamId: team.id, pageSize: 100)),
+      client.machine.listMachines(teamId: team.id, pageSize: 100),
+      client.agent.listAgents(teamId: team.id, pageSize: 100),
     ]);
 
     final machines =
@@ -76,9 +75,7 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
 
   /// Close an agent's session. Confirming with the human belongs to the caller.
   Future<void> close(Agent agent) async {
-    await mtCall(
-      ref.read(mtClientProvider).agent.closeAgent(userId: agent.userId),
-    );
+    await ref.read(mtClientProvider).agent.closeAgent(userId: agent.userId);
     ref.invalidateSelf();
   }
 
@@ -90,12 +87,10 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
   Future<void> unbind(Machine machine) async {
     final team = ref.read(currentTeamProvider);
     if (team == null) return;
-    await mtCall(
-      ref
-          .read(mtClientProvider)
-          .team
-          .unbindTeamMachine(id: team.id, machineId: machine.id),
-    );
+    await ref
+        .read(mtClientProvider)
+        .team
+        .unbindTeamMachine(id: team.id, machineId: machine.id);
     ref.invalidateSelf();
   }
 
@@ -108,7 +103,7 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
   Future<int> startChat(Agent agent) async {
     final client = ref.read(mtClientProvider);
     final chats =
-        (await mtCall(client.chat.listChats(pageSize: 100))).data?.chats ??
+        (await client.chat.listChats(pageSize: 100)).data?.chats ??
         const <ChatSummary>[];
 
     for (final chat in chats) {
@@ -116,14 +111,12 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
       if (chat.members.any((m) => m.userId == agent.userId)) return chat.id;
     }
 
-    final created = await mtCall(
-      client.chat.createThread(
-        createThreadRequest: CreateThreadRequest(
-          title: agent.nickname.isEmpty
-              ? 'agent #${agent.userId}'
-              : agent.nickname,
-          memberIds: [agent.userId],
-        ),
+    final created = await client.chat.createThread(
+      createThreadRequest: CreateThreadRequest(
+        title: agent.nickname.isEmpty
+            ? 'agent #${agent.userId}'
+            : agent.nickname,
+        memberIds: [agent.userId],
       ),
     );
     final thread = created.data;

@@ -17,10 +17,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/auth/auth_api.dart';
-import 'package:microteams/src/common/cache.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/agents/agents_screen.dart';
-import 'package:microteams/src/common/mt_client.dart';
+import 'package:microteams/src/common/api.dart';
 
 /// Answers the four calls this screen makes, and records what it was asked to do.
 class _FakeBackend implements HttpClientAdapter {
@@ -103,7 +102,6 @@ Widget host(_FakeBackend backend, {void Function(int threadId)? onOpenChat}) =>
         endpointsProvider.overrideWithValue(
           const Endpoints(origin: 'http://backend.test'),
         ),
-        cacheProvider.overrideWithValue(ReadCache.inMemory()),
         mtClientProvider.overrideWithValue(
           MtClient(
             baseUrl: 'http://backend.test/mt',

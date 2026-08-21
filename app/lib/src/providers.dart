@@ -8,18 +8,40 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth/auth_api.dart';
-import 'common/cache.dart';
+import 'package:multipath/multipath.dart' as mp;
+
 import 'common/config.dart';
 import 'common/errors.dart';
-import 'common/mt_client.dart';
+import 'common/key_value.dart';
+import 'common/lines.dart';
+import 'common/stream_lines.dart';
+import 'common/api.dart';
 import 'common/updates/socket.dart';
 import 'common/updates/store.dart';
 
 final endpointsProvider = Provider<Endpoints>((ref) => defaultEndpoints());
 
-/// Overridden at startup with the opened cache — see main.dart. The unopened default keeps tests
+/// What the same request returned last time. MultiPath's, so the keys, the scoping, the eviction
+/// and the expiry are the rules every client in the org shares — and so nothing in this app has to
+/// invent a cache key ever again.
+///
+/// Overridden at startup with a disk-backed one — see main.dart. The in-memory default keeps tests
 /// and any early read honest rather than null.
-final cacheProvider = Provider<ReadCache>((ref) => ReadCache.inMemory());
+final requestCacheProvider = Provider<mp.RequestCache>(
+  (ref) => mp.RequestCache(),
+);
+
+/// The app's own small state — the outbox, and anything else that must survive being killed but is
+/// not an answer to a request. See common/key_value.dart for why the two are not the same shelf.
+final stateStoreProvider = Provider<KeyValueStore>(
+  (ref) => KeyValueStore.inMemory(),
+);
+
+/// Which network paths this app may reach the backend over. One manager for the whole app: two
+/// would be two opinions about which line is fastest, each blind to what the other measured.
+final linesProvider = Provider<mp.LineManager>(
+  (ref) => mp.LineManager(registry: sameOriginOnly()),
+);
 
 final authApiProvider = Provider<AuthApi>((ref) {
   return AuthApi(baseUrl: ref.watch(endpointsProvider).auth);
@@ -28,6 +50,8 @@ final authApiProvider = Provider<AuthApi>((ref) {
 final mtClientProvider = Provider<MtClient>((ref) {
   final client = MtClient(
     baseUrl: ref.watch(endpointsProvider).mt,
+    lines: ref.watch(linesProvider),
+    cache: ref.watch(requestCacheProvider),
     // On a 401, ask the session to refresh silently through the cookie and hand back a fresh
     // token for a one-shot retry. Returning null means the session is genuinely over.
     reauthorize: () => ref.read(sessionProvider.notifier).reauthorize(),
@@ -37,6 +61,20 @@ final mtClientProvider = Provider<MtClient>((ref) {
 
 final updatesStoreProvider = Provider<UpdatesStore>((ref) => UpdatesStore());
 
+/// Which line the app's long-lived connections leave by.
+///
+/// Its own policy, separate from the request ranking, because holding a stream and answering a
+/// request quickly are different abilities — see common/stream_lines.dart. Ranked lines are read
+/// afresh on every dial, so a line that has since been measured faster is used on the next
+/// reconnect rather than at the next restart.
+final streamLinesProvider = Provider<StreamLines>((ref) {
+  final manager = ref.watch(linesProvider);
+  return StreamLines(
+    selector: mp.StreamSelector(lines: () => manager.ranked),
+    endpoints: ref.watch(endpointsProvider),
+  );
+});
+
 /// The socket lives as long as there is a signed-in session, and not a moment longer: dialling it
 /// without a token gets a refusal that looks exactly like a server gone quiet.
 final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
@@ -44,14 +82,25 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
   final token = session.value?.accessToken;
   if (token == null) return null;
 
-  final endpoints = ref.watch(endpointsProvider);
+  final streams = ref.watch(streamLinesProvider);
   final socket = UpdatesSocket(
     store: ref.watch(updatesStoreProvider),
     // Read the token per dial rather than closing over this one: a reconnect after a refresh must
-    // carry the new token.
-    url: () =>
-        endpoints.updatesSocket(ref.read(sessionProvider).value?.accessToken),
-  )..start();
+    // carry the new token — and pick the line per dial too, so a line that cannot hold a stream is
+    // dropped on the next attempt rather than retried forever.
+    url: () {
+      final live = ref.read(sessionProvider).value?.accessToken;
+      final query = live == null || live.isEmpty
+          ? ''
+          : '?token=${Uri.encodeComponent(live)}';
+      return streams.urlFor('/mt/updates$query');
+    },
+  );
+  // Told when a dial succeeds and when it ends, so a line that accepts the handshake and drops it
+  // is skipped for streams next time rather than retried forever.
+  socket.onOpened = () => streams.opened(DateTime.now());
+  socket.onClosed = () => streams.closed(DateTime.now());
+  socket.start();
   ref.onDispose(socket.close);
   return socket;
 });
@@ -125,7 +174,7 @@ class SessionController extends AsyncNotifier<Session?> {
       // The server refusing to hear about it does not keep us signed in locally.
     }
     ref.read(mtClientProvider).accessToken = null;
-    await ref.read(cacheProvider).setScope(null);
+    _scopeTo(ref, null);
     state = const AsyncValue.data(null);
   }
 
@@ -138,7 +187,7 @@ class SessionController extends AsyncNotifier<Session?> {
       return session.accessToken;
     } on AuthError {
       ref.read(mtClientProvider).accessToken = null;
-      await ref.read(cacheProvider).setScope(null);
+      _scopeTo(ref, null);
       state = const AsyncValue.data(null);
       return null;
     }
@@ -148,7 +197,7 @@ class SessionController extends AsyncNotifier<Session?> {
     ref.read(mtClientProvider).accessToken = session.accessToken;
     // Point the read cache at this user. A different user clears everything, so no account ever
     // paints another's cached reads.
-    await ref.read(cacheProvider).setScope(session.user.id);
+    _scopeTo(ref, session.user.id);
   }
 }
 
@@ -176,4 +225,15 @@ void watchTopic(
     TopicListener(onChange: onChange, digest: digest),
   );
   ref.onDispose(drop);
+}
+
+/// Point everything that remembers things at this account, or at nobody.
+///
+/// One function because the two shelves must move together: a request cache scoped to a new user
+/// while an outbox still held the previous one's unsent messages would show one account another's
+/// writing. Entries are dropped rather than hidden — waiting in memory to become reachable again is
+/// exactly the accident this prevents.
+void _scopeTo(Ref ref, int? userId) {
+  ref.read(requestCacheProvider).setScope(userId == null ? '' : '$userId');
+  if (userId == null) ref.read(stateStoreProvider).clear();
 }

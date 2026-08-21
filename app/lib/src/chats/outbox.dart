@@ -16,10 +16,9 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:mt_api/mt_api.dart';
-
-import '../common/cache.dart';
 import '../common/errors.dart';
-import '../common/mt_client.dart';
+import '../common/api.dart';
+import '../common/key_value.dart';
 
 /// How long to wait before each retry. Bounded and slow at the end: a message that has been
 /// failing for a minute is waiting on a network, and hammering it helps nobody's battery.
@@ -74,17 +73,17 @@ class Outbox {
   Outbox({
     required this.threadId,
     required MtClient client,
-    required ReadCache cache,
+    required KeyValueStore store,
     required this.onSent,
     required this.onChanged,
   }) : _client = client,
-       _cache = cache {
+       _store = store {
     _restore();
   }
 
   final int threadId;
   final MtClient _client;
-  final ReadCache _cache;
+  final KeyValueStore _store;
 
   /// The server took it. The thread folds the real message into its list.
   final void Function(Message message) onSent;
@@ -159,13 +158,11 @@ class Outbox {
       while (_pending.isNotEmpty && !_disposed) {
         final item = _pending.first;
         try {
-          final response = await mtCall(
-            _client.chat.postMessage(
-              id: threadId,
-              postMessageRequest: PostMessageRequest(
-                content: item.content,
-                clientToken: item.clientToken,
-              ),
+          final response = await _client.chat.postMessage(
+            id: threadId,
+            postMessageRequest: PostMessageRequest(
+              content: item.content,
+              clientToken: item.clientToken,
             ),
           );
           final message = response.data;
@@ -212,7 +209,7 @@ class Outbox {
   }
 
   void _restore() {
-    final raw = _cache.get<String>(_key);
+    final raw = _store.get(_key);
     if (raw == null) return;
     try {
       final decoded = jsonDecode(raw);
@@ -231,10 +228,7 @@ class Outbox {
   }
 
   void _persist() {
-    _cache.set<String>(
-      _key,
-      jsonEncode(_pending.map((p) => p.toJson()).toList()),
-    );
+    _store.set(_key, jsonEncode(_pending.map((p) => p.toJson()).toList()));
   }
 
   static final Random _random = Random();

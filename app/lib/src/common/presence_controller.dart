@@ -15,7 +15,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../providers.dart';
-import 'mt_client.dart';
 import 'updates/topics.dart';
 import 'team_scope.dart';
 
@@ -59,9 +58,10 @@ class PresenceController extends FamilyAsyncNotifier<Presence, String> {
       );
     }
 
-    final response = await mtCall(
-      ref.watch(mtClientProvider).agent.listAgents(userId: ids),
-    );
+    final response = await ref
+        .watch(mtClientProvider)
+        .agent
+        .listAgents(userId: ids);
     return Presence({
       for (final agent in response.data?.agents ?? const <Agent>[])
         agent.userId: agent,

@@ -6,6 +6,8 @@
 /// in the interceptor (see mt/client.dart), and nothing above it ever sees a Dio exception.
 library;
 
+import 'package:dio/dio.dart';
+
 class AuthError implements Exception {
   AuthError(this.message, this.status);
 
@@ -23,10 +25,25 @@ class AuthError implements Exception {
   String toString() => message;
 }
 
-class MtError implements Exception {
-  MtError(this.message, this.status, {this.code});
+/// What nt refused, as the thing that is actually thrown.
+///
+/// It extends [DioException] rather than merely being carried inside one, and that is the whole
+/// reason the app no longer wraps every call in an `mtCall(...)`. Dio wraps anything an interceptor
+/// rejects with, so a plain exception could only ever arrive as `DioException.error` — and every
+/// caller that forgot to unwrap it showed the user the word "DioException". Being one removes the
+/// step instead of asking people to remember it.
+class MtError extends DioException {
+  MtError(String message, this.status, {this.code, RequestOptions? request})
+    : super(
+        requestOptions: request ?? RequestOptions(),
+        message: message,
+        type: DioExceptionType.badResponse,
+      );
 
-  final String message;
+  /// Narrowed from `String?`: there is always something to show, and a screen that had to handle a
+  /// null message would end up printing "null" the one time it mattered.
+  @override
+  String get message => super.message!;
   final int status;
   final int? code;
 

@@ -19,7 +19,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Files that are allowed to know the network exists.
 const _plumbing = {
-  'lib/src/common/mt_client.dart',
+  'lib/src/common/api.dart',
+  'lib/src/common/lines.dart',
+  'lib/src/common/multipath_adapter.dart',
   'lib/src/common/config.dart',
   'lib/src/common/updates/socket.dart',
   'lib/src/auth/auth_api.dart',
@@ -53,7 +55,7 @@ void main() {
       if (source.contains('mtCall(')) {
         offenders.add('$path calls mtCall — move the fetch into a controller');
       }
-      if (source.contains('mt_client.dart')) {
+      if (source.contains('common/api.dart')) {
         offenders.add('$path imports the nt client directly');
       }
       if (source.contains('watchTopic(')) {
