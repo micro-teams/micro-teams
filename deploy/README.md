@@ -306,3 +306,20 @@ authorize everything, and losing the JWT secret logs everyone out.
   backend re-adopts them when the machine reconnects — so upgrading the jar doesn't kill running
   agents. Connected machines self-update their own connector via `microteams update`.
 - **Images** are digest-pinned in `docker-compose.yml`; to move to newer bases, update the digests.
+
+## 部署之后，确认它真的部署了
+
+Service Worker 只在**自己的字节变了**的时候才会被替换。所以一次「新文件 + 旧 sw.js」的部署是
+隐形的：worker 不更新、activate 不跑、缓存不清，每个访问者继续运行 worker 当初缓存的那一版。
+从外面看没有任何异常——文件是新的，站点是活的，应用是旧的。
+
+这不是假设。2026-08-21 线上就是 16:41 的 `main.dart.js` 配 15:21 的 `sw.js`，唯一的症状是
+「部署了，但什么都没变」。
+
+```sh
+node app/tool/verify-deploy.mjs https://microteams.app
+```
+
+它检查两件事：worker 里写死的版本和实际提供的文件哈希是否一致，以及入口文件（`/`、`sw.js`、
+`main.dart.js`——这三个名字都不带内容哈希）是不是被 HTTP 缓存扣着。任何一条不过，这次部署就是
+坏的，重新完整发一次。

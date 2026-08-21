@@ -78,6 +78,26 @@ if (!source.includes("__MT_BUILD__")) {
 }
 await writeFile(path.join(dist, "sw.js"), source.replace("__MT_BUILD__", version));
 
+/**
+ * What the server says is deployed, for the worker to check itself against.
+ *
+ * Small on purpose: a worker asks for this on every navigation, and it is served without caching.
+ * The per-file hashes are not used by the worker — the one version is enough to know it is behind —
+ * but they make a broken deploy diagnosable from outside, which is how the 2026-08-21 one was
+ * found: the worker's version simply did not match the files it was serving.
+ */
+const files = {};
+for (const file of await present(VERSIONED)) {
+  files[`/${file}`] = createHash("sha256")
+    .update(await readFile(path.join(dist, file)))
+    .digest("hex")
+    .slice(0, 16);
+}
+await writeFile(
+  path.join(dist, "build.json"),
+  `${JSON.stringify({ version, files }, null, 2)}\n`,
+);
+
 await rm(path.join(dist, "flutter_service_worker.js"), { force: true });
 
 // Symbol maps are for reading a stack trace, not for running the app: several megabytes each, and

@@ -68,6 +68,11 @@ Three rules, each enforced by `test/architecture_test.dart` rather than by good 
 - **The font is bundled.** Flutter draws its own text and does not inherit the platform's monospace
   family, which the terminal needs.
 - **The service worker is ours, not Flutter's** (`web/sw.js`, stamped by `tool/make-sw.mjs`).
+  It also asks the server what is deployed (`/build.json`, served without caching) and throws its
+  cache away when the answer is not the build it holds — because a worker is only replaced when its
+  own bytes change, so a deploy that ships new files beside an old `sw.js` is otherwise invisible.
+  After deploying, `node tool/verify-deploy.mjs https://your-host` says whether the thing that just
+  went out is internally consistent; it is the one-line version of the outage on 2026-08-21.
   Flutter's is deprecated: its loader no longer registers one on a first visit unless you pass an
   explicit `serviceWorkerUrl`, and doing that prints a warning saying it will stop working. Ours
   also gets to decide what to keep — the shell is precached, the engine is cached as it is actually

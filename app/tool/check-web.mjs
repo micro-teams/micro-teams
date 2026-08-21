@@ -138,6 +138,25 @@ check(
   flutterSw,
 );
 
+// The worker and the files have to be from the same build, or a deploy lands invisibly: the worker
+// is only replaced when its own bytes change, so an old worker keeps serving an old app out of its
+// own cache no matter what was uploaded beside it.
+const stamped = await page.evaluate(async () => {
+  const [sw, build] = await Promise.all([
+    fetch("/sw.js").then((r) => r.text()),
+    fetch("/build.json").then((r) => r.json()),
+  ]);
+  return {
+    worker: /const VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
+    build: build.version ?? null,
+  };
+});
+check(
+  "the worker and the build stamp agree",
+  stamped.worker != null && stamped.worker === stamped.build,
+  `worker ${stamped.worker}, stamp ${stamped.build}`,
+);
+
 const manifest = await page.evaluate(async () => {
   const link = document.querySelector('link[rel="manifest"]');
   if (!link) return null;
