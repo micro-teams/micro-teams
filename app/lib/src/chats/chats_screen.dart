@@ -41,7 +41,7 @@ class ChatsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final chats = ref.watch(chatsProvider);
-    final me = ref.watch(sessionProvider).value?.user.id;
+    final me = ref.watch(sessionProvider).valueOrNull?.user.id;
 
     return chats.when(
       // Paint what we already know while the first answer is on its way. A spinner where a list

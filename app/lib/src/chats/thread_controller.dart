@@ -102,7 +102,7 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
       threadTopic(_threadId),
       onChange: (_) => refresh(),
       digest: () => threadDigest(
-        state.value?.messages ?? const [],
+        state.valueOrNull?.messages ?? const [],
         loading: state.isLoading,
         window: pageSize,
       ),
@@ -197,11 +197,11 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
       _walkedBack = true;
       _olderCursor = body?.page.nextStart;
       final merged = mergeOlderPage(
-        state.value?.messages ?? current.messages,
+        state.valueOrNull?.messages ?? current.messages,
         body?.messages ?? const [],
       );
       state = AsyncValue.data(
-        (state.value ?? current).copyWith(
+        (state.valueOrNull ?? current).copyWith(
           messages: merged,
           loadingOlder: false,
           hasOlder: body?.page.hasMore ?? false,
@@ -209,7 +209,7 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
       );
     } on MtError catch (e) {
       state = AsyncValue.data(
-        (state.value ?? current).copyWith(
+        (state.valueOrNull ?? current).copyWith(
           loadingOlder: false,
           error: e.message,
         ),

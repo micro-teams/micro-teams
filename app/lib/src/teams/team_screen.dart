@@ -32,7 +32,7 @@ class TeamScreen extends ConsumerWidget {
         ?.where((t) => t.id == teamId)
         .firstOrNull;
     final roster = ref.watch(teamRosterProvider(teamId));
-    final me = ref.watch(sessionProvider).value?.user.id;
+    final me = ref.watch(sessionProvider).valueOrNull?.user.id;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(

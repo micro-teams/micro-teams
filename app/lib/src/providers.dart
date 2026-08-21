@@ -79,7 +79,7 @@ final streamLinesProvider = Provider<StreamLines>((ref) {
 /// without a token gets a refusal that looks exactly like a server gone quiet.
 final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
   final session = ref.watch(sessionProvider);
-  final token = session.value?.accessToken;
+  final token = session.valueOrNull?.accessToken;
   if (token == null) return null;
 
   final streams = ref.watch(streamLinesProvider);
@@ -89,7 +89,7 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
     // carry the new token — and pick the line per dial too, so a line that cannot hold a stream is
     // dropped on the next attempt rather than retried forever.
     url: () {
-      final live = ref.read(sessionProvider).value?.accessToken;
+      final live = ref.read(sessionProvider).valueOrNull?.accessToken;
       final query = live == null || live.isEmpty
           ? ''
           : '?token=${Uri.encodeComponent(live)}';

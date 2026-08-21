@@ -100,7 +100,7 @@ final selectedTeamProvider = NotifierProvider<SelectedTeam, int?>(
 /// Resolved in one place so no screen has to write "the selected team, or if that is null the
 /// first one" — the sort of line that is written slightly differently in each place it appears.
 final currentTeamProvider = Provider<Team?>((ref) {
-  final teams = ref.watch(teamsProvider).value ?? const <Team>[];
+  final teams = ref.watch(teamsProvider).valueOrNull ?? const <Team>[];
   if (teams.isEmpty) return null;
   final selected = ref.watch(selectedTeamProvider);
   if (selected == null) return teams.first;

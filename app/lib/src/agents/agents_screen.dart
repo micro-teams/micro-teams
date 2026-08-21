@@ -47,7 +47,7 @@ class AgentsScreen extends ConsumerWidget {
             tooltip: 'Open agent',
             onPressed: () => showOpenAgentDialog(
               context,
-              machines: fleet.value?.machines ?? const [],
+              machines: fleet.valueOrNull?.machines ?? const [],
             ),
             icon: const Icon(Icons.smart_toy_outlined),
           ),

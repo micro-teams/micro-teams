@@ -18,7 +18,7 @@ class TeamPickerBar extends ConsumerWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final teams = ref.watch(teamsProvider).value ?? const [];
+    final teams = ref.watch(teamsProvider).valueOrNull ?? const [];
     final current = ref.watch(currentTeamProvider);
 
     if (teams.length < 2 || current == null) return const SizedBox.shrink();

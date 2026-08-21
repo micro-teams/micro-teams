@@ -97,7 +97,7 @@ class _TreePane extends ConsumerWidget {
     // height regardless — which leaves a 48px band of empty header. Deciding here is the only
     // place that can see both.
     final canSwitchTeams =
-        (ref.watch(teamsProvider).value ?? const []).length > 1;
+        (ref.watch(teamsProvider).valueOrNull ?? const []).length > 1;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(

@@ -18,7 +18,7 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(sessionProvider).value?.user;
+    final user = ref.watch(sessionProvider).valueOrNull?.user;
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
 
