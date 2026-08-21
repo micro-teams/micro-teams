@@ -18,6 +18,8 @@ import 'package:go_router/go_router.dart';
 
 import 'providers.dart';
 import 'auth/login_screen.dart';
+import 'auth/profile_screen.dart';
+import 'auth/register_screen.dart';
 import 'agents/agents_screen.dart';
 import 'chats/chats_screen.dart';
 import 'chats/thread_screen.dart';
@@ -87,13 +89,27 @@ GoRouter _buildRouter(WidgetRef ref) {
       if (session.isLoading) return null;
 
       final signedIn = session.value != null;
-      final atLogin = state.matchedLocation == '/login';
-      if (!signedIn) return atLogin ? null : '/login';
-      if (atLogin) return '/chats';
+      // Both screens that exist before a session. Bouncing someone off /register back to /login
+      // for not being signed in is how registration became unreachable.
+      const anonymous = {'/login', '/register'};
+      final atAnonymous = anonymous.contains(state.matchedLocation);
+      if (!signedIn) return atAnonymous ? null : '/login';
+      if (atAnonymous) return '/chats';
       return null;
     },
     routes: [
-      GoRoute(path: '/login', pageBuilder: _page(const LoginScreen())),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: LoginScreen(onRegister: () => context.go('/register')),
+        ),
+      ),
+      GoRoute(
+        path: '/register',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: RegisterScreen(onSignIn: () => context.go('/login')),
+        ),
+      ),
       ShellRoute(
         builder: (context, state, child) => _Shell(child: child),
         routes: [
@@ -137,10 +153,7 @@ GoRouter _buildRouter(WidgetRef ref) {
               ),
             ),
           ),
-          GoRoute(
-            path: '/profile',
-            pageBuilder: _page(const _NotYetMigrated(name: 'me')),
-          ),
+          GoRoute(path: '/profile', pageBuilder: _page(const ProfileScreen())),
         ],
       ),
     ],

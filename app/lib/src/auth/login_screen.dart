@@ -10,7 +10,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({this.onRegister, super.key});
+
+  /// Where "no account? register" goes. Absent in tests that pump this screen alone.
+  final VoidCallback? onRegister;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -115,6 +118,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             : const Text('sign in'),
                       ),
                     ),
+                    if (widget.onRegister != null)
+                      Center(
+                        child: TextButton(
+                          onPressed: widget.onRegister,
+                          child: const Text('no account? register'),
+                        ),
+                      ),
                   ],
                 ),
               ),
