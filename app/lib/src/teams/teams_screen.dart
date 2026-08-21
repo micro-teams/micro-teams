@@ -13,9 +13,20 @@ import '../common/ui/theme.dart';
 import 'team_admin_controller.dart';
 
 class TeamsScreen extends ConsumerWidget {
-  const TeamsScreen({required this.onOpen, super.key});
+  const TeamsScreen({
+    required this.onOpen,
+    this.selectedId,
+    this.dense = false,
+    super.key,
+  });
 
   final void Function(Team team) onOpen;
+
+  /// Which team the detail beside this list is about — whatever the URL says is open.
+  final int? selectedId;
+
+  /// Beside a detail pane the list is the narrower variant, as the chat and agent lists are.
+  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -25,6 +36,8 @@ class TeamsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        // The list is not something you go back FROM; it is always there.
+        automaticallyImplyLeading: false,
         title: const Text('teams'),
         actions: [
           IconButton(
@@ -36,7 +49,9 @@ class TeamsScreen extends ConsumerWidget {
       ),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: Metrics.readingColumn),
+          constraints: BoxConstraints(
+            maxWidth: dense ? double.infinity : Metrics.readingColumn,
+          ),
           child: teams.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => _Failed(
@@ -61,6 +76,10 @@ class TeamsScreen extends ConsumerWidget {
                         trailing: team.id == selected
                             ? Icon(Icons.check, color: scheme.primary)
                             : null,
+                        // Open and selected are two different things: the row you are LOOKING at
+                        // is not necessarily the team the rest of the app is scoped to. The tick
+                        // says which team you are in; this says which one is on the right.
+                        selected: team.id == selectedId,
                         onTap: () {
                           ref
                               .read(selectedTeamProvider.notifier)

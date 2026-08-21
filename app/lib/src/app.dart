@@ -190,17 +190,20 @@ GoRouter _buildRouter(WidgetRef ref) {
             routes: [
               GoRoute(
                 path: '/docs',
-                pageBuilder: (context, state) => NoTransitionPage(
-                  child: DocsScreen(
-                    onManageTeams: () => context.go('/teams'),
-                    openPath: state.uri.queryParameters['path'],
-                    onOpen: (path) => context.go(
-                      path == null
-                          ? '/docs'
-                          : '/docs?path=${Uri.encodeQueryComponent(path)}',
+                pageBuilder: _page(const _DocsPane()),
+                routes: [
+                  // A file is a frame of its own, so back closes the file rather than leaving
+                  // docs altogether. Its path is a query parameter because a document's path
+                  // contains slashes — it is a path inside a repository, not inside a URL.
+                  GoRoute(
+                    path: 'file',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: _DocsPane(
+                        openPath: state.uri.queryParameters['path'],
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
@@ -208,11 +211,7 @@ GoRouter _buildRouter(WidgetRef ref) {
             routes: [
               GoRoute(
                 path: '/teams',
-                pageBuilder: (context, state) => NoTransitionPage(
-                  child: TeamsScreen(
-                    onOpen: (team) => context.go('/teams/${team.id}'),
-                  ),
-                ),
+                pageBuilder: _page(const _TeamsPane()),
                 routes: [
                   GoRoute(
                     path: ':teamId',
@@ -221,10 +220,7 @@ GoRouter _buildRouter(WidgetRef ref) {
                           int.tryParse(state.pathParameters['teamId'] ?? '') ??
                           0;
                       return NoTransitionPage(
-                        child: TeamScreen(
-                          teamId: id,
-                          onGone: () => context.go('/teams'),
-                        ),
+                        child: _TeamsPane(openTeamId: id),
                       );
                     },
                   ),
@@ -471,6 +467,71 @@ class _AgentsPane extends ConsumerWidget {
               ),
               _ => const Center(child: Text('pick an agent or a machine')),
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Documents, in whichever arrangement the window calls for.
+///
+/// The third of these, and deliberately the same shape as the other two: narrow shows the top
+/// frame, wide shows the list beside it, back pops one frame. A section that arranged itself
+/// differently would be a section people have to learn separately.
+class _DocsPane extends ConsumerWidget {
+  const _DocsPane({this.openPath});
+
+  final String? openPath;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => DocsScreen(
+    openPath: openPath,
+    onManageTeams: () => context.go('/teams'),
+    onOpen: (path) => context.go(
+      path == null
+          ? '/docs'
+          : '/docs/file?path=${Uri.encodeQueryComponent(path)}',
+    ),
+  );
+}
+
+/// Teams, in whichever arrangement the window calls for.
+class _TeamsPane extends ConsumerWidget {
+  const _TeamsPane({this.openTeamId});
+
+  final int? openTeamId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final wide = isWide(context);
+    final open = openTeamId;
+
+    final list = TeamsScreen(
+      selectedId: open,
+      dense: wide,
+      onOpen: (team) => context.go('/teams/${team.id}'),
+    );
+
+    if (!wide) {
+      if (open == null) return list;
+      return TeamScreen(teamId: open, onGone: () => context.go('/teams'));
+    }
+
+    return Scaffold(
+      body: Row(
+        children: [
+          SizedBox(width: Metrics.listPaneWidth, child: list),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: open == null
+                ? const Center(child: Text('pick a team'))
+                : TeamScreen(
+                    key: ValueKey(open),
+                    teamId: open,
+                    asPane: true,
+                    onGone: () => context.go('/teams'),
+                  ),
           ),
         ],
       ),

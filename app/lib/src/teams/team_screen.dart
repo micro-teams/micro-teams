@@ -17,12 +17,20 @@ import 'team_admin_controller.dart';
 import 'teams_screen.dart' show promptForText;
 
 class TeamScreen extends ConsumerWidget {
-  const TeamScreen({required this.teamId, required this.onGone, super.key});
+  const TeamScreen({
+    required this.teamId,
+    required this.onGone,
+    this.asPane = false,
+    super.key,
+  });
 
   final int teamId;
 
   /// Called once the team no longer exists, so the shell can leave a screen about nothing.
   final VoidCallback onGone;
+
+  /// Beside the list rather than on top of it: no back arrow, because the list is still there.
+  final bool asPane;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -37,6 +45,7 @@ class TeamScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: !asPane,
         title: Text(team?.name ?? 'team #$teamId'),
         actions: [
           IconButton(
