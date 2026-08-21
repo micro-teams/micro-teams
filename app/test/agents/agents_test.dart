@@ -18,7 +18,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/config.dart';
+import 'package:microteams/src/agents/agent_detail.dart';
 import 'package:microteams/src/agents/agents_screen.dart';
+import 'package:microteams/src/agents/machine_detail.dart';
+import 'package:mt_api/mt_api.dart';
 import 'package:microteams/src/common/api.dart';
 
 /// Answers the four calls this screen makes, and records what it was asked to do.
@@ -95,39 +98,51 @@ class _SignedIn extends SessionController {
 }
 
 // ignore: library_private_types_in_public_api — a test helper is not an API
-Widget host(_FakeBackend backend, {void Function(int threadId)? onOpenChat}) =>
-    ProviderScope(
-      overrides: [
-        sessionProvider.overrideWith(_SignedIn.new),
-        endpointsProvider.overrideWithValue(
-          const Endpoints(origin: 'http://backend.test'),
-        ),
-        mtClientProvider.overrideWithValue(
-          MtClient(
-            baseUrl: 'http://backend.test/mt',
-            reauthorize: () async => null,
-            adapter: backend,
-          ),
-        ),
-      ],
-      child: MaterialApp(
-        home: AgentsScreen(
-          onOpenScreen: (_) {},
-          onOpenChat: onOpenChat ?? (_) {},
-          onManageTeams: () {},
-        ),
+Widget host(_FakeBackend backend, {void Function(Agent agent)? onOpenAgent}) =>
+    _scope(
+      backend,
+      AgentsScreen(
+        onOpenAgent: onOpenAgent ?? (_) {},
+        onOpenMachine: (_) {},
+        onManageTeams: () {},
       ),
     );
 
-/// Open the one agent's sheet. Every per-agent action lives in there now — the row is the agent,
-/// not a strip of icon buttons, so a test that taps an action taps it where a person would.
-Future<void> openAgent(WidgetTester tester) async {
-  await tester.tap(find.text('agent3'));
-  await tester.pumpAndSettle();
-}
+/// The agent's own frame, which is where every per-agent action lives now.
+Widget agentDetail(
+  // ignore: library_private_types_in_public_api — a test helper is not an API
+  _FakeBackend backend, {
+  void Function(int threadId)? onChat,
+}) => _scope(
+  backend,
+  AgentDetailScreen(userId: 42, onChat: onChat ?? (_) {}, onGone: () {}),
+);
 
-Future<void> openMachine(WidgetTester tester) async {
-  await tester.tap(find.text('box'));
+// ignore: library_private_types_in_public_api — a test helper is not an API
+Widget machineDetail(_FakeBackend backend) =>
+    _scope(backend, MachineDetailScreen(machineId: 'm1', onGone: () {}));
+
+Widget _scope(_FakeBackend backend, Widget child) => ProviderScope(
+  overrides: [
+    sessionProvider.overrideWith(_SignedIn.new),
+    endpointsProvider.overrideWithValue(
+      const Endpoints(origin: 'http://backend.test'),
+    ),
+    mtClientProvider.overrideWithValue(
+      MtClient(
+        baseUrl: 'http://backend.test/mt',
+        reauthorize: () async => null,
+        adapter: backend,
+      ),
+    ),
+  ],
+  child: MaterialApp(home: child),
+);
+
+/// Settled twice on purpose. The fleet is asked for only once the TEAM has arrived, so the first
+/// settle ends with an empty list and the frame saying the agent is not there.
+Future<void> settle(WidgetTester tester) async {
+  await tester.pumpAndSettle();
   await tester.pumpAndSettle();
 }
 
@@ -150,10 +165,11 @@ void main() {
             '"members":[{"userId":1,"nickname":"Me"},{"userId":42,"nickname":"agent3"}]}]',
       );
       int? opened;
-      await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
-      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        agentDetail(backend, onChat: (id) => opened = id),
+      );
+      await settle(tester);
 
-      await openAgent(tester);
       await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
@@ -170,10 +186,11 @@ void main() {
     testWidgets('creates one when there is none', (tester) async {
       final backend = _FakeBackend();
       int? opened;
-      await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
-      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        agentDetail(backend, onChat: (id) => opened = id),
+      );
+      await settle(tester);
 
-      await openAgent(tester);
       await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
@@ -192,10 +209,11 @@ void main() {
             '"members":[{"userId":1,"nickname":"Me"},{"userId":2,"nickname":"You"},{"userId":42,"nickname":"agent3"}]}]',
       );
       int? opened;
-      await tester.pumpWidget(host(backend, onOpenChat: (id) => opened = id));
-      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        agentDetail(backend, onChat: (id) => opened = id),
+      );
+      await settle(tester);
 
-      await openAgent(tester);
       await tester.tap(find.text('Chat with agent'));
       await tester.pumpAndSettle();
 
@@ -207,9 +225,10 @@ void main() {
     testWidgets('is not offered when this team is the only one holding it', (
       tester,
     ) async {
-      await tester.pumpWidget(host(_FakeBackend(machineTeams: const [1])));
-      await tester.pumpAndSettle();
-      await openMachine(tester);
+      await tester.pumpWidget(
+        machineDetail(_FakeBackend(machineTeams: const [1])),
+      );
+      await settle(tester);
 
       expect(
         find.text('Remove from this team'),
@@ -221,9 +240,10 @@ void main() {
     });
 
     testWidgets('is offered when another team still holds it', (tester) async {
-      await tester.pumpWidget(host(_FakeBackend(machineTeams: const [1, 2])));
-      await tester.pumpAndSettle();
-      await openMachine(tester);
+      await tester.pumpWidget(
+        machineDetail(_FakeBackend(machineTeams: const [1, 2])),
+      );
+      await settle(tester);
 
       expect(find.text('Remove from this team'), findsOneWidget);
     });
@@ -231,10 +251,9 @@ void main() {
 
   testWidgets('closing an agent asks first', (tester) async {
     final backend = _FakeBackend();
-    await tester.pumpWidget(host(backend));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(agentDetail(backend));
+    await settle(tester);
 
-    await openAgent(tester);
     await tester.tap(find.text('Close agent'));
     await tester.pumpAndSettle();
 

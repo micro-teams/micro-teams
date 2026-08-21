@@ -39,7 +39,6 @@ import '../providers.dart';
 import '../common/ui/avatar.dart';
 import 'chat_time.dart';
 import '../common/ui/theme.dart';
-import '../common/presence_controller.dart';
 import 'outbox.dart';
 import 'thread_controller.dart';
 import 'thread_info_controller.dart';
@@ -115,13 +114,6 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     final me = ref.watch(sessionProvider).valueOrNull?.user.id;
     final infoValue = ref.watch(threadInfoProvider(widget.threadId));
     final info = infoValue.valueOrNull ?? const ThreadInfo();
-    // Who in this conversation is an agent, and is anything watchable. Empty until the roster
-    // arrives, which is exactly right: nobody is an agent until we know who is here.
-    final presence =
-        ref
-            .watch(presenceProvider(presenceKey(info.members.keys)))
-            .valueOrNull ??
-        const Presence({});
 
     return Scaffold(
       appBar: AppBar(
@@ -149,8 +141,6 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
                 state: state,
                 me: me,
                 info: info,
-                presence: presence,
-                onOpenScreen: widget.onOpenScreen,
                 scroll: _scroll,
                 onRetry: (token) => ref
                     .read(threadProvider(widget.threadId).notifier)
@@ -215,8 +205,6 @@ class _MessageList extends StatelessWidget {
     required this.state,
     required this.me,
     required this.info,
-    required this.presence,
-    required this.onOpenScreen,
     required this.scroll,
     required this.onRetry,
     required this.onDiscard,
@@ -225,8 +213,6 @@ class _MessageList extends StatelessWidget {
   final ThreadState state;
   final int? me;
   final ThreadInfo info;
-  final Presence presence;
-  final void Function(String sessionId)? onOpenScreen;
   final ScrollController scroll;
   final void Function(String clientToken) onRetry;
   final void Function(String clientToken) onDiscard;
@@ -256,16 +242,6 @@ class _MessageList extends StatelessWidget {
     return rows;
   }
 
-  /// Tapping an agent's avatar opens its live screen — but only when there IS one. An avatar that
-  /// looks tappable and does nothing is worse than one that does not invite the tap.
-  VoidCallback? _watcher(int userId) {
-    final open = onOpenScreen;
-    if (open == null || !presence.watchable(userId)) return null;
-    final sid = presence.sidFor(userId);
-    if (sid == null) return null;
-    return () => open(sid);
-  }
-
   @override
   Widget build(BuildContext context) {
     final rows = _rows();
@@ -292,8 +268,6 @@ class _MessageList extends StatelessWidget {
               // only one other person, and their avatar is right there.
               showName: message.senderId != me && info.members.length > 2,
               separator: separator,
-              isAgent: presence[message.senderId] != null,
-              onWatch: _watcher(message.senderId),
             ),
             _EdgeRow() => _HistoryEdge(
               loading: state.loadingOlder,
@@ -373,8 +347,6 @@ class _Bubble extends StatelessWidget {
     required this.avatarId,
     required this.showName,
     required this.separator,
-    required this.isAgent,
-    required this.onWatch,
   });
 
   final Message message;
@@ -383,8 +355,6 @@ class _Bubble extends StatelessWidget {
   final int? avatarId;
   final bool showName;
   final String? separator;
-  final bool isAgent;
-  final VoidCallback? onWatch;
 
   @override
   Widget build(BuildContext context) {
@@ -403,8 +373,6 @@ class _Bubble extends StatelessWidget {
                 nickname: name,
                 avatarId: avatarId,
                 size: Metrics.avatarInBubble,
-                isAgent: isAgent,
-                onTap: onWatch,
               ),
               const SizedBox(width: 8),
               Flexible(

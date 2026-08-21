@@ -127,8 +127,8 @@ Widget _host(_Fake backend) => ProviderScope(
   ],
   child: MaterialApp(
     home: AgentsScreen(
-      onOpenScreen: (_) {},
-      onOpenChat: (_) {},
+      onOpenAgent: (_) {},
+      onOpenMachine: (_) {},
       onManageTeams: () {},
     ),
   ),

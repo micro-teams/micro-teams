@@ -128,7 +128,7 @@ void main() {
 
     await tester.tap(_rail('agents'));
     await tester.pumpAndSettle();
-    expect(find.text('Agents'), findsWidgets);
+    expect(find.text('agents'), findsWidgets);
 
     await tester.tap(_rail('chats'));
     await tester.pumpAndSettle();
@@ -203,5 +203,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('teams'), findsWidgets, reason: 'the management screen');
+  });
+
+  testWidgets('coming back out of a conversation leaves the bar where it was', (
+    tester,
+  ) async {
+    // The complaint this pins: on a phone you open a chat and come back, and the bottom bar is
+    // gone. Whatever the shell hides while you are inside a conversation, it has to put back.
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_app(_Fake()));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationBar), findsOneWidget);
+
+    await tester.tap(find.text('standup'));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationBar), findsOneWidget);
   });
 }

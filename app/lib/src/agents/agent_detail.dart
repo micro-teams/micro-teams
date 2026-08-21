@@ -1,9 +1,10 @@
 /// One agent, and everything you do to it.
 ///
-/// A sheet rather than a row full of icon buttons. The React phone list learned this the hard way:
-/// per-agent actions spread across a row leave no room for the name, and the same actions then
-/// have to be built a second time for the wide layout. Here the row is the agent and this is what
-/// it opens, on every size of screen.
+/// A place with a URL (`/agents/:userId`), which is what the React desktop did — selection lived in
+/// the address bar so a deep link and the back button both worked. It is also why this is not a
+/// bottom sheet any more: a sheet is not a frame on the display stack, so "back" had nothing to
+/// pop and the wide layout had nowhere to put it. On a phone this is a pushed screen; beside a
+/// list it is the pane on the right. One widget either way.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,33 +14,87 @@ import 'package:mt_api/mt_api.dart';
 import '../common/ui/change_avatar.dart';
 import 'agents_controller.dart';
 
-/// What the caller has to be able to do that this sheet cannot: leave for another screen.
+/// What this screen cannot do for itself: leave for another one.
 class AgentActions {
-  const AgentActions({required this.onWatch, required this.onChat});
+  const AgentActions({required this.onChat});
 
-  /// Null when the agent has no live screen — the button is absent rather than disappointing.
-  final VoidCallback? onWatch;
   final VoidCallback onChat;
 }
 
-Future<void> showAgentDetail(
-  BuildContext context, {
-  required Agent agent,
-  required String? machineName,
-  required AgentActions actions,
-}) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  showDragHandle: true,
-  builder: (context) =>
-      AgentDetail(agent: agent, machineName: machineName, actions: actions),
-);
+/// The agent's own screen: this pushed onto the stack, with a header of its own.
+class AgentDetailScreen extends ConsumerWidget {
+  const AgentDetailScreen({
+    required this.userId,
+    required this.onChat,
+    required this.onGone,
+    this.asPane = false,
+    super.key,
+  });
+
+  final int userId;
+  final void Function(int threadId) onChat;
+
+  /// The agent is no longer there — closed, or never was. The caller leaves this frame.
+  final VoidCallback onGone;
+
+  /// Beside the list rather than on top of it: no back arrow, because there is nothing to go back
+  /// from — the list is still on screen.
+  final bool asPane;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fleet = ref.watch(agentsProvider).valueOrNull;
+    Agent? agent;
+    for (final candidate in fleet?.agents ?? const <Agent>[]) {
+      if (candidate.userId == userId) agent = candidate;
+    }
+
+    if (agent == null) {
+      return Scaffold(
+        appBar: AppBar(automaticallyImplyLeading: !asPane),
+        body: Center(
+          child: fleet == null
+              ? const CircularProgressIndicator()
+              : const Text('that agent is not here any more'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: !asPane,
+        title: Text(
+          agent.nickname.isEmpty ? 'agent #${agent.userId}' : agent.nickname,
+        ),
+      ),
+      body: AgentDetail(
+        agent: agent,
+        machineName: fleet?.machineLabel(agent.machineId),
+        actions: AgentActions(onChat: () => _chat(context, ref, agent!)),
+        onGone: onGone,
+      ),
+    );
+  }
+
+  Future<void> _chat(BuildContext context, WidgetRef ref, Agent agent) async {
+    try {
+      onChat(await ref.read(agentsProvider.notifier).startChat(agent));
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+}
 
 class AgentDetail extends ConsumerWidget {
   const AgentDetail({
     required this.agent,
     required this.machineName,
     required this.actions,
+    required this.onGone,
     super.key,
   });
 
@@ -47,13 +102,16 @@ class AgentDetail extends ConsumerWidget {
   final String? machineName;
   final AgentActions actions;
 
+  /// Called once this agent is closed, so whoever is showing it can leave.
+  final VoidCallback onGone;
+
   String get _name =>
       agent.nickname.isEmpty ? 'agent #${agent.userId}' : agent.nickname;
 
   /// The agent as the list currently has it, so a rename or a new avatar shows here without
   /// closing the sheet. Falls back to what we were opened with while the list is refetching.
   Agent _live(WidgetRef ref) {
-    final fleet = ref.watch(agentsProvider).value;
+    final fleet = ref.watch(agentsProvider).valueOrNull;
     for (final candidate in fleet?.agents ?? const <Agent>[]) {
       if (candidate.userId == agent.userId) return candidate;
     }
@@ -119,7 +177,7 @@ class AgentDetail extends ConsumerWidget {
     if (confirmed != true) return;
     try {
       await ref.read(agentsProvider.notifier).close(agent);
-      if (context.mounted) Navigator.pop(context);
+      onGone();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(
@@ -174,24 +232,10 @@ class AgentDetail extends ConsumerWidget {
             _Keepalive(agent: live),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                actions.onChat();
-              },
+              onPressed: actions.onChat,
               icon: const Icon(Icons.chat_bubble_outline),
               label: const Text('Chat with agent'),
             ),
-            if (actions.onWatch != null) ...[
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  actions.onWatch!();
-                },
-                icon: const Icon(Icons.terminal),
-                label: const Text('Live screen'),
-              ),
-            ],
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () => _rename(context, ref),

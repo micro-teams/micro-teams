@@ -10,29 +10,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../common/ui/avatar.dart';
+import '../common/ui/theme.dart';
 import '../common/ui/team_picker.dart';
 import 'add_device_dialog.dart';
-import 'agent_detail.dart';
 import 'agents_controller.dart';
-import 'machine_detail.dart';
 import 'open_agent_dialog.dart';
 
 class AgentsScreen extends ConsumerWidget {
   const AgentsScreen({
-    required this.onOpenScreen,
-    required this.onOpenChat,
+    required this.onOpenAgent,
+    required this.onOpenMachine,
     required this.onManageTeams,
+    this.selectedAgentId,
+    this.selectedMachineId,
+    this.dense = false,
     super.key,
   });
 
   /// Go to team management, from the team picker in the header.
   final VoidCallback onManageTeams;
 
-  /// Watch this agent's live screen.
-  final void Function(Agent agent) onOpenScreen;
+  /// Open this agent — a pushed frame on a phone, the pane beside the list on a wide window.
+  final void Function(Agent agent) onOpenAgent;
 
-  /// Go to the conversation with this agent.
-  final void Function(int threadId) onOpenChat;
+  final void Function(Machine machine) onOpenMachine;
+
+  /// What the list draws as selected, which is whatever the URL says is open.
+  final int? selectedAgentId;
+  final String? selectedMachineId;
+
+  /// Beside a detail pane the list is the narrower variant, as the chat list is.
+  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,7 +48,8 @@ class AgentsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Agents'),
+        automaticallyImplyLeading: false,
+        title: const Text('agents'),
         actions: [
           TeamPickerAction(onManage: onManageTeams),
           IconButton(
@@ -68,8 +77,10 @@ class AgentsScreen extends ConsumerWidget {
           onRefresh: () async => ref.invalidate(agentsProvider),
           child: _Fleet(
             fleet: data,
-            onOpenScreen: onOpenScreen,
-            onOpenChat: onOpenChat,
+            onOpenAgent: onOpenAgent,
+            onOpenMachine: onOpenMachine,
+            selectedAgentId: selectedAgentId,
+            selectedMachineId: selectedMachineId,
           ),
         ),
       ),
@@ -80,28 +91,17 @@ class AgentsScreen extends ConsumerWidget {
 class _Fleet extends ConsumerWidget {
   const _Fleet({
     required this.fleet,
-    required this.onOpenScreen,
-    required this.onOpenChat,
+    required this.onOpenAgent,
+    required this.onOpenMachine,
+    required this.selectedAgentId,
+    required this.selectedMachineId,
   });
 
   final TeamFleet fleet;
-  final void Function(Agent agent) onOpenScreen;
-  final void Function(int threadId) onOpenChat;
-
-  Future<void> _chat(BuildContext context, WidgetRef ref, Agent agent) async {
-    try {
-      final threadId = await ref.read(agentsProvider.notifier).startChat(agent);
-      onOpenChat(threadId);
-    } catch (e) {
-      if (context.mounted) _say(context, '$e');
-    }
-  }
-
-  void _say(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
+  final void Function(Agent agent) onOpenAgent;
+  final void Function(Machine machine) onOpenMachine;
+  final int? selectedAgentId;
+  final String? selectedMachineId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,24 +131,17 @@ class _Fleet extends ConsumerWidget {
           _AgentRow(
             agent: agent,
             machine: fleet.machineLabel(agent.machineId),
-            onWatch: agent.sid == null ? null : () => onOpenScreen(agent),
-            // The row opens the agent; every per-agent action lives in there. A row full of icon
-            // buttons leaves no room for the name and has to be built twice, once per layout.
-            onOpen: () => showAgentDetail(
-              context,
-              agent: agent,
-              machineName: fleet.machineLabel(agent.machineId),
-              actions: AgentActions(
-                onWatch: agent.sid == null ? null : () => onOpenScreen(agent),
-                onChat: () => _chat(context, ref, agent),
-              ),
-            ),
+            // The row opens the agent, and every per-agent action lives in there. A row full of
+            // icon buttons leaves no room for the name and has to be built twice, once per layout.
+            onOpen: () => onOpenAgent(agent),
+            selected: agent.userId == selectedAgentId,
           ),
         if (fleet.machines.isNotEmpty) const _Heading('Machines'),
         for (final machine in fleet.machines)
           _MachineRow(
             machine: machine,
-            onOpen: () => showMachineDetail(context, machine: machine),
+            onOpen: () => onOpenMachine(machine),
+            selected: machine.id == selectedMachineId,
           ),
       ],
     );
@@ -171,17 +164,14 @@ class _AgentRow extends StatelessWidget {
   const _AgentRow({
     required this.agent,
     required this.machine,
-    required this.onWatch,
     required this.onOpen,
+    required this.selected,
   });
 
   final Agent agent;
   final String? machine;
-
-  /// Null when this agent has no live screen to watch, which is why tapping the avatar does
-  /// nothing rather than opening an empty terminal.
-  final VoidCallback? onWatch;
   final VoidCallback onOpen;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -191,68 +181,75 @@ class _AgentRow extends StatelessWidget {
     ].join(' · ');
 
     return ListTile(
-      // The same avatar control as everywhere else, with the agent's real picture and the robot
-      // badge — a coloured dot said less, and said it in a shape nothing else in the app uses.
-      leading: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          UserAvatar(
-            userId: agent.userId,
-            nickname: agent.nickname,
-            avatarId: agent.avatarId,
-            size: 44,
-            isAgent: true,
-            onTap: onWatch,
-          ),
-          Positioned(right: -2, top: -2, child: _Dot(online: agent.online)),
-        ],
+      // Just the avatar. It is agent-aware on its own — the ring while it works, the tap that
+      // opens its live screen — and the React row put liveness in the meta line below rather than
+      // as a badge on the face.
+      leading: UserAvatar(
+        userId: agent.userId,
+        nickname: agent.nickname,
+        avatarId: agent.avatarId,
+        size: 44,
       ),
       title: Text(
         agent.nickname.isEmpty ? 'agent #${agent.userId}' : agent.nickname,
       ),
-      subtitle: subtitle.isEmpty ? null : Text(subtitle),
+      subtitle: Row(
+        children: [
+          _Dot(online: agent.online),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ],
+      ),
       onTap: onOpen,
+      selected: selected,
     );
   }
 }
 
 class _MachineRow extends StatelessWidget {
-  const _MachineRow({required this.machine, required this.onOpen});
+  const _MachineRow({
+    required this.machine,
+    required this.onOpen,
+    required this.selected,
+  });
 
   final Machine machine;
   final VoidCallback onOpen;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
-      // The same 44px leading tile as an agent row, so the machine's status dot lands at the same
-      // x as the agent's and the two lists read as one column of live/dead.
-      leading: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.dns_outlined, color: scheme.onSurfaceVariant),
-          ),
-          Positioned(right: -2, top: -2, child: _Dot(online: machine.online)),
-        ],
+      // The same 44px leading tile as an agent row, so the two lists read as one column.
+      leading: Container(
+        width: 44,
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(Metrics.avatarRadius),
+        ),
+        child: Icon(Icons.dns_outlined, color: scheme.onSurfaceVariant),
       ),
       title: Text(machine.name),
-      subtitle: Text(machine.online ? 'connected' : 'not connected'),
+      subtitle: _Dot(online: machine.online),
       onTap: onOpen,
+      selected: selected,
     );
   }
 }
 
-/// Online or not. One dot, drawn one way, so "connected" never means two different things on two
-/// screens — the React client had this drift and had to be pulled back into line.
+/// Online or not: an 8px dot and the word, in one colour when alive and the muted one when not.
+/// Ported from the React `OnlineDot`, which every agent and machine row used.
 class _Dot extends StatelessWidget {
   const _Dot({required this.online});
 
@@ -261,16 +258,24 @@ class _Dot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: 12,
-      height: 12,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: online ? Colors.green : scheme.outlineVariant,
-        // Ringed in the page's own colour so the dot reads as ON the tile rather than beside it,
-        // whatever picture is underneath.
-        border: Border.all(color: scheme.surface, width: 2),
-      ),
+    final colour = online ? scheme.primary : scheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: online ? colour : colour.withValues(alpha: 0.5),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          online ? 'online' : 'offline',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colour),
+        ),
+      ],
     );
   }
 }
