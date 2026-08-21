@@ -31,7 +31,8 @@ class AddDeviceDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final origin = ref.watch(endpointsProvider).origin;
     final team = ref.watch(currentTeamProvider);
-    final mine = ref.watch(allMachinesProvider).valueOrNull ?? const <Machine>[];
+    final mine =
+        ref.watch(allMachinesProvider).valueOrNull ?? const <Machine>[];
     // Only the ones this team is not already using — the others are not an option, they are the
     // list you were just looking at.
     final spare = team == null

@@ -118,7 +118,9 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     // Who in this conversation is an agent, and is anything watchable. Empty until the roster
     // arrives, which is exactly right: nobody is an agent until we know who is here.
     final presence =
-        ref.watch(presenceProvider(presenceKey(info.members.keys))).valueOrNull ??
+        ref
+            .watch(presenceProvider(presenceKey(info.members.keys)))
+            .valueOrNull ??
         const Presence({});
 
     return Scaffold(
