@@ -29,6 +29,54 @@
 const VERSION = "__MT_BUILD__";
 const CACHE = `microteams-${VERSION}`;
 
+/// What the SERVER says is deployed, written by the same build step and served without caching.
+///
+/// A worker is only replaced when its own bytes change, so a deploy that ships new application
+/// files beside an OLD sw.js is invisible: no update, no activate, no cache eviction, and every
+/// asset keeps coming from the cache this worker built. That is not hypothetical — it is exactly
+/// what happened on 2026-08-21, where main.dart.js was four builds newer than the worker caching
+/// it, and every visitor kept running the old application.
+///
+/// So the worker does not trust its own version to be current. It asks.
+const BUILD_URL = "/build.json";
+
+/// How often that question is worth asking. Cheap (a few dozen bytes, no-store) but not free, so
+/// it rides navigations rather than every request.
+const CHECK_EVERY_MS = 60_000;
+let lastChecked = 0;
+
+/**
+ * Compare what we hold against what is deployed, and recover if they differ.
+ *
+ * Recovery is deliberately blunt: throw away every cache and ask the browser to re-examine the
+ * worker script. The next request for anything goes to the network, which is the whole point —
+ * being stale is precisely the state where the cache is worth nothing.
+ */
+async function reconcileWithServer() {
+  const now = Date.now();
+  if (now - lastChecked < CHECK_EVERY_MS) return;
+  lastChecked = now;
+  try {
+    const response = await fetch(BUILD_URL, { cache: "no-store" });
+    if (!response.ok) return;
+    const deployed = await response.json();
+    if (!deployed || typeof deployed.version !== "string") return;
+    if (deployed.version === VERSION) return;
+
+    console.warn(
+      `sw: holding ${VERSION}, server has ${deployed.version} — dropping the cache`,
+    );
+    for (const name of await caches.keys()) {
+      if (name.startsWith("microteams-")) await caches.delete(name);
+    }
+    // And look for a new worker, which is the thing that was supposed to happen by itself.
+    await self.registration.update();
+  } catch (e) {
+    // Offline, or no build.json (an older deployment). Neither is a reason to do anything: what we
+    // hold is what we have.
+  }
+}
+
 /** What the app cannot start without. Everything else arrives through the fetch handler. */
 const SHELL = [
   // "/" and "/index.html" are the multipath launcher (tool/launcher.mjs), not Flutter's document:
@@ -72,6 +120,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
+      await reconcileWithServer();
       for (const name of await caches.keys()) {
         if (name.startsWith("microteams-") && name !== CACHE) await caches.delete(name);
       }
@@ -92,12 +141,18 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mt/")) return;
 
   // The escape hatch must always come from the network if the network is there — it is what people
-  // are told to open when the cache itself is the problem.
-  if (url.pathname === "/unregister.html") return;
+  // are told to open when the cache itself is the problem. The build stamp likewise: a cached
+  // answer to "what is deployed?" is an answer about the past, which is the one thing it must
+  // never be.
+  if (url.pathname === "/unregister.html" || url.pathname === "/build.json") {
+    return;
+  }
 
   // A navigation to any route is answered with the document. This is the service-worker half of
   // nginx's try_files: /agents typed into the address bar has to open the app, offline too.
   if (request.mode === "navigate") {
+    // Every navigation is a chance to notice that this worker is behind the deployment.
+    event.waitUntil(reconcileWithServer());
     event.respondWith(
       (async () => {
         try {
