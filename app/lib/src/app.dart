@@ -16,13 +16,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'app_providers.dart';
-import 'features/auth/login_screen.dart';
-import 'features/agents/agents_screen.dart';
-import 'features/chats/chats_screen.dart';
-import 'features/chats/thread_screen.dart';
-import 'features/terminal/terminal_screen.dart';
-import 'ui/theme.dart';
+import 'providers.dart';
+import 'auth/login_screen.dart';
+import 'agents/agents_screen.dart';
+import 'chats/chats_screen.dart';
+import 'chats/thread_screen.dart';
+import 'terminal/terminal_screen.dart';
+import 'common/ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
   const MicroTeamsApp({super.key});

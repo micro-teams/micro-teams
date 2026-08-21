@@ -1,12 +1,17 @@
-// The layering rule, enforced by reading the source.
+// The rules about shape, enforced by reading the source.
 //
-// The React client had to grow a custom lint for exactly this (PR #162): screens had accumulated
-// their own API calls, so the same fetch existed in the phone layout and the desktop layout and
-// drifted apart. The rule that fixed it is simple enough to check with a regex, and a rule that is
-// checked is a rule that survives a rewrite.
+// Two of them, and each exists because the React client broke it once.
 //
 // A screen renders state and reports intent. It does not fetch, does not hold a client, and does
-// not subscribe. Everything that talks to a server lives in a controller behind a provider.
+// not subscribe. That one had to grow a custom lint over there (PR #162): screens had accumulated
+// their own API calls, so the same fetch existed in the phone layout and the desktop layout and
+// drifted apart.
+//
+// The tree is arranged by BUSINESS AREA, not by layer — chats/, agents/, terminal/, auth/ —
+// with common/ for the things that belong to no area. That matches the backend, and it means the
+// files you change together live together. What keeps it honest is direction: common/ may not know
+// what a chat is, and a feature may not reach into another feature. When two features want the same
+// thing it goes to common/; when it will not go, that is the answer — it was not shared.
 
 import 'dart:io';
 
@@ -14,18 +19,27 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Files that are allowed to know the network exists.
 const _plumbing = {
-  'lib/src/mt/client.dart',
+  'lib/src/common/mt_client.dart',
+  'lib/src/common/config.dart',
+  'lib/src/common/updates/socket.dart',
   'lib/src/auth/auth_api.dart',
-  'lib/src/app_providers.dart',
-  'lib/src/core/config.dart',
-  'lib/src/updates/socket.dart',
+  'lib/src/providers.dart',
 };
+
+/// The business areas. Anything not here is common/ or the composition root.
+const _features = ['chats', 'agents', 'terminal', 'auth'];
 
 List<File> _dartFiles(String dir) => Directory(dir)
     .listSync(recursive: true)
     .whereType<File>()
     .where((f) => f.path.endsWith('.dart'))
     .toList();
+
+/// The import targets of one file, as written.
+List<String> _importsOf(File file) => RegExp(
+  r"""^\s*import\s+['"]([^'"]+)['"]""",
+  multiLine: true,
+).allMatches(file.readAsStringSync()).map((m) => m.group(1)!).toList();
 
 void main() {
   test('no screen talks to a server', () {
@@ -39,7 +53,7 @@ void main() {
       if (source.contains('mtCall(')) {
         offenders.add('$path calls mtCall — move the fetch into a controller');
       }
-      if (source.contains("mt/client.dart")) {
+      if (source.contains('mt_client.dart')) {
         offenders.add('$path imports the nt client directly');
       }
       if (source.contains('watchTopic(')) {
@@ -70,10 +84,82 @@ void main() {
     expect(offenders, isEmpty, reason: offenders.join('\n'));
   });
 
+  test('common/ does not know what a chat is', () {
+    // The direction that makes "common" mean anything. The moment something in common/ imports a
+    // feature, it is not common — it is that feature's, sitting in the wrong place, and every other
+    // feature now depends on it transitively.
+    final offenders = <String>[];
+
+    for (final file in _dartFiles('lib/src/common')) {
+      for (final target in _importsOf(file)) {
+        for (final feature in _features) {
+          if (target.contains('/$feature/') ||
+              target.startsWith('../$feature/')) {
+            offenders.add('${file.path} imports $target');
+          }
+        }
+      }
+    }
+
+    expect(offenders, isEmpty, reason: offenders.join('\n'));
+  });
+
+  test('features do not reach into each other', () {
+    // Not a style preference: a chat screen importing an agents file is how two areas become one
+    // area that nobody decided to merge. When both want the same thing, it goes to common/ — and if
+    // it will not go there without dragging half a feature with it, that is the answer.
+    //
+    // The composition root (providers.dart, app.dart) is exempt: wiring features together is its
+    // entire job, and it is the one place where that is visible.
+    final offenders = <String>[];
+
+    for (final feature in _features) {
+      for (final file in _dartFiles('lib/src/$feature')) {
+        for (final target in _importsOf(file)) {
+          for (final other in _features) {
+            if (other == feature) continue;
+            if (target.contains('../$other/')) {
+              offenders.add('${file.path} imports $target');
+            }
+          }
+        }
+      }
+    }
+
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          '${offenders.join('\n')}\n'
+          'Move the shared thing into lib/src/common/, or accept that it was not shared.',
+    );
+  });
+
+  test('every source file lives in a business area or in common', () {
+    // A file at the top of lib/src/ is a file nobody has decided the owner of, and that is where a
+    // "utils" directory starts.
+    const allowed = {'lib/src/app.dart', 'lib/src/providers.dart'};
+    final offenders = <String>[];
+
+    for (final file in Directory('lib/src').listSync().whereType<File>()) {
+      if (!file.path.endsWith('.dart')) continue;
+      if (allowed.contains(file.path)) continue;
+      offenders.add(file.path);
+    }
+
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          '${offenders.join('\n')}\n'
+          'Put it under the feature that owns it, or under common/ if no feature does.',
+    );
+  });
+
   test('the generated client cannot be committed, so it cannot be edited', () {
     // The strongest available guarantee that nobody "just fixes" a generated model: the whole
     // package is ignored, so an edit cannot survive a checkout. Same arrangement as
-    // frontend/src/api on the TypeScript side.
+    // frontend/src/api had on the TypeScript side.
     final ignore = File('.gitignore').readAsStringSync();
     expect(
       ignore.contains('packages/mt_api/'),
