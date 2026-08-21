@@ -30,6 +30,19 @@ class _TwoPeople implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    // Keyed on the path. The conversation asks three questions now — messages, the roster, and
+    // which of those members are agents — and a fake that answers them all with the same shape is
+    // a fake that would let a mis-parse pass.
+    if (options.uri.path.endsWith('/agent')) {
+      return ResponseBody.fromString(
+        '{"agents":[],"page":{"page_start":0,"page_size":50,'
+        '"has_prev":false,"has_more":false}}',
+        200,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
     final json = options.uri.path.endsWith('/messages')
         ? '{"messages":['
               '{"id":1,"threadId":7,"senderId":2,"content":"theirs",'

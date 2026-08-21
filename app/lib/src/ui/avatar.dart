@@ -32,6 +32,8 @@ class UserAvatar extends ConsumerWidget {
     this.nickname,
     this.avatarId,
     this.size = Metrics.avatarInBubble,
+    this.isAgent = false,
+    this.onTap,
     super.key,
   });
 
@@ -43,6 +45,13 @@ class UserAvatar extends ConsumerWidget {
   final int? avatarId;
 
   final double size;
+
+  /// Draws the small robot badge the React avatar had. Being an agent is worth saying even when
+  /// there is nothing to watch — otherwise a conversation gives no sign of who you are talking to.
+  final bool isAgent;
+
+  /// What tapping does. Only agents ever have one: it opens their live screen.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -67,22 +76,52 @@ class UserAvatar extends ConsumerWidget {
     );
 
     final id = avatarId;
-    if (id == null || id == 0) return fallback;
+    final Widget picture;
+    if (id == null || id == 0) {
+      picture = fallback;
+    } else {
+      final url = '${ref.watch(endpointsProvider).auth}/avatars/$id';
+      picture = ClipRRect(
+        borderRadius: radius,
+        child: Image.network(
+          url,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          // The initial, not a spinner or a hole: an avatar that flickers grey on every rebuild is
+          // more distracting than one that is briefly the wrong shape.
+          loadingBuilder: (context, child, progress) =>
+              progress == null ? child : fallback,
+          errorBuilder: (context, error, stack) => fallback,
+        ),
+      );
+    }
 
-    final url = '${ref.watch(endpointsProvider).auth}/avatars/$id';
-    return ClipRRect(
-      borderRadius: radius,
-      child: Image.network(
-        url,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        // The initial, not a spinner or a hole: an avatar that flickers grey on every rebuild is
-        // more distracting than one that is briefly the wrong shape.
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : fallback,
-        errorBuilder: (context, error, stack) => fallback,
-      ),
+    Widget result = picture;
+    if (isAgent) {
+      result = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          picture,
+          Positioned(
+            right: -3,
+            bottom: -3,
+            child: Container(
+              padding: const EdgeInsets.all(1.5),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.smart_toy, size: size * 0.3, color: brandGreen),
+            ),
+          ),
+        ],
+      );
+    }
+    if (onTap == null) return result;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: onTap, child: result),
     );
   }
 }

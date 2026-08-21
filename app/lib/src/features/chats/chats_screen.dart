@@ -126,6 +126,10 @@ class _List extends StatelessWidget {
     return ListView.builder(
       itemCount: threads.length,
       itemBuilder: (context, index) => _ChatRow(
+        // Keyed, so picking a conversation does not replace the row's element mid-ripple. Without
+        // this the first tap looked like it did nothing: the row was rebuilt (it is now the
+        // selected one) and the ink was thrown away before it could be drawn.
+        key: ValueKey(threads[index].id),
         chat: threads[index],
         me: me,
         dense: dense,
@@ -138,6 +142,7 @@ class _List extends StatelessWidget {
 
 class _ChatRow extends StatelessWidget {
   const _ChatRow({
+    super.key,
     required this.chat,
     required this.me,
     required this.dense,
@@ -156,6 +161,7 @@ class _ChatRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
 
+    final avatarSize = dense ? Metrics.avatarInDenseList : Metrics.avatarInList;
     final members = chat.members.toList();
     final others = members.where((m) => m.userId != me).toList();
     final oneOnOne = members.length == 2 && others.length == 1;
@@ -178,9 +184,10 @@ class _ChatRow extends StatelessWidget {
       child: InkWell(
         onTap: onOpen,
         child: Padding(
-          // 10/12, measured off the React row. The row's height is not set: it is whatever the
-          // text column comes to, which is what makes the phone row taller than the dense one.
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          // The row's height is not set: it is whatever its contents come to, which is what makes
+          // the phone row taller than the dense one. There is no rule under the text — the React
+          // row had one and it earns nothing: the avatar column already separates the rows.
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -189,9 +196,10 @@ class _ChatRow extends StatelessWidget {
                       userId: others.first.userId,
                       nickname: others.first.nickname,
                       avatarId: others.first.avatarId,
-                      size: Metrics.avatarInList,
+                      size: avatarSize,
                     )
                   : MemberGridAvatar(
+                      size: avatarSize,
                       members: [
                         for (final m in members)
                           (
@@ -203,55 +211,47 @@ class _ChatRow extends StatelessWidget {
                     ),
               const SizedBox(width: 12),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(color: scheme.outlineVariant),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodyLarge?.copyWith(
-                                fontSize: dense
-                                    ? Metrics.rowTitleDense
-                                    : Metrics.rowTitlePhone,
-                                height: dense ? 1.4 : 1.5,
-                                fontWeight: FontWeight.w500,
-                              ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodyLarge?.copyWith(
+                              fontSize: dense
+                                  ? Metrics.rowTitleDense
+                                  : Metrics.rowTitlePhone,
+                              height: dense ? 1.4 : 1.5,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            listTime(last?.createdAt ?? chat.updatedAt),
-                            style: text.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        preview,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: text.bodyMedium?.copyWith(
-                          fontSize: 14,
-                          height: 1.4,
-                          color: scheme.onSurfaceVariant,
                         ),
+                        const SizedBox(width: 8),
+                        Text(
+                          listTime(last?.createdAt ?? chat.updatedAt),
+                          style: text.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodyMedium?.copyWith(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: scheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],

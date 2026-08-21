@@ -178,7 +178,12 @@ class _ChatsPane extends ConsumerWidget {
     final open = openThreadId;
 
     if (!wide) {
-      if (open != null) return ThreadScreen(threadId: open);
+      if (open != null) {
+        return ThreadScreen(
+          threadId: open,
+          onOpenScreen: (sid) => context.go('/screen/$sid'),
+        );
+      }
       return Scaffold(
         appBar: AppBar(title: const Text('chats')),
         body: ChatsScreen(
@@ -215,6 +220,7 @@ class _ChatsPane extends ConsumerWidget {
                     key: ValueKey(open),
                     threadId: open,
                     asPane: true,
+                    onOpenScreen: (sid) => context.go('/screen/$sid'),
                   ),
           ),
         ],
@@ -279,26 +285,10 @@ class _Shell extends StatelessWidget {
       return Scaffold(
         body: Row(
           children: [
-            // 64px and icon-first, which is what the React desktop rail was. Material's default
-            // rail is wider and puts the label beside the icon; that difference alone moved every
-            // pane beside it.
-            NavigationRail(
-              selectedIndex: index,
-              labelType: NavigationRailLabelType.all,
-              minWidth: Metrics.railWidth,
-              groupAlignment: -1,
-              onDestinationSelected: (i) => context.go(_destinations[i].path),
-              destinations: [
-                for (final d in _destinations)
-                  NavigationRailDestination(
-                    icon: Icon(d.icon),
-                    selectedIcon: Icon(d.selected),
-                    label: Text(
-                      d.label,
-                      style: const TextStyle(fontSize: Metrics.railLabelSize),
-                    ),
-                  ),
-              ],
+            _Rail(
+              index: index,
+              destinations: _destinations,
+              onSelected: (i) => context.go(_destinations[i].path),
             ),
             const VerticalDivider(width: 1),
             Expanded(child: child),
@@ -320,6 +310,104 @@ class _Shell extends StatelessWidget {
               label: d.label,
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The desktop rail, drawn rather than configured.
+///
+/// Each destination is a 44px rounded SQUARE with the icon and the label both inside it, which is
+/// what the React rail was (`size-11 rounded-lg text-[10px]`). Material's NavigationRail puts its
+/// indicator around the icon alone and the label underneath, outside — a different shape that no
+/// amount of theming reaches, and the difference is visible at a glance.
+class _Rail extends StatelessWidget {
+  const _Rail({
+    required this.index,
+    required this.destinations,
+    required this.onSelected,
+  });
+
+  final int index;
+  final List<({String path, IconData icon, IconData selected, String label})>
+  destinations;
+  final void Function(int) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: Metrics.railWidth,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        border: Border(right: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < destinations.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _RailItem(
+                destination: destinations[i],
+                active: i == index,
+                onTap: () => onSelected(i),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RailItem extends StatelessWidget {
+  const _RailItem({
+    required this.destination,
+    required this.active,
+    required this.onTap,
+  });
+
+  final ({String path, IconData icon, IconData selected, String label})
+  destination;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final colour = active ? scheme.primary : scheme.onSurfaceVariant;
+    return Tooltip(
+      message: destination.label,
+      child: Material(
+        color: active ? scheme.surfaceContainerHighest : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: Metrics.railItemSize,
+            height: Metrics.railItemSize,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  active ? destination.selected : destination.icon,
+                  size: Metrics.railIconSize,
+                  color: colour,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  destination.label,
+                  style: TextStyle(
+                    fontSize: Metrics.railLabelSize,
+                    height: 1,
+                    color: colour,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

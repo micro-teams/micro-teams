@@ -37,6 +37,7 @@ class _FakeBackend implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (options.uri.path.endsWith('/agent')) return _noAgents();
     if (!options.uri.path.endsWith('/messages')) return _detail();
     asked.add(options.uri.toString());
 
@@ -72,6 +73,17 @@ class _FakeBackend implements HttpClientAdapter {
         '"has_prev":false,"has_more":$hasMore'
         '${nextStart == null ? '' : ',"next_start":$nextStart'}}}';
   }
+
+  /// Nobody here is an agent. Said explicitly, because "no answer" and "no agents" are different
+  /// things and only one of them is what a conversation between two humans looks like.
+  ResponseBody _noAgents() => ResponseBody.fromString(
+    '{"agents":[],"page":{"page_start":0,"page_size":50,'
+    '"has_prev":false,"has_more":false}}',
+    200,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
 
   /// One member, so a bubble has a name and an avatar to draw.
   ResponseBody _detail() => ResponseBody.fromString(
@@ -182,6 +194,7 @@ class _ShortThread extends _FakeBackend {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (options.uri.path.endsWith('/agent')) return _noAgents();
     if (!options.uri.path.endsWith('/messages')) return _detail();
     asked.add(options.uri.toString());
     return ResponseBody.fromString(

@@ -38,6 +38,10 @@ const Color _ink = Color(0xFFDDE8DD); // --foreground
 const Color _inkMuted = Color(0xFF798479); // --muted-foreground
 const Color _danger = Color(0xFFE62B34); // --destructive
 
+/// The send button's green. Not the brand green: the React composer used WeChat's own #07c160
+/// here, and it is the one control in the app that is copying a specific product on purpose.
+const Color sendGreen = Color(0xFF07C160);
+
 /// WeChat-ish bubble colours, taken verbatim from the React `MessageList.tsx` constants so the two
 /// clients cannot drift apart on the one screen people actually look at.
 const Color ownBubble = Color(0xFF95EC69);
@@ -74,6 +78,12 @@ ThemeData darkTheme() {
   final text = base.textTheme.apply(fontFamily: monoFamily);
 
   return base.copyWith(
+    // One press effect, not two. Material draws a fast expanding splash AND a slow-fading
+    // highlight underneath it; on a dark theme the highlight lags visibly behind the ripple and
+    // reads as a second, sluggish animation. The splash is the one that tracks the finger.
+    splashFactory: InkRipple.splashFactory,
+    highlightColor: Colors.transparent,
+    hoverColor: _hover,
     scaffoldBackgroundColor: _page,
     canvasColor: _page,
     textTheme: text,
@@ -93,6 +103,9 @@ ThemeData darkTheme() {
       // 16px, regular. Measured off the React header, not chosen: Material's default title is
       // 20px and half a weight heavier, which is most of why screens "felt bigger than before".
       toolbarHeight: 56,
+      // Every header in the React client sat on a 1px line. Without it a black header and a black
+      // body are one undivided field, and the title looks like it is floating in the content.
+      shape: const Border(bottom: BorderSide(color: _line)),
       titleTextStyle: text.titleMedium?.copyWith(
         color: _ink,
         fontSize: 16,
@@ -171,9 +184,13 @@ OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
 class Metrics {
   const Metrics._();
 
-  /// The desktop rail: 64px wide, 44px targets, a 10px label under each icon.
+  /// The desktop rail: 64px wide, and each destination is a 44px rounded SQUARE with its icon and
+  /// its label both inside it — the React rail's `size-11 rounded-lg text-[10px]` button. Material's
+  /// NavigationRail cannot be talked into that shape (its indicator wraps the icon and the label
+  /// sits outside), which is why the rail here is hand-drawn.
   static const double railWidth = 64;
   static const double railItemSize = 44;
+  static const double railIconSize = 20;
   static const double railLabelSize = 10;
 
   /// The chat list beside an open conversation.
@@ -183,9 +200,14 @@ class Metrics {
   /// 768px, which is what makes a bubble cap out at 553px there.
   static const double readingColumn = 768;
 
-  /// Avatars. Two sizes, and only two: the list uses the larger, a message bubble the smaller.
-  /// The React client used exactly these, and the same rounded-square radius for both.
+  /// Avatars, all rounded squares of the same radius.
+  ///
+  /// Three call sites, and the React client had three sizes for them: 48 in the phone chat list,
+  /// 44 in the list beside a conversation, 40 next to a message. The middle one matters — with 48
+  /// beside a 40 the two read as different controls on a desktop, which is exactly what it looked
+  /// like. 44 beside 40 does not.
   static const double avatarInList = 48;
+  static const double avatarInDenseList = 44;
   static const double avatarInBubble = 40;
   static const double avatarRadius = 6;
 
@@ -201,6 +223,10 @@ class Metrics {
   /// A chat row is taller on a phone (16px title) than beside a conversation (14px).
   static const double rowTitlePhone = 16;
   static const double rowTitleDense = 14;
+
+  /// The composer. The input and the button are the same height, because two controls side by side
+  /// at different heights is the sort of thing you cannot stop seeing once you have seen it.
+  static const double composerHeight = 40;
 }
 
 /// Breakpoint between the phone layout (one screen at a time) and the desktop one (list beside

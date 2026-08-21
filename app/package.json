@@ -1,7 +1,7 @@
 {
   "name": "microteams-app-checks",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "The browser checks for the built web app. Not part of the app — Flutter builds that. This exists because asserting service workers, offline start and the escape hatch needs a real browser, and Playwright is how that is driven.",
   "type": "module",
   "scripts": {

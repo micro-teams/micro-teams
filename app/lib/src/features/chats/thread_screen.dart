@@ -39,6 +39,7 @@ import '../../app_providers.dart';
 import '../../ui/avatar.dart';
 import '../../ui/chat_time.dart';
 import '../../ui/theme.dart';
+import '../agents/presence_controller.dart';
 import 'outbox.dart';
 import 'thread_controller.dart';
 import 'thread_info_controller.dart';
@@ -48,6 +49,7 @@ class ThreadScreen extends ConsumerStatefulWidget {
     required this.threadId,
     this.title,
     this.asPane = false,
+    this.onOpenScreen,
     super.key,
   });
 
@@ -61,6 +63,10 @@ class ThreadScreen extends ConsumerStatefulWidget {
   /// this way, and the first cut got a back arrow purely because Material adds one whenever the
   /// router could pop — which says something about the history stack, not about the layout.
   final bool asPane;
+
+  /// Opens an agent's live screen. Supplied by the router, because a screen does not navigate — it
+  /// says what happened and the shell decides where that goes.
+  final void Function(String sessionId)? onOpenScreen;
 
   @override
   ConsumerState<ThreadScreen> createState() => _ThreadScreenState();
@@ -103,14 +109,18 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   Widget build(BuildContext context) {
     final thread = ref.watch(threadProvider(widget.threadId));
     final me = ref.watch(sessionProvider).value?.user.id;
-    final info =
-        ref.watch(threadInfoProvider(widget.threadId)).value ??
-        const ThreadInfo();
+    final infoValue = ref.watch(threadInfoProvider(widget.threadId));
+    final info = infoValue.value ?? const ThreadInfo();
+    // Who in this conversation is an agent, and is anything watchable. Empty until the roster
+    // arrives, which is exactly right: nobody is an agent until we know who is here.
+    final presence =
+        ref.watch(presenceProvider(presenceKey(info.members.keys))).value ??
+        const Presence({});
 
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: !widget.asPane,
-        title: Text(_title(info, me)),
+        title: Text(_title(info, me, settled: !infoValue.isLoading)),
       ),
       body: Column(
         children: [
@@ -125,6 +135,8 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
                 state: state,
                 me: me,
                 info: info,
+                presence: presence,
+                onOpenScreen: widget.onOpenScreen,
                 scroll: _scroll,
                 onRetry: (token) => ref
                     .read(threadProvider(widget.threadId).notifier)
@@ -147,7 +159,10 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
 
   /// A group is called by its title; a direct chat is called by the other person. Same rule as the
   /// chat list, which is why a 1:1 does not read "thread #12" in one place and a name in the other.
-  String _title(ThreadInfo info, int? me) {
+  /// [settled] is whether the roster has actually answered. While it has not, the title is EMPTY
+  /// rather than "chat #12": a placeholder that is replaced a moment later reads as the app
+  /// changing its mind about what you opened, which is worse than a header that fills in.
+  String _title(ThreadInfo info, int? me, {required bool settled}) {
     if (widget.title != null && widget.title!.isNotEmpty) return widget.title!;
     if (info.title.isNotEmpty) return info.title;
     final others = info.others(me);
@@ -155,7 +170,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     if (others.isNotEmpty) {
       return others.map((m) => m.nickname ?? '?').join('、');
     }
-    return 'chat #${widget.threadId}';
+    return settled ? 'chat #${widget.threadId}' : '';
   }
 }
 
@@ -186,6 +201,8 @@ class _MessageList extends StatelessWidget {
     required this.state,
     required this.me,
     required this.info,
+    required this.presence,
+    required this.onOpenScreen,
     required this.scroll,
     required this.onRetry,
     required this.onDiscard,
@@ -194,6 +211,8 @@ class _MessageList extends StatelessWidget {
   final ThreadState state;
   final int? me;
   final ThreadInfo info;
+  final Presence presence;
+  final void Function(String sessionId)? onOpenScreen;
   final ScrollController scroll;
   final void Function(String clientToken) onRetry;
   final void Function(String clientToken) onDiscard;
@@ -223,6 +242,16 @@ class _MessageList extends StatelessWidget {
     return rows;
   }
 
+  /// Tapping an agent's avatar opens its live screen — but only when there IS one. An avatar that
+  /// looks tappable and does nothing is worse than one that does not invite the tap.
+  VoidCallback? _watcher(int userId) {
+    final open = onOpenScreen;
+    if (open == null || !presence.watchable(userId)) return null;
+    final sid = presence.sidFor(userId);
+    if (sid == null) return null;
+    return () => open(sid);
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _rows();
@@ -249,6 +278,8 @@ class _MessageList extends StatelessWidget {
               // only one other person, and their avatar is right there.
               showName: message.senderId != me && info.members.length > 2,
               separator: separator,
+              isAgent: presence[message.senderId] != null,
+              onWatch: _watcher(message.senderId),
             ),
             _EdgeRow() => _HistoryEdge(
               loading: state.loadingOlder,
@@ -328,6 +359,8 @@ class _Bubble extends StatelessWidget {
     required this.avatarId,
     required this.showName,
     required this.separator,
+    required this.isAgent,
+    required this.onWatch,
   });
 
   final Message message;
@@ -336,6 +369,8 @@ class _Bubble extends StatelessWidget {
   final int? avatarId;
   final bool showName;
   final String? separator;
+  final bool isAgent;
+  final VoidCallback? onWatch;
 
   @override
   Widget build(BuildContext context) {
@@ -354,6 +389,8 @@ class _Bubble extends StatelessWidget {
                 nickname: name,
                 avatarId: avatarId,
                 size: Metrics.avatarInBubble,
+                isAgent: isAgent,
+                onTap: onWatch,
               ),
               const SizedBox(width: 8),
               Flexible(
