@@ -11,7 +11,7 @@ library;
 
 import 'package:dio/dio.dart';
 
-import '../core/errors.dart';
+import '../common/errors.dart';
 
 class AuthUser {
   const AuthUser({

@@ -16,13 +16,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'app_providers.dart';
-import 'features/auth/login_screen.dart';
-import 'features/agents/agents_screen.dart';
-import 'features/chats/chats_screen.dart';
-import 'features/chats/thread_screen.dart';
-import 'features/terminal/terminal_screen.dart';
-import 'ui/theme.dart';
+import 'providers.dart';
+import 'auth/login_screen.dart';
+import 'auth/profile_screen.dart';
+import 'auth/register_screen.dart';
+import 'agents/agents_screen.dart';
+import 'chats/chats_screen.dart';
+import 'chats/thread_screen.dart';
+import 'docs/docs_screen.dart';
+import 'teams/team_screen.dart';
+import 'teams/teams_screen.dart';
+import 'terminal/terminal_screen.dart';
+import 'common/ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
   const MicroTeamsApp({super.key});
@@ -87,13 +92,27 @@ GoRouter _buildRouter(WidgetRef ref) {
       if (session.isLoading) return null;
 
       final signedIn = session.value != null;
-      final atLogin = state.matchedLocation == '/login';
-      if (!signedIn) return atLogin ? null : '/login';
-      if (atLogin) return '/chats';
+      // Both screens that exist before a session. Bouncing someone off /register back to /login
+      // for not being signed in is how registration became unreachable.
+      const anonymous = {'/login', '/register'};
+      final atAnonymous = anonymous.contains(state.matchedLocation);
+      if (!signedIn) return atAnonymous ? null : '/login';
+      if (atAnonymous) return '/chats';
       return null;
     },
     routes: [
-      GoRoute(path: '/login', pageBuilder: _page(const LoginScreen())),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: LoginScreen(onRegister: () => context.go('/register')),
+        ),
+      ),
+      GoRoute(
+        path: '/register',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: RegisterScreen(onSignIn: () => context.go('/login')),
+        ),
+      ),
       ShellRoute(
         builder: (context, state, child) => _Shell(child: child),
         routes: [
@@ -123,8 +142,40 @@ GoRouter _buildRouter(WidgetRef ref) {
             ),
           ),
           GoRoute(
+            path: '/docs',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: DocsScreen(
+                openPath: state.uri.queryParameters['path'],
+                onOpen: (path) => context.go(
+                  path == null
+                      ? '/docs'
+                      : '/docs?path=${Uri.encodeQueryComponent(path)}',
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
             path: '/teams',
-            pageBuilder: _page(const _NotYetMigrated(name: 'docs')),
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: TeamsScreen(
+                onOpen: (team) => context.go('/teams/${team.id}'),
+              ),
+            ),
+            routes: [
+              GoRoute(
+                path: ':teamId',
+                pageBuilder: (context, state) {
+                  final id =
+                      int.tryParse(state.pathParameters['teamId'] ?? '') ?? 0;
+                  return NoTransitionPage(
+                    child: TeamScreen(
+                      teamId: id,
+                      onGone: () => context.go('/teams'),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/agents',
@@ -137,10 +188,7 @@ GoRouter _buildRouter(WidgetRef ref) {
               ),
             ),
           ),
-          GoRoute(
-            path: '/profile',
-            pageBuilder: _page(const _NotYetMigrated(name: 'me')),
-          ),
+          GoRoute(path: '/profile', pageBuilder: _page(const ProfileScreen())),
         ],
       ),
     ],
@@ -243,12 +291,16 @@ class _Shell extends StatelessWidget {
       label: 'chats',
     ),
     (
-      // "docs" rather than "teams": the tab has always opened the team's document tree, and the
-      // path is /teams because that is the URL the React client used and links to it exist.
-      path: '/teams',
+      path: '/docs',
       icon: Icons.snippet_folder_outlined,
       selected: Icons.snippet_folder,
       label: 'docs',
+    ),
+    (
+      path: '/teams',
+      icon: Icons.groups_outlined,
+      selected: Icons.groups,
+      label: 'teams',
     ),
     (
       path: '/agents',
@@ -406,34 +458,6 @@ class _RailItem extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A screen that still lives in the React client.
-///
-/// Named rather than hidden: during the migration it has to be obvious which half of the app you
-/// are looking at, and a blank page is not obvious. See todo/microteams/flutter-migration.md for
-/// the order these are coming across in.
-class _NotYetMigrated extends StatelessWidget {
-  const _NotYetMigrated({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(name)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            '$name has not been migrated yet.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
           ),
         ),
       ),

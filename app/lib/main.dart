@@ -9,11 +9,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'src/app.dart';
-import 'src/app_providers.dart';
-import 'src/core/cache.dart';
-import 'src/core/ready_signal.dart';
-import 'src/core/url_strategy.dart';
+import './src/app.dart';
+import 'src/providers.dart';
+import './src/common/cache.dart';
+import './src/common/ready_signal.dart';
+import './src/common/url_strategy.dart';
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
