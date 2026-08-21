@@ -114,6 +114,7 @@ Widget host(_FakeBackend backend, {void Function(int threadId)? onOpenChat}) =>
         home: AgentsScreen(
           onOpenScreen: (_) {},
           onOpenChat: onOpenChat ?? (_) {},
+          onManageTeams: () {},
         ),
       ),
     );

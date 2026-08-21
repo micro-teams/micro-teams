@@ -29,6 +29,7 @@ import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
 import 'terminal/terminal_screen.dart';
+import 'common/ui/avatar.dart';
 import 'common/ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
@@ -115,26 +116,27 @@ GoRouter _buildRouter(WidgetRef ref) {
           child: RegisterScreen(onSignIn: () => context.go('/login')),
         ),
       ),
-      ShellRoute(
-        builder: (context, state, child) => _Shell(child: child),
-        routes: [
-          GoRoute(
-            path: '/chats',
-            pageBuilder: _page(const _ChatsPane()),
+      // A branch per destination, each with its own Navigator and its own place in the URL.
+      //
+      // This is what "switching tabs does not throw your place away" is made of: an IndexedStack
+      // keeps every visited branch alive, so scroll position, the file you had open, the
+      // conversation you were reading and anything half-typed are all still there when you come
+      // back — and the branch remembers its own location, so returning to docs returns to the file
+      // rather than to the tree. The React shells did this by hand (MobileTabs / sectionKeepAlive)
+      // because react-router unmounts a route on every navigation; go_router has it built in, and
+      // rebuilding the world on every tab tap was the single biggest way this client did not feel
+      // like the old one.
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, shell) => _Shell(shell: shell),
+        branches: [
+          StatefulShellBranch(
             routes: [
               GoRoute(
-                path: ':threadId',
-                pageBuilder: (context, state) {
-                  final id =
-                      int.tryParse(state.pathParameters['threadId'] ?? '') ?? 0;
-                  return NoTransitionPage(child: _ChatsPane(openThreadId: id));
-                },
+                path: '/chats',
+                pageBuilder: _page(const _ChatsPane()),
                 routes: [
-                  // A place, not a sheet: a link to a chat's members is a link somebody can send,
-                  // and the same screen serves both layouts so the two cannot grow different
-                  // sets of actions the way the React shells did.
                   GoRoute(
-                    path: 'info',
+                    path: ':threadId',
                     pageBuilder: (context, state) {
                       final id =
                           int.tryParse(
@@ -142,9 +144,73 @@ GoRouter _buildRouter(WidgetRef ref) {
                           ) ??
                           0;
                       return NoTransitionPage(
-                        child: ThreadInfoScreen(
-                          threadId: id,
-                          onGone: () => context.go('/chats'),
+                        child: _ChatsPane(openThreadId: id),
+                      );
+                    },
+                    routes: [
+                      // A place, not a sheet: a link to a chat's members is a link somebody can send,
+                      // and the same screen serves both layouts so the two cannot grow different
+                      // sets of actions the way the React shells did.
+                      GoRoute(
+                        path: 'info',
+                        pageBuilder: (context, state) {
+                          final id =
+                              int.tryParse(
+                                state.pathParameters['threadId'] ?? '',
+                              ) ??
+                              0;
+                          return NoTransitionPage(
+                            child: ThreadInfoScreen(
+                              threadId: id,
+                              onGone: () => context.go('/chats'),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/docs',
+                pageBuilder: (context, state) => NoTransitionPage(
+                  child: DocsScreen(
+                    onManageTeams: () => context.go('/teams'),
+                    openPath: state.uri.queryParameters['path'],
+                    onOpen: (path) => context.go(
+                      path == null
+                          ? '/docs'
+                          : '/docs?path=${Uri.encodeQueryComponent(path)}',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/teams',
+                pageBuilder: (context, state) => NoTransitionPage(
+                  child: TeamsScreen(
+                    onOpen: (team) => context.go('/teams/${team.id}'),
+                  ),
+                ),
+                routes: [
+                  GoRoute(
+                    path: ':teamId',
+                    pageBuilder: (context, state) {
+                      final id =
+                          int.tryParse(state.pathParameters['teamId'] ?? '') ??
+                          0;
+                      return NoTransitionPage(
+                        child: TeamScreen(
+                          teamId: id,
+                          onGone: () => context.go('/teams'),
                         ),
                       );
                     },
@@ -153,66 +219,45 @@ GoRouter _buildRouter(WidgetRef ref) {
               ),
             ],
           ),
-          // Reachable by URL before the agents screen that will normally lead here has been
-          // migrated, so the hardest part of this rewrite can be judged on a real device now
-          // rather than after everything else is done.
-          GoRoute(
-            path: '/screen/:sessionId',
-            pageBuilder: (context, state) => NoTransitionPage(
-              child: TerminalScreen(
-                sessionId: state.pathParameters['sessionId'] ?? '',
-              ),
-            ),
-          ),
-          GoRoute(
-            path: '/docs',
-            pageBuilder: (context, state) => NoTransitionPage(
-              child: DocsScreen(
-                openPath: state.uri.queryParameters['path'],
-                onOpen: (path) => context.go(
-                  path == null
-                      ? '/docs'
-                      : '/docs?path=${Uri.encodeQueryComponent(path)}',
-                ),
-              ),
-            ),
-          ),
-          GoRoute(
-            path: '/teams',
-            pageBuilder: (context, state) => NoTransitionPage(
-              child: TeamsScreen(
-                onOpen: (team) => context.go('/teams/${team.id}'),
-              ),
-            ),
+          StatefulShellBranch(
             routes: [
               GoRoute(
-                path: ':teamId',
-                pageBuilder: (context, state) {
-                  final id =
-                      int.tryParse(state.pathParameters['teamId'] ?? '') ?? 0;
-                  return NoTransitionPage(
-                    child: TeamScreen(
-                      teamId: id,
-                      onGone: () => context.go('/teams'),
-                    ),
-                  );
-                },
+                path: '/agents',
+                pageBuilder: (context, state) => NoTransitionPage(
+                  child: AgentsScreen(
+                    // An agent with no session has no screen to watch, and the row does not offer one —
+                    // so reaching here means there is a sid.
+                    onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
+                    onOpenChat: (threadId) => context.go('/chats/$threadId'),
+                    onManageTeams: () => context.go('/teams'),
+                  ),
+                ),
               ),
             ],
           ),
-          GoRoute(
-            path: '/agents',
-            pageBuilder: (context, state) => NoTransitionPage(
-              child: AgentsScreen(
-                // An agent with no session has no screen to watch, and the row does not offer one —
-                // so reaching here means there is a sid.
-                onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
-                onOpenChat: (threadId) => context.go('/chats/$threadId'),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/profile',
+                pageBuilder: _page(const ProfileScreen()),
               ),
-            ),
+            ],
           ),
-          GoRoute(path: '/profile', pageBuilder: _page(const ProfileScreen())),
         ],
+      ),
+      // Outside the shell, because watching a live screen covers the app rather than sitting in a
+      // tab. It is still a route for now; the React client floated it over everything as an
+      // overlay, which is the next thing to fix here.
+      // Reachable by URL before the agents screen that will normally lead here has been
+      // migrated, so the hardest part of this rewrite can be judged on a real device now
+      // rather than after everything else is done.
+      GoRoute(
+        path: '/screen/:sessionId',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: TerminalScreen(
+            sessionId: state.pathParameters['sessionId'] ?? '',
+          ),
+        ),
       ),
     ],
   );
@@ -323,11 +368,20 @@ class _NewChatButton extends StatelessWidget {
 
 /// The shell: a bottom bar on a phone, a rail on a wide window.
 class _Shell extends StatelessWidget {
-  const _Shell({required this.child});
+  const _Shell({required this.shell});
 
-  final Widget child;
+  /// The live branch stack. Tapping a destination goes back to where that branch was, rather than
+  /// to its root — which is the difference between a tab bar and five separate apps.
+  final StatefulNavigationShell shell;
 
-  static const _destinations = [
+  /// Every branch, in the order they are declared on the router.
+  ///
+  /// Not all of them are destinations. The React shells had three rail items (chats, docs, agents)
+  /// with the signed-in human's avatar pinned at the bottom, and team management was not a section
+  /// at all — it was a surface drawn over docs, with the rail still reading "docs". Copying that is
+  /// not deference to the old client: a rail item per route is how navigation grows until nothing
+  /// on it is where anyone remembers.
+  static const _branches = [
     (
       path: '/chats',
       icon: Icons.forum_outlined,
@@ -360,50 +414,68 @@ class _Shell extends StatelessWidget {
     ),
   ];
 
-  int _indexOf(BuildContext context) {
-    final location = GoRouterState.of(context).matchedLocation;
-    final index = _destinations.indexWhere((d) => location.startsWith(d.path));
-    return index < 0 ? 0 : index;
-  }
+  /// Branch indices, by name, so the two shells can pick without counting.
+  static const _chats = 0;
+  static const _docs = 1;
+  static const _teams = 2;
+  static const _agents = 3;
+  static const _profile = 4;
+
+  /// What the rail offers: three, with the avatar underneath.
+  static const _railItems = [_chats, _docs, _agents];
+
+  /// What the bottom bar offers. Profile is a tab here because a phone has nowhere to pin an
+  /// avatar menu — the React phone shell made the same call.
+  static const _tabItems = [_chats, _docs, _agents, _profile];
+
+  /// Switch branches. Tapping the branch you are already in goes to its root — the standard "tap
+  /// the tab again to get back to the top" — and any other tap lands where that branch left off.
+  void _go(int index) =>
+      shell.goBranch(index, initialLocation: index == shell.currentIndex);
 
   @override
   Widget build(BuildContext context) {
-    final index = _indexOf(context);
+    final index = shell.currentIndex;
     // On a phone an open conversation is a screen of its own; a bottom bar under it would be a
     // second way out that the back gesture already provides.
     final location = GoRouterState.of(context).matchedLocation;
     final immersive =
         !isWide(context) && RegExp(r'^/chats/\d+$').hasMatch(location);
 
-    if (immersive) return child;
+    if (immersive) return shell;
 
     if (isWide(context)) {
       return Scaffold(
         body: Row(
           children: [
             _Rail(
-              index: index,
-              destinations: _destinations,
-              onSelected: (i) => context.go(_destinations[i].path),
+              // Team management is a surface over docs, not a section of its own, so the rail
+              // keeps reading "docs" while it is up — the same as the React shell.
+              current: index == _teams ? _docs : index,
+              items: [for (final i in _railItems) (branch: i, d: _branches[i])],
+              onSelected: _go,
+              onProfile: () => _go(_profile),
             ),
             const VerticalDivider(width: 1),
-            Expanded(child: child),
+            Expanded(child: shell),
           ],
         ),
       );
     }
 
     return Scaffold(
-      body: child,
+      body: shell,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (i) => context.go(_destinations[i].path),
+        selectedIndex: _tabItems
+            .indexOf(index == _teams ? _docs : index)
+            .clamp(0, _tabItems.length - 1),
+        onDestinationSelected: (i) => _go(_tabItems[i]),
         destinations: [
-          for (final d in _destinations)
+          for (final i in _tabItems)
             NavigationDestination(
-              icon: Icon(d.icon),
-              selectedIcon: Icon(d.selected),
-              label: d.label,
+              icon: Icon(_branches[i].icon),
+              selectedIcon: Icon(_branches[i].selected),
+              label: _branches[i].label,
             ),
         ],
       ),
@@ -417,21 +489,33 @@ class _Shell extends StatelessWidget {
 /// what the React rail was (`size-11 rounded-lg text-[10px]`). Material's NavigationRail puts its
 /// indicator around the icon alone and the label underneath, outside — a different shape that no
 /// amount of theming reaches, and the difference is visible at a glance.
-class _Rail extends StatelessWidget {
+class _Rail extends ConsumerWidget {
   const _Rail({
-    required this.index,
-    required this.destinations,
+    required this.current,
+    required this.items,
     required this.onSelected,
+    required this.onProfile,
   });
 
-  final int index;
-  final List<({String path, IconData icon, IconData selected, String label})>
-  destinations;
-  final void Function(int) onSelected;
+  /// The branch the rail highlights, which is not always the branch you are in — see the call site.
+  final int current;
+
+  /// The destinations, each carrying the branch it goes to.
+  final List<
+    ({
+      int branch,
+      ({String path, IconData icon, IconData selected, String label}) d,
+    })
+  >
+  items;
+  final void Function(int branch) onSelected;
+  final VoidCallback onProfile;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final user = ref.watch(sessionProvider).value?.user;
+
     return Container(
       width: Metrics.railWidth,
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -441,13 +525,41 @@ class _Rail extends StatelessWidget {
       ),
       child: Column(
         children: [
-          for (var i = 0; i < destinations.length; i++)
+          for (final item in items)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: _RailItem(
-                destination: destinations[i],
-                active: i == index,
-                onTap: () => onSelected(i),
+                // Keyed by destination so a test can point at the rail's own copy of a word: the
+                // list pane's header says "chats" too.
+                key: ValueKey('rail-${item.d.label}'),
+                destination: item.d,
+                active: item.branch == current,
+                onTap: () => onSelected(item.branch),
+              ),
+            ),
+          const Spacer(),
+          // Pinned at the bottom, with your own picture in it — the React rail's shape, and the
+          // only place on a wide window that says who you are signed in as.
+          if (user != null)
+            PopupMenuButton<int>(
+              tooltip: user.nickname,
+              position: PopupMenuPosition.over,
+              onSelected: (choice) async {
+                if (choice == 0) {
+                  onProfile();
+                  return;
+                }
+                await ref.read(sessionProvider.notifier).logout();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 0, child: Text('profile')),
+                PopupMenuItem(value: 1, child: Text('log out')),
+              ],
+              child: UserAvatar(
+                userId: user.id,
+                nickname: user.nickname,
+                avatarId: user.avatarId,
+                size: 36,
               ),
             ),
         ],
@@ -461,6 +573,7 @@ class _RailItem extends StatelessWidget {
     required this.destination,
     required this.active,
     required this.onTap,
+    super.key,
   });
 
   final ({String path, IconData icon, IconData selected, String label})
