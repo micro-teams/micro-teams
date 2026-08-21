@@ -23,6 +23,8 @@ import 'auth/register_screen.dart';
 import 'agents/agents_screen.dart';
 import 'chats/chats_screen.dart';
 import 'chats/thread_screen.dart';
+import 'teams/team_screen.dart';
+import 'teams/teams_screen.dart';
 import 'terminal/terminal_screen.dart';
 import 'common/ui/theme.dart';
 
@@ -140,7 +142,26 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
           GoRoute(
             path: '/teams',
-            pageBuilder: _page(const _NotYetMigrated(name: 'docs')),
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: TeamsScreen(
+                onOpen: (team) => context.go('/teams/${team.id}'),
+              ),
+            ),
+            routes: [
+              GoRoute(
+                path: ':teamId',
+                pageBuilder: (context, state) {
+                  final id =
+                      int.tryParse(state.pathParameters['teamId'] ?? '') ?? 0;
+                  return NoTransitionPage(
+                    child: TeamScreen(
+                      teamId: id,
+                      onGone: () => context.go('/teams'),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/agents',
@@ -256,12 +277,14 @@ class _Shell extends StatelessWidget {
       label: 'chats',
     ),
     (
-      // "docs" rather than "teams": the tab has always opened the team's document tree, and the
-      // path is /teams because that is the URL the React client used and links to it exist.
+      // The React client called this tab "docs" and opened the team's document tree with team
+      // management behind it. The tree has not been migrated, so calling it "docs" would name a
+      // thing that is not there; it says what it currently is, and goes back to "docs" when the
+      // tree arrives underneath it.
       path: '/teams',
-      icon: Icons.snippet_folder_outlined,
-      selected: Icons.snippet_folder,
-      label: 'docs',
+      icon: Icons.groups_outlined,
+      selected: Icons.groups,
+      label: 'teams',
     ),
     (
       path: '/agents',
@@ -419,34 +442,6 @@ class _RailItem extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A screen that still lives in the React client.
-///
-/// Named rather than hidden: during the migration it has to be obvious which half of the app you
-/// are looking at, and a blank page is not obvious. See todo/microteams/flutter-migration.md for
-/// the order these are coming across in.
-class _NotYetMigrated extends StatelessWidget {
-  const _NotYetMigrated({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(name)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            '$name has not been migrated yet.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
           ),
         ),
       ),
