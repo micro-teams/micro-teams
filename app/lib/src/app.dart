@@ -23,6 +23,7 @@ import 'auth/register_screen.dart';
 import 'agents/agents_screen.dart';
 import 'chats/chats_screen.dart';
 import 'chats/thread_screen.dart';
+import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
 import 'terminal/terminal_screen.dart';
@@ -137,6 +138,19 @@ GoRouter _buildRouter(WidgetRef ref) {
             pageBuilder: (context, state) => NoTransitionPage(
               child: TerminalScreen(
                 sessionId: state.pathParameters['sessionId'] ?? '',
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/docs',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: DocsScreen(
+                openPath: state.uri.queryParameters['path'],
+                onOpen: (path) => context.go(
+                  path == null
+                      ? '/docs'
+                      : '/docs?path=${Uri.encodeQueryComponent(path)}',
+                ),
               ),
             ),
           ),
@@ -277,10 +291,12 @@ class _Shell extends StatelessWidget {
       label: 'chats',
     ),
     (
-      // The React client called this tab "docs" and opened the team's document tree with team
-      // management behind it. The tree has not been migrated, so calling it "docs" would name a
-      // thing that is not there; it says what it currently is, and goes back to "docs" when the
-      // tree arrives underneath it.
+      path: '/docs',
+      icon: Icons.snippet_folder_outlined,
+      selected: Icons.snippet_folder,
+      label: 'docs',
+    ),
+    (
       path: '/teams',
       icon: Icons.groups_outlined,
       selected: Icons.groups,
