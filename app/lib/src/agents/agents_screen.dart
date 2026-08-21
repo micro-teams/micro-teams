@@ -9,8 +9,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
+import '../common/ui/avatar.dart';
 import '../common/ui/team_picker.dart';
+import 'add_device_dialog.dart';
+import 'agent_detail.dart';
 import 'agents_controller.dart';
+import 'machine_detail.dart';
+import 'open_agent_dialog.dart';
 
 class AgentsScreen extends ConsumerWidget {
   const AgentsScreen({
@@ -32,6 +37,21 @@ class AgentsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Agents'),
+        actions: [
+          IconButton(
+            tooltip: 'Add a device',
+            onPressed: () => showAddDeviceDialog(context),
+            icon: const Icon(Icons.devices_other),
+          ),
+          IconButton(
+            tooltip: 'Open agent',
+            onPressed: () => showOpenAgentDialog(
+              context,
+              machines: fleet.value?.machines ?? const [],
+            ),
+            icon: const Icon(Icons.smart_toy_outlined),
+          ),
+        ],
         bottom: const TeamPickerBar(),
       ),
       body: fleet.when(
@@ -73,65 +93,6 @@ class _Fleet extends ConsumerWidget {
     }
   }
 
-  Future<void> _close(BuildContext context, WidgetRef ref, Agent agent) async {
-    final name = agent.nickname.isEmpty ? 'this agent' : agent.nickname;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Close $name?'),
-        content: const Text(
-          'Its session ends. Anything it was in the middle of stops there.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Close it'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await ref.read(agentsProvider.notifier).close(agent);
-    } catch (e) {
-      if (context.mounted) _say(context, '$e');
-    }
-  }
-
-  Future<void> _unbind(
-    BuildContext context,
-    WidgetRef ref,
-    Machine machine,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove ${machine.name} from this team?'),
-        content: const Text('Other teams keep it. This team stops seeing it.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await ref.read(agentsProvider.notifier).unbind(machine);
-    } catch (e) {
-      if (context.mounted) _say(context, '$e');
-    }
-  }
-
   void _say(BuildContext context, String message) {
     ScaffoldMessenger.of(
       context,
@@ -141,10 +102,20 @@ class _Fleet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (fleet.agents.isEmpty && fleet.machines.isEmpty) {
+      // An empty list with no way out of it is a dead end. The way in is here, and it is the one
+      // that has to happen first: an agent runs ON something.
       return ListView(
-        children: const [
-          SizedBox(height: 80),
-          Center(child: Text('No machines or agents in this team yet')),
+        children: [
+          const SizedBox(height: 80),
+          const Center(child: Text('No machines or agents in this team yet')),
+          const SizedBox(height: 16),
+          Center(
+            child: FilledButton.icon(
+              onPressed: () => showAddDeviceDialog(context),
+              icon: const Icon(Icons.devices_other),
+              label: const Text('Add a device'),
+            ),
+          ),
         ],
       );
     }
@@ -157,19 +128,23 @@ class _Fleet extends ConsumerWidget {
             agent: agent,
             machine: fleet.machineLabel(agent.machineId),
             onWatch: agent.sid == null ? null : () => onOpenScreen(agent),
-            onChat: () => _chat(context, ref, agent),
-            onClose: () => _close(context, ref, agent),
+            // The row opens the agent; every per-agent action lives in there. A row full of icon
+            // buttons leaves no room for the name and has to be built twice, once per layout.
+            onOpen: () => showAgentDetail(
+              context,
+              agent: agent,
+              machineName: fleet.machineLabel(agent.machineId),
+              actions: AgentActions(
+                onWatch: agent.sid == null ? null : () => onOpenScreen(agent),
+                onChat: () => _chat(context, ref, agent),
+              ),
+            ),
           ),
         if (fleet.machines.isNotEmpty) const _Heading('Machines'),
         for (final machine in fleet.machines)
           _MachineRow(
             machine: machine,
-            // Unbinding the LAST team orphans the machine and the backend forgets it outright, so
-            // the action is absent — not disabled — while this team is the only one holding it.
-            // An action that exists and refuses is an invitation to find out the hard way.
-            onUnbind: machine.teamIds.length > 1
-                ? () => _unbind(context, ref, machine)
-                : null,
+            onOpen: () => showMachineDetail(context, machine: machine),
           ),
       ],
     );
@@ -193,18 +168,16 @@ class _AgentRow extends StatelessWidget {
     required this.agent,
     required this.machine,
     required this.onWatch,
-    required this.onChat,
-    required this.onClose,
+    required this.onOpen,
   });
 
   final Agent agent;
   final String? machine;
 
-  /// Null when this agent has no live screen to watch, which is why the button is absent rather
-  /// than present and disappointing.
+  /// Null when this agent has no live screen to watch, which is why tapping the avatar does
+  /// nothing rather than opening an empty terminal.
   final VoidCallback? onWatch;
-  final VoidCallback onChat;
-  final VoidCallback onClose;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -214,57 +187,62 @@ class _AgentRow extends StatelessWidget {
     ].join(' · ');
 
     return ListTile(
-      leading: _Dot(online: agent.online),
+      // The same avatar control as everywhere else, with the agent's real picture and the robot
+      // badge — a coloured dot said less, and said it in a shape nothing else in the app uses.
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          UserAvatar(
+            userId: agent.userId,
+            nickname: agent.nickname,
+            avatarId: agent.avatarId,
+            size: 44,
+            isAgent: true,
+            onTap: onWatch,
+          ),
+          Positioned(right: -2, top: -2, child: _Dot(online: agent.online)),
+        ],
+      ),
       title: Text(
         agent.nickname.isEmpty ? 'agent #${agent.userId}' : agent.nickname,
       ),
       subtitle: subtitle.isEmpty ? null : Text(subtitle),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (onWatch != null)
-            IconButton(
-              tooltip: 'Live screen',
-              onPressed: onWatch,
-              icon: const Icon(Icons.terminal),
-            ),
-          IconButton(
-            tooltip: 'Chat',
-            onPressed: onChat,
-            icon: const Icon(Icons.chat_bubble_outline),
-          ),
-          IconButton(
-            tooltip: 'Close session',
-            onPressed: onClose,
-            icon: const Icon(Icons.power_settings_new),
-          ),
-        ],
-      ),
+      onTap: onOpen,
     );
   }
 }
 
 class _MachineRow extends StatelessWidget {
-  const _MachineRow({required this.machine, required this.onUnbind});
+  const _MachineRow({required this.machine, required this.onOpen});
 
   final Machine machine;
-
-  /// Null while this team is the only one holding the machine — see the call site.
-  final VoidCallback? onUnbind;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return ListTile(
-      leading: _Dot(online: machine.online),
+      // The same 44px leading tile as an agent row, so the machine's status dot lands at the same
+      // x as the agent's and the two lists read as one column of live/dead.
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.dns_outlined, color: scheme.onSurfaceVariant),
+          ),
+          Positioned(right: -2, top: -2, child: _Dot(online: machine.online)),
+        ],
+      ),
       title: Text(machine.name),
       subtitle: Text(machine.online ? 'connected' : 'not connected'),
-      trailing: onUnbind == null
-          ? null
-          : IconButton(
-              tooltip: 'Remove from this team',
-              onPressed: onUnbind,
-              icon: const Icon(Icons.link_off),
-            ),
+      onTap: onOpen,
     );
   }
 }
@@ -282,10 +260,12 @@ class _Dot extends StatelessWidget {
     return Container(
       width: 12,
       height: 12,
-      margin: const EdgeInsets.only(top: 16),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: online ? Colors.green : scheme.outlineVariant,
+        // Ringed in the page's own colour so the dot reads as ON the tile rather than beside it,
+        // whatever picture is underneath.
+        border: Border.all(color: scheme.surface, width: 2),
       ),
     );
   }

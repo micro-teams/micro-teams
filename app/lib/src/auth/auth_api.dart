@@ -149,6 +149,59 @@ class AuthApi {
     return AuthUser.fromJson(data['user']! as Map<String, Object?>);
   }
 
+  /// Upload an image and get cheese-auth's id for it.
+  ///
+  /// The picture goes to the identity service as the SIGNED-IN HUMAN, always — even when the
+  /// avatar being changed belongs to an agent. Only pointing a profile at the resulting id differs
+  /// between the two, and that difference is the caller's (see `ChangeAvatar`).
+  Future<int> uploadAvatar({
+    required List<int> bytes,
+    required String filename,
+    required String accessToken,
+  }) async {
+    final form = FormData.fromMap({
+      'avatar': MultipartFile.fromBytes(bytes, filename: filename),
+    });
+    final response = await _dio.post<Object?>(
+      '/avatars',
+      data: form,
+      options: Options(
+        headers: {'Authorization': 'Bearer $accessToken'},
+        // Dio sets the multipart content type, boundary and all; the JSON default from
+        // BaseOptions would make the server read the body as a broken document.
+        contentType: null,
+      ),
+    );
+    final envelope = response.data;
+    final status = response.statusCode ?? 0;
+    if (envelope is! Map<String, Object?> || status < 200 || status >= 300) {
+      final message = envelope is Map<String, Object?>
+          ? envelope['message']
+          : null;
+      throw AuthError(message is String ? message : 'HTTP $status', status);
+    }
+    return (envelope['data']! as Map<String, Object?>)['avatarId']! as int;
+  }
+
+  /// Write the caller's own profile.
+  ///
+  /// cheese-auth replaces the whole profile, so the fields that are not changing have to be sent
+  /// back unchanged — sending only the avatar id blanks the nickname and the intro.
+  Future<void> updateProfile({
+    required int userId,
+    required String nickname,
+    required String intro,
+    required int avatarId,
+    required String accessToken,
+  }) async {
+    await _request<Object?>(
+      '/users/$userId',
+      method: 'PUT',
+      body: {'nickname': nickname, 'intro': intro, 'avatarId': avatarId},
+      accessToken: accessToken,
+    );
+  }
+
   Session _session(Map<String, Object?> data) => Session(
     user: AuthUser.fromJson(data['user']! as Map<String, Object?>),
     accessToken: data['accessToken']! as String,

@@ -9,7 +9,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../common/ui/avatar.dart';
+import '../common/ui/change_avatar.dart';
 import '../common/ui/theme.dart';
 import '../providers.dart';
 
@@ -39,12 +39,9 @@ class ProfileScreen extends ConsumerWidget {
                     _Card(
                       child: Row(
                         children: [
-                          UserAvatar(
-                            userId: user.id,
-                            nickname: user.nickname,
-                            avatarId: user.avatarId,
-                            size: 56,
-                          ),
+                          // Tappable, because this is the one place your own picture is yours to
+                          // change — the same control the agent sheet uses, pointed at you.
+                          const ChangeAvatar(size: 56),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(

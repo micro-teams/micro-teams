@@ -47,6 +47,11 @@ dependencies:
   # flutter-term-probe in the agent workdir and todo/microteams/backlog.md T-088.
   xterm: ^4.0.0
 
+  # Picking an image to upload as an avatar. file_selector rather than image_picker because this
+  # client is one codebase for six platforms and image_picker has no Linux or Windows story —
+  # a picture is a file everywhere, and only a phone thinks it is a camera roll.
+  file_selector: ^1.0.3
+
   shared_preferences: ^2.3.3
   web: ^1.1.1
   markdown: ^7.3.1

@@ -178,6 +178,25 @@ class SessionController extends AsyncNotifier<Session?> {
     state = const AsyncValue.data(null);
   }
 
+  /// Re-read the signed-in human's own profile, keeping the token.
+  ///
+  /// Used after changing something about yourself — an avatar, a name — so every screen showing
+  /// you reads the new one. A refresh() here would work too and would also rotate the refresh
+  /// cookie, which is a lot of machinery to move for a picture.
+  Future<void> refreshMe() async {
+    final current = state.value;
+    if (current == null) return;
+    try {
+      final user = await ref.read(authApiProvider).me(current.accessToken);
+      state = AsyncValue.data(
+        Session(user: user, accessToken: current.accessToken),
+      );
+    } on AuthError {
+      // Not worth signing anyone out over: the change landed on the server either way, and the
+      // next thing that reads the profile will see it.
+    }
+  }
+
   /// Called by the nt client on a 401. Returns a fresh token, or null if the session is over.
   Future<String?> reauthorize() async {
     try {
