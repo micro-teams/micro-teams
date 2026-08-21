@@ -22,6 +22,7 @@ import 'auth/profile_screen.dart';
 import 'auth/register_screen.dart';
 import 'agents/agent_detail.dart';
 import 'agents/agents_screen.dart';
+import 'agents/connect_screen.dart';
 import 'agents/machine_detail.dart';
 import 'chats/chats_screen.dart';
 import 'chats/new_chat_dialog.dart';
@@ -271,6 +272,17 @@ GoRouter _buildRouter(WidgetRef ref) {
             ],
           ),
         ],
+      ),
+      // Where `microteams link auto-connect` sends a human. Outside the branches: it is not a
+      // section, it is a thing you were sent to do once, and it leaves for /agents when done.
+      GoRoute(
+        path: '/connect',
+        pageBuilder: (context, state) => NoTransitionPage(
+          child: ConnectScreen(
+            code: state.uri.queryParameters['code'] ?? '',
+            onDone: () => context.go('/agents'),
+          ),
+        ),
       ),
       // A link to a live screen still works: it raises the overlay and leaves you on the chats
       // list underneath, which is where you would have been. The screen itself is not a place —
