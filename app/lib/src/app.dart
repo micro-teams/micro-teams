@@ -30,7 +30,7 @@ import 'chats/thread_screen.dart';
 import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
-import 'terminal/terminal_screen.dart';
+import 'terminal/scene.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/theme.dart';
 
@@ -50,10 +50,11 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Any avatar, anywhere, can ask for an agent's live screen — that is what made an avatar worth
-    // tapping in the old client. How this app gets there is the shell's business, so the shell
-    // says so once rather than every screen passing a callback down to every face it draws.
-    openSceneHandler = (context, {required String sid}) =>
-        context.go('/screen/$sid');
+    // tapping in the old client. It opens the overlay rather than navigating: watching an agent is
+    // a glance, not a place, and going there would replace the list you were reading and the
+    // message you were half-way through typing.
+    openSceneHandler = (context, {required String sid, String? nickname}) =>
+        ref.read(sceneProvider.notifier).open(sid, nickname: nickname);
   }
 
   @override
@@ -87,6 +88,10 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
       theme: darkTheme(),
       themeMode: ThemeMode.dark,
       routerConfig: _router,
+      // Above everything the router draws, and mounted once. It is empty until an avatar asks for
+      // a screen, at which point what you were doing stays exactly where it was, underneath.
+      builder: (context, child) =>
+          Stack(children: [if (child != null) child, const SceneOverlay()]),
     );
   }
 }
@@ -267,19 +272,21 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
         ],
       ),
-      // Outside the shell, because watching a live screen covers the app rather than sitting in a
-      // tab. It is still a route for now; the React client floated it over everything as an
-      // overlay, which is the next thing to fix here.
-      // Reachable by URL before the agents screen that will normally lead here has been
-      // migrated, so the hardest part of this rewrite can be judged on a real device now
-      // rather than after everything else is done.
+      // A link to a live screen still works: it raises the overlay and leaves you on the chats
+      // list underneath, which is where you would have been. The screen itself is not a place —
+      // see terminal/scene.dart — so this route has no page of its own.
       GoRoute(
         path: '/screen/:sessionId',
-        pageBuilder: (context, state) => NoTransitionPage(
-          child: TerminalScreen(
-            sessionId: state.pathParameters['sessionId'] ?? '',
-          ),
-        ),
+        redirect: (context, state) {
+          final sid = state.pathParameters['sessionId'] ?? '';
+          if (sid.isEmpty) return '/chats';
+          // After this frame: opening it during a redirect would change a provider while the
+          // router is mid-navigation.
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => ref.read(sceneProvider.notifier).open(sid),
+          );
+          return '/chats';
+        },
       ),
     ],
   );
@@ -319,7 +326,7 @@ class _ChatsPane extends ConsumerWidget {
       if (open != null) {
         return ThreadScreen(
           threadId: open,
-          onOpenScreen: (sid) => context.go('/screen/$sid'),
+          onOpenScreen: (sid) => ref.read(sceneProvider.notifier).open(sid),
           onOpenInfo: () => context.go('/chats/$open/info'),
         );
       }
@@ -360,7 +367,8 @@ class _ChatsPane extends ConsumerWidget {
                     key: ValueKey(open),
                     threadId: open,
                     asPane: true,
-                    onOpenScreen: (sid) => context.go('/screen/$sid'),
+                    onOpenScreen: (sid) =>
+                        ref.read(sceneProvider.notifier).open(sid),
                     onOpenInfo: () => context.go('/chats/$open/info'),
                   ),
           ),

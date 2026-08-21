@@ -115,13 +115,13 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
   }
 
   void _open(BuildContext context, {required bool online, String? sid}) {
-    if (sid != null && sid.isNotEmpty && online) {
-      openScene(context, sid: sid);
-      return;
-    }
     final name = widget.nickname?.isNotEmpty == true
         ? widget.nickname!
         : '#${widget.userId}';
+    if (sid != null && sid.isNotEmpty && online) {
+      openScene(context, sid: sid, nickname: name);
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(online ? '「$name」的现场暂不可用' : '「$name」当前离线，无法查看现场')),
     );
@@ -216,12 +216,13 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
 
 /// What the whole app does when an avatar asks for a live screen.
 ///
-/// Set once by the shell, because opening a screen is navigation and an avatar has no business
-/// knowing how this app navigates — but every avatar everywhere has to be able to ask.
-void Function(BuildContext context, {required String sid})? openSceneHandler;
+/// Set once, at the top, because an avatar has no business knowing how this app shows a terminal —
+/// but every avatar everywhere has to be able to ask.
+void Function(BuildContext context, {required String sid, String? nickname})?
+openSceneHandler;
 
-void openScene(BuildContext context, {required String sid}) =>
-    openSceneHandler?.call(context, sid: sid);
+void openScene(BuildContext context, {required String sid, String? nickname}) =>
+    openSceneHandler?.call(context, sid: sid, nickname: nickname);
 
 /// The picture itself: the real image, or a colour and an initial.
 class _Picture extends ConsumerWidget {

@@ -36,11 +36,16 @@ class TerminalScreen extends ConsumerStatefulWidget {
     required this.sessionId,
     this.title,
     this.connect,
+    this.onClose,
     super.key,
   });
 
   final String sessionId;
   final String? title;
+
+  /// How to get out, when this is the overlay rather than a route. Null makes the header's leading
+  /// control whatever the surrounding navigator would put there.
+  final VoidCallback? onClose;
 
   /// Replaces the socket. Only a test passes this — the seam exists because a terminal that can
   /// only be exercised against a live machine is a terminal whose failure modes are never tested.
@@ -131,6 +136,15 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
+        // Escape closes it too, and on a phone so does the back gesture — but neither is
+        // discoverable, and an overlay with no visible way out is a trap.
+        leading: widget.onClose == null
+            ? null
+            : IconButton(
+                tooltip: 'Close',
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.close),
+              ),
         title: Text(widget.title ?? 'Live screen'),
         actions: [
           IconButton(
