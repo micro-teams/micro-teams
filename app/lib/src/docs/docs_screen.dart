@@ -105,11 +105,6 @@ class _TreePane extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tree = ref.watch(docsTreeProvider);
     final team = ref.watch(currentTeamProvider);
-    // The picker hides itself when there is nothing to pick between, but `bottom:` reserves its
-    // height regardless — which leaves a 48px band of empty header. Deciding here is the only
-    // place that can see both.
-    final canSwitchTeams =
-        (ref.watch(teamsProvider).valueOrNull ?? const []).length > 1;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
