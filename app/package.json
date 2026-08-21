@@ -12,6 +12,6 @@
     "playwright": "1.62.1"
   },
   "dependencies": {
-    "@micro-teams/multipath": "feat-launcher-progress"
+    "@micro-teams/multipath": "main"
   }
 }

@@ -34,13 +34,13 @@ dependencies:
   dio: ^5.7.0
 
   # Transport resilience: the line registry, hedged reads, idempotent write failover, the stream
-  # line policy, and the request cache. Pinned to the branch of micro-teams/multipath#21 until that
-  # PR lands; the only change then is `ref:` -> a tag.
+  # line policy, and the request cache. #21 has landed, so this follows main; it becomes a tag as
+  # soon as one is cut for the Dart package.
   multipath:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      ref: feat/dart-line-manager
+      ref: main
   web_socket_channel: ^3.0.1
 
   # The live terminal. Proven against a real device before any of this was written — see
