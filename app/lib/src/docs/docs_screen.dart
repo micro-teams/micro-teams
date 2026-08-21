@@ -20,7 +20,15 @@ import 'docs_controller.dart';
 import 'markdown_view.dart';
 
 class DocsScreen extends ConsumerStatefulWidget {
-  const DocsScreen({this.openPath, required this.onOpen, super.key});
+  const DocsScreen({
+    this.openPath,
+    required this.onOpen,
+    required this.onManageTeams,
+    super.key,
+  });
+
+  /// Go to team management, from the team picker in the header.
+  final VoidCallback onManageTeams;
 
   /// The file being looked at, or null for just the tree.
   final String? openPath;
@@ -56,6 +64,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
         if (!_collapsed.remove(path)) _collapsed.add(path);
       }),
       onOpen: widget.onOpen,
+      onManageTeams: widget.onManageTeams,
     );
 
     if (!wide) return tree;
@@ -82,7 +91,10 @@ class _TreePane extends ConsumerWidget {
     required this.selected,
     required this.onToggle,
     required this.onOpen,
+    required this.onManageTeams,
   });
+
+  final VoidCallback onManageTeams;
 
   final Set<String> collapsed;
   final String? selected;
@@ -93,20 +105,15 @@ class _TreePane extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tree = ref.watch(docsTreeProvider);
     final team = ref.watch(currentTeamProvider);
-    // The picker hides itself when there is nothing to pick between, but `bottom:` reserves its
-    // height regardless — which leaves a 48px band of empty header. Deciding here is the only
-    // place that can see both.
-    final canSwitchTeams =
-        (ref.watch(teamsProvider).value ?? const []).length > 1;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: const Text('docs'),
-        // The picker sits under the title rather than in the actions: it is a bar of its own.
-        bottom: canSwitchTeams ? const TeamPickerBar() : null,
         actions: [
+          // Top-right, next to the actions, not a bar of its own under the title (T-007).
+          TeamPickerAction(onManage: onManageTeams),
           IconButton(
             tooltip: 'new document',
             onPressed: team == null ? null : () => _create(context, ref),

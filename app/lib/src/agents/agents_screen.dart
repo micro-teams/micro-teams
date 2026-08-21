@@ -21,8 +21,12 @@ class AgentsScreen extends ConsumerWidget {
   const AgentsScreen({
     required this.onOpenScreen,
     required this.onOpenChat,
+    required this.onManageTeams,
     super.key,
   });
+
+  /// Go to team management, from the team picker in the header.
+  final VoidCallback onManageTeams;
 
   /// Watch this agent's live screen.
   final void Function(Agent agent) onOpenScreen;
@@ -38,6 +42,7 @@ class AgentsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Agents'),
         actions: [
+          TeamPickerAction(onManage: onManageTeams),
           IconButton(
             tooltip: 'Add a device',
             onPressed: () => showAddDeviceDialog(context),
@@ -52,7 +57,6 @@ class AgentsScreen extends ConsumerWidget {
             icon: const Icon(Icons.smart_toy_outlined),
           ),
         ],
-        bottom: const TeamPickerBar(),
       ),
       body: fleet.when(
         loading: () => const Center(child: CircularProgressIndicator()),
