@@ -170,6 +170,10 @@ class TeamScreen extends ConsumerWidget {
   }
 }
 
+/// The one menu entry that is not a role. An object rather than a string so the menu can be typed
+/// on the generated enum and still carry it.
+const Object _remove = Object();
+
 class _MemberRow extends StatelessWidget {
   const _MemberRow({
     required this.member,
@@ -200,33 +204,30 @@ class _MemberRow extends StatelessWidget {
           context,
         ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
       ),
-      trailing: PopupMenuButton<String>(
+      // Typed on the enum itself, not on 'role:NAME' strings: a role added, renamed or removed in
+      // the contract has to break the build here rather than fall through a firstWhere at runtime.
+      trailing: PopupMenuButton<Object>(
         // Your own row offers nothing: demoting or removing yourself out of a team you administer
         // is the one action with no way back from inside the app.
         enabled: !isMe,
         itemBuilder: (context) => [
           for (final role in ChangeRoleRequestRoleEnum.values)
-            PopupMenuItem(
-              value: 'role:${role.name}',
+            PopupMenuItem<Object>(
+              value: role,
               child: Text('make ${role.name.toLowerCase()}'),
             ),
           const PopupMenuDivider(),
-          PopupMenuItem(
-            value: 'remove',
+          PopupMenuItem<Object>(
+            value: _remove,
             child: Text('remove', style: TextStyle(color: scheme.error)),
           ),
         ],
         onSelected: (choice) {
-          if (choice == 'remove') {
+          if (choice == _remove) {
             onRemove();
             return;
           }
-          final wanted = choice.substring('role:'.length);
-          onRole(
-            ChangeRoleRequestRoleEnum.values.firstWhere(
-              (r) => r.name == wanted,
-            ),
-          );
+          onRole(choice as ChangeRoleRequestRoleEnum);
         },
       ),
     );

@@ -124,9 +124,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Typed on Object, because the menu now carries the generated role enum itself rather than a
+    // 'role:NAME' string — see the comment on the button.
     final menus = tester
-        .widgetList<PopupMenuButton<String>>(
-          find.byType(PopupMenuButton<String>),
+        .widgetList<PopupMenuButton<Object>>(
+          find.byType(PopupMenuButton<Object>),
         )
         .toList();
     expect(menus, hasLength(2));
@@ -144,7 +146,7 @@ void main() {
     await tester.pumpAndSettle();
     backend.asked.clear();
 
-    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.tap(find.byType(PopupMenuButton<Object>).last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('make admin'));
     await tester.pumpAndSettle();

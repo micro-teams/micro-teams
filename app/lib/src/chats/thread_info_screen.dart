@@ -245,7 +245,7 @@ class _MemberGrid extends StatelessWidget {
                     // The owner cannot be removed, and you do not remove yourself here: leaving is
                     // a different act from being taken out, and it does not exist yet.
                     if (canManage &&
-                        member.role.name != 'OWNER' &&
+                        member.role != ThreadMemberRoleEnum.OWNER &&
                         member.userId != me)
                       Positioned(
                         right: -6,

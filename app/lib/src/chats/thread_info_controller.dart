@@ -41,8 +41,8 @@ class ThreadInfo {
   List<ThreadMember> get ranked {
     final list = members.values.toList();
     list.sort((a, b) {
-      final byRole = (_roleOrder[a.role.name] ?? 3).compareTo(
-        _roleOrder[b.role.name] ?? 3,
+      final byRole = (_roleOrder[a.role] ?? 3).compareTo(
+        _roleOrder[b.role] ?? 3,
       );
       return byRole != 0 ? byRole : a.userId.compareTo(b.userId);
     });
@@ -59,7 +59,14 @@ class ThreadInfo {
 }
 
 /// Owners first, then admins, then everyone else — the order the member grid is drawn in.
-const Map<String, int> _roleOrder = {'OWNER': 0, 'ADMIN': 1, 'MEMBER': 2};
+///
+/// Keyed by the generated enum rather than by its name: a role that is renamed or removed in the
+/// contract then fails to compile here, instead of silently sorting to the end.
+const Map<ThreadMemberRoleEnum, int> _roleOrder = {
+  ThreadMemberRoleEnum.OWNER: 0,
+  ThreadMemberRoleEnum.ADMIN: 1,
+  ThreadMemberRoleEnum.MEMBER: 2,
+};
 
 class ThreadInfoController extends FamilyAsyncNotifier<ThreadInfo, int> {
   @override
