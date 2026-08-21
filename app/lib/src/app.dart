@@ -66,8 +66,11 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     return MaterialApp.router(
       title: 'MicroTeams',
       debugShowCheckedModeBanner: false,
-      theme: lightTheme(),
-      darkTheme: darkTheme(),
+      // One theme, and it is dark — see ui/theme.dart. Following the browser's preference is what
+      // made this client open white on a machine set to light, next to a React client that had
+      // exactly one `:root` and it was black.
+      theme: darkTheme(),
+      themeMode: ThemeMode.dark,
       routerConfig: _router,
     );
   }
@@ -119,7 +122,7 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
           GoRoute(
             path: '/teams',
-            builder: (context, state) => const _NotYetMigrated(name: 'Teams'),
+            builder: (context, state) => const _NotYetMigrated(name: 'docs'),
           ),
           GoRoute(
             path: '/agents',
@@ -132,7 +135,7 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
           GoRoute(
             path: '/profile',
-            builder: (context, state) => const _NotYetMigrated(name: 'Profile'),
+            builder: (context, state) => const _NotYetMigrated(name: 'me'),
           ),
         ],
       ),
@@ -164,7 +167,7 @@ class _ChatsPane extends ConsumerWidget {
     if (!wide) {
       if (open != null) return ThreadScreen(threadId: open);
       return Scaffold(
-        appBar: AppBar(title: const Text('Chats')),
+        appBar: AppBar(title: const Text('chats')),
         body: ChatsScreen(
           onOpen: (thread) => context.go('/chats/${thread.id}'),
         ),
@@ -177,7 +180,7 @@ class _ChatsPane extends ConsumerWidget {
           SizedBox(
             width: 340,
             child: Scaffold(
-              appBar: AppBar(title: const Text('Chats')),
+              appBar: AppBar(title: const Text('chats')),
               body: ChatsScreen(
                 selectedId: open,
                 onOpen: (thread) => context.go('/chats/${thread.id}'),
@@ -187,7 +190,7 @@ class _ChatsPane extends ConsumerWidget {
           const VerticalDivider(width: 1),
           Expanded(
             child: open == null
-                ? const Center(child: Text('Pick a conversation'))
+                ? const Center(child: Text('pick a conversation'))
                 : ThreadScreen(key: ValueKey(open), threadId: open),
           ),
         ],
@@ -207,25 +210,27 @@ class _Shell extends StatelessWidget {
       path: '/chats',
       icon: Icons.forum_outlined,
       selected: Icons.forum,
-      label: 'Chats',
+      label: 'chats',
     ),
     (
+      // "docs" rather than "teams": the tab has always opened the team's document tree, and the
+      // path is /teams because that is the URL the React client used and links to it exist.
       path: '/teams',
-      icon: Icons.groups_outlined,
-      selected: Icons.groups,
-      label: 'Teams',
+      icon: Icons.snippet_folder_outlined,
+      selected: Icons.snippet_folder,
+      label: 'docs',
     ),
     (
       path: '/agents',
       icon: Icons.smart_toy_outlined,
       selected: Icons.smart_toy,
-      label: 'Agents',
+      label: 'agents',
     ),
     (
       path: '/profile',
       icon: Icons.person_outline,
       selected: Icons.person,
-      label: 'Profile',
+      label: 'me',
     ),
   ];
 

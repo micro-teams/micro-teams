@@ -22,7 +22,13 @@ import 'package:microteams/src/features/chats/thread_screen.dart';
 import 'package:microteams/src/mt/client.dart';
 
 /// Answers listMessages from canned pages and records what was asked for.
+///
+/// It also answers getThread, because the screen asks who is in the conversation before it can
+/// draw a name or an avatar beside a bubble. Keyed on the PATH, not on the fact that a request
+/// arrived: a fake that answers every path with a message page is a fake that would let the screen
+/// mis-parse a roster and still pass.
 class _FakeBackend implements HttpClientAdapter {
+  /// Only the message requests. The roster is fetched once and is not what these tests are about.
   final List<String> asked = [];
 
   @override
@@ -31,6 +37,7 @@ class _FakeBackend implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (!options.uri.path.endsWith('/messages')) return _detail();
     asked.add(options.uri.toString());
 
     final pageStart = options.uri.queryParameters['page_start'];
@@ -65,6 +72,17 @@ class _FakeBackend implements HttpClientAdapter {
         '"has_prev":false,"has_more":$hasMore'
         '${nextStart == null ? '' : ',"next_start":$nextStart'}}}';
   }
+
+  /// One member, so a bubble has a name and an avatar to draw.
+  ResponseBody _detail() => ResponseBody.fromString(
+    '{"thread":{"id":7,"title":"a thread","createdAt":"2026-08-20T00:00:00Z"},'
+    '"members":[{"id":1,"threadId":7,"userId":1,"role":"OWNER",'
+    '"joinedAt":"2026-08-20T00:00:00Z","nickname":"probe"}]}',
+    200,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
 
   @override
   void close({bool force = false}) {}
@@ -164,6 +182,7 @@ class _ShortThread extends _FakeBackend {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (!options.uri.path.endsWith('/messages')) return _detail();
     asked.add(options.uri.toString());
     return ResponseBody.fromString(
       _page(from: 1, to: 20, hasMore: false, nextStart: null),
