@@ -234,9 +234,16 @@ class Outbox {
   static final Random _random = Random();
 
   /// Unique per message, and only has to be unique within one thread.
+  ///
+  /// The bound is a literal, and that is the whole point. It used to be `1 << 32`, which is
+  /// 4294967296 on a phone and **0** in a browser: dart2js compiles `<<` to JavaScript's 32-bit
+  /// shift, where shifting by 32 is shifting by 0 and the 1 falls off the end. `nextInt(0)` throws,
+  /// the throw came out of enqueue, and pressing send did nothing at all — on the web only, which
+  /// is why every test passed. Nothing here needs more than 30 bits of salt beside a microsecond
+  /// clock, so this stays comfortably inside what both platforms agree about.
   String _token() {
     final now = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    final salt = _random.nextInt(1 << 32).toRadixString(36);
+    final salt = _random.nextInt(1073741824).toRadixString(36);
     return '$now-$salt';
   }
 }
