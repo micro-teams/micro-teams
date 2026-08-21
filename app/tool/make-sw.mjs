@@ -47,6 +47,28 @@ async function present(files) {
   return out;
 }
 
+/**
+ * Flutter's own worker is deleted below, so the call that loads it has to go too.
+ *
+ * It is not dead code once the launcher is in front of the app: the launcher registers OUR worker
+ * before the engine starts, and Flutter's loader only asks for `flutter_service_worker.js` when a
+ * registration already exists. So the file it asks for is missing, the SPA fallback answers with
+ * index.html, and the browser reports a script with an unsupported MIME type — a console error on
+ * every first visit, for a worker we deliberately do not ship. Rewritten before the hash, because
+ * the hash is over what is actually served.
+ */
+const bootstrap = path.join(dist, "flutter_bootstrap.js");
+const bootstrapSource = await readFile(bootstrap, "utf8");
+// The call at the very end of the file, not the word anywhere in it: the minified loader mentions
+// both `serviceWorkerSettings` and `serviceWorkerVersion` in its own code, so a search would find
+// the wrong thing and running this step twice would look like a failure.
+const CALL = /_flutter\.loader\.load\(\{[\s\S]*?\}\);\s*$/;
+if (!CALL.test(bootstrapSource)) {
+  console.error("flutter_bootstrap.js does not end in _flutter.loader.load({…}) — did it change?");
+  process.exit(1);
+}
+await writeFile(bootstrap, bootstrapSource.replace(CALL, "_flutter.loader.load({});\n"));
+
 const version = await hashOf(await present(VERSIONED));
 
 const source = await readFile(path.join(dist, "sw.js"), "utf8");

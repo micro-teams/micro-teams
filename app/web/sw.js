@@ -31,8 +31,13 @@ const CACHE = `microteams-${VERSION}`;
 
 /** What the app cannot start without. Everything else arrives through the fetch handler. */
 const SHELL = [
+  // "/" and "/index.html" are the multipath launcher (tool/launcher.mjs), not Flutter's document:
+  // the first request cannot be spread across lines, so it is small and does one job. "/app.html"
+  // is Flutter's own document, kept as the way to start without the launcher when the launcher
+  // itself is what somebody is debugging.
   "/",
   "/index.html",
+  "/app.html",
   "/flutter.js",
   "/flutter_bootstrap.js",
   "/manifest.json",

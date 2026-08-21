@@ -37,7 +37,23 @@ page.on("console", (m) => {
   if (m.type() === "error") errors.push(m.text());
 });
 
+// Recorded from before the first byte of the document runs, because the thing being measured
+// happens during the load: by the time a test could attach a listener, the launcher is done.
+await page.addInitScript(() => {
+  window.__mpProgress = [];
+  window.addEventListener("multipath:progress", (e) => window.__mpProgress.push(e.detail.percent));
+});
+
 await page.goto(BASE + "/", { waitUntil: "load" });
+
+// The first document is the multipath launcher, not Flutter's: that request is the one thing that
+// cannot be spread across lines, so it is small and does one job. Flutter's document is kept as
+// /app.html.
+const launcher = await page.evaluate(() => ({
+  splash: Boolean(document.querySelector("[data-multipath-progress]")),
+  config: Boolean(window.__multipath__ && window.__multipath__.registry),
+}));
+check("the launcher is what the browser was served", launcher.splash && launcher.config);
 
 // Waited for, not sampled: the engine has to download, boot and lay out before anything is on
 // screen, and reading the moment "load" fires measures this script's patience rather than the app.
@@ -48,6 +64,44 @@ const painted = await page
   .then(() => true)
   .catch(() => false);
 check("the app paints a first frame", painted);
+
+// A percentage of the 13KB bootstrap would be a lie told quickly. What is counted is main.dart.js,
+// which is 3.4MB and is what the visitor is actually waiting for.
+const progress = await page.evaluate(() => window.__mpProgress ?? []);
+check("the launcher reported progress while loading", progress.length > 1, progress.join(" "));
+check(
+  "and it got to 100 only once the app had been imported",
+  progress[progress.length - 1] === 100 && progress.every((p, i) => i === 0 || p >= progress[i - 1]),
+  progress.slice(-3).join(" "),
+);
+
+// The splash covers the whole viewport, so a splash that stays is a black screen over a running
+// app. It goes when the app says it has painted, not when the module finished importing.
+// Waited for rather than sampled: it fades, so reading it the instant the first frame lands
+// measures the transition rather than the rule.
+const splashGone = await page
+  .waitForFunction(
+    () => {
+      const el = document.querySelector("#mt-splash");
+      return !el || Number(getComputedStyle(el).opacity) === 0;
+    },
+    null,
+    { timeout: 5000 },
+  )
+  .then(() => true)
+  .catch(() => false);
+check("the splash gets out of the way once the app has painted", splashGone);
+
+// Flutter's own document still starts the app, which is what /unregister.html sends people to and
+// the quickest way to tell whether the launcher is what is wrong.
+const plain = await context.newPage();
+await plain.goto(BASE + "/app.html", { waitUntil: "load" });
+const plainPainted = await plain
+  .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, { timeout: 60000 })
+  .then(() => true)
+  .catch(() => false);
+check("the app also starts without the launcher, from /app.html", plainPainted);
+await plain.close();
 
 check(
   "the tab is named",
