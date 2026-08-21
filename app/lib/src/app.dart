@@ -18,6 +18,7 @@ import 'package:go_router/go_router.dart';
 
 import 'app_providers.dart';
 import 'features/auth/login_screen.dart';
+import 'features/agents/agents_screen.dart';
 import 'features/chats/chats_screen.dart';
 import 'features/chats/thread_screen.dart';
 import 'features/terminal/terminal_screen.dart';
@@ -122,7 +123,12 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
           GoRoute(
             path: '/agents',
-            builder: (context, state) => const _NotYetMigrated(name: 'Agents'),
+            builder: (context, state) => AgentsScreen(
+              // An agent with no session has no screen to watch, and the row does not offer one —
+              // so reaching here means there is a sid.
+              onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
+              onOpenChat: (threadId) => context.go('/chats/$threadId'),
+            ),
           ),
           GoRoute(
             path: '/profile',
