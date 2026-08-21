@@ -13,9 +13,7 @@ import '../common/ui/avatar.dart';
 import '../common/ui/theme.dart';
 import '../common/ui/team_picker.dart';
 import 'add_device_dialog.dart';
-import 'agent_detail.dart';
 import 'agents_controller.dart';
-import 'machine_detail.dart';
 import 'open_agent_dialog.dart';
 
 class AgentsScreen extends ConsumerWidget {
@@ -104,12 +102,6 @@ class _Fleet extends ConsumerWidget {
   final void Function(Machine machine) onOpenMachine;
   final int? selectedAgentId;
   final String? selectedMachineId;
-
-  void _say(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

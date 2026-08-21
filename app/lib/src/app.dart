@@ -20,7 +20,9 @@ import 'providers.dart';
 import 'auth/login_screen.dart';
 import 'auth/profile_screen.dart';
 import 'auth/register_screen.dart';
+import 'agents/agent_detail.dart';
 import 'agents/agents_screen.dart';
+import 'agents/machine_detail.dart';
 import 'chats/chats_screen.dart';
 import 'chats/new_chat_dialog.dart';
 import 'chats/thread_info_screen.dart';
@@ -228,15 +230,30 @@ GoRouter _buildRouter(WidgetRef ref) {
             routes: [
               GoRoute(
                 path: '/agents',
-                pageBuilder: (context, state) => NoTransitionPage(
-                  child: AgentsScreen(
-                    // An agent with no session has no screen to watch, and the row does not offer one —
-                    // so reaching here means there is a sid.
-                    onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
-                    onOpenChat: (threadId) => context.go('/chats/$threadId'),
-                    onManageTeams: () => context.go('/teams'),
+                pageBuilder: _page(const _AgentsPane()),
+                routes: [
+                  // Selection lives in the URL, the way the React desktop had it: a link to an
+                  // agent opens that agent, and back pops the frame rather than guessing.
+                  GoRoute(
+                    path: 'machine/:machineId',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: _AgentsPane(
+                        openMachineId: state.pathParameters['machineId'],
+                      ),
+                    ),
                   ),
-                ),
+                  GoRoute(
+                    path: ':userId',
+                    pageBuilder: (context, state) {
+                      final id =
+                          int.tryParse(state.pathParameters['userId'] ?? '') ??
+                          0;
+                      return NoTransitionPage(
+                        child: _AgentsPane(openAgentId: id),
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -371,7 +388,83 @@ class _NewChatButton extends StatelessWidget {
   );
 }
 
+/// Agents, in whichever arrangement the window calls for.
+///
+/// The same shape as [_ChatsPane], and for the same reason: on a phone the detail covers the list,
+/// on a wide window it sits beside it, and neither branch has its own copy of either screen. The
+/// React desktop had exactly this (`AgentsDesktop`), with the selection in the URL.
+class _AgentsPane extends ConsumerWidget {
+  const _AgentsPane({this.openAgentId, this.openMachineId});
+
+  final int? openAgentId;
+  final String? openMachineId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final wide = isWide(context);
+
+    final list = AgentsScreen(
+      selectedAgentId: openAgentId,
+      selectedMachineId: openMachineId,
+      dense: wide,
+      onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
+      onOpenMachine: (machine) => context.go('/agents/machine/${machine.id}'),
+      onManageTeams: () => context.go('/teams'),
+    );
+
+    if (!wide) {
+      if (openAgentId != null) {
+        return AgentDetailScreen(
+          userId: openAgentId!,
+          onChat: (threadId) => context.go('/chats/$threadId'),
+          onGone: () => context.go('/agents'),
+        );
+      }
+      if (openMachineId != null) {
+        return MachineDetailScreen(
+          machineId: openMachineId!,
+          onGone: () => context.go('/agents'),
+        );
+      }
+      return list;
+    }
+
+    return Scaffold(
+      body: Row(
+        children: [
+          SizedBox(width: Metrics.listPaneWidth, child: list),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: switch ((openAgentId, openMachineId)) {
+              (final int id, _) => AgentDetailScreen(
+                key: ValueKey('agent-$id'),
+                userId: id,
+                asPane: true,
+                onChat: (threadId) => context.go('/chats/$threadId'),
+                onGone: () => context.go('/agents'),
+              ),
+              (_, final String id) => MachineDetailScreen(
+                key: ValueKey('machine-$id'),
+                machineId: id,
+                asPane: true,
+                onGone: () => context.go('/agents'),
+              ),
+              _ => const Center(child: Text('pick an agent or a machine')),
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The shell: a bottom bar on a phone, a rail on a wide window.
+///
+/// The chrome is OUTSIDE the stack and stays put. A detail — a conversation, an agent — is a frame
+/// pushed inside it, so coming back out of one lands you where you were with the bar still there.
+/// It used to hide the bar while a conversation was open, and coming back left the screen without
+/// one at all: the shell decided from the URL, and the URL it read was not the one you had just
+/// returned to.
 class _Shell extends StatelessWidget {
   const _Shell({required this.shell});
 
@@ -441,13 +534,6 @@ class _Shell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final index = shell.currentIndex;
-    // On a phone an open conversation is a screen of its own; a bottom bar under it would be a
-    // second way out that the back gesture already provides.
-    final location = GoRouterState.of(context).matchedLocation;
-    final immersive =
-        !isWide(context) && RegExp(r'^/chats/\d+$').hasMatch(location);
-
-    if (immersive) return shell;
 
     if (isWide(context)) {
       return Scaffold(
@@ -519,7 +605,7 @@ class _Rail extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final user = ref.watch(sessionProvider).value?.user;
+    final user = ref.watch(sessionProvider).valueOrNull?.user;
 
     return Container(
       width: Metrics.railWidth,
