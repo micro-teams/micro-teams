@@ -13,9 +13,9 @@ forgotten; code does not.
 
 | | |
 |---|---|
-| **`MicroTeams-API.yml`** | The single API contract. The backend's interfaces and the frontend's client are both **generated** from it. |
+| **`MicroTeams-API.yml`** | The single API contract. The backend's interfaces and the client's are both **generated** from it. |
 | **`backend/`** ("mt") | Kotlin / Spring Boot. Chat, teams, git-backed documents, machines, agents. |
-| **`frontend/`** | React + Vite, mobile-first. |
+| **`app/`** | Flutter. The client: web today, Android / iOS / desktop from the same code. |
 | **`cli/`** | Go. Runs on a machine, hosts the agent's CLI, speaks the connector protocol. |
 | **cheese-auth** | A *separate* repo (`micro-teams/cheese-auth`, NestJS): registration, login, avatars. Runs as a prebuilt image in deployment; cloned as a sibling for local dev. Not part of this monorepo. |
 
@@ -25,8 +25,8 @@ forgotten; code does not.
 
 - the backend regenerates `app.microteams.api.*Api` on every build, and each module's single
   controller implements exactly its own interface — nothing else;
-- the frontend regenerates `frontend/src/api` on every `npm run dev` / `npm run build` (npm
-  `pre*` hooks, so you cannot accidentally run against a stale client).
+- the client regenerates `app/packages/mt_api` via `app/tool/codegen.sh` (run by CI before it
+  builds anything, and gitignored so a stale or hand-edited copy cannot be committed).
 
 The generator names an Api class after a path's **first segment**, so the path *is* the structure:
 `/chat` → `ChatApi` → `chat/ChatController`, on both sides, from one file. Change the API by
@@ -60,7 +60,7 @@ itself, and chat — which owns "who is in this group" — calls it. Chat never 
 ```mermaid
 flowchart TD
     browser(["browser"]) -->|one public origin| nginx["nginx"]
-    nginx -->|"/"| frontend["frontend<br/>React + Vite · :5173"]
+    nginx -->|"/"| app["app<br/>Flutter web · :8931 in dev"]
     nginx -->|"/api"| auth["cheese-auth<br/>NestJS · :8091"]
     nginx -->|"/mt"| mt["mt<br/>Kotlin / Spring · :8199"]
     cli["cli<br/>on your machine"] -->|WebSocket| mt
@@ -71,8 +71,10 @@ flowchart TD
 
 Everything the browser touches is **one origin** — nginx puts all three behind it at different
 path prefixes — so there is effectively no cross-origin request and cheese-auth's `httpOnly`
-refresh cookie simply works. The frontend calls relative paths only (`/api/...`, `/mt/...`),
-never an absolute backend URL. That is required, not tidiness.
+refresh cookie simply works. The web build calls relative paths only (`/api/...`, `/mt/...`),
+never an absolute backend URL. That is required, not tidiness. (A NATIVE build has no proxy in
+front of it and therefore no same-origin to rely on, which is why it must be told where the server
+is at build time — see `app/README.md`, and note that the cookie story differs there.)
 
 Both backends trust the **same JWT** because they share `JWT_SECRET`: mt verifies the signature
 itself and never calls cheese-auth to check a request. (`application.legacy-url` is a different,
@@ -142,14 +144,22 @@ nothing — override on the command line as above, or rebuild. Never commit real
 
 `curl :8199/ping` → 401 with no token; `{"code":200,"message":"pong from user <id>"}` with one.
 
-### 3. frontend
+### 3. app (the client)
 
 ```sh
-cd frontend && npm install && npm run dev     # :5173
+cd app && bash tool/codegen.sh && flutter run -d chrome
 ```
 
-`vite.config.ts` proxies `/api` → :8091 and `/mt` → :8199, mirroring nginx; override with
-`AUTH_BACKEND_URL` / `MT_BACKEND_URL`.
+For a build you can serve, plus the browser checks that assert it actually starts (and starts
+offline):
+
+```sh
+flutter build web --release && node tool/make-sw.mjs build/web
+npm ci && npx playwright install chromium && bash tool/check-web.sh
+```
+
+Point it at the backends the same way nginx does — a dev server on the same origin, or
+`--dart-define=MT_ORIGIN=...` for a native build. See `app/README.md`.
 
 ### 4. nginx
 

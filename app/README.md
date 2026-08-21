@@ -1,7 +1,8 @@
 # app — the MicroTeams client
 
-One codebase for web, Android, iOS, Windows, macOS and Linux. It is replacing `frontend/`; until
-that directory is deleted, both exist and both must stay green.
+One codebase for web, Android, iOS, Windows, macOS and Linux. It IS the client — the React app
+that used to live in `frontend/` is gone, and what CI packages into the deployment bundle is the
+web build produced here.
 
 ## Running it
 
@@ -19,7 +20,14 @@ which is also what lets the httpOnly refresh cookie work at all.
 
 ## Tests
 
-    flutter test
+    flutter test                       # unit and widget tests
+    flutter build web --release && node tool/make-sw.mjs build/web
+    npm ci && npx playwright install chromium && bash tool/check-web.sh
+
+The second one is not optional in CI, and it is the only thing that can answer the questions that
+matter about a web build: does it paint at all (Flutter draws into a canvas, so a DOM check proves
+nothing — see `lib/src/core/ready_signal.dart`), does the service worker register and store the
+engine, does a second visit work with the network off, and does the escape hatch clear it again.
 
 If `flutter test` dies with `HttpException: Connection reset by peer` on a localhost URL, the
 shell has `HTTP_PROXY` set and the test harness is honouring it for its own loopback connection.
@@ -59,3 +67,10 @@ Three rules, each enforced by `test/architecture_test.dart` rather than by good 
   would fire constantly and mean nothing.
 - **The font is bundled.** Flutter draws its own text and does not inherit the platform's monospace
   family, which the terminal needs.
+- **The service worker is ours, not Flutter's** (`web/sw.js`, stamped by `tool/make-sw.mjs`).
+  Flutter's is deprecated: its loader no longer registers one on a first visit unless you pass an
+  explicit `serviceWorkerUrl`, and doing that prints a warning saying it will stop working. Ours
+  also gets to decide what to keep — the shell is precached, the engine is cached as it is actually
+  fetched, so a first visit downloads only the wasm variant this browser chose.
+- **A first visit needs the network; every one after it does not.** Anything claiming otherwise is
+  claiming a browser can run a build it has never downloaded.

@@ -71,50 +71,8 @@ jobs:
           name: jar
           path: backend/target/*.jar
 
-  build-frontend:
-    runs-on: ubuntu-latest
-    # MultiPath is installed from @micro-teams/multipath on GitHub Packages, which requires an
-    # authenticated request even for a public package — same as build-applet below.
-    permissions:
-      contents: read
-      packages: read
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-
-      # The launcher and the Service Worker are browser behaviour, and none of it can be asserted
-      # any other way: whether the worker registers, what it stores, whether the app starts with the
-      # network off, and whether the escape hatch clears it. The first version of that build step
-      # passed every unit test and did not start offline.
-      - name: Check the launcher in a real browser
-        run: |
-          npx playwright install --with-deps chromium
-          bash scripts/check-launcher.sh
-
-      - name: Upload dist
-        uses: actions/upload-artifact@v7
-        with:
-          retention-days: 1
-          name: frontend-dist
-          path: frontend/dist
-
-  # The Flutter client, which is replacing frontend/ (see todo/microteams/flutter-migration.md).
-  # It builds alongside the React app rather than instead of it: for as long as both exist, both
-  # have to stay green, and the day frontend/ is deleted this job is what is left.
+  # The web client. It is the ONLY frontend now — frontend/ (React + Vite) is gone, because one
+  # person maintaining two implementations of the same product maintains neither.
   build-app:
     runs-on: ubuntu-latest
     defaults:
@@ -136,14 +94,36 @@ jobs:
           flutter-version: "3.47.1"
           cache: true
 
-      # The Dart client comes from the same repo-root contract as the TypeScript one. It is
-      # gitignored, so this step is not optional — without it nothing below compiles.
+      # The Dart client comes from the same repo-root contract the backend generates its Api
+      # interfaces from. It is gitignored, so this step is not optional — without it nothing below
+      # compiles.
       - run: bash tool/codegen.sh
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
       - run: flutter build web --release
+      # Stamps the service worker with a hash of the build and removes Flutter's deprecated one.
+      # Part of the build, not a nicety: an unstamped worker serves the first build it ever cached
+      # for as long as the browser lives.
+      - run: node tool/make-sw.mjs build/web
+
+      # The half of this that no unit test can reach: whether the app actually paints, whether the
+      # worker registers and stores the engine, whether a second visit works with the network off,
+      # and whether the escape hatch clears it all. The React build passed every unit test it had
+      # and did not start offline; that is why its check existed, and why this one replaces it.
+      - name: Check the built app in a real browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          bash tool/check-web.sh
+
+      - name: Upload the web build
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          name: web-dist
+          path: app/build/web
 
   build-applet:
     runs-on: ubuntu-latest
@@ -270,7 +250,7 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-app, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -291,7 +271,7 @@ jobs:
           # migration an upgrade needs. Committed in-repo (CI verifies it matches the entities).
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
-          cp -r artifacts/frontend-dist/. "$STAGE/frontend/dist/"
+          cp -r artifacts/web-dist/. "$STAGE/frontend/dist/"
           cp artifacts/applets/*.js "$STAGE/applets/"
           chmod +x "$STAGE/gen-env.sh"
           # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
@@ -430,7 +410,7 @@ jobs:
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
   ci-success:
     name: CI success
-    needs: [build-jar, build-frontend, build-applet, build-cli, build-tmux, package-zip, test-e2e]
+    needs: [build-jar, build-app, build-applet, build-cli, build-tmux, package-zip, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."

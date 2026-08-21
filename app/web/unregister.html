@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reset MicroTeams</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #060606;
+      color: #e7e3f0;
+      font: 15px/1.5 system-ui, sans-serif;
+      padding: 24px;
+    }
+    main { max-width: 32rem; }
+    code { background: #1b1d2a; padding: 0 4px; border-radius: 3px; }
+    a { color: #8ab4ff; }
+  </style>
+</head>
+<body>
+  <!--
+    The way out.
+
+    A cached app that will not update is the worst failure mode a service worker has: the user sees
+    an old build, reloading does not help, and there is nothing on screen to tell them why. This
+    page unregisters every worker and deletes every cache, so "open /unregister.html" is an answer
+    that can be given over the phone.
+
+    It is deliberately plain HTML with no imports: it has to work when the thing it is repairing is
+    broken.
+  -->
+  <main>
+    <h1 id="state">Clearing…</h1>
+    <p id="detail">Unregistering the service worker and deleting its caches.</p>
+    <p><a href="/">Back to MicroTeams</a></p>
+  </main>
+
+  <script>
+    (async () => {
+      const state = document.getElementById("state");
+      const detail = document.getElementById("detail");
+      let workers = 0;
+      let caches_ = 0;
+      try {
+        if ("serviceWorker" in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          workers = registrations.length;
+          await Promise.all(registrations.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          caches_ = keys.length;
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+        state.textContent = "Cleared";
+        detail.textContent =
+          `Removed ${workers} service worker(s) and ${caches_} cache(s). ` +
+          "Open MicroTeams again and it will download a fresh copy.";
+      } catch (e) {
+        state.textContent = "Could not clear everything";
+        detail.textContent =
+          String(e) +
+          " — clearing site data for this domain in your browser settings does the same thing.";
+      } finally {
+        document.body.setAttribute("data-unregister-done", "1");
+      }
+    })();
+  </script>
+</body>
+</html>

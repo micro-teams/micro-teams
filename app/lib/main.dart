@@ -12,9 +12,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/app.dart';
 import 'src/app_providers.dart';
 import 'src/core/cache.dart';
+import 'src/core/ready_signal.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
   final cache = await ReadCache.open();
 
   runApp(
@@ -23,4 +24,8 @@ Future<void> main() async {
       child: const MicroTeamsApp(),
     ),
   );
+
+  // After the first frame, tell the document the app is really on screen. On the web that mark is
+  // the only honest answer to "did it start?" — the canvas exists either way. See ready_signal.dart.
+  binding.addPostFrameCallback((_) => signalReady());
 }
