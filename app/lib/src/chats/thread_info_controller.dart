@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../providers.dart';
+import 'chats_controller.dart';
 
 class ThreadInfo {
   const ThreadInfo({this.title = '', this.members = const {}});
@@ -35,7 +36,30 @@ class ThreadInfo {
   /// The people who are not [me]. What a chat is *called* depends on this.
   List<ThreadMember> others(int? me) =>
       members.values.where((m) => m.userId != me).toList();
+
+  /// Members in the order they are shown: owners first, then admins, then the rest.
+  List<ThreadMember> get ranked {
+    final list = members.values.toList();
+    list.sort((a, b) {
+      final byRole = (_roleOrder[a.role.name] ?? 3).compareTo(
+        _roleOrder[b.role.name] ?? 3,
+      );
+      return byRole != 0 ? byRole : a.userId.compareTo(b.userId);
+    });
+    return list;
+  }
+
+  /// Whether [me] may add and remove people here.
+  bool canManage(int? me) {
+    final role = me == null ? null : members[me]?.role.name;
+    return role == 'OWNER' || role == 'ADMIN';
+  }
+
+  bool isOwner(int? me) => me != null && members[me]?.role.name == 'OWNER';
 }
+
+/// Owners first, then admins, then everyone else — the order the member grid is drawn in.
+const Map<String, int> _roleOrder = {'OWNER': 0, 'ADMIN': 1, 'MEMBER': 2};
 
 class ThreadInfoController extends FamilyAsyncNotifier<ThreadInfo, int> {
   @override
@@ -49,6 +73,46 @@ class ThreadInfoController extends FamilyAsyncNotifier<ThreadInfo, int> {
           member.userId: member,
       },
     );
+  }
+
+  /// Put someone in. Refetched rather than patched: a roster edited locally disagrees with the
+  /// server the moment two people edit it, and the screen then lies until you leave it.
+  Future<void> add(int userId) async {
+    await ref
+        .read(mtClientProvider)
+        .chat
+        .addThreadMember(
+          id: arg,
+          addMemberRequest: AddMemberRequest(userId: userId),
+        );
+    ref.invalidateSelf();
+  }
+
+  Future<void> remove(int userId) async {
+    await ref
+        .read(mtClientProvider)
+        .chat
+        .removeThreadMember(id: arg, userId: userId);
+    ref.invalidateSelf();
+  }
+
+  Future<void> rename(String title) async {
+    await ref
+        .read(mtClientProvider)
+        .chat
+        .renameThread(
+          id: arg,
+          renameThreadRequest: RenameThreadRequest(title: title.trim()),
+        );
+    ref.invalidateSelf();
+    ref.invalidate(chatsProvider);
+  }
+
+  /// Dissolve the conversation. It is gone for everyone, which is why every surface that offers
+  /// this asks first.
+  Future<void> dissolve() async {
+    await ref.read(mtClientProvider).chat.dissolveThread(id: arg);
+    ref.invalidate(chatsProvider);
   }
 }
 

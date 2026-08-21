@@ -22,6 +22,8 @@ import 'auth/profile_screen.dart';
 import 'auth/register_screen.dart';
 import 'agents/agents_screen.dart';
 import 'chats/chats_screen.dart';
+import 'chats/new_chat_dialog.dart';
+import 'chats/thread_info_screen.dart';
 import 'chats/thread_screen.dart';
 import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
@@ -127,6 +129,27 @@ GoRouter _buildRouter(WidgetRef ref) {
                       int.tryParse(state.pathParameters['threadId'] ?? '') ?? 0;
                   return NoTransitionPage(child: _ChatsPane(openThreadId: id));
                 },
+                routes: [
+                  // A place, not a sheet: a link to a chat's members is a link somebody can send,
+                  // and the same screen serves both layouts so the two cannot grow different
+                  // sets of actions the way the React shells did.
+                  GoRoute(
+                    path: 'info',
+                    pageBuilder: (context, state) {
+                      final id =
+                          int.tryParse(
+                            state.pathParameters['threadId'] ?? '',
+                          ) ??
+                          0;
+                      return NoTransitionPage(
+                        child: ThreadInfoScreen(
+                          threadId: id,
+                          onGone: () => context.go('/chats'),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -230,10 +253,11 @@ class _ChatsPane extends ConsumerWidget {
         return ThreadScreen(
           threadId: open,
           onOpenScreen: (sid) => context.go('/screen/$sid'),
+          onOpenInfo: () => context.go('/chats/$open/info'),
         );
       }
       return Scaffold(
-        appBar: AppBar(title: const Text('chats')),
+        appBar: AppBar(title: const Text('chats'), actions: [_NewChatButton()]),
         body: ChatsScreen(
           onOpen: (thread) => context.go('/chats/${thread.id}'),
         ),
@@ -251,6 +275,7 @@ class _ChatsPane extends ConsumerWidget {
               appBar: AppBar(
                 automaticallyImplyLeading: false,
                 title: const Text('chats'),
+                actions: [_NewChatButton()],
               ),
               body: ChatsScreen(
                 selectedId: open,
@@ -269,12 +294,31 @@ class _ChatsPane extends ConsumerWidget {
                     threadId: open,
                     asPane: true,
                     onOpenScreen: (sid) => context.go('/screen/$sid'),
+                    onOpenInfo: () => context.go('/chats/$open/info'),
                   ),
           ),
         ],
       ),
     );
   }
+}
+
+/// Starting a conversation, from wherever the list is.
+///
+/// One widget rather than the same three lines in both layouts: the two shells having their own
+/// copy of an action is exactly how the React client ended up with a rename on the phone and not
+/// on the desktop.
+class _NewChatButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'New chat',
+    icon: const Icon(Icons.add_comment_outlined),
+    onPressed: () async {
+      final threadId = await showNewChatDialog(context);
+      // Straight into it: a chat you made and were not taken to is a chat you have to go and find.
+      if (threadId != null && context.mounted) context.go('/chats/$threadId');
+    },
+  );
 }
 
 /// The shell: a bottom bar on a phone, a rail on a wide window.

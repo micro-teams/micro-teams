@@ -50,6 +50,7 @@ class ThreadScreen extends ConsumerStatefulWidget {
     this.title,
     this.asPane = false,
     this.onOpenScreen,
+    this.onOpenInfo,
     super.key,
   });
 
@@ -67,6 +68,9 @@ class ThreadScreen extends ConsumerStatefulWidget {
   /// Opens an agent's live screen. Supplied by the router, because a screen does not navigate — it
   /// says what happened and the shell decides where that goes.
   final void Function(String sessionId)? onOpenScreen;
+
+  /// Open this conversation's members and settings. Null in a context that has nowhere to open it.
+  final VoidCallback? onOpenInfo;
 
   @override
   ConsumerState<ThreadScreen> createState() => _ThreadScreenState();
@@ -121,6 +125,14 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
       appBar: AppBar(
         automaticallyImplyLeading: !widget.asPane,
         title: Text(_title(info, me, settled: !infoValue.isLoading)),
+        actions: [
+          if (widget.onOpenInfo != null)
+            IconButton(
+              tooltip: 'Chat info',
+              onPressed: widget.onOpenInfo,
+              icon: const Icon(Icons.info_outline),
+            ),
+        ],
       ),
       body: Column(
         children: [

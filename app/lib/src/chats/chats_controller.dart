@@ -59,6 +59,33 @@ class ChatsController extends AsyncNotifier<List<ChatSummary>> {
     return response.data?.chats ?? const <ChatSummary>[];
   }
 
+  /// Start a conversation, and say which one so the caller can open it.
+  ///
+  /// Member ids are optional: a chat with nobody in it yet is a chat you add people to, and
+  /// refusing to make one would mean the only way to start a group is to know everyone's id first.
+  Future<Thread> create({
+    required String title,
+    List<int> memberIds = const [],
+  }) async {
+    final response = await ref
+        .read(mtClientProvider)
+        .chat
+        .createThread(
+          createThreadRequest: CreateThreadRequest(
+            title: title.trim(),
+            memberIds: memberIds.isEmpty ? null : memberIds,
+          ),
+        );
+    ref.invalidateSelf();
+    final thread = response.data;
+    if (thread == null) {
+      throw StateError(
+        'the server created a conversation but did not say which',
+      );
+    }
+    return thread;
+  }
+
   /// What to paint before the first answer arrives. Read synchronously so the list is on screen in
   /// the same frame as the rest of the app.
   List<ChatSummary> cached() {
