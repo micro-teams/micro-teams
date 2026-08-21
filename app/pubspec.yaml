@@ -10,6 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # For usePathUrlStrategy: real paths on the web instead of /#/chats. Part of the SDK, but it has
+  # to be declared to be imported. See lib/src/core/url_strategy.dart.
+  flutter_web_plugins:
+    sdk: flutter
+
   # The contract, generated from the repo-root MicroTeams-API.yml by tool/codegen.sh — the same
   # file the backend generates its Api interfaces from. Not committed, for the same reason
   # frontend/src/api is not: a generated file that can drift from its source is a lie waiting.

@@ -13,9 +13,12 @@ import 'src/app.dart';
 import 'src/app_providers.dart';
 import 'src/core/cache.dart';
 import 'src/core/ready_signal.dart';
+import 'src/core/url_strategy.dart';
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  // Before the router exists, so the first route is read from a real path rather than a hash.
+  configureUrlStrategy();
   final cache = await ReadCache.open();
 
   runApp(

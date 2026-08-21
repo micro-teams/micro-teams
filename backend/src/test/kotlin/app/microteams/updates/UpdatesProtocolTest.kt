@@ -201,7 +201,11 @@ constructor(
         val failed =
             try {
                 StandardWebSocketClient()
-                    .execute(TextWebSocketHandler(), "ws://localhost:$port/mt/updates")
+                    // `/updates`, not `/mt/updates`: this test reaches the server directly, and
+                    // the `/mt` prefix belongs to the gateway that strips it. Asking for the
+                    // prefixed path here would pass while every real client got a 404 — which is
+                    // exactly what happened until a deployed bundle was actually opened.
+                    .execute(TextWebSocketHandler(), "ws://localhost:$port/updates")
                     .get(5, TimeUnit.SECONDS)
                 false
             } catch (e: Exception) {
@@ -249,7 +253,7 @@ constructor(
                             inbox.put(message.payload)
                         }
                     },
-                    "ws://localhost:$port/mt/updates?token=$token",
+                    "ws://localhost:$port/updates?token=$token",
                 )
                 .get(5, TimeUnit.SECONDS)
         return Client(session, inbox)

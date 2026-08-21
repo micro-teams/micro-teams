@@ -122,6 +122,11 @@ check(
   deepResponse?.status() === 200 && deepPainted,
   `${deepResponse?.status()}`,
 );
+// And that it OPENS that route. Serving the document is only half of it: Flutter web defaults to
+// hash routing, where /agents paints the app and then quietly becomes /#/chats — the link works
+// and takes you somewhere else, which is worse than a 404 because nothing looks broken.
+const landedOn = await deep.evaluate(() => location.pathname + location.hash);
+check("and it opens that route, not the default one", landedOn === "/agents", landedOn);
 await deep.close();
 
 // The engine is megabytes of wasm, and it is fetched before the worker takes over — so this is a

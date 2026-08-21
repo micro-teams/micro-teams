@@ -1,5 +1,12 @@
 /*
- *  Description: The updates endpoint, `/mt/updates`, and its handshake.
+ *  Description: The updates endpoint, `/updates`, and its handshake.
+ *
+ *               `/updates`, NOT `/mt/updates`: the `/mt` prefix belongs to the gateway, which
+ *               strips it (`proxy_pass http://backend:8080/` in deploy/nginx.conf) before this
+ *               server ever sees a path. A browser therefore dials `/mt/updates` and arrives here
+ *               as `/updates` — the same arrangement the machine sockets already use.
+ *               Registering the prefixed path instead means the endpoint answers only when it is
+ *               reached directly, which is true in a test and false everywhere else.
  *
  *               Built the way ConnectorWebSocketConfig is built, and for the same reason: the chat
  *               module owns `@EnableWebSocketMessageBroker`, which defines the application-wide
@@ -71,7 +78,7 @@ class UpdatesWebSocketConfig {
     ): HandlerMapping {
         val mapping = SimpleUrlHandlerMapping()
         mapping.order = -1
-        mapping.urlMap = mapOf("/mt/updates" to updatesWsRequestHandler)
+        mapping.urlMap = mapOf("/updates" to updatesWsRequestHandler)
         return mapping
     }
 }
