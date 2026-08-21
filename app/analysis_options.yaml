@@ -1,0 +1,30 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # A TODO that only the analyzer knows about is a TODO nobody will do.
+    todo: ignore
+  exclude:
+    - packages/mt_api/**
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+
+linter:
+  rules:
+    # The layering rule this client is built on: nothing in ui/ may call the API directly. It is
+    # enforced by a test (test/architecture_test.dart) rather than by a lint, because the rule is
+    # about which directory imports which — something no lint expresses and every reviewer forgets.
+    always_declare_return_types: true
+    avoid_dynamic_calls: true
+    prefer_final_locals: true
+    unawaited_futures: true
+    require_trailing_commas: true

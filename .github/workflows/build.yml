@@ -112,6 +112,39 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
+  # The Flutter client, which is replacing frontend/ (see todo/microteams/flutter-migration.md).
+  # It builds alongside the React app rather than instead of it: for as long as both exist, both
+  # have to stay green, and the day frontend/ is deleted this job is what is left.
+  build-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      # openapi-generator (the codegen step) runs on the JVM, same as the applet's.
+      - uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "temurin"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.1"
+          cache: true
+
+      # The Dart client comes from the same repo-root contract as the TypeScript one. It is
+      # gitignored, so this step is not optional — without it nothing below compiles.
+      - run: bash tool/codegen.sh
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web --release
+
   build-applet:
     runs-on: ubuntu-latest
     # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which

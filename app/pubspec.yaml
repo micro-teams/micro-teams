@@ -1,0 +1,54 @@
+name: microteams
+description: The MicroTeams client — one codebase for web, Android, iOS, and the desktops.
+publish_to: none
+version: 0.1.15
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The contract, generated from the repo-root MicroTeams-API.yml by tool/codegen.sh — the same
+  # file the backend generates its Api interfaces from. Not committed, for the same reason
+  # frontend/src/api is not: a generated file that can drift from its source is a lie waiting.
+  mt_api:
+    path: packages/mt_api
+
+  # State. Riverpod because a provider is declared where it is defined and read where it is
+  # needed, which is what keeps data-fetching out of layout files — the rule PR #162 had to add
+  # a lint for on the React side.
+  flutter_riverpod: ^2.6.1
+
+  # Routing. go_router because the web build must keep real URLs: /chats/206 has to be a link
+  # someone can send, a browser back button has to work, and a deep link has to open the same
+  # screen on Android.
+  go_router: ^14.6.2
+
+  dio: ^5.7.0
+  web_socket_channel: ^3.0.1
+
+  # The live terminal. Proven against a real device before any of this was written — see
+  # flutter-term-probe in the agent workdir and todo/microteams/backlog.md T-088.
+  xterm: ^4.0.0
+
+  shared_preferences: ^2.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  # A terminal has to ship its own font: Flutter draws its own text and does not inherit the
+  # platform's monospace family, so without this every cell is drawn in a proportional face at a
+  # fixed cell width. Learned from the probe, not from the documentation.
+  fonts:
+    - family: LiberationMono
+      fonts:
+        - asset: fonts/LiberationMono-Regular.ttf
+        - asset: fonts/LiberationMono-Bold.ttf
+          weight: 700

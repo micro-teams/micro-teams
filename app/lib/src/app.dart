@@ -1,0 +1,311 @@
+/// The app: its routes, and the one shell both layouts share.
+///
+/// Two rules this file exists to keep.
+///
+/// One: a URL is a real address. /chats/206 has to be a link someone can send, a browser back
+/// button has to work, and the same path has to open the same screen from an Android deep link.
+/// That is why routing is declarative and lives here rather than in a stack of pushes.
+///
+/// Two: there is ONE set of screens. The phone shows one at a time with a bottom bar; a wide
+/// window shows list-beside-detail with a rail. Both are this file arranging the same widgets —
+/// the React client had two parallel shells and spent a whole refactor pass merging them back
+/// together, which is a mistake worth not making twice.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import 'app_providers.dart';
+import 'features/auth/login_screen.dart';
+import 'features/chats/chats_screen.dart';
+import 'features/chats/thread_screen.dart';
+import 'features/terminal/terminal_screen.dart';
+import 'ui/theme.dart';
+
+class MicroTeamsApp extends ConsumerStatefulWidget {
+  const MicroTeamsApp({super.key});
+
+  @override
+  ConsumerState<MicroTeamsApp> createState() => _MicroTeamsAppState();
+}
+
+class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
+    with WidgetsBindingObserver {
+  late final GoRouter _router = _buildRouter(ref);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _router.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the foreground refetches everything being watched, once. On a phone this is
+    // the backstop that matters most: the OS suspends the process without telling anyone, and a
+    // socket that was asleep cannot know what it missed.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(updatesSocketProvider)?.resumed();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Reading it here is what opens it, and closing the session closes it.
+    ref.watch(updatesSocketProvider);
+
+    return MaterialApp.router(
+      title: 'MicroTeams',
+      debugShowCheckedModeBanner: false,
+      theme: lightTheme(),
+      darkTheme: darkTheme(),
+      routerConfig: _router,
+    );
+  }
+}
+
+GoRouter _buildRouter(WidgetRef ref) {
+  return GoRouter(
+    initialLocation: '/chats',
+    refreshListenable: _SessionListenable(ref),
+    redirect: (context, state) {
+      final session = ref.read(sessionProvider);
+      // Boot: we are still asking the refresh cookie who this is. Sending someone to /login here
+      // is the bug that used to bounce a signed-in user out on every reload.
+      if (session.isLoading) return null;
+
+      final signedIn = session.value != null;
+      final atLogin = state.matchedLocation == '/login';
+      if (!signedIn) return atLogin ? null : '/login';
+      if (atLogin) return '/chats';
+      return null;
+    },
+    routes: [
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      ShellRoute(
+        builder: (context, state, child) => _Shell(child: child),
+        routes: [
+          GoRoute(
+            path: '/chats',
+            builder: (context, state) => const _ChatsPane(),
+            routes: [
+              GoRoute(
+                path: ':threadId',
+                builder: (context, state) {
+                  final id =
+                      int.tryParse(state.pathParameters['threadId'] ?? '') ?? 0;
+                  return _ChatsPane(openThreadId: id);
+                },
+              ),
+            ],
+          ),
+          // Reachable by URL before the agents screen that will normally lead here has been
+          // migrated, so the hardest part of this rewrite can be judged on a real device now
+          // rather than after everything else is done.
+          GoRoute(
+            path: '/screen/:sessionId',
+            builder: (context, state) => TerminalScreen(
+              sessionId: state.pathParameters['sessionId'] ?? '',
+            ),
+          ),
+          GoRoute(
+            path: '/teams',
+            builder: (context, state) => const _NotYetMigrated(name: 'Teams'),
+          ),
+          GoRoute(
+            path: '/agents',
+            builder: (context, state) => const _NotYetMigrated(name: 'Agents'),
+          ),
+          GoRoute(
+            path: '/profile',
+            builder: (context, state) => const _NotYetMigrated(name: 'Profile'),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// Rebuilds the router when the session changes, so the redirect above runs again.
+class _SessionListenable extends ChangeNotifier {
+  _SessionListenable(WidgetRef ref) {
+    ref.listenManual(sessionProvider, (_, _) => notifyListeners());
+  }
+}
+
+/// Chats, in whichever arrangement the window calls for.
+///
+/// One widget, two layouts. On a phone the open conversation covers the list; on a wide window it
+/// sits beside it. Neither branch has its own copy of either screen.
+class _ChatsPane extends ConsumerWidget {
+  const _ChatsPane({this.openThreadId});
+
+  final int? openThreadId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final wide = isWide(context);
+    final open = openThreadId;
+
+    if (!wide) {
+      if (open != null) return ThreadScreen(threadId: open);
+      return Scaffold(
+        appBar: AppBar(title: const Text('Chats')),
+        body: ChatsScreen(
+          onOpen: (thread) => context.go('/chats/${thread.id}'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      body: Row(
+        children: [
+          SizedBox(
+            width: 340,
+            child: Scaffold(
+              appBar: AppBar(title: const Text('Chats')),
+              body: ChatsScreen(
+                selectedId: open,
+                onOpen: (thread) => context.go('/chats/${thread.id}'),
+              ),
+            ),
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: open == null
+                ? const Center(child: Text('Pick a conversation'))
+                : ThreadScreen(key: ValueKey(open), threadId: open),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The shell: a bottom bar on a phone, a rail on a wide window.
+class _Shell extends StatelessWidget {
+  const _Shell({required this.child});
+
+  final Widget child;
+
+  static const _destinations = [
+    (
+      path: '/chats',
+      icon: Icons.forum_outlined,
+      selected: Icons.forum,
+      label: 'Chats',
+    ),
+    (
+      path: '/teams',
+      icon: Icons.groups_outlined,
+      selected: Icons.groups,
+      label: 'Teams',
+    ),
+    (
+      path: '/agents',
+      icon: Icons.smart_toy_outlined,
+      selected: Icons.smart_toy,
+      label: 'Agents',
+    ),
+    (
+      path: '/profile',
+      icon: Icons.person_outline,
+      selected: Icons.person,
+      label: 'Profile',
+    ),
+  ];
+
+  int _indexOf(BuildContext context) {
+    final location = GoRouterState.of(context).matchedLocation;
+    final index = _destinations.indexWhere((d) => location.startsWith(d.path));
+    return index < 0 ? 0 : index;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final index = _indexOf(context);
+    // On a phone an open conversation is a screen of its own; a bottom bar under it would be a
+    // second way out that the back gesture already provides.
+    final location = GoRouterState.of(context).matchedLocation;
+    final immersive =
+        !isWide(context) && RegExp(r'^/chats/\d+$').hasMatch(location);
+
+    if (immersive) return child;
+
+    if (isWide(context)) {
+      return Scaffold(
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: index,
+              labelType: NavigationRailLabelType.all,
+              onDestinationSelected: (i) => context.go(_destinations[i].path),
+              destinations: [
+                for (final d in _destinations)
+                  NavigationRailDestination(
+                    icon: Icon(d.icon),
+                    selectedIcon: Icon(d.selected),
+                    label: Text(d.label),
+                  ),
+              ],
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(child: child),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      body: child,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: index,
+        onDestinationSelected: (i) => context.go(_destinations[i].path),
+        destinations: [
+          for (final d in _destinations)
+            NavigationDestination(
+              icon: Icon(d.icon),
+              selectedIcon: Icon(d.selected),
+              label: d.label,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A screen that still lives in the React client.
+///
+/// Named rather than hidden: during the migration it has to be obvious which half of the app you
+/// are looking at, and a blank page is not obvious. See todo/microteams/flutter-migration.md for
+/// the order these are coming across in.
+class _NotYetMigrated extends StatelessWidget {
+  const _NotYetMigrated({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(name)),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            '$name has not been migrated yet.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      ),
+    );
+  }
+}
