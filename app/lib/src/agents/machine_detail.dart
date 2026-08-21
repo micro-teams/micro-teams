@@ -1,6 +1,9 @@
 /// One machine: what it is called, whether it is connected, who is running on it, and the two
 /// things you can do to it from here — rename it, or stop this team using it.
 ///
+/// A frame on the display stack with a URL of its own (`/agents/machine/:id`), not a sheet: back
+/// pops it, a link opens it, and beside a list it is simply the right-hand pane.
+///
 /// The name is a label, not an identifier: the id is what everything else refers to, so renaming
 /// is free and is the only way a fleet of hosts stays readable (T-032).
 library;
@@ -11,24 +14,59 @@ import 'package:mt_api/mt_api.dart';
 
 import 'agents_controller.dart';
 
-Future<void> showMachineDetail(
-  BuildContext context, {
-  required Machine machine,
-}) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  showDragHandle: true,
-  builder: (context) => MachineDetail(machine: machine),
-);
+/// The machine's own screen: a frame on the stack, like the agent's.
+class MachineDetailScreen extends ConsumerWidget {
+  const MachineDetailScreen({
+    required this.machineId,
+    required this.onGone,
+    this.asPane = false,
+    super.key,
+  });
+
+  final String machineId;
+  final VoidCallback onGone;
+  final bool asPane;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fleet = ref.watch(agentsProvider).valueOrNull;
+    Machine? machine;
+    for (final candidate in fleet?.machines ?? const <Machine>[]) {
+      if (candidate.id == machineId) machine = candidate;
+    }
+
+    if (machine == null) {
+      return Scaffold(
+        appBar: AppBar(automaticallyImplyLeading: !asPane),
+        body: Center(
+          child: fleet == null
+              ? const CircularProgressIndicator()
+              : const Text('that machine is not in this team any more'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: !asPane,
+        title: Text(machine.name),
+      ),
+      body: MachineDetail(machine: machine, onGone: onGone),
+    );
+  }
+}
 
 class MachineDetail extends ConsumerWidget {
-  const MachineDetail({required this.machine, super.key});
+  const MachineDetail({required this.machine, required this.onGone, super.key});
 
   final Machine machine;
 
+  /// Called once this team no longer has the machine, so whoever is showing it can leave.
+  final VoidCallback onGone;
+
   /// The machine as the list currently has it, so a rename shows without closing the sheet.
   Machine _live(WidgetRef ref) {
-    final fleet = ref.watch(agentsProvider).value;
+    final fleet = ref.watch(agentsProvider).valueOrNull;
     for (final candidate in fleet?.machines ?? const <Machine>[]) {
       if (candidate.id == machine.id) return candidate;
     }
@@ -92,7 +130,7 @@ class MachineDetail extends ConsumerWidget {
     if (confirmed != true) return;
     try {
       await ref.read(agentsProvider.notifier).unbind(machine);
-      if (context.mounted) Navigator.pop(context);
+      onGone();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(
@@ -105,7 +143,7 @@ class MachineDetail extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final live = _live(ref);
-    final fleet = ref.watch(agentsProvider).value;
+    final fleet = ref.watch(agentsProvider).valueOrNull;
     final here = (fleet?.agents ?? const <Agent>[])
         .where((a) => a.machineId == live.id)
         .toList();

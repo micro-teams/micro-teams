@@ -47,6 +47,11 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Any avatar, anywhere, can ask for an agent's live screen — that is what made an avatar worth
+    // tapping in the old client. How this app gets there is the shell's business, so the shell
+    // says so once rather than every screen passing a callback down to every face it draws.
+    openSceneHandler = (context, {required String sid}) =>
+        context.go('/screen/$sid');
   }
 
   @override

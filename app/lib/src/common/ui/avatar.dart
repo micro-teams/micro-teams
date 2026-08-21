@@ -1,15 +1,28 @@
-/// The one avatar control, ported from the React `Avatar.tsx`.
+/// The one avatar control, ported from React's `Avatar.tsx` and `UserAvatar.tsx`.
 ///
-/// Rounded squares, WeChat style — not circles. When the caller knows an `avatarId` the real
-/// picture comes from cheese-auth through the same `/api/avatars/:id` proxy the old client used;
-/// when it does not, or the image fails, the fallback is a deterministic colour and an initial.
-/// The colour list and the `abs(seed) % length` rule are copied exactly, so the same person keeps
-/// the same colour across the two clients and across devices.
+/// Rounded squares, WeChat style — not circles. With an `avatarId` the real picture comes from
+/// cheese-auth; without one, or when the image fails, the fallback is a deterministic colour and an
+/// initial. The colour list and the `abs(seed) % length` rule are copied exactly, so the same
+/// person keeps the same colour across the two clients and across devices.
+///
+/// Everything else here is what made an avatar in the old client more than a picture. Every avatar
+/// registers its user id with the app-global presence registry, and what comes back decides:
+///
+///   * whether this is an agent at all — only agents are enumerated, so being in the answer is the
+///     answer;
+///   * whether it is working (busy / starting / compacting), which draws the pulsing ring;
+///   * `elapsed · tokens` under the face while it works, which is the one place a human can see
+///     what an agent is spending;
+///   * whether tapping it opens that agent's live screen.
+///
+/// An agent is ALWAYS tappable, even when there is nothing to open: a tap that explains itself
+/// ("offline", "no live screen") is better than a dead avatar, and no action should fail silently.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../presence_controller.dart';
 import '../../providers.dart';
 import 'theme.dart';
 
@@ -26,14 +39,18 @@ const List<Color> _palette = [
 
 Color colourFor(int seed) => _palette[seed.abs() % _palette.length];
 
-class UserAvatar extends ConsumerWidget {
+/// The ring and the meta pill are this violet in the React client, in both themes, and it is not
+/// the brand green on purpose: it means "this one is working", not "this is us".
+const Color workingViolet = Color(0xFF7C3AED);
+
+class UserAvatar extends ConsumerStatefulWidget {
   const UserAvatar({
     required this.userId,
     this.nickname,
     this.avatarId,
     this.size = Metrics.avatarInBubble,
-    this.isAgent = false,
-    this.onTap,
+    this.clickable = true,
+    this.showMeta = true,
     super.key,
   });
 
@@ -46,18 +63,183 @@ class UserAvatar extends ConsumerWidget {
 
   final double size;
 
-  /// Draws the small robot badge the React avatar had. Being an agent is worth saying even when
-  /// there is nothing to watch — otherwise a conversation gives no sign of who you are talking to.
-  final bool isAgent;
+  /// Whether tapping an agent opens its live screen. False inside a group tile, where the tap
+  /// belongs to the row.
+  final bool clickable;
 
-  /// What tapping does. Only agents ever have one: it opens their live screen.
-  final VoidCallback? onTap;
+  /// Whether `elapsed · tokens` is drawn under a working agent. False in a group tile, where there
+  /// is no room for it.
+  final bool showMeta;
+
+  @override
+  ConsumerState<UserAvatar> createState() => _UserAvatarState();
+}
+
+class _UserAvatarState extends ConsumerState<UserAvatar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat();
+
+  /// Held rather than read on demand, and taken eagerly in initState: `ref` is unusable once the
+  /// widget is disposed, and untrack has to happen exactly then — an avatar that scrolled away must
+  /// stop being asked about. A `late` field would be evaluated at that first use, which is the one
+  /// moment it cannot be.
+  late AgentPresence _registry;
+
+  @override
+  void initState() {
+    super.initState();
+    _registry = ref.read(agentPresenceProvider.notifier);
+    // After the frame, because tracking makes a provider change while this one is building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _registry.track(widget.userId);
+    });
+  }
+
+  @override
+  void didUpdateWidget(UserAvatar old) {
+    super.didUpdateWidget(old);
+    if (old.userId != widget.userId) {
+      _registry.untrack(old.userId);
+      _registry.track(widget.userId);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    _registry.untrack(widget.userId);
+    super.dispose();
+  }
+
+  void _open(BuildContext context, {required bool online, String? sid}) {
+    if (sid != null && sid.isNotEmpty && online) {
+      openScene(context, sid: sid);
+      return;
+    }
+    final name = widget.nickname?.isNotEmpty == true
+        ? widget.nickname!
+        : '#${widget.userId}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(online ? '「$name」的现场暂不可用' : '「$name」当前离线，无法查看现场')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final presence = ref.watch(agentPresenceProvider);
+    final agent = presence[widget.userId];
+    final isAgent = agent != null;
+    final working = isWorking(agent);
+    final meta = metaOf(agent);
+    final avatarId = widget.avatarId ?? agent?.avatarId;
+    final name = (widget.nickname ?? agent?.nickname ?? '${widget.userId}')
+        .trim();
+
+    final picture = _Picture(
+      userId: widget.userId,
+      label: name,
+      avatarId: avatarId,
+      size: widget.size,
+    );
+
+    Widget result = picture;
+
+    if (working) {
+      // The React ring is a circle at inset -18%: our avatars are rounded squares, whose corners
+      // reach further from the centre than a flat inset would clear, so the inset is proportional
+      // to the size at every size the app uses.
+      final inset = widget.size * 0.18;
+      result = SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              left: -inset,
+              top: -inset,
+              right: -inset,
+              bottom: -inset,
+              child: AnimatedBuilder(
+                animation: _pulse,
+                builder: (context, _) {
+                  // 0.35 → 1 opacity, 1 → 1.08 scale, and back. The same curve as the CSS
+                  // keyframes, which is what makes it read as the same app.
+                  final t = (_pulse.value * 2 <= 1)
+                      ? _pulse.value * 2
+                      : 2 - _pulse.value * 2;
+                  return Opacity(
+                    opacity: 0.35 + 0.65 * t,
+                    child: Transform.scale(
+                      scale: 1 + 0.08 * t,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: workingViolet, width: 2),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            picture,
+            if (widget.showMeta && meta.isNotEmpty)
+              Positioned(bottom: -15, child: _MetaPill(text: meta)),
+          ],
+        ),
+      );
+    }
+
+    if (!(widget.clickable && isAgent)) return result;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _open(context, online: agent.online, sid: agent.sid),
+        child: Tooltip(
+          message: presence.watchable(widget.userId)
+              ? '$name · 点击查看现场'
+              : agent.online
+              ? '$name · 现场暂不可用'
+              : '$name · 离线',
+          child: result,
+        ),
+      ),
+    );
+  }
+}
+
+/// What the whole app does when an avatar asks for a live screen.
+///
+/// Set once by the shell, because opening a screen is navigation and an avatar has no business
+/// knowing how this app navigates — but every avatar everywhere has to be able to ask.
+void Function(BuildContext context, {required String sid})? openSceneHandler;
+
+void openScene(BuildContext context, {required String sid}) =>
+    openSceneHandler?.call(context, sid: sid);
+
+/// The picture itself: the real image, or a colour and an initial.
+class _Picture extends ConsumerWidget {
+  const _Picture({
+    required this.userId,
+    required this.label,
+    required this.avatarId,
+    required this.size,
+  });
+
+  final int userId;
+  final String label;
+  final int? avatarId;
+  final double size;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // One radius at every size — the React `Avatar` had one `rounded-lg` and so does this.
     final radius = BorderRadius.circular(Metrics.avatarRadius);
-    final label = (nickname ?? '$userId').trim();
     final initial = label.isEmpty ? '#' : label.characters.first.toUpperCase();
 
     final fallback = Container(
@@ -76,57 +258,55 @@ class UserAvatar extends ConsumerWidget {
     );
 
     final id = avatarId;
-    final Widget picture;
-    if (id == null || id == 0) {
-      picture = fallback;
-    } else {
-      final url = '${ref.watch(endpointsProvider).auth}/avatars/$id';
-      picture = ClipRRect(
-        borderRadius: radius,
-        child: Image.network(
-          url,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          // The initial, not a spinner or a hole: an avatar that flickers grey on every rebuild is
-          // more distracting than one that is briefly the wrong shape.
-          loadingBuilder: (context, child, progress) =>
-              progress == null ? child : fallback,
-          errorBuilder: (context, error, stack) => fallback,
-        ),
-      );
-    }
+    if (id == null || id == 0) return fallback;
 
-    Widget result = picture;
-    if (isAgent) {
-      result = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          picture,
-          Positioned(
-            right: -3,
-            bottom: -3,
-            child: Container(
-              padding: const EdgeInsets.all(1.5),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.smart_toy, size: size * 0.3, color: brandGreen),
-            ),
-          ),
-        ],
-      );
-    }
-    if (onTap == null) return result;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(onTap: onTap, child: result),
+    return ClipRRect(
+      borderRadius: radius,
+      child: Image.network(
+        '${ref.watch(endpointsProvider).auth}/avatars/$id',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        // The initial, not a spinner or a hole: an avatar that flickers grey on every rebuild is
+        // more distracting than one that is briefly the wrong shape.
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : fallback,
+        errorBuilder: (context, error, stack) => fallback,
+      ),
     );
   }
 }
 
-/// A group's avatar: up to four members in a grid, the way WeChat draws one.
+/// `elapsed · tokens`, in a violet pill that crosses the ring.
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+    decoration: BoxDecoration(
+      color: workingViolet,
+      borderRadius: BorderRadius.circular(6),
+      // A crisp edge where the pill crosses the ring, the way the CSS box-shadow did it.
+      border: Border.all(
+        color: Theme.of(context).colorScheme.surface,
+        width: 2,
+      ),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(color: Colors.white, fontSize: 9, height: 1),
+    ),
+  );
+}
+
+/// A group's avatar: WeChat's grid, up to nine faces in one rounded tile.
+///
+/// The part that makes it read as WeChat is that a row which is not full is CENTRED rather than
+/// left-aligned: three members are one-over-two, five are two-over-three. Tiles are half the square
+/// up to four members and a third beyond. Copied row for row from the React `MemberGrid`.
 class MemberGridAvatar extends StatelessWidget {
   const MemberGridAvatar({
     required this.members,
@@ -138,9 +318,22 @@ class MemberGridAvatar extends StatelessWidget {
   final List<({int userId, String nickname, int? avatarId})> members;
   final double size;
 
+  /// How many tiles go on each row, for a group of [n].
+  static List<int> rowsFor(int n) => switch (n) {
+    <= 1 => const [1],
+    2 => const [2],
+    3 => const [1, 2],
+    4 => const [2, 2],
+    5 => const [2, 3],
+    6 => const [3, 3],
+    7 => const [1, 3, 3],
+    8 => const [2, 3, 3],
+    _ => const [3, 3, 3],
+  };
+
   @override
   Widget build(BuildContext context) {
-    final shown = members.take(4).toList();
+    final shown = members.take(9).toList();
     if (shown.length == 1) {
       return UserAvatar(
         userId: shown.first.userId,
@@ -149,21 +342,50 @@ class MemberGridAvatar extends StatelessWidget {
         size: size,
       );
     }
-    const gap = 2.0;
-    final cell = (size - gap) / 2;
-    return SizedBox(
+
+    // The React tile is `(100% - (perRow-1)px) / perRow` of the ROW's width, and the row sits
+    // inside a 1px padding — so the arithmetic is over `size - 2*gap`, not over `size`.
+    const gap = 1.0;
+    final perRow = shown.length <= 4 ? 2 : 3;
+    final tile = (size - 2 * gap - gap * (perRow - 1)) / perRow;
+    var i = 0;
+
+    return Container(
       width: size,
       height: size,
-      child: Wrap(
-        spacing: gap,
-        runSpacing: gap,
+      padding: const EdgeInsets.all(gap),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(Metrics.avatarRadius),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          for (final m in shown)
-            UserAvatar(
-              userId: m.userId,
-              nickname: m.nickname,
-              avatarId: m.avatarId,
-              size: cell,
+          for (final (r, count) in rowsFor(shown.length).indexed)
+            Padding(
+              // Between rows only: a gap under the last one is a row that does not fit.
+              padding: EdgeInsets.only(top: r == 0 ? 0 : gap),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var c = 0; c < count; c++) ...[
+                    if (c > 0) const SizedBox(width: gap),
+                    () {
+                      final member = shown[i++];
+                      return UserAvatar(
+                        userId: member.userId,
+                        nickname: member.nickname,
+                        avatarId: member.avatarId,
+                        size: tile,
+                        // The tap belongs to the row this tile is in, and there is no room under a
+                        // tile for the meta pill.
+                        clickable: false,
+                        showMeta: false,
+                      );
+                    }(),
+                  ],
+                ],
+              ),
             ),
         ],
       ),
