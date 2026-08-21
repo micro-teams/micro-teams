@@ -50,68 +50,93 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    // The React login was a bordered card with the heading and the field labels ABOVE their
+    // boxes, all lowercase. Material's floating label is a different control with a different
+    // rhythm, so the labels here are plain text — matching the old screen rather than the
+    // framework's default.
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _form,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'MicroTeams',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 28),
-                  TextFormField(
-                    controller: _username,
-                    autofillHints: const [AutofillHints.username],
-                    decoration: const InputDecoration(labelText: 'Username'),
-                    validator: (value) => (value ?? '').trim().isEmpty
-                        ? 'Enter your username'
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _password,
-                    obscureText: true,
-                    autofillHints: const [AutofillHints.password],
-                    decoration: const InputDecoration(labelText: 'Password'),
-                    onFieldSubmitted: (_) => _submit(),
-                    validator: (value) =>
-                        (value ?? '').isEmpty ? 'Enter your password' : null,
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLow,
+                border: Border.all(color: scheme.outlineVariant),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Form(
+                key: _form,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('login', style: text.headlineSmall),
+                    const SizedBox(height: 24),
+                    _Label('username'),
+                    TextFormField(
+                      controller: _username,
+                      autofillHints: const [AutofillHints.username],
+                      validator: (value) => (value ?? '').trim().isEmpty
+                          ? 'enter your username'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    _Label('password'),
+                    TextFormField(
+                      controller: _password,
+                      obscureText: true,
+                      autofillHints: const [AutofillHints.password],
+                      onFieldSubmitted: (_) => _submit(),
+                      validator: (value) =>
+                          (value ?? '').isEmpty ? 'enter your password' : null,
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_error!, style: TextStyle(color: scheme.error)),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      height: 44,
+                      child: FilledButton(
+                        onPressed: _busy ? null : _submit,
+                        child: _busy
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('sign in'),
                       ),
                     ),
                   ],
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: _busy ? null : _submit,
-                    child: _busy
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Sign in'),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A field's name, above its box. See the note in [_LoginScreenState.build].
+class _Label extends StatelessWidget {
+  const _Label(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
     );
   }
 }

@@ -13,7 +13,8 @@ gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
-frontend/dist/         the built SPA (static, domain-independent)
+frontend/dist/         the built web client (static, domain-independent) — a Flutter build
+                       since 0.1.16; the directory name is unchanged so upgrades in place still work
 applets/               cli.js + claude.js (mounted into the backend, swappable)
 connector/             the CLI distribution served to fresh machines: per-target dirs each
                        holding the `microteams` binary + a static `tmux` (Linux only — see below)
@@ -280,6 +281,13 @@ authorize everything, and losing the JWT secret logs everyone out.
 ## Notes
 
 - **Secrets** live only in `.env` (chmod 600), generated locally, never committed.
+- **The web client caches itself.** It registers a service worker, so a browser that has visited
+  once starts from disk and works offline. That is deliberate, and it has one consequence worth
+  knowing before someone reports it as a bug: after an upgrade a tab that is already open keeps the
+  old build until it is reloaded. If a browser ever gets stuck on a stale copy, open
+  `https://<your-domain>/unregister.html` — it unregisters the worker and deletes its caches, and
+  the next visit downloads the new build. That URL is the answer to give over the phone.
+
 - **Upgrading**: replace `backend/backend.jar`, `frontend/dist/`, or `applets/` with a newer build
   and `docker compose up -d` again (applets can even be swapped without touching the jar). Replace
   files **in place** — overwrite the jar, and for a directory like `frontend/dist/` clear its

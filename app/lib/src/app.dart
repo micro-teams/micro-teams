@@ -66,8 +66,11 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     return MaterialApp.router(
       title: 'MicroTeams',
       debugShowCheckedModeBanner: false,
-      theme: lightTheme(),
-      darkTheme: darkTheme(),
+      // One theme, and it is dark — see ui/theme.dart. Following the browser's preference is what
+      // made this client open white on a machine set to light, next to a React client that had
+      // exactly one `:root` and it was black.
+      theme: darkTheme(),
+      themeMode: ThemeMode.dark,
       routerConfig: _router,
     );
   }
@@ -90,20 +93,20 @@ GoRouter _buildRouter(WidgetRef ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/login', pageBuilder: _page(const LoginScreen())),
       ShellRoute(
         builder: (context, state, child) => _Shell(child: child),
         routes: [
           GoRoute(
             path: '/chats',
-            builder: (context, state) => const _ChatsPane(),
+            pageBuilder: _page(const _ChatsPane()),
             routes: [
               GoRoute(
                 path: ':threadId',
-                builder: (context, state) {
+                pageBuilder: (context, state) {
                   final id =
                       int.tryParse(state.pathParameters['threadId'] ?? '') ?? 0;
-                  return _ChatsPane(openThreadId: id);
+                  return NoTransitionPage(child: _ChatsPane(openThreadId: id));
                 },
               ),
             ],
@@ -113,32 +116,45 @@ GoRouter _buildRouter(WidgetRef ref) {
           // rather than after everything else is done.
           GoRoute(
             path: '/screen/:sessionId',
-            builder: (context, state) => TerminalScreen(
-              sessionId: state.pathParameters['sessionId'] ?? '',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: TerminalScreen(
+                sessionId: state.pathParameters['sessionId'] ?? '',
+              ),
             ),
           ),
           GoRoute(
             path: '/teams',
-            builder: (context, state) => const _NotYetMigrated(name: 'Teams'),
+            pageBuilder: _page(const _NotYetMigrated(name: 'docs')),
           ),
           GoRoute(
             path: '/agents',
-            builder: (context, state) => AgentsScreen(
-              // An agent with no session has no screen to watch, and the row does not offer one —
-              // so reaching here means there is a sid.
-              onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
-              onOpenChat: (threadId) => context.go('/chats/$threadId'),
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: AgentsScreen(
+                // An agent with no session has no screen to watch, and the row does not offer one —
+                // so reaching here means there is a sid.
+                onOpenScreen: (agent) => context.go('/screen/${agent.sid}'),
+                onOpenChat: (threadId) => context.go('/chats/$threadId'),
+              ),
             ),
           ),
           GoRoute(
             path: '/profile',
-            builder: (context, state) => const _NotYetMigrated(name: 'Profile'),
+            pageBuilder: _page(const _NotYetMigrated(name: 'me')),
           ),
         ],
       ),
     ],
   );
 }
+
+/// Every route is a [NoTransitionPage].
+///
+/// Material's default page transition slides and fades a screen in. That is right for a phone push
+/// — a screen arriving on top of another — and wrong for everything this app actually does, which
+/// is switch between tabs and between conversations. Those are not arrivals; there is no hierarchy
+/// to animate. The React client had no such effect and nobody missed it.
+GoRouterPageBuilder _page(Widget child) =>
+    (context, state) => NoTransitionPage(child: child);
 
 /// Rebuilds the router when the session changes, so the redirect above runs again.
 class _SessionListenable extends ChangeNotifier {
@@ -162,9 +178,14 @@ class _ChatsPane extends ConsumerWidget {
     final open = openThreadId;
 
     if (!wide) {
-      if (open != null) return ThreadScreen(threadId: open);
+      if (open != null) {
+        return ThreadScreen(
+          threadId: open,
+          onOpenScreen: (sid) => context.go('/screen/$sid'),
+        );
+      }
       return Scaffold(
-        appBar: AppBar(title: const Text('Chats')),
+        appBar: AppBar(title: const Text('chats')),
         body: ChatsScreen(
           onOpen: (thread) => context.go('/chats/${thread.id}'),
         ),
@@ -175,11 +196,17 @@ class _ChatsPane extends ConsumerWidget {
       body: Row(
         children: [
           SizedBox(
-            width: 340,
+            width: Metrics.listPaneWidth,
             child: Scaffold(
-              appBar: AppBar(title: const Text('Chats')),
+              // The list is not something you can go back FROM — it is always there. Material
+              // would add an arrow here just because /chats/1 can pop to /chats.
+              appBar: AppBar(
+                automaticallyImplyLeading: false,
+                title: const Text('chats'),
+              ),
               body: ChatsScreen(
                 selectedId: open,
+                dense: true,
                 onOpen: (thread) => context.go('/chats/${thread.id}'),
               ),
             ),
@@ -187,8 +214,14 @@ class _ChatsPane extends ConsumerWidget {
           const VerticalDivider(width: 1),
           Expanded(
             child: open == null
-                ? const Center(child: Text('Pick a conversation'))
-                : ThreadScreen(key: ValueKey(open), threadId: open),
+                ? const Center(child: Text('pick a conversation'))
+                // asPane: beside the list, not on top of it. No back button — see ThreadScreen.
+                : ThreadScreen(
+                    key: ValueKey(open),
+                    threadId: open,
+                    asPane: true,
+                    onOpenScreen: (sid) => context.go('/screen/$sid'),
+                  ),
           ),
         ],
       ),
@@ -207,25 +240,27 @@ class _Shell extends StatelessWidget {
       path: '/chats',
       icon: Icons.forum_outlined,
       selected: Icons.forum,
-      label: 'Chats',
+      label: 'chats',
     ),
     (
+      // "docs" rather than "teams": the tab has always opened the team's document tree, and the
+      // path is /teams because that is the URL the React client used and links to it exist.
       path: '/teams',
-      icon: Icons.groups_outlined,
-      selected: Icons.groups,
-      label: 'Teams',
+      icon: Icons.snippet_folder_outlined,
+      selected: Icons.snippet_folder,
+      label: 'docs',
     ),
     (
       path: '/agents',
       icon: Icons.smart_toy_outlined,
       selected: Icons.smart_toy,
-      label: 'Agents',
+      label: 'agents',
     ),
     (
       path: '/profile',
       icon: Icons.person_outline,
       selected: Icons.person,
-      label: 'Profile',
+      label: 'me',
     ),
   ];
 
@@ -250,18 +285,10 @@ class _Shell extends StatelessWidget {
       return Scaffold(
         body: Row(
           children: [
-            NavigationRail(
-              selectedIndex: index,
-              labelType: NavigationRailLabelType.all,
-              onDestinationSelected: (i) => context.go(_destinations[i].path),
-              destinations: [
-                for (final d in _destinations)
-                  NavigationRailDestination(
-                    icon: Icon(d.icon),
-                    selectedIcon: Icon(d.selected),
-                    label: Text(d.label),
-                  ),
-              ],
+            _Rail(
+              index: index,
+              destinations: _destinations,
+              onSelected: (i) => context.go(_destinations[i].path),
             ),
             const VerticalDivider(width: 1),
             Expanded(child: child),
@@ -283,6 +310,104 @@ class _Shell extends StatelessWidget {
               label: d.label,
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The desktop rail, drawn rather than configured.
+///
+/// Each destination is a 44px rounded SQUARE with the icon and the label both inside it, which is
+/// what the React rail was (`size-11 rounded-lg text-[10px]`). Material's NavigationRail puts its
+/// indicator around the icon alone and the label underneath, outside — a different shape that no
+/// amount of theming reaches, and the difference is visible at a glance.
+class _Rail extends StatelessWidget {
+  const _Rail({
+    required this.index,
+    required this.destinations,
+    required this.onSelected,
+  });
+
+  final int index;
+  final List<({String path, IconData icon, IconData selected, String label})>
+  destinations;
+  final void Function(int) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: Metrics.railWidth,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        border: Border(right: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < destinations.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _RailItem(
+                destination: destinations[i],
+                active: i == index,
+                onTap: () => onSelected(i),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RailItem extends StatelessWidget {
+  const _RailItem({
+    required this.destination,
+    required this.active,
+    required this.onTap,
+  });
+
+  final ({String path, IconData icon, IconData selected, String label})
+  destination;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final colour = active ? scheme.primary : scheme.onSurfaceVariant;
+    return Tooltip(
+      message: destination.label,
+      child: Material(
+        color: active ? scheme.surfaceContainerHighest : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: Metrics.railItemSize,
+            height: Metrics.railItemSize,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  active ? destination.selected : destination.icon,
+                  size: Metrics.railIconSize,
+                  color: colour,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  destination.label,
+                  style: TextStyle(
+                    fontSize: Metrics.railLabelSize,
+                    height: 1,
+                    color: colour,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -47,6 +47,9 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Generated from the repo-root MicroTeams-API.yml by tool/codegen.sh — the same arrangement as
-# frontend/src/api. A committed copy is one that can drift from the contract.
+# Generated from the repo-root MicroTeams-API.yml by tool/codegen.sh. A committed copy is one
+# that can drift from the contract.
 packages/mt_api/
+
+# The browser checks pull Playwright; the app itself has no npm dependencies.
+node_modules/

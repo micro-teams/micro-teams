@@ -1,13 +1,18 @@
 name: microteams
 description: The MicroTeams client — one codebase for web, Android, iOS, and the desktops.
 publish_to: none
-version: 0.1.15
+version: 0.1.16
 
 environment:
   sdk: ^3.9.0
 
 dependencies:
   flutter:
+    sdk: flutter
+
+  # For usePathUrlStrategy: real paths on the web instead of /#/chats. Part of the SDK, but it has
+  # to be declared to be imported. See lib/src/core/url_strategy.dart.
+  flutter_web_plugins:
     sdk: flutter
 
   # The contract, generated from the repo-root MicroTeams-API.yml by tool/codegen.sh — the same
@@ -34,6 +39,7 @@ dependencies:
   xterm: ^4.0.0
 
   shared_preferences: ^2.3.3
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
