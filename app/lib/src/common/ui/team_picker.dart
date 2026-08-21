@@ -23,7 +23,7 @@ class TeamPickerAction extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final teams = ref.watch(teamsProvider).value ?? const [];
+    final teams = ref.watch(teamsProvider).valueOrNull ?? const [];
     final current = ref.watch(currentTeamProvider);
     final scheme = Theme.of(context).colorScheme;
 

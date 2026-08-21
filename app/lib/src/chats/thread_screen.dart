@@ -112,13 +112,15 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   @override
   Widget build(BuildContext context) {
     final thread = ref.watch(threadProvider(widget.threadId));
-    final me = ref.watch(sessionProvider).value?.user.id;
+    final me = ref.watch(sessionProvider).valueOrNull?.user.id;
     final infoValue = ref.watch(threadInfoProvider(widget.threadId));
-    final info = infoValue.value ?? const ThreadInfo();
+    final info = infoValue.valueOrNull ?? const ThreadInfo();
     // Who in this conversation is an agent, and is anything watchable. Empty until the roster
     // arrives, which is exactly right: nobody is an agent until we know who is here.
     final presence =
-        ref.watch(presenceProvider(presenceKey(info.members.keys))).value ??
+        ref
+            .watch(presenceProvider(presenceKey(info.members.keys)))
+            .valueOrNull ??
         const Presence({});
 
     return Scaffold(

@@ -81,7 +81,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // refusal looks exactly like a machine that has gone quiet.
       url: () => endpoints.screenSocket(
         widget.sessionId,
-        ref.read(sessionProvider).value?.accessToken,
+        ref.read(sessionProvider).valueOrNull?.accessToken,
       ),
       // The terminal takes text; the wire carries bytes. Decoding here rather than in the
       // link keeps the link free of any opinion about what the bytes mean.

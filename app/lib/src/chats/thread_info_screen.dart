@@ -146,8 +146,8 @@ class ThreadInfoScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final value = ref.watch(threadInfoProvider(threadId));
-    final me = ref.watch(sessionProvider).value?.user.id;
-    final info = value.value ?? const ThreadInfo();
+    final me = ref.watch(sessionProvider).valueOrNull?.user.id;
+    final info = value.valueOrNull ?? const ThreadInfo();
     final canManage = info.canManage(me);
 
     return Scaffold(
