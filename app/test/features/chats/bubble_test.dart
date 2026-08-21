@@ -8,8 +8,6 @@
 // It also pins the two colours. They are shared with the React client on purpose (see
 // ui/theme.dart), and "the green went slightly off" is not something anyone notices in review.
 
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
