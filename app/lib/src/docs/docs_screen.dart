@@ -93,15 +93,19 @@ class _TreePane extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tree = ref.watch(docsTreeProvider);
     final team = ref.watch(currentTeamProvider);
+    // The picker hides itself when there is nothing to pick between, but `bottom:` reserves its
+    // height regardless — which leaves a 48px band of empty header. Deciding here is the only
+    // place that can see both.
+    final canSwitchTeams =
+        (ref.watch(teamsProvider).value ?? const []).length > 1;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: const Text('docs'),
-        // The picker sits under the title rather than in the actions: it is a bar of its own, and
-        // it hides itself when there is only one team to pick from.
-        bottom: const TeamPickerBar(),
+        // The picker sits under the title rather than in the actions: it is a bar of its own.
+        bottom: canSwitchTeams ? const TeamPickerBar() : null,
         actions: [
           IconButton(
             tooltip: 'new document',
