@@ -78,10 +78,15 @@ ThemeData darkTheme() {
   final text = base.textTheme.apply(fontFamily: monoFamily);
 
   return base.copyWith(
-    // One press effect, not two. Material draws a fast expanding splash AND a slow-fading
-    // highlight underneath it; on a dark theme the highlight lags visibly behind the ripple and
-    // reads as a second, sluggish animation. The splash is the one that tracks the finger.
-    splashFactory: InkRipple.splashFactory,
+    // The Play Store press effect, which is Android 12's: a soft, edgeless glow that fades out,
+    // NOT a circle with a boundary expanding from the touch point. That is InkSparkle — Flutter's
+    // port of the platform's own ripple shader — and it is the whole reason a stock Material app
+    // on Android 12+ feels different from one on Android 11.
+    //
+    // The highlight underneath is off as well. Material draws a fast splash AND a slow-fading
+    // highlight; on a dark theme the highlight lags visibly behind and reads as a second, sluggish
+    // animation on top of the first.
+    splashFactory: InkSparkle.splashFactory,
     highlightColor: Colors.transparent,
     hoverColor: _hover,
     scaffoldBackgroundColor: _page,
