@@ -39,6 +39,10 @@ class _Fake implements HttpClientAdapter {
 
     final body = switch (options.uri.path) {
       '/mt/team' => '{"teams":[{"id":1,"name":"One"}],$page}',
+      // The tree itself: a root with one file in it, which is what the tree pane draws rows from.
+      '/mt/team/1/document' when query['recursive'] == 'true' =>
+        '{"path":"","isFolder":true,"children":['
+            '{"path":"notes.md","isFolder":false}]}',
       '/mt/team/1/document' when query['history'] == 'true' =>
         '{"path":"notes.md","isFolder":false,"history":['
             '{"sha":"abcdef1234567890","message":"agent3 wrote it down",'
@@ -148,10 +152,18 @@ void main() {
     expect(colourOf('+++ b/notes.md'), isNot(colourOf('+new')));
   });
 
-  testWidgets('renaming a file follows it to its new path', (tester) async {
-    // You renamed a file you were reading, so you should still be reading it. And in the wide
-    // layout there is nowhere to go "back" to, so the pane would otherwise sit on a path that no
-    // longer exists.
+  testWidgets('renaming a file in the tree follows it to its new path', (
+    tester,
+  ) async {
+    // Renaming lives in the TREE — you rename a file you can see in it — and it happens in place:
+    // the row becomes a field and a tick. You renamed a file you were reading, so you should still
+    // be reading it afterwards.
+    // A wide window, so the tree and the open document are both on screen: renaming happens in the
+    // tree, and what it has to do afterwards is keep the reader on the file they were reading.
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
     final backend = _Fake();
     String? movedTo;
     await tester.pumpWidget(
@@ -181,15 +193,16 @@ void main() {
     );
     await settle(tester);
 
-    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.tap(find.byIcon(Icons.more_horiz).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('rename or move'));
+    await tester.tap(find.text('rename'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'notes/renamed.md');
-    await tester.tap(find.widgetWithText(TextButton, 'move'));
+
+    await tester.enterText(find.byType(TextField).first, 'renamed.md');
+    await tester.tap(find.byIcon(Icons.check));
     await settle(tester);
 
     expect(backend.wrote, contains('PATCH /mt/team/1/document'));
-    expect(movedTo, 'notes/renamed.md');
+    expect(movedTo, 'renamed.md');
   });
 }
