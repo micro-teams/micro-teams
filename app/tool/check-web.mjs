@@ -259,6 +259,50 @@ const after = await reset.evaluate(async () => ({
 check("the escape hatch unregisters the worker", after.workers === 0, JSON.stringify(after));
 check("the escape hatch clears the caches", after.caches === 0, JSON.stringify(after));
 
+// The thing a person actually does, in a real browser, against the real release build: open a
+// conversation, type, press send.
+//
+// This exists because "the send button does nothing" survived every unit test we had — and it did
+// so for a reason no unit test could have caught. The outbox minted its idempotency key with
+// `Random.nextInt(1 << 32)`, and dart2js compiles `<<` to JavaScript's 32-bit shift, where shifting
+// by 32 shifts by 0: the bound was 4294967296 in a test and 0 in a browser, nextInt(0) threw, and
+// the throw came out of the enqueue that the button calls. Every test passed; the button did
+// nothing. Only something that drives the compiled app in a browser can see that class of bug.
+const chat = await context.newPage();
+const chatErrors = [];
+chat.on("pageerror", (e) => chatErrors.push(`pageerror: ${e.message ?? e}`));
+chat.on("console", (m) => {
+  if (m.type() === "error") chatErrors.push(`console: ${m.text()}`);
+});
+const sent = [];
+chat.on("request", (r) => {
+  if (r.method() === "POST" && r.url().includes("/mt/chat/")) sent.push(r.url());
+});
+
+await chat.goto(BASE + "/chats/5", { waitUntil: "load" });
+await chat
+  .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+    timeout: 60000,
+  })
+  .catch(() => {});
+
+// Flutter draws into a canvas: there is nothing to select or click by text, so this clicks where a
+// person would. In a wide window the conversation is the right-hand pane and its composer sits at
+// the bottom of it: the field across the middle, the send button just inside the right edge.
+const size = chat.viewportSize() ?? { width: 1280, height: 720 };
+await chat.mouse.click(size.width * 0.6, size.height - 32);
+await chat.keyboard.type("probe message");
+await chat.waitForTimeout(300);
+await chat.mouse.click(size.width - 100, size.height - 32);
+await chat.waitForTimeout(1500);
+
+check(
+  "a message typed into a conversation is posted",
+  sent.length > 0,
+  sent.join(" ") || chatErrors.slice(0, 2).join(" | "),
+);
+await chat.close();
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();
