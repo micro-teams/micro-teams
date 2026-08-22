@@ -34,6 +34,7 @@ import 'teams/teams_screen.dart';
 import 'terminal/scene.dart';
 import 'common/lines_screen.dart';
 import 'common/ui/avatar.dart';
+import 'common/ui/destination_button.dart';
 import 'common/ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
@@ -52,11 +53,9 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Any avatar, anywhere, can ask for an agent's live screen — that is what made an avatar worth
-    // tapping in the old client. It opens the overlay rather than navigating: watching an agent is
-    // a glance, not a place, and going there would replace the list you were reading and the
-    // message you were half-way through typing.
-    openSceneHandler = (context, {required String sid, String? nickname}) =>
-        ref.read(sceneProvider.notifier).open(sid, nickname: nickname);
+    // tapping in the old client. It PUSHES a non-opaque frame: the app underneath keeps rendering,
+    // and back pops the terminal rather than the screen beneath it.
+    openSceneHandler = openScene;
   }
 
   @override
@@ -93,10 +92,6 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
       theme: darkTheme(),
       themeMode: ThemeMode.dark,
       routerConfig: _router,
-      // Above everything the router draws, and mounted once. It is empty until an avatar asks for
-      // a screen, at which point what you were doing stays exactly where it was, underneath.
-      builder: (context, child) =>
-          Stack(children: [if (child != null) child, const SceneOverlay()]),
     );
   }
 }
@@ -287,21 +282,14 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
         ),
       ),
-      // A link to a live screen still works: it raises the overlay and leaves you on the chats
-      // list underneath, which is where you would have been. The screen itself is not a place —
-      // see terminal/scene.dart — so this route has no page of its own.
+      // A live screen is a frame over whatever you were doing, not a place you go: see
+      // terminal/scene.dart. Non-opaque, so the app below keeps rendering, and back pops it.
       GoRoute(
         path: '/screen/:sessionId',
-        redirect: (context, state) {
-          final sid = state.pathParameters['sessionId'] ?? '';
-          if (sid.isEmpty) return '/chats';
-          // After this frame: opening it during a redirect would change a provider while the
-          // router is mid-navigation.
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => ref.read(sceneProvider.notifier).open(sid),
-          );
-          return '/chats';
-        },
+        pageBuilder: (context, state) => sceneFrame(
+          sessionId: state.pathParameters['sessionId'] ?? '',
+          nickname: state.uri.queryParameters['name'],
+        ),
       ),
     ],
   );
@@ -341,7 +329,7 @@ class _ChatsPane extends ConsumerWidget {
       if (open != null) {
         return ThreadScreen(
           threadId: open,
-          onOpenScreen: (sid) => ref.read(sceneProvider.notifier).open(sid),
+          onOpenScreen: (sid) => openScene(context, sid: sid),
           onOpenInfo: () => context.go('/chats/$open/info'),
         );
       }
@@ -368,7 +356,6 @@ class _ChatsPane extends ConsumerWidget {
               ),
               body: ChatsScreen(
                 selectedId: open,
-                dense: true,
                 onOpen: (thread) => context.go('/chats/${thread.id}'),
               ),
             ),
@@ -382,8 +369,7 @@ class _ChatsPane extends ConsumerWidget {
                     key: ValueKey(open),
                     threadId: open,
                     asPane: true,
-                    onOpenScreen: (sid) =>
-                        ref.read(sceneProvider.notifier).open(sid),
+                    onOpenScreen: (sid) => openScene(context, sid: sid),
                     onOpenInfo: () => context.go('/chats/$open/info'),
                   ),
           ),
@@ -429,7 +415,6 @@ class _AgentsPane extends ConsumerWidget {
     final list = AgentsScreen(
       selectedAgentId: openAgentId,
       selectedMachineId: openMachineId,
-      dense: wide,
       onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
       onOpenMachine: (machine) => context.go('/agents/machine/${machine.id}'),
       onManageTeams: () => context.go('/teams'),
@@ -447,6 +432,7 @@ class _AgentsPane extends ConsumerWidget {
         return MachineDetailScreen(
           machineId: openMachineId!,
           onGone: () => context.go('/agents'),
+          onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
         );
       }
       return list;
@@ -471,6 +457,7 @@ class _AgentsPane extends ConsumerWidget {
                 machineId: id,
                 asPane: true,
                 onGone: () => context.go('/agents'),
+                onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
               ),
               _ => const Center(child: Text('pick an agent or a machine')),
             },
@@ -516,7 +503,6 @@ class _TeamsPane extends StatelessWidget {
 
     final list = TeamsScreen(
       selectedId: open,
-      dense: wide,
       onOpen: (team) => context.go('/teams/${team.id}'),
     );
 
@@ -568,31 +554,31 @@ class _Shell extends StatelessWidget {
   /// not deference to the old client: a rail item per route is how navigation grows until nothing
   /// on it is where anyone remembers.
   static const _branches = [
-    (
+    Destination(
       path: '/chats',
       icon: Icons.forum_outlined,
       selected: Icons.forum,
       label: 'chats',
     ),
-    (
+    Destination(
       path: '/docs',
       icon: Icons.snippet_folder_outlined,
       selected: Icons.snippet_folder,
       label: 'docs',
     ),
-    (
+    Destination(
       path: '/teams',
       icon: Icons.groups_outlined,
       selected: Icons.groups,
       label: 'teams',
     ),
-    (
+    Destination(
       path: '/agents',
       icon: Icons.smart_toy_outlined,
       selected: Icons.smart_toy,
       label: 'agents',
     ),
-    (
+    Destination(
       path: '/profile',
       icon: Icons.person_outline,
       selected: Icons.person,
@@ -644,19 +630,35 @@ class _Shell extends StatelessWidget {
 
     return Scaffold(
       body: shell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabItems
-            .indexOf(index == _teams ? _docs : index)
-            .clamp(0, _tabItems.length - 1),
-        onDestinationSelected: (i) => _go(_tabItems[i]),
-        destinations: [
-          for (final i in _tabItems)
-            NavigationDestination(
-              icon: Icon(_branches[i].icon),
-              selectedIcon: Icon(_branches[i].selected),
-              label: _branches[i].label,
+      // The same buttons as the rail, in a row instead of a column. A shell decides where they go;
+      // what they look like is not its business — see ui/destination_button.dart.
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          border: Border(
+            top: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
             ),
-        ],
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final i in _tabItems)
+                  DestinationButton(
+                    key: ValueKey('destination-${_branches[i].label}'),
+                    destination: _branches[i],
+                    active: i == (index == _teams ? _docs : index),
+                    onTap: () => _go(i),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -680,13 +682,7 @@ class _Rail extends ConsumerWidget {
   final int current;
 
   /// The destinations, each carrying the branch it goes to.
-  final List<
-    ({
-      int branch,
-      ({String path, IconData icon, IconData selected, String label}) d,
-    })
-  >
-  items;
+  final List<({int branch, Destination d})> items;
   final void Function(int branch) onSelected;
   final VoidCallback onProfile;
 
@@ -707,95 +703,45 @@ class _Rail extends ConsumerWidget {
           for (final item in items)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: _RailItem(
-                // Keyed by destination so a test can point at the rail's own copy of a word: the
-                // list pane's header says "chats" too.
-                key: ValueKey('rail-${item.d.label}'),
+              child: DestinationButton(
+                // Keyed by destination so a test can point at this copy of a word: the list pane's
+                // header says "chats" too.
+                key: ValueKey('destination-${item.d.label}'),
                 destination: item.d,
                 active: item.branch == current,
                 onTap: () => onSelected(item.branch),
               ),
             ),
           const Spacer(),
-          // Pinned at the bottom, with your own picture in it — the React rail's shape, and the
-          // only place on a wide window that says who you are signed in as.
+          // Your own face, pinned at the bottom — the React rail's shape, and the only thing on a
+          // wide window that says who you are signed in as.
+          //
+          // It opens the profile, rather than a menu offering "profile" and "log out": logging out
+          // is already inside the profile, and a two-item menu in front of a page that contains one
+          // of the two items is a door in front of a door.
           if (user != null)
-            PopupMenuButton<int>(
-              tooltip: user.nickname,
-              position: PopupMenuPosition.over,
-              onSelected: (choice) async {
-                if (choice == 0) {
-                  onProfile();
-                  return;
-                }
-                await ref.read(sessionProvider.notifier).logout();
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 0, child: Text('profile')),
-                PopupMenuItem(value: 1, child: Text('log out')),
-              ],
-              child: UserAvatar(
-                userId: user.id,
-                nickname: user.nickname,
-                avatarId: user.avatarId,
-                size: 36,
+            Tooltip(
+              message: user.nickname,
+              child: InkWell(
+                key: const ValueKey('destination-me'),
+                borderRadius: BorderRadius.circular(Metrics.avatarRadius),
+                onTap: onProfile,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: UserAvatar(
+                    userId: user.id,
+                    nickname: user.nickname,
+                    avatarId: user.avatarId,
+                    size: 36,
+                    // It is you: there is no live screen behind your own face, and a tap here means
+                    // "my profile".
+                    clickable: false,
+                    showMeta: false,
+                  ),
+                ),
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _RailItem extends StatelessWidget {
-  const _RailItem({
-    required this.destination,
-    required this.active,
-    required this.onTap,
-    super.key,
-  });
-
-  final ({String path, IconData icon, IconData selected, String label})
-  destination;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final colour = active ? scheme.primary : scheme.onSurfaceVariant;
-    return Tooltip(
-      message: destination.label,
-      child: Material(
-        color: active ? scheme.surfaceContainerHighest : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: SizedBox(
-            width: Metrics.railItemSize,
-            height: Metrics.railItemSize,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  active ? destination.selected : destination.icon,
-                  size: Metrics.railIconSize,
-                  color: colour,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  destination.label,
-                  style: TextStyle(
-                    fontSize: Metrics.railLabelSize,
-                    height: 1,
-                    color: colour,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

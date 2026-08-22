@@ -23,26 +23,35 @@ import '../common/ui/theme.dart';
 import 'chats_controller.dart';
 
 class ChatsScreen extends ConsumerWidget {
-  const ChatsScreen({
-    required this.onOpen,
-    this.selectedId,
-    this.dense = false,
-    super.key,
-  });
+  const ChatsScreen({required this.onOpen, this.selectedId, super.key});
 
   final void Function(ChatSummary thread) onOpen;
   final int? selectedId;
-
-  /// Beside an open conversation the list is the narrower, 14px variant the React desktop shell
-  /// used; on a phone it is the roomier 16px one. Same widget, two measured densities — not two
-  /// widgets, which is how the two shells drifted apart last time.
-  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final chats = ref.watch(chatsProvider);
     final me = ref.watch(sessionProvider).valueOrNull?.user.id;
 
+    // How roomy the rows are is measured from the width this list is GIVEN, not passed down by
+    // whichever shell built it — and measured rather than read off the window, because beside an
+    // open conversation this is a 320px column inside a 1400px window. Filling a phone it takes the
+    // roomier variant; in that column it takes the 14px one the React desktop used. A shell that
+    // had to say which would be a shell that knows what a chat row looks like.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dense = constraints.maxWidth < Metrics.readingColumn;
+        return _body(ref, chats, me, dense);
+      },
+    );
+  }
+
+  Widget _body(
+    WidgetRef ref,
+    AsyncValue<List<ChatSummary>> chats,
+    int? me,
+    bool dense,
+  ) {
     return chats.when(
       // Paint what we already know while the first answer is on its way. A spinner where a list
       // was a moment ago reads as loss, not as loading.

@@ -54,6 +54,28 @@ Three rules, each enforced by `test/architecture_test.dart` rather than by good 
 
 ## Things worth knowing before changing something
 
+- **One stack, two arrangements.** The stack is the URL hierarchy: `/chats` → `/chats/5` →
+  `/chats/5/info` is three frames, and back pops exactly one of them. A narrow window draws the top
+  frame; a wide one draws the nearest list frame beside the top detail frame. That is the whole
+  rule, and all four sections (chats, docs, agents, teams) obey it — a section that arranged itself
+  differently would be a section people have to learn separately. It is the same idea as Android's
+  list-detail Scene: the layout is a function of the stack and the width, not a second navigation
+  state. The chrome (bottom bar, rail) is OUTSIDE the stack and never disappears.
+- **Every branch stays alive.** `StatefulShellRoute.indexedStack` keeps each visited destination
+  mounted with its own location, so switching tabs and coming back returns to the conversation, the
+  file and the half-typed message you left. The React client did this by hand (`MobileTabs`,
+  `sectionKeepAlive`) because react-router unmounts on every navigation.
+- **An avatar is not a picture.** Every `UserAvatar` registers its user id with one app-global
+  presence registry, which batches them into a single request — thirty faces in a list is one
+  question, not thirty. Being in the answer IS being an agent; a working agent gets the pulsing ring
+  and its `elapsed · tokens`; tapping one raises the live-screen overlay, and an agent with nothing
+  to show says why rather than doing nothing.
+- **Watching a live screen is an overlay, not a route.** `terminal/scene.dart` is mounted once above
+  the router. Going *to* a terminal would replace the list you were reading and the message you were
+  typing; the test that matters asserts the draft below it survives.
+- **Mermaid: a narrow subset, drawn — everything else, source.** `docs/mermaid.dart` reads
+  flowcharts (TD/TB/LR, three node shapes, labelled edges) and refuses everything else *as a whole
+  block*. Half a diagram is worse than none, because a reader cannot tell which half went missing.
 - **The message list is reversed.** Newest at the bottom, index 0 at the end. That is why there is
   no scroll anchor, no pin-to-bottom rule and no position restore: "load older" is just "reached
   the end of the list". Scroll-up pagination is the one feature in this app that has been reported

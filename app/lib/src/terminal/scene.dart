@@ -1,92 +1,114 @@
-/// The one live screen, floating over whatever you were doing.
+/// The one live screen, floating over whatever you were doing — as a frame on the display stack.
 ///
-/// Watching an agent work is not a place you go: it is a thing you glance at. The React client had
-/// this right — one overlay, mounted once above the whole app, opened by tapping any agent avatar
-/// anywhere, closed with Escape, and underneath it everything is exactly where you left it. Making
-/// it a route instead (which this client did first) means the list you were reading, the message
-/// you were typing and the file you had open are all replaced by a terminal, and coming back is
-/// your problem.
+/// Watching an agent work is not a place you go: it is a thing you glance at, and underneath it
+/// everything must stay exactly where you left it. That is why it is drawn over the app rather than
+/// instead of it.
 ///
-/// It is still deep-linkable: `/screen/:sessionId` opens the app with the overlay already up, so a
-/// link somebody pastes still works.
+/// But "over the app" is not the same as "outside the stack", and the first version got that wrong:
+/// it was mounted above the router, so the back gesture never reached it — back went to the screen
+/// under the overlay while the overlay stayed up. A frame you cannot pop is not on the stack at all.
+///
+/// So it is a route (`/screen/:sessionId`) pushed as a NON-OPAQUE page: the app below keeps
+/// rendering, the terminal is painted over it, and back pops exactly this frame — the same rule as
+/// everywhere else in the app. It is deep-linkable for free, which is what the CLI's links need.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'screen_link.dart';
 import 'terminal_screen.dart';
 
-/// Whose screen is being watched.
-class Scene {
-  const Scene({required this.sessionId, this.nickname});
+/// Open the live screen for a session, over whatever is on screen now.
+///
+/// A push rather than a go: the frame goes ON TOP of where you are, and popping it puts you back
+/// there rather than at some remembered location.
+void openScene(BuildContext context, {required String sid, String? nickname}) {
+  final name = nickname == null || nickname.isEmpty
+      ? ''
+      : '?name=${Uri.encodeQueryComponent(nickname)}';
+  context.push('/screen/${Uri.encodeComponent(sid)}$name');
+}
+
+/// The page a router builds for that route. Non-opaque, so the app underneath is still drawn.
+Page<void> sceneFrame({
+  required String sessionId,
+  String? nickname,
+  ScreenSocket Function(Uri url)? connect,
+}) => _ScenePage(sessionId: sessionId, nickname: nickname, connect: connect);
+
+class _ScenePage extends Page<void> {
+  const _ScenePage({
+    required this.sessionId,
+    required this.nickname,
+    required this.connect,
+  });
 
   final String sessionId;
   final String? nickname;
-}
-
-class SceneController extends Notifier<Scene?> {
-  @override
-  Scene? build() => null;
-
-  void open(String sessionId, {String? nickname}) =>
-      state = Scene(sessionId: sessionId, nickname: nickname);
-
-  void close() => state = null;
-}
-
-final sceneProvider = NotifierProvider<SceneController, Scene?>(
-  SceneController.new,
-);
-
-/// Mounted once, above the router. Draws nothing at all until there is something to watch.
-class SceneOverlay extends ConsumerWidget {
-  const SceneOverlay({this.connect, super.key});
-
-  /// Replaces the socket the terminal dials. Only a test passes this, for the same reason
-  /// [TerminalScreen] has the seam: an overlay that can only be exercised against a live machine is
-  /// an overlay whose behaviour is never tested.
   final ScreenSocket Function(Uri url)? connect;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scene = ref.watch(sceneProvider);
-    if (scene == null) return const SizedBox.shrink();
+  Route<void> createRoute(BuildContext context) => PageRouteBuilder<void>(
+    settings: this,
+    // What makes it an overlay rather than a screen: the route below keeps painting.
+    opaque: false,
+    barrierColor: Colors.black54,
+    barrierDismissible: true,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    pageBuilder: (context, _, _) =>
+        SceneFrame(sessionId: sessionId, nickname: nickname, connect: connect),
+  );
+}
 
-    void close() => ref.read(sceneProvider.notifier).close();
+/// The terminal itself, with the ways out a frame is expected to have.
+class SceneFrame extends StatelessWidget {
+  const SceneFrame({
+    required this.sessionId,
+    this.nickname,
+    this.connect,
+    super.key,
+  });
 
-    return Positioned.fill(
-      child: Focus(
-        autofocus: true,
-        // Escape, because that is what the React overlay answered to and because a terminal owns
-        // every other key on the keyboard — anything else would be a shortcut stolen from the
-        // program you are watching.
-        onKeyEvent: (node, event) {
-          if (event is KeyDownEvent &&
-              event.logicalKey == LogicalKeyboardKey.escape) {
-            close();
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: PopScope(
-          // The phone's way out: the back gesture closes the overlay rather than leaving the screen
-          // underneath it.
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) close();
-          },
-          child: Material(
-            color: Colors.black,
-            child: TerminalScreen(
-              key: ValueKey(scene.sessionId),
-              sessionId: scene.sessionId,
-              title: scene.nickname,
-              connect: connect,
-              onClose: close,
-            ),
-          ),
+  final String sessionId;
+  final String? nickname;
+  final ScreenSocket Function(Uri url)? connect;
+
+  @override
+  Widget build(BuildContext context) {
+    void close() {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        // Opened by a pasted link, with nothing underneath. Somewhere is better than a frame that
+        // cannot be closed.
+        GoRouter.of(context).go('/chats');
+      }
+    }
+
+    return Focus(
+      autofocus: true,
+      // Escape, because that is what the React overlay answered to, and because a terminal owns
+      // every other key on the keyboard — anything else would be a shortcut stolen from the program
+      // you are watching.
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.escape) {
+          close();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Material(
+        color: Colors.black,
+        child: TerminalScreen(
+          key: ValueKey(sessionId),
+          sessionId: sessionId,
+          title: nickname,
+          connect: connect,
+          onClose: close,
         ),
       ),
     );
