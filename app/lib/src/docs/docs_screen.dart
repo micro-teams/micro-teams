@@ -54,6 +54,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
       return _DocPane(
         path: open,
         onBack: () => widget.onOpen(null),
+        onMoved: widget.onOpen,
         showBack: true,
       );
     }
@@ -78,7 +79,12 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
           Expanded(
             child: open == null
                 ? const Center(child: Text('pick a document'))
-                : _DocPane(key: ValueKey(open), path: open, showBack: false),
+                : _DocPane(
+                    key: ValueKey(open),
+                    path: open,
+                    onMoved: widget.onOpen,
+                    showBack: false,
+                  ),
           ),
         ],
       ),
@@ -224,12 +230,17 @@ class _DocPane extends ConsumerStatefulWidget {
     required this.path,
     required this.showBack,
     this.onBack,
+    this.onMoved,
     super.key,
   });
 
   final String path;
   final bool showBack;
   final VoidCallback? onBack;
+
+  /// The file is now at this path. The caller decides what that means — on both layouts it means
+  /// opening it there.
+  final void Function(String path)? onMoved;
 
   @override
   ConsumerState<_DocPane> createState() => _DocPaneState();
@@ -364,7 +375,10 @@ class _DocPaneState extends ConsumerState<_DocPane> {
     );
     if (to == null || to.isEmpty || to == widget.path) return;
     await ref.read(docsAdminProvider).move(widget.path, to);
-    if (mounted) widget.onBack?.call();
+    // Follow it. You renamed a file you were reading, so you should still be reading it — and in
+    // the wide layout there is nowhere to go "back" to, so the pane would otherwise sit on a path
+    // that no longer exists.
+    if (mounted) widget.onMoved?.call(to);
   }
 
   Future<void> _delete(BuildContext context) async {

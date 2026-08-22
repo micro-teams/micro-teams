@@ -16,10 +16,12 @@ import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/docs/doc_history.dart';
+import 'package:microteams/src/docs/docs_screen.dart';
 import 'package:microteams/src/providers.dart';
 
 class _Fake implements HttpClientAdapter {
   final List<String> asked = [];
+  final List<String> wrote = [];
 
   @override
   Future<ResponseBody> fetch(
@@ -28,6 +30,9 @@ class _Fake implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     asked.add(options.uri.toString());
+    if (options.method != 'GET') {
+      wrote.add('${options.method} ${options.uri.path}');
+    }
     const page =
         '"page":{"page_start":1,"page_size":100,"has_prev":false,"has_more":false}';
     final query = options.uri.queryParameters;
@@ -141,5 +146,50 @@ void main() {
     expect(colourOf('+new'), isNot(colourOf('-old')));
     expect(colourOf('+++ b/notes.md'), colourOf('--- a/notes.md'));
     expect(colourOf('+++ b/notes.md'), isNot(colourOf('+new')));
+  });
+
+  testWidgets('renaming a file follows it to its new path', (tester) async {
+    // You renamed a file you were reading, so you should still be reading it. And in the wide
+    // layout there is nowhere to go "back" to, so the pane would otherwise sit on a path that no
+    // longer exists.
+    final backend = _Fake();
+    String? movedTo;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionProvider.overrideWith(_SignedIn.new),
+          endpointsProvider.overrideWithValue(
+            const Endpoints(origin: 'http://backend.test'),
+          ),
+          mtClientProvider.overrideWithValue(
+            MtClient(
+              baseUrl: 'http://backend.test/mt',
+              reauthorize: () async => null,
+              adapter: backend,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: darkTheme(),
+          home: DocsScreen(
+            openPath: 'notes.md',
+            onManageTeams: () {},
+            onOpen: (path) => movedTo = path,
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('rename or move'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'notes/renamed.md');
+    await tester.tap(find.widgetWithText(TextButton, 'move'));
+    await settle(tester);
+
+    expect(backend.wrote, contains('PATCH /mt/team/1/document'));
+    expect(movedTo, 'notes/renamed.md');
   });
 }
