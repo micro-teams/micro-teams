@@ -13,20 +13,12 @@ import '../common/ui/theme.dart';
 import 'team_admin_controller.dart';
 
 class TeamsScreen extends ConsumerWidget {
-  const TeamsScreen({
-    required this.onOpen,
-    this.selectedId,
-    this.dense = false,
-    super.key,
-  });
+  const TeamsScreen({required this.onOpen, this.selectedId, super.key});
 
   final void Function(Team team) onOpen;
 
   /// Which team the detail beside this list is about — whatever the URL says is open.
   final int? selectedId;
-
-  /// Beside a detail pane the list is the narrower variant, as the chat and agent lists are.
-  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,10 +40,11 @@ class TeamsScreen extends ConsumerWidget {
         ],
       ),
       body: Center(
+        // Measured, not told: filling a phone this list keeps to a reading column; in the narrow
+        // pane beside a team it uses every pixel it has. The shell says where the list goes, not
+        // what a list looks like at that width.
         child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: dense ? double.infinity : Metrics.readingColumn,
-          ),
+          constraints: const BoxConstraints(maxWidth: Metrics.readingColumn),
           child: teams.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => _Failed(

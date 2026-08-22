@@ -119,7 +119,7 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
         ? widget.nickname!
         : '#${widget.userId}';
     if (sid != null && sid.isNotEmpty && online) {
-      openScene(context, sid: sid, nickname: name);
+      askForScene(context, sid: sid, nickname: name);
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -221,8 +221,11 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
 void Function(BuildContext context, {required String sid, String? nickname})?
 openSceneHandler;
 
-void openScene(BuildContext context, {required String sid, String? nickname}) =>
-    openSceneHandler?.call(context, sid: sid, nickname: nickname);
+void askForScene(
+  BuildContext context, {
+  required String sid,
+  String? nickname,
+}) => openSceneHandler?.call(context, sid: sid, nickname: nickname);
 
 /// The picture itself: the real image, or a colour and an initial.
 class _Picture extends ConsumerWidget {

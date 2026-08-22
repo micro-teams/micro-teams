@@ -23,7 +23,6 @@ class AgentsScreen extends ConsumerWidget {
     required this.onManageTeams,
     this.selectedAgentId,
     this.selectedMachineId,
-    this.dense = false,
     super.key,
   });
 
@@ -38,9 +37,6 @@ class AgentsScreen extends ConsumerWidget {
   /// What the list draws as selected, which is whatever the URL says is open.
   final int? selectedAgentId;
   final String? selectedMachineId;
-
-  /// Beside a detail pane the list is the narrower variant, as the chat list is.
-  final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
