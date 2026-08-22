@@ -12,6 +12,7 @@
 /// backwards for the thing whose job is to survive one route being down.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mt_api/mt_api.dart' as contract;
 import 'package:multipath/multipath.dart';
@@ -76,3 +77,28 @@ String socketUrlOver(Line? line, Endpoints endpoints, String path) {
   final origin = line == null || line.url.isEmpty ? endpoints.origin : line.url;
   return endpoints.socketUrl(origin, path);
 }
+
+/// Measure every line, by asking each one the one question that costs nothing to answer.
+///
+/// `/mt/probe` is MultiPath's own endpoint and must never be cached — a cached probe reports the
+/// latency of the disk. What counts as an answer is decided here rather than by the library,
+/// deliberately: a 500 is a perfectly prompt reply, and a probe that recorded it as a success would
+/// leave a broken line ranked first.
+Future<void> probeLines(LineManager manager, Dio dio) => manager.probe((
+  line,
+) async {
+  final url = line.url.isEmpty ? '/mt/probe' : '${line.url}/mt/probe';
+  final response = await dio.getUri<Object?>(
+    Uri.parse(url),
+    options: Options(
+      // Straight out, past every interceptor this app hangs on its own client: a probe measures
+      // the line, not what the app does with a line.
+      extra: const {'mt.probe': true},
+      validateStatus: (_) => true,
+    ),
+  );
+  final status = response.statusCode ?? 0;
+  if (status < 200 || status >= 300) {
+    throw StateError('${line.id} answered $status');
+  }
+});

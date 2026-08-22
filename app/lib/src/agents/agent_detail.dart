@@ -258,44 +258,112 @@ class AgentDetail extends ConsumerWidget {
   }
 }
 
-/// The cache keepalive switch.
+/// The cache keepalive switch, and how often it fires.
 ///
 /// What it buys is not liveness — it is the driver's prefix cache not expiring, so an idle agent's
-/// context never has to be rebuilt. A rebuild costs a large slice of the account's rolling quota,
-/// which is why this is a switch a human gets to see rather than something always on.
-class _Keepalive extends ConsumerWidget {
+/// context never has to be rebuilt. A rebuild costs a large one-off slice of the account's rolling
+/// quota, which is why this is a switch a human gets to see rather than something always on.
+///
+/// The interval is shown in minutes because the cache's TTL is about an hour, and stored in
+/// seconds because that is what the server takes. It is deliberately unbounded: the operator knows
+/// the TTL, and the TTL is not ours — it can move under us when the driver changes.
+class _Keepalive extends ConsumerStatefulWidget {
   const _Keepalive({required this.agent});
 
   final Agent agent;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final keepalive = agent.keepalive;
-    final enabled = keepalive?.enabled ?? false;
-    final minutes = ((keepalive?.intervalSeconds ?? 0) / 60).round();
+  ConsumerState<_Keepalive> createState() => _KeepaliveState();
+}
 
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      value: enabled,
-      title: const Text('Keep its cache warm'),
-      subtitle: Text(
-        enabled && minutes > 0
-            ? 'Every $minutes min, while its program is alive'
-            : 'Stops an idle agent\'s context from having to be rebuilt',
-      ),
-      onChanged: (value) async {
-        try {
-          await ref
-              .read(agentsProvider.notifier)
-              .setKeepalive(agent, enabled: value);
-        } catch (e) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('$e')));
-          }
-        }
-      },
+class _KeepaliveState extends ConsumerState<_Keepalive> {
+  /// What the React control defaulted to, and for the same reason: comfortably inside an hour.
+  static const int _defaultMinutes = 40;
+
+  late final TextEditingController _minutes = TextEditingController(
+    text: '${_currentMinutes ?? _defaultMinutes}',
+  );
+
+  int? get _currentMinutes {
+    final seconds = widget.agent.keepalive?.intervalSeconds;
+    return seconds == null || seconds <= 0 ? null : (seconds / 60).round();
+  }
+
+  bool get _enabled => widget.agent.keepalive?.enabled ?? false;
+
+  @override
+  void dispose() {
+    _minutes.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply({required bool enabled}) async {
+    final minutes = int.tryParse(_minutes.text.trim());
+    try {
+      await ref
+          .read(agentsProvider.notifier)
+          .setKeepalive(
+            widget.agent,
+            enabled: enabled,
+            intervalSeconds: enabled && minutes != null && minutes > 0
+                ? minutes * 60
+                : null,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final minutes = int.tryParse(_minutes.text.trim());
+    final valid = minutes != null && minutes > 0;
+    final changed = _enabled && valid && minutes != _currentMinutes;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _enabled,
+          title: const Text('Keep its cache warm'),
+          subtitle: Text(
+            _enabled && _currentMinutes != null
+                ? 'Every $_currentMinutes min, while its program is alive'
+                : "Stops an idle agent's context from having to be rebuilt",
+          ),
+          onChanged: (on) => _apply(enabled: on),
+        ),
+        if (_enabled)
+          Row(
+            children: [
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _minutes,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'every',
+                    suffixText: 'min',
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Only offered once it would do something: a button that is always there and usually
+              // a no-op teaches people to press it and see.
+              if (changed)
+                FilledButton.tonal(
+                  onPressed: () => _apply(enabled: true),
+                  child: const Text('apply'),
+                ),
+            ],
+          ),
+      ],
     );
   }
 }

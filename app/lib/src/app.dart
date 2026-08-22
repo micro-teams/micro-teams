@@ -32,6 +32,7 @@ import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
 import 'terminal/scene.dart';
+import 'common/lines_screen.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/theme.dart';
 
@@ -269,6 +270,9 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
         ],
       ),
+      // Nothing links here. It is for the moment somebody asks "is it the network?" — see
+      // common/lines_screen.dart.
+      GoRoute(path: '/__lines', pageBuilder: _page(const LinesScreen())),
       // Where `microteams link auto-connect` sends a human. Outside the branches: it is not a
       // section, it is a thing you were sent to do once, and it leaves for /agents when done.
       GoRoute(

@@ -36,6 +36,9 @@ class _FakeBackend implements HttpClientAdapter {
 
   final List<String> posted = [];
 
+  /// What each write carried, in the same order as [posted].
+  final List<Object?> bodies = [];
+
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
@@ -43,7 +46,10 @@ class _FakeBackend implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final path = options.uri.path;
-    if (options.method != 'GET') posted.add('${options.method} $path');
+    if (options.method != 'GET') {
+      posted.add('${options.method} $path');
+      bodies.add(options.data);
+    }
 
     // Keyed on method AND path: listChats and createThread are both /mt/chat, and answering a
     // POST with a list of chats is a fake that lies in exactly the shape the code under test
@@ -58,7 +64,8 @@ class _FakeBackend implements HttpClientAdapter {
             '"page":{"page_start":1,"page_size":100,"has_prev":false,"has_more":false}}',
       'GET /mt/agent' =>
         '{"agents":[{"userId":42,"nickname":"agent3","online":true,'
-            '"machineId":"m1","sid":"s1","driver":"claude"}],'
+            '"machineId":"m1","sid":"s1","driver":"claude",'
+            '"keepalive":{"enabled":true,"intervalSeconds":2400}}],'
             '"page":{"page_start":1,"page_size":100,"has_prev":false,"has_more":false}}',
       'GET /mt/chat' =>
         '{"chats":$chats,'
@@ -266,5 +273,44 @@ void main() {
       isEmpty,
       reason: 'cancel has to mean cancel',
     );
+  });
+
+  group('cache keepalive', () {
+    testWidgets('says how often it fires, in the unit a human thinks in', (
+      tester,
+    ) async {
+      // Stored in seconds because that is what the server takes; shown in minutes because the
+      // cache TTL it exists to stay inside is about an hour.
+      await tester.pumpWidget(agentDetail(_FakeBackend()));
+      await settle(tester);
+
+      expect(find.textContaining('Every 40 min'), findsOneWidget);
+      expect(find.textContaining('2400'), findsNothing);
+    });
+
+    testWidgets('a changed interval is applied in seconds', (tester) async {
+      final backend = _FakeBackend();
+      await tester.pumpWidget(agentDetail(backend));
+      await settle(tester);
+
+      await tester.enterText(find.widgetWithText(TextField, 'every'), '30');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('apply'));
+      await settle(tester);
+
+      expect(backend.posted, contains('PUT /mt/agent/42/keepalive'));
+      final sent =
+          jsonDecode(backend.bodies.last as String) as Map<String, Object?>;
+      expect(sent['enabled'], isTrue);
+      expect(sent['intervalSeconds'], 1800);
+    });
+
+    testWidgets('nothing to apply until something changed', (tester) async {
+      // A button that is always there and usually a no-op teaches people to press it and see.
+      await tester.pumpWidget(agentDetail(_FakeBackend()));
+      await settle(tester);
+
+      expect(find.text('apply'), findsNothing);
+    });
   });
 }
