@@ -32,6 +32,7 @@ import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
 import 'terminal/scene.dart';
+import 'common/lines.dart';
 import 'common/lines_screen.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/destination_button.dart';
@@ -56,6 +57,19 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     // tapping in the old client. It PUSHES a non-opaque frame: the app underneath keeps rendering,
     // and back pops the terminal rather than the screen beneath it.
     openSceneHandler = openScene;
+    // Ask the deployment which lines exist, and route over them from here on.
+    //
+    // This call was missing entirely: `adoptRegistry` existed and nothing called it, so every
+    // client ran on the inline same-origin line no matter what /mt/lines said — multi-line routing
+    // was never once in effect. Nothing looked wrong either, because one working line is
+    // indistinguishable from a routing layer with nothing to route between. The panel at /__lines
+    // showing a single line is what finally said so.
+    unawaited(
+      adoptRegistry(
+        ref.read(linesProvider),
+        ref.read(mtClientProvider).transport,
+      ),
+    );
   }
 
   @override

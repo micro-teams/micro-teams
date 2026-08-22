@@ -77,6 +77,12 @@ async function reconcileWithServer() {
   }
 }
 
+/**
+ * The files whose NAMES never change, and which therefore may not be answered from cache without
+ * asking. Flutter emits `main.dart.js` under that name for every build it will ever produce.
+ */
+const CODE = ["/", "/index.html", "/app.html", "/flutter_bootstrap.js", "/main.dart.js"];
+
 /** What the app cannot start without. Everything else arrives through the fetch handler. */
 const SHELL = [
   // "/" and "/index.html" are the multipath launcher (tool/launcher.mjs), not Flutter's document:
@@ -170,9 +176,37 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // The application's own code is asked for FIRST and cached second.
+  //
+  // Cache-first is right for the engine — megabytes of wasm whose name changes with the build that
+  // produced it — and wrong for these three, whose names never change. Cache-first on them means a
+  // deploy is picked up on the visit AFTER the one where it landed: the page you are looking at was
+  // assembled from the old cache while the new worker was still installing. "One reload behind" is
+  // indistinguishable from "not deployed" to whoever is looking.
+  //
+  // The cost of asking first is a conditional request: the server answers 304 when nothing changed
+  // (see the no-cache rule in deploy/nginx.conf), so nothing is re-downloaded. And a failure falls
+  // back to the cache, which is what keeps this offline-first rather than online-only.
+  const isCode = CODE.includes(url.pathname);
+
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
+
+      if (isCode) {
+        try {
+          const fresh = await fetch(request);
+          if (fresh.ok && fresh.type === "basic") {
+            cache.put(request, fresh.clone());
+          }
+          return fresh;
+        } catch (_) {
+          const hit = await cache.match(request);
+          if (hit) return hit;
+          return Response.error();
+        }
+      }
+
       const hit = await cache.match(request);
       if (hit) return hit;
       const response = await fetch(request);
