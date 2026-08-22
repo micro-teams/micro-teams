@@ -174,32 +174,26 @@ void main() {
     expect(_bubbleColourOf(tester, 'theirs'), otherBubble);
   });
 
-  testWidgets('holding a message copies it', (tester) async {
-    // There is no live text selection over the list — see the measurement in thread_screen.dart.
-    // This gesture is the whole of how a message gets copied, so it is worth an assertion.
-    String? copied;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          copied = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
-
+  testWidgets('message text can be selected, and the system copies it', (
+    tester,
+  ) async {
+    // Copying used to be "long-press the bubble, get the whole thing". That cannot copy half a
+    // message, or one line out of an agent's reply, which is most of what people copy here. So the
+    // list is a selection area and the system's own copy does the copying — see the measurement in
+    // thread_screen.dart for what that costs.
     await _pumpThread(tester);
-    await tester.longPress(find.text('mine'));
-    await tester.pump();
 
-    expect(copied, 'mine');
-    expect(find.text('copied'), findsOneWidget);
+    expect(
+      find.byType(SelectionArea),
+      findsOneWidget,
+      reason: 'one area around the list, so a drag runs across bubbles',
+    );
+
+    final selectable = find.descendant(
+      of: find.byType(SelectionArea),
+      matching: find.text('mine'),
+    );
+    expect(selectable, findsOneWidget);
   });
 
   testWidgets('a conversation beside the list is not something you entered', (
