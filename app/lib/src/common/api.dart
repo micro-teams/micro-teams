@@ -68,10 +68,6 @@ class MtClient {
   }
 
   final Dio _dio;
-
-  /// The one client, for the two things that are not API calls: probing a line, and anything else
-  /// that has to reach a line rather than an endpoint.
-  Dio get dio => _dio;
   final Reauthorize _reauthorize;
 
   /// Which lines exist, what is known about each, and therefore which one a request leaves by.

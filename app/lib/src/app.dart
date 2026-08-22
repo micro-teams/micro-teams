@@ -62,6 +62,9 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Put the handler back, because it is global: leaving it pointing at this app's ref means the
+    // next avatar to ask — in a test, after a hot restart — reaches into a container that is gone.
+    openSceneHandler = null;
     _router.dispose();
     super.dispose();
   }
@@ -483,13 +486,13 @@ class _AgentsPane extends ConsumerWidget {
 /// The third of these, and deliberately the same shape as the other two: narrow shows the top
 /// frame, wide shows the list beside it, back pops one frame. A section that arranged itself
 /// differently would be a section people have to learn separately.
-class _DocsPane extends ConsumerWidget {
+class _DocsPane extends StatelessWidget {
   const _DocsPane({this.openPath});
 
   final String? openPath;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => DocsScreen(
+  Widget build(BuildContext context) => DocsScreen(
     openPath: openPath,
     onManageTeams: () => context.go('/teams'),
     onOpen: (path) => context.go(
@@ -501,13 +504,13 @@ class _DocsPane extends ConsumerWidget {
 }
 
 /// Teams, in whichever arrangement the window calls for.
-class _TeamsPane extends ConsumerWidget {
+class _TeamsPane extends StatelessWidget {
   const _TeamsPane({this.openTeamId});
 
   final int? openTeamId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final wide = isWide(context);
     final open = openTeamId;
 

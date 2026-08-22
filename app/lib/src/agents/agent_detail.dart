@@ -292,6 +292,16 @@ class _KeepaliveState extends ConsumerState<_Keepalive> {
   bool get _enabled => widget.agent.keepalive?.enabled ?? false;
 
   @override
+  void didUpdateWidget(_Keepalive old) {
+    super.didUpdateWidget(old);
+    // A different agent is a different number. Keeping the field as it was would offer one agent's
+    // interval as if it were another's, which is the kind of wrong that gets applied by accident.
+    if (old.agent.userId != widget.agent.userId) {
+      _minutes.text = '${_currentMinutes ?? _defaultMinutes}';
+    }
+  }
+
+  @override
   void dispose() {
     _minutes.dispose();
     super.dispose();

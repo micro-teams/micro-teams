@@ -52,8 +52,8 @@ final authApiProvider = Provider<AuthApi>((ref) {
 /// ordinary traffic already updates.
 final probeLinesProvider = Provider<Future<void> Function()>((ref) {
   final manager = ref.watch(linesProvider);
-  final client = ref.watch(mtClientProvider);
-  return () => probeLines(manager, client.dio);
+  final origin = ref.watch(endpointsProvider).origin;
+  return () => probeLines(manager, origin: origin);
 });
 
 final mtClientProvider = Provider<MtClient>((ref) {
