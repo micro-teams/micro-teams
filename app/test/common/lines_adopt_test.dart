@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/lines.dart';
-import 'package:flutter/material.dart';
 import 'package:microteams/src/app.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/providers.dart';
