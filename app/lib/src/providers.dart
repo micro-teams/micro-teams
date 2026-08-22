@@ -47,6 +47,15 @@ final authApiProvider = Provider<AuthApi>((ref) {
   return AuthApi(baseUrl: ref.watch(endpointsProvider).auth);
 });
 
+/// Measures every line, on request. Nothing calls this on a timer: probing costs real requests, and
+/// a client that measured constantly would be spending a phone's battery to keep a table warm that
+/// ordinary traffic already updates.
+final probeLinesProvider = Provider<Future<void> Function()>((ref) {
+  final manager = ref.watch(linesProvider);
+  final origin = ref.watch(endpointsProvider).origin;
+  return () => probeLines(manager, origin: origin);
+});
+
 final mtClientProvider = Provider<MtClient>((ref) {
   final client = MtClient(
     baseUrl: ref.watch(endpointsProvider).mt,

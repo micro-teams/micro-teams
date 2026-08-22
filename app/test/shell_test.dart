@@ -39,8 +39,23 @@ class _Fake implements HttpClientAdapter {
 
     const page =
         '"page":{"page_start":1,"page_size":100,"has_prev":false,"has_more":false}';
+    // Any team's roster, because which team is open is the test's business, not the fake's.
+    if (path.endsWith('/members')) {
+      return ResponseBody.fromString(
+        '[{"userId":1,"nickname":"Me","role":"OWNER"}]',
+        200,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+
     final body = switch (path) {
-      '/mt/team' => '{"teams":[{"id":1,"name":"Team One"}],$page}',
+      '/mt/team' =>
+        '{"teams":[{"id":1,"name":"Team One"},{"id":2,"name":"Team Two"}],$page}',
+      '/mt/team/1/document' =>
+        '{"path":"","isFolder":true,"children":['
+            '{"path":"notes.md","isFolder":false}]}',
       '/mt/chat' =>
         '{"chats":[{"id":7,"title":"standup",'
             '"updatedAt":"2026-08-20T00:00:00Z",'
@@ -225,5 +240,60 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
+  testWidgets('opening a document is a frame, so back closes the document', (
+    tester,
+  ) async {
+    // It used to be a query parameter on the docs route, which is not a frame at all: back left
+    // the section entirely instead of closing the file you were reading.
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_app(_Fake()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('docs'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('notes.md'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('notes.md'),
+      findsOneWidget,
+      reason:
+          'back closed the file and left the tree, rather than leaving docs',
+    );
+    expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
+  testWidgets('a team opens beside its list on a wide window', (tester) async {
+    // The same shape as chats and agents. A section that arranged itself differently would be a
+    // section people have to learn separately.
+    _wide(tester);
+    await tester.pumpWidget(_app(_Fake()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_rail('docs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Team One'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('manage teams'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Team Two'));
+    await tester.pumpAndSettle();
+
+    // Both at once: the list did not go anywhere.
+    expect(find.text('Team One'), findsWidgets);
+    expect(
+      find.text('delete this team'),
+      findsOneWidget,
+      reason: 'the team detail is beside the list, not instead of it',
+    );
   });
 }

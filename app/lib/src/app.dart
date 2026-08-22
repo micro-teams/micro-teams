@@ -22,6 +22,7 @@ import 'auth/profile_screen.dart';
 import 'auth/register_screen.dart';
 import 'agents/agent_detail.dart';
 import 'agents/agents_screen.dart';
+import 'agents/connect_screen.dart';
 import 'agents/machine_detail.dart';
 import 'chats/chats_screen.dart';
 import 'chats/new_chat_dialog.dart';
@@ -30,7 +31,8 @@ import 'chats/thread_screen.dart';
 import 'docs/docs_screen.dart';
 import 'teams/team_screen.dart';
 import 'teams/teams_screen.dart';
-import 'terminal/terminal_screen.dart';
+import 'terminal/scene.dart';
+import 'common/lines_screen.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/theme.dart';
 
@@ -50,15 +52,19 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Any avatar, anywhere, can ask for an agent's live screen — that is what made an avatar worth
-    // tapping in the old client. How this app gets there is the shell's business, so the shell
-    // says so once rather than every screen passing a callback down to every face it draws.
-    openSceneHandler = (context, {required String sid}) =>
-        context.go('/screen/$sid');
+    // tapping in the old client. It opens the overlay rather than navigating: watching an agent is
+    // a glance, not a place, and going there would replace the list you were reading and the
+    // message you were half-way through typing.
+    openSceneHandler = (context, {required String sid, String? nickname}) =>
+        ref.read(sceneProvider.notifier).open(sid, nickname: nickname);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Put the handler back, because it is global: leaving it pointing at this app's ref means the
+    // next avatar to ask — in a test, after a hot restart — reaches into a container that is gone.
+    openSceneHandler = null;
     _router.dispose();
     super.dispose();
   }
@@ -87,6 +93,10 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
       theme: darkTheme(),
       themeMode: ThemeMode.dark,
       routerConfig: _router,
+      // Above everything the router draws, and mounted once. It is empty until an avatar asks for
+      // a screen, at which point what you were doing stays exactly where it was, underneath.
+      builder: (context, child) =>
+          Stack(children: [if (child != null) child, const SceneOverlay()]),
     );
   }
 }
@@ -184,17 +194,20 @@ GoRouter _buildRouter(WidgetRef ref) {
             routes: [
               GoRoute(
                 path: '/docs',
-                pageBuilder: (context, state) => NoTransitionPage(
-                  child: DocsScreen(
-                    onManageTeams: () => context.go('/teams'),
-                    openPath: state.uri.queryParameters['path'],
-                    onOpen: (path) => context.go(
-                      path == null
-                          ? '/docs'
-                          : '/docs?path=${Uri.encodeQueryComponent(path)}',
+                pageBuilder: _page(const _DocsPane()),
+                routes: [
+                  // A file is a frame of its own, so back closes the file rather than leaving
+                  // docs altogether. Its path is a query parameter because a document's path
+                  // contains slashes — it is a path inside a repository, not inside a URL.
+                  GoRoute(
+                    path: 'file',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: _DocsPane(
+                        openPath: state.uri.queryParameters['path'],
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
@@ -202,11 +215,7 @@ GoRouter _buildRouter(WidgetRef ref) {
             routes: [
               GoRoute(
                 path: '/teams',
-                pageBuilder: (context, state) => NoTransitionPage(
-                  child: TeamsScreen(
-                    onOpen: (team) => context.go('/teams/${team.id}'),
-                  ),
-                ),
+                pageBuilder: _page(const _TeamsPane()),
                 routes: [
                   GoRoute(
                     path: ':teamId',
@@ -215,10 +224,7 @@ GoRouter _buildRouter(WidgetRef ref) {
                           int.tryParse(state.pathParameters['teamId'] ?? '') ??
                           0;
                       return NoTransitionPage(
-                        child: TeamScreen(
-                          teamId: id,
-                          onGone: () => context.go('/teams'),
-                        ),
+                        child: _TeamsPane(openTeamId: id),
                       );
                     },
                   ),
@@ -267,19 +273,35 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
         ],
       ),
-      // Outside the shell, because watching a live screen covers the app rather than sitting in a
-      // tab. It is still a route for now; the React client floated it over everything as an
-      // overlay, which is the next thing to fix here.
-      // Reachable by URL before the agents screen that will normally lead here has been
-      // migrated, so the hardest part of this rewrite can be judged on a real device now
-      // rather than after everything else is done.
+      // Nothing links here. It is for the moment somebody asks "is it the network?" — see
+      // common/lines_screen.dart.
+      GoRoute(path: '/__lines', pageBuilder: _page(const LinesScreen())),
+      // Where `microteams link auto-connect` sends a human. Outside the branches: it is not a
+      // section, it is a thing you were sent to do once, and it leaves for /agents when done.
       GoRoute(
-        path: '/screen/:sessionId',
+        path: '/connect',
         pageBuilder: (context, state) => NoTransitionPage(
-          child: TerminalScreen(
-            sessionId: state.pathParameters['sessionId'] ?? '',
+          child: ConnectScreen(
+            code: state.uri.queryParameters['code'] ?? '',
+            onDone: () => context.go('/agents'),
           ),
         ),
+      ),
+      // A link to a live screen still works: it raises the overlay and leaves you on the chats
+      // list underneath, which is where you would have been. The screen itself is not a place —
+      // see terminal/scene.dart — so this route has no page of its own.
+      GoRoute(
+        path: '/screen/:sessionId',
+        redirect: (context, state) {
+          final sid = state.pathParameters['sessionId'] ?? '';
+          if (sid.isEmpty) return '/chats';
+          // After this frame: opening it during a redirect would change a provider while the
+          // router is mid-navigation.
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => ref.read(sceneProvider.notifier).open(sid),
+          );
+          return '/chats';
+        },
       ),
     ],
   );
@@ -319,7 +341,7 @@ class _ChatsPane extends ConsumerWidget {
       if (open != null) {
         return ThreadScreen(
           threadId: open,
-          onOpenScreen: (sid) => context.go('/screen/$sid'),
+          onOpenScreen: (sid) => ref.read(sceneProvider.notifier).open(sid),
           onOpenInfo: () => context.go('/chats/$open/info'),
         );
       }
@@ -360,7 +382,8 @@ class _ChatsPane extends ConsumerWidget {
                     key: ValueKey(open),
                     threadId: open,
                     asPane: true,
-                    onOpenScreen: (sid) => context.go('/screen/$sid'),
+                    onOpenScreen: (sid) =>
+                        ref.read(sceneProvider.notifier).open(sid),
                     onOpenInfo: () => context.go('/chats/$open/info'),
                   ),
           ),
@@ -451,6 +474,71 @@ class _AgentsPane extends ConsumerWidget {
               ),
               _ => const Center(child: Text('pick an agent or a machine')),
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Documents, in whichever arrangement the window calls for.
+///
+/// The third of these, and deliberately the same shape as the other two: narrow shows the top
+/// frame, wide shows the list beside it, back pops one frame. A section that arranged itself
+/// differently would be a section people have to learn separately.
+class _DocsPane extends StatelessWidget {
+  const _DocsPane({this.openPath});
+
+  final String? openPath;
+
+  @override
+  Widget build(BuildContext context) => DocsScreen(
+    openPath: openPath,
+    onManageTeams: () => context.go('/teams'),
+    onOpen: (path) => context.go(
+      path == null
+          ? '/docs'
+          : '/docs/file?path=${Uri.encodeQueryComponent(path)}',
+    ),
+  );
+}
+
+/// Teams, in whichever arrangement the window calls for.
+class _TeamsPane extends StatelessWidget {
+  const _TeamsPane({this.openTeamId});
+
+  final int? openTeamId;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = isWide(context);
+    final open = openTeamId;
+
+    final list = TeamsScreen(
+      selectedId: open,
+      dense: wide,
+      onOpen: (team) => context.go('/teams/${team.id}'),
+    );
+
+    if (!wide) {
+      if (open == null) return list;
+      return TeamScreen(teamId: open, onGone: () => context.go('/teams'));
+    }
+
+    return Scaffold(
+      body: Row(
+        children: [
+          SizedBox(width: Metrics.listPaneWidth, child: list),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: open == null
+                ? const Center(child: Text('pick a team'))
+                : TeamScreen(
+                    key: ValueKey(open),
+                    teamId: open,
+                    asPane: true,
+                    onGone: () => context.go('/teams'),
+                  ),
           ),
         ],
       ),

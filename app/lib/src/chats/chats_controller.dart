@@ -25,9 +25,16 @@ const int chatsPageSize = 50;
 /// cache simply never hit, which is invisible because a cache that misses looks like one that is
 /// not needed. `cached_reads_test.dart` is what found it and what keeps it honest.
 const String chatsPath =
-    '/mt/chat?page_size=$chatsPageSize&queryIsMemberAgent=false';
+    '/mt/chat?page_size=$chatsPageSize&queryIsMemberAgent=true';
 
 class ChatsController extends AsyncNotifier<List<ChatSummary>> {
+  /// Asked WITH `queryIsMemberAgent`, which is what stops a one-agent group flashing.
+  ///
+  /// The list draws such a group with that agent's face rather than a grid of everyone. Deciding
+  /// that from the app-global presence registry — which is what the React client did — means the
+  /// answer arrives after the row does, so the row is painted as a grid and corrected a moment
+  /// later (T-040). Asking the server costs one flag and the answer comes WITH the list, so there
+  /// is no moment in which the row is drawn from an unknown.
   @override
   Future<List<ChatSummary>> build() async {
     final session = ref.watch(sessionProvider).value;
@@ -53,7 +60,7 @@ class ChatsController extends AsyncNotifier<List<ChatSummary>> {
     final response = await ref
         .read(mtClientProvider)
         .chat
-        .listChats(pageSize: chatsPageSize);
+        .listChats(pageSize: chatsPageSize, queryIsMemberAgent: true);
     // Nothing is stored here: the client records every successful GET under the request's own key,
     // so what this call just fetched is already what [cached] finds next time.
     return response.data?.chats ?? const <ChatSummary>[];

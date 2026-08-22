@@ -20,6 +20,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import 'mermaid.dart';
+import 'mermaid_view.dart';
+
 class MarkdownView extends StatelessWidget {
   const MarkdownView({required this.source, this.onOpenLink, super.key});
 
@@ -133,12 +136,35 @@ class _Renderer {
     ),
   );
 
-  /// A fenced block. Mermaid is labelled rather than drawn — see this file's header.
+  /// A fenced block — or, when it is a mermaid flowchart this can read, the diagram itself.
+  ///
+  /// A block it cannot read stays exactly as it was: the source, labelled. That is not a
+  /// placeholder for a renderer that never came, it is the honest answer — a diagram drawn with
+  /// half its arrows missing is worse than one not drawn, because a reader cannot tell which half
+  /// went missing. See mermaid.dart for what "can read" covers.
   Widget _code(md.Element node) {
     final code = node.children?.whereType<md.Element>().firstOrNull;
     final text = code?.textContent ?? node.textContent;
     final language = _languageOf(code);
     final isDiagram = language == 'mermaid';
+
+    if (isDiagram) {
+      final graph = parseMermaid(text);
+      if (graph != null) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: MermaidView(graph: graph),
+          ),
+        );
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -156,7 +182,8 @@ class _Renderer {
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: Text(
-                  'mermaid diagram — shown as source, not drawn',
+                  'mermaid diagram — this one is not one we can draw yet, so '
+                  'here is its source',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),

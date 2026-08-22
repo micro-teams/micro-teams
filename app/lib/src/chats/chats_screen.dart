@@ -165,6 +165,12 @@ class _ChatRow extends StatelessWidget {
     final members = chat.members.toList();
     final others = members.where((m) => m.userId != me).toList();
     final oneOnOne = members.length == 2 && others.length == 1;
+    // A group whose only agent is one agent is shown with that agent's face: those are the rooms
+    // where several people talk to one agent, and a grid of the humans says nothing about which
+    // room it is. `isAgent` is null when the server was not asked — which is different from "asked,
+    // and no", and is why this checks for true rather than for truthiness.
+    final agents = members.where((m) => m.isAgent == true).toList();
+    final publicAgent = !oneOnOne && agents.length == 1 ? agents.first : null;
 
     final title = chat.title.isNotEmpty
         ? chat.title
@@ -191,24 +197,25 @@ class _ChatRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              oneOnOne
-                  ? UserAvatar(
-                      userId: others.first.userId,
-                      nickname: others.first.nickname,
-                      avatarId: others.first.avatarId,
-                      size: avatarSize,
-                    )
-                  : MemberGridAvatar(
-                      size: avatarSize,
-                      members: [
-                        for (final m in members)
-                          (
-                            userId: m.userId,
-                            nickname: m.nickname,
-                            avatarId: m.avatarId,
-                          ),
-                      ],
-                    ),
+              if (oneOnOne || publicAgent != null)
+                UserAvatar(
+                  userId: (publicAgent ?? others.first).userId,
+                  nickname: (publicAgent ?? others.first).nickname,
+                  avatarId: (publicAgent ?? others.first).avatarId,
+                  size: avatarSize,
+                )
+              else
+                MemberGridAvatar(
+                  size: avatarSize,
+                  members: [
+                    for (final m in members)
+                      (
+                        userId: m.userId,
+                        nickname: m.nickname,
+                        avatarId: m.avatarId,
+                      ),
+                  ],
+                ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
