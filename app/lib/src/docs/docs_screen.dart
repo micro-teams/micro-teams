@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mt_api/mt_api.dart';
 
 import '../common/team_scope.dart';
 import '../common/ui/team_picker.dart';
@@ -92,7 +93,17 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
   }
 }
 
-class _TreePane extends ConsumerWidget {
+/// The tree, and everything you do TO the tree.
+///
+/// Creating, renaming, moving and deleting live here rather than in the header of an open document,
+/// because they are operations on the tree: you rename a file you can see in it, and you create one
+/// next to where you are looking. The React client put them here for the same reason. A "delete"
+/// button in the corner of a document is also a delete button you meet while reading, which is not
+/// where anyone wants to meet one.
+///
+/// Renaming happens IN PLACE — the row becomes a field and a tick. A dialog for a name is a frame
+/// that has to be dismissed to see the thing you are naming.
+class _TreePane extends ConsumerStatefulWidget {
   const _TreePane({
     required this.collapsed,
     required this.selected,
@@ -109,7 +120,23 @@ class _TreePane extends ConsumerWidget {
   final void Function(String? path) onOpen;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TreePane> createState() => _TreePaneState();
+}
+
+class _TreePaneState extends ConsumerState<_TreePane> {
+  /// The path being renamed, or null. One at a time: two open fields in a tree is two ways to be
+  /// half-way through something.
+  String? _renaming;
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final tree = ref.watch(docsTreeProvider);
     final team = ref.watch(currentTeamProvider);
     final scheme = Theme.of(context).colorScheme;
@@ -120,12 +147,18 @@ class _TreePane extends ConsumerWidget {
         title: const Text('docs'),
         actions: [
           // Top-right, next to the actions, not a bar of its own under the title (T-007).
-          TeamPickerAction(onManage: onManageTeams),
-          IconButton(
-            tooltip: 'new document',
-            onPressed: team == null ? null : () => _create(context, ref),
-            icon: const Icon(Icons.note_add_outlined),
-          ),
+          TeamPickerAction(onManage: widget.onManageTeams),
+          // The root's actions. Every other node carries its own, on the row.
+          if (team != null)
+            PopupMenuButton<String>(
+              tooltip: 'new',
+              icon: const Icon(Icons.add),
+              onSelected: (choice) => _create(folder: choice == 'folder'),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'file', child: Text('new file')),
+                PopupMenuItem(value: 'folder', child: Text('new folder')),
+              ],
+            ),
         ],
       ),
       body: team == null
@@ -146,7 +179,7 @@ class _TreePane extends ConsumerWidget {
                 ),
               ),
               data: (root) {
-                final rows = flatten(root, collapsed: collapsed);
+                final rows = flatten(root, collapsed: widget.collapsed);
                 if (rows.isEmpty) {
                   return Center(
                     child: Text(
@@ -163,15 +196,15 @@ class _TreePane extends ConsumerWidget {
                     final row = rows[index];
                     final node = row.node;
                     final folded =
-                        node.isFolder && collapsed.contains(node.path);
+                        node.isFolder && widget.collapsed.contains(node.path);
                     return Material(
-                      color: node.path == selected
+                      color: node.path == widget.selected
                           ? scheme.surfaceContainerHighest
                           : Colors.transparent,
                       child: InkWell(
                         onTap: () => node.isFolder
-                            ? onToggle(node.path)
-                            : onOpen(node.path),
+                            ? widget.onToggle(node.path)
+                            : widget.onOpen(node.path),
                         child: Padding(
                           padding: EdgeInsets.fromLTRB(
                             12.0 + row.depth * 14,
@@ -192,13 +225,34 @@ class _TreePane extends ConsumerWidget {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  nameOf(node.path),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
+                                child: _renaming == node.path
+                                    ? _NameField(
+                                        controller: _name,
+                                        onDone: () => _renameTo(node.path),
+                                        onCancel: () =>
+                                            setState(() => _renaming = null),
+                                      )
+                                    : Text(
+                                        nameOf(node.path),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
                               ),
+                              if (_renaming == node.path)
+                                IconButton(
+                                  tooltip: 'rename',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _renameTo(node.path),
+                                  icon: const Icon(Icons.check, size: 18),
+                                )
+                              else
+                                _NodeMenu(
+                                  node: node,
+                                  onSelected: (action) => _act(action, node),
+                                ),
                             ],
                           ),
                         ),
@@ -211,17 +265,149 @@ class _TreePane extends ConsumerWidget {
     );
   }
 
-  Future<void> _create(BuildContext context, WidgetRef ref) async {
-    final path = await promptForText(
+  /// A path's parent, or the empty string at the root — where a new sibling goes.
+  static String _parentOf(String path) {
+    final slash = path.lastIndexOf('/');
+    return slash == -1 ? '' : path.substring(0, slash);
+  }
+
+  Future<void> _act(String action, DocNode node) async {
+    // A folder's "new file" goes inside it; a file's goes beside it. That is what a person means by
+    // pointing at one and asking for a new one.
+    final within = node.isFolder ? node.path : _parentOf(node.path);
+    switch (action) {
+      case 'file':
+        await _create(folder: false, within: within);
+      case 'folder':
+        await _create(folder: true, within: within);
+      case 'rename':
+        setState(() {
+          _renaming = node.path;
+          _name.text = nameOf(node.path);
+        });
+      case 'move':
+        await _move(node);
+      case 'delete':
+        await _delete(node);
+    }
+  }
+
+  Future<void> _create({required bool folder, String within = ''}) async {
+    final name = await promptForText(
       context,
-      title: 'new document',
-      hint: 'notes/idea.md',
+      title: folder ? 'new folder' : 'new file',
+      hint: folder ? 'notes' : 'idea.md',
       action: 'create',
     );
-    if (path == null || path.isEmpty) return;
-    await ref.read(docsAdminProvider).create(path, '# ${nameOf(path)}\n');
-    onOpen(path);
+    if (name == null || name.trim().isEmpty) return;
+    final path = within.isEmpty ? name.trim() : '$within/${name.trim()}';
+    // A folder in git is a folder with something in it, so a new one is created with a file that
+    // says so. An empty folder would vanish the moment it was written.
+    final target = folder ? '$path/README.md' : path;
+    await ref.read(docsAdminProvider).create(target, '# ${nameOf(target)}\n');
+    if (!folder) widget.onOpen(target);
   }
+
+  Future<void> _renameTo(String path) async {
+    final name = _name.text.trim();
+    setState(() => _renaming = null);
+    if (name.isEmpty || name == nameOf(path)) return;
+    final parent = _parentOf(path);
+    final to = parent.isEmpty ? name : '$parent/$name';
+    await ref.read(docsAdminProvider).move(path, to);
+    if (widget.selected == path) widget.onOpen(to);
+  }
+
+  Future<void> _move(DocNode node) async {
+    final to = await promptForText(
+      context,
+      title: 'move ${nameOf(node.path)}',
+      hint: 'notes/moved.md',
+      action: 'move',
+      initial: node.path,
+    );
+    if (to == null || to.isEmpty || to == node.path) return;
+    await ref.read(docsAdminProvider).move(node.path, to);
+    if (widget.selected == node.path) widget.onOpen(to);
+  }
+
+  Future<void> _delete(DocNode node) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('delete ${nameOf(node.path)}?'),
+        content: Text(
+          node.isFolder
+              ? 'Everything in it goes too. It stays in the repository history.'
+              : 'It stays in the repository history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ref.read(docsAdminProvider).delete(node.path);
+    if (widget.selected == node.path) widget.onOpen(null);
+  }
+}
+
+/// A row's own actions. The root's live in the header — it has no row.
+class _NodeMenu extends StatelessWidget {
+  const _NodeMenu({required this.node, required this.onSelected});
+
+  final DocNode node;
+  final void Function(String action) onSelected;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+    tooltip: 'actions',
+    icon: const Icon(Icons.more_horiz, size: 18),
+    padding: EdgeInsets.zero,
+    onSelected: onSelected,
+    itemBuilder: (context) => const [
+      PopupMenuItem(value: 'file', child: Text('new file')),
+      PopupMenuItem(value: 'folder', child: Text('new folder')),
+      PopupMenuDivider(),
+      PopupMenuItem(value: 'rename', child: Text('rename')),
+      PopupMenuItem(value: 'move', child: Text('move')),
+      PopupMenuDivider(),
+      PopupMenuItem(value: 'delete', child: Text('delete')),
+    ],
+  );
+}
+
+/// A name being typed, in the place the name was.
+class _NameField extends StatelessWidget {
+  const _NameField({
+    required this.controller,
+    required this.onDone,
+    required this.onCancel,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onDone;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: controller,
+    autofocus: true,
+    style: Theme.of(context).textTheme.bodyMedium,
+    decoration: const InputDecoration(
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(vertical: 4),
+    ),
+    onSubmitted: (_) => onDone(),
+    onTapOutside: (_) => onCancel(),
+  );
 }
 
 /// One document: read, or edited.
@@ -313,14 +499,9 @@ class _DocPaneState extends ConsumerState<_DocPane> {
               onPressed: doc.hasValue ? () => _startEditing(doc.value!) : null,
               icon: const Icon(Icons.edit_outlined),
             ),
-          PopupMenuButton<String>(
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'rename', child: Text('rename or move')),
-              PopupMenuItem(value: 'delete', child: Text('delete')),
-            ],
-            onSelected: (choice) =>
-                choice == 'rename' ? _rename(context) : _delete(context),
-          ),
+          // Renaming, moving and deleting are not here. They are operations on the TREE and they
+          // live in it — a delete button in the corner of a document is also a delete button you
+          // meet while reading.
         ],
       ),
       body: doc.when(
@@ -363,46 +544,5 @@ class _DocPaneState extends ConsumerState<_DocPane> {
         ),
       ),
     );
-  }
-
-  Future<void> _rename(BuildContext context) async {
-    final to = await promptForText(
-      context,
-      title: 'rename or move',
-      hint: 'new path',
-      action: 'move',
-      initial: widget.path,
-    );
-    if (to == null || to.isEmpty || to == widget.path) return;
-    await ref.read(docsAdminProvider).move(widget.path, to);
-    // Follow it. You renamed a file you were reading, so you should still be reading it — and in
-    // the wide layout there is nowhere to go "back" to, so the pane would otherwise sit on a path
-    // that no longer exists.
-    if (mounted) widget.onMoved?.call(to);
-  }
-
-  Future<void> _delete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('delete ${nameOf(widget.path)}?'),
-        content: const Text(
-          'It stays in the repository history, but it goes from the tree.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('delete'),
-          ),
-        ],
-      ),
-    );
-    if (!(confirmed ?? false)) return;
-    await ref.read(docsAdminProvider).delete(widget.path);
-    if (mounted) widget.onBack?.call();
   }
 }
