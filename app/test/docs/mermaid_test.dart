@@ -103,6 +103,24 @@ flowchart LR
     });
   });
 
+  group('drawing', () {
+    test('an edge that skips a rank goes round, not through', () {
+      // Straight, it would pass underneath whatever is in between — and boxes are painted after
+      // edges, so the connection would simply be missing from the picture. This was found by
+      // rendering a diagram to a PNG and looking at it; it is a rule here so that nobody has to
+      // look again.
+      final graph = parseMermaid('graph TD\n  A --> B\n  B --> C\n  A --> C')!;
+      final layout = layOut(graph);
+
+      expect(
+        bowsAround(layout.rankOf('A'), layout.rankOf('C')),
+        isTrue,
+        reason: 'A to C skips the rank B is on',
+      );
+      expect(bowsAround(layout.rankOf('A'), layout.rankOf('B')), isFalse);
+    });
+  });
+
   group('in a document', () {
     testWidgets('a flowchart is drawn, not printed', (tester) async {
       await tester.pumpWidget(

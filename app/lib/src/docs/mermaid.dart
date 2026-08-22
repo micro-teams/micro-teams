@@ -219,3 +219,11 @@ MermaidLayout layOut(MermaidGraph graph) {
   }
   return MermaidLayout(ranks);
 }
+
+/// Whether an edge has to go round rather than straight.
+///
+/// A straight line between ranks that are not neighbours passes underneath whatever sits between
+/// them — and boxes are painted after edges, so the line disappears and the diagram silently loses
+/// a connection. Found by rendering one and looking at it; no test was going to say so, which is
+/// why it is a rule here now rather than a shape in the painter.
+bool bowsAround(int fromRank, int toRank) => (toRank - fromRank).abs() > 1;

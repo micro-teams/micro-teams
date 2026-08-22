@@ -201,11 +201,12 @@ class _MermaidPainter extends CustomPainter {
       final to = diagram.boxes[edge.to];
       if (from == null || to == null) continue;
 
-      // An edge that skips a rank cannot be drawn straight: the straight line passes underneath
-      // whatever sits between, and boxes are painted after edges — so the arrow simply disappears
-      // and the diagram silently loses a connection. Those bow out to the side instead.
-      final skips =
-          (diagram.rankOf(edge.to) - diagram.rankOf(edge.from)).abs() > 1;
+      // See bowsAround: a straight line between ranks that are not neighbours is a line the boxes
+      // painted afterwards will hide.
+      final skips = bowsAround(
+        diagram.rankOf(edge.from),
+        diagram.rankOf(edge.to),
+      );
       final start = _edgePoint(from.rect, to.rect.center);
       final end = _edgePoint(to.rect, from.rect.center);
       final Offset middle;
