@@ -23,6 +23,7 @@ import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/ui/avatar.dart';
+import 'package:microteams/src/common/ui/destination_button.dart';
 import 'package:microteams/src/providers.dart';
 
 class _Fake implements HttpClientAdapter {
@@ -121,9 +122,9 @@ void _wide(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
-/// The rail's own copy of a destination. The list pane's header says "chats" too, so the rail
-/// items carry a key and this points at that rather than at whichever word came first.
-Finder _rail(String label) => find.byKey(ValueKey('rail-$label'));
+/// A destination button — the same control on both shells, so this finds it on either. The list
+/// pane's header says "chats" too, which is why the buttons carry a key.
+Finder _rail(String label) => find.byKey(ValueKey('destination-$label'));
 
 void main() {
   testWidgets('a tab you come back to is the tab you left', (tester) async {
@@ -191,15 +192,11 @@ void main() {
     expect(_rail('docs'), findsOneWidget);
     expect(_rail('agents'), findsOneWidget);
     expect(
-      find.descendant(
-        of: find.byType(PopupMenuButton<int>),
-        matching: find.byType(UserAvatar),
-      ),
+      find.descendant(of: _rail('me'), matching: find.byType(UserAvatar)),
       findsOneWidget,
       reason: 'the signed-in human, pinned at the bottom',
     );
     expect(_rail('teams'), findsNothing);
-    expect(_rail('me'), findsNothing);
   });
 
   testWidgets('team management is reached from the team picker', (
@@ -231,7 +228,7 @@ void main() {
 
     await tester.pumpWidget(_app(_Fake()));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(_rail('chats'), findsOneWidget);
 
     await tester.tap(find.text('standup'));
     await tester.pumpAndSettle();
@@ -239,7 +236,7 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(_rail('chats'), findsOneWidget);
   });
 
   testWidgets('opening a document is a frame, so back closes the document', (
@@ -268,7 +265,7 @@ void main() {
       reason:
           'back closed the file and left the tree, rather than leaving docs',
     );
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(_rail('chats'), findsOneWidget);
   });
 
   testWidgets('a team opens beside its list on a wide window', (tester) async {
@@ -295,5 +292,50 @@ void main() {
       findsOneWidget,
       reason: 'the team detail is beside the list, not instead of it',
     );
+  });
+
+  testWidgets('both shells use the same destination control', (tester) async {
+    // The point of the exercise: one control, arranged two ways. Before this the desktop had
+    // square buttons with the word inside and the phone had Material's navigation bar — the same
+    // app wearing two faces, and every later change to one had to be remembered for the other.
+    _wide(tester);
+    await tester.pumpWidget(_app(_Fake()));
+    await tester.pumpAndSettle();
+    final onRail = tester.widget<DestinationButton>(
+      find.descendant(
+        of: _rail('chats'),
+        matching: find.byType(DestinationButton),
+        matchRoot: true,
+      ),
+    );
+
+    tester.view.physicalSize = const Size(400, 800);
+    await tester.pumpAndSettle();
+    final onPhone = tester.widget<DestinationButton>(
+      find.descendant(
+        of: _rail('chats'),
+        matching: find.byType(DestinationButton),
+        matchRoot: true,
+      ),
+    );
+
+    expect(onRail.destination.label, onPhone.destination.label);
+    expect(onRail.runtimeType, onPhone.runtimeType);
+  });
+
+  testWidgets('your own face opens the profile, without asking first', (
+    tester,
+  ) async {
+    // Logging out already lives inside the profile, so a two-item menu in front of a page holding
+    // one of those two items is a door in front of a door.
+    _wide(tester);
+    await tester.pumpWidget(_app(_Fake()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_rail('me'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('log out'), findsOneWidget, reason: 'the profile itself');
+    expect(find.byType(PopupMenuButton<int>), findsNothing);
   });
 }
