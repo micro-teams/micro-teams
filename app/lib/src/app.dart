@@ -432,6 +432,7 @@ class _AgentsPane extends ConsumerWidget {
         return MachineDetailScreen(
           machineId: openMachineId!,
           onGone: () => context.go('/agents'),
+          onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
         );
       }
       return list;
@@ -456,6 +457,7 @@ class _AgentsPane extends ConsumerWidget {
                 machineId: id,
                 asPane: true,
                 onGone: () => context.go('/agents'),
+                onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
               ),
               _ => const Center(child: Text('pick an agent or a machine')),
             },

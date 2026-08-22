@@ -176,17 +176,31 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
     ref.invalidate(allMachinesProvider);
   }
 
-  /// Let this team run agents on a machine it can already see but is not using yet.
-  Future<void> bind(String machineId) async {
-    final team = ref.read(currentTeamProvider);
+  /// Let a team run agents on a machine it can already see but is not using yet.
+  ///
+  /// Which team is a parameter: a machine's own detail offers every team you are in, not only the
+  /// one you happen to be looking at.
+  Future<void> bind(String machineId, {int? teamId}) async {
+    final team = teamId ?? ref.read(currentTeamProvider)?.id;
     if (team == null) return;
     await ref
         .read(mtClientProvider)
         .team
         .bindTeamMachine(
-          id: team.id,
+          id: team,
           bindMachineRequest: BindMachineRequest(machineId: machineId),
         );
+    ref.invalidateSelf();
+    ref.invalidate(allMachinesProvider);
+  }
+
+  /// Forget a machine entirely — for every team it serves, not just this one.
+  ///
+  /// The host keeps its connector installed; it would have to enrol again to come back. That is
+  /// why this is not the same button as "remove from this team", and why the surfaces put it
+  /// somewhere you have to mean it.
+  Future<void> forget(Machine machine) async {
+    await ref.read(mtClientProvider).machine.forgetMachine(id: machine.id);
     ref.invalidateSelf();
     ref.invalidate(allMachinesProvider);
   }
