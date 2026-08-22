@@ -52,8 +52,11 @@ void main() {
   test('the chat list is cached under the path its controller reads', () async {
     final wire = _Wire();
     final client = _client(wire);
-    await client.chat.listChats(pageSize: chatsPageSize);
-    // Note the second parameter: the generated client sends `queryIsMemberAgent=false` whether or
+    await client.chat.listChats(
+      pageSize: chatsPageSize,
+      queryIsMemberAgent: true,
+    );
+    // Note the second parameter: the generated client sends `queryIsMemberAgent` whether or
     // not the caller mentions it, and a constant that omitted it would key the cache under a
     // request that is never made. That is precisely what this test caught.
     expect(wire.paths.single, chatsPath.substring(0));
@@ -90,7 +93,10 @@ void main() {
   test('one account never reads another account\'s answers', () async {
     final client = _client(_Wire());
     client.cache.setScope('1');
-    await client.chat.listChats(pageSize: chatsPageSize);
+    await client.chat.listChats(
+      pageSize: chatsPageSize,
+      queryIsMemberAgent: true,
+    );
     expect(client.cached<Object?>('GET', chatsPath), isNotNull);
 
     client.cache.setScope('2');
