@@ -70,7 +70,7 @@ void main() {
     await tester.pumpWidget(host(socket));
     await tester.pumpAndSettle();
 
-    expect(find.text('Watching'), findsOneWidget);
+    expect(find.byTooltip('watching'), findsOneWidget);
     expect(
       socket.jsonSent.first,
       equals({'type': 'control', 'level': 'passive'}),
@@ -88,7 +88,7 @@ void main() {
     await tester.pumpAndSettle();
     socket.sent.clear();
 
-    await tester.tap(find.text('Typing'));
+    await tester.tap(find.byTooltip('typing'));
     await tester.pumpAndSettle();
 
     expect(

@@ -106,7 +106,7 @@ void main() {
     await tester.pumpWidget(_host());
     await tester.pumpAndSettle();
 
-    expect(find.text('agent3'), findsNothing);
+    expect(find.byTooltip('close'), findsNothing);
   });
 
   testWidgets('what was underneath is still there, and still has its state', (
@@ -119,7 +119,7 @@ void main() {
 
     await _watch(tester);
 
-    expect(find.text('agent3'), findsOneWidget);
+    expect(find.byTooltip('close'), findsOneWidget);
     expect(
       tester.state<_UnderneathState>(find.byType(_Underneath)).draft.text,
       'half a message',
@@ -143,7 +143,7 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
-    expect(find.text('agent3'), findsNothing);
+    expect(find.byTooltip('close'), findsNothing);
     expect(find.byType(_Underneath), findsOneWidget);
   });
 
@@ -155,7 +155,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
-    expect(find.text('agent3'), findsNothing);
+    expect(find.byTooltip('close'), findsNothing);
   });
 
   testWidgets('and so does the visible way out', (tester) async {
@@ -165,18 +165,32 @@ void main() {
     await tester.pumpAndSettle();
     await _watch(tester);
 
-    await tester.tap(find.byTooltip('Close'));
+    await tester.tap(find.byTooltip('close'));
     await tester.pumpAndSettle();
 
-    expect(find.text('agent3'), findsNothing);
+    expect(find.byTooltip('close'), findsNothing);
   });
 
-  testWidgets('it is named after whoever is being watched', (tester) async {
+  testWidgets('the chrome is one row, and it is not a title bar', (
+    tester,
+  ) async {
+    // A terminal is the content. The row above it carries the way out, the three modes and
+    // compact — and not the agent's name, which you already knew: you got here from its face.
     await tester.pumpWidget(_host());
     await tester.pumpAndSettle();
     await _watch(tester);
 
-    expect(find.text('agent3'), findsOneWidget);
-    expect(find.text('Live screen'), findsNothing);
+    // Scoped to the frame: the page underneath has a header of its own, and it is still there.
+    expect(
+      find.descendant(
+        of: find.byType(SceneFrame),
+        matching: find.byType(AppBar),
+      ),
+      findsNothing,
+    );
+    expect(find.text('agent3'), findsNothing);
+    expect(find.byTooltip('close'), findsOneWidget);
+    expect(find.byTooltip('watching'), findsOneWidget);
+    expect(find.byTooltip('compact'), findsOneWidget);
   });
 }
