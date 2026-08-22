@@ -19,19 +19,20 @@
 ///   * rows are computed as DATA and turned into widgets inside `itemBuilder`. The first cut built
 ///     a `List<Widget>` of every message on every rebuild, which does all the work `ListView
 ///     .builder` exists to avoid — and it did it again on each arriving message.
-///   * there is NO live text selection over the list, and that is a measurement rather than a
-///     preference. Both ways of having it were tried against a 300-message conversation in a real
-///     browser: a `SelectableText` per bubble (the first cut) and one `SelectionArea` around the
-///     whole list. The `SelectionArea` version dropped 125 of 274 frames while scrolling — a 95th
-///     percentile frame of 50ms against a 16.7ms budget. Without it: 0 dropped frames, p95 16.7ms.
-///     What replaces it is what WeChat itself does — long-press a bubble to copy it — which costs
-///     nothing per frame and is the gesture people already reach for on a phone.
+///   * message text IS selectable, with one `SelectionArea` around the list, and you copy with
+///     whatever your system uses to copy. This is a deliberate reversal, and the cost is on the
+///     record: measured against a 300-message conversation in a browser, that `SelectionArea`
+///     dropped 125 of 274 frames while scrolling (p95 50ms against a 16.7ms budget) where having
+///     none dropped zero. It went back in because copying half a message — or a code fence out of
+///     an agent's reply — is something people do constantly here, and "long-press copies the whole
+///     bubble" cannot do it at all. The list is still virtualised, so what is in the selection tree
+///     is what is on screen; if this ever feels heavy on a real phone, that measurement is where to
+///     start, not this comment.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
@@ -245,36 +246,40 @@ class _MessageList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = _rows();
+    // One selection area around the list, so a drag runs across bubbles the way it does on a web
+    // page and the system's own copy is what copies. See this file's header for what it costs.
     return _ReadingColumn(
-      child: ListView.builder(
-        controller: scroll,
-        reverse: true,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: rows.length,
-        itemBuilder: (context, index) {
-          final row = rows[index];
-          return switch (row) {
-            _PendingRow(:final pending) => _PendingBubble(
-              pending: pending,
-              onRetry: () => onRetry(pending.clientToken),
-              onDiscard: () => onDiscard(pending.clientToken),
-            ),
-            _MessageRow(:final message, :final separator) => _Bubble(
-              message: message,
-              mine: message.senderId == me,
-              name: info.nameOf(message.senderId),
-              avatarId: info.avatarOf(message.senderId),
-              // A 1:1 does not need the other person's name written above every bubble; there is
-              // only one other person, and their avatar is right there.
-              showName: message.senderId != me && info.members.length > 2,
-              separator: separator,
-            ),
-            _EdgeRow() => _HistoryEdge(
-              loading: state.loadingOlder,
-              hasOlder: state.hasOlder,
-            ),
-          };
-        },
+      child: SelectionArea(
+        child: ListView.builder(
+          controller: scroll,
+          reverse: true,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: rows.length,
+          itemBuilder: (context, index) {
+            final row = rows[index];
+            return switch (row) {
+              _PendingRow(:final pending) => _PendingBubble(
+                pending: pending,
+                onRetry: () => onRetry(pending.clientToken),
+                onDiscard: () => onDiscard(pending.clientToken),
+              ),
+              _MessageRow(:final message, :final separator) => _Bubble(
+                message: message,
+                mine: message.senderId == me,
+                name: info.nameOf(message.senderId),
+                avatarId: info.avatarOf(message.senderId),
+                // A 1:1 does not need the other person's name written above every bubble; there is
+                // only one other person, and their avatar is right there.
+                showName: message.senderId != me && info.members.length > 2,
+                separator: separator,
+              ),
+              _EdgeRow() => _HistoryEdge(
+                loading: state.loadingOlder,
+                hasOlder: state.hasOlder,
+              ),
+            };
+          },
+        ),
       ),
     );
   }
@@ -395,14 +400,11 @@ class _Bubble extends StatelessWidget {
                         ),
                       ),
                     _BubbleWidth(
-                      child: _CopyOnLongPress(
+                      child: _BubbleBody(
                         text: message.content,
-                        child: _BubbleBody(
-                          text: message.content,
-                          mine: mine,
-                          background: mine ? ownBubble : otherBubble,
-                          foreground: mine ? ownBubbleInk : otherBubbleInk,
-                        ),
+                        mine: mine,
+                        background: mine ? ownBubble : otherBubble,
+                        foreground: mine ? ownBubbleInk : otherBubbleInk,
                       ),
                     ),
                   ],
@@ -435,40 +437,6 @@ class _BubbleWidth extends StatelessWidget {
         ),
         child: child,
       ),
-    );
-  }
-}
-
-/// Long-press (or right-click) a bubble to copy it.
-///
-/// This is what stands in for dragging a selection across the text, and it is deliberate: see the
-/// measurement in this file's header. It is also the gesture the app is being compared against —
-/// on a phone, holding a message is how you copy one.
-class _CopyOnLongPress extends StatelessWidget {
-  const _CopyOnLongPress({required this.text, required this.child});
-
-  final String text;
-  final Widget child;
-
-  Future<void> _copy(BuildContext context) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    await Clipboard.setData(ClipboardData(text: text));
-    // Silence here would be indistinguishable from a gesture that did not register.
-    messenger?.showSnackBar(
-      const SnackBar(
-        content: Text('copied'),
-        duration: Duration(milliseconds: 900),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onLongPress: () => _copy(context),
-      onSecondaryTap: () => _copy(context),
-      child: child,
     );
   }
 }
