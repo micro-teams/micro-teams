@@ -217,11 +217,12 @@ void main() {
     expect(find.text('teams'), findsWidgets, reason: 'the management screen');
   });
 
-  testWidgets('coming back out of a conversation leaves the bar where it was', (
+  testWidgets('the bar is gone inside a conversation and back afterwards', (
     tester,
   ) async {
-    // The complaint this pins: on a phone you open a chat and come back, and the bottom bar is
-    // gone. Whatever the shell hides while you are inside a conversation, it has to put back.
+    // WeChat shows no tab bar inside a conversation, and neither does this — those pixels belong to
+    // the messages. The half that broke once is the second half: whatever the shell hides while you
+    // are in there, it has to put back when you leave.
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -232,6 +233,11 @@ void main() {
 
     await tester.tap(find.text('standup'));
     await tester.pumpAndSettle();
+    expect(
+      _rail('chats'),
+      findsNothing,
+      reason: 'no tab bar over a conversation',
+    );
 
     await tester.pageBack();
     await tester.pumpAndSettle();

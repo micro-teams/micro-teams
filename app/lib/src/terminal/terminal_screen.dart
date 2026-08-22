@@ -135,28 +135,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        // Escape closes it too, and on a phone so does the back gesture — but neither is
-        // discoverable, and an overlay with no visible way out is a trap.
-        leading: widget.onClose == null
-            ? null
-            : IconButton(
-                tooltip: 'Close',
-                onPressed: widget.onClose,
-                icon: const Icon(Icons.close),
-              ),
-        title: Text(widget.title ?? 'Live screen'),
-        actions: [
-          IconButton(
-            tooltip: 'Compact',
-            onPressed: () => _link?.compact(),
-            icon: const Icon(Icons.compress),
-          ),
-        ],
-      ),
+      // One row of chrome, not two. A terminal is the content; everything around it is a tax on the
+      // number of lines you can see, which on a phone is the whole argument. The agent's name is
+      // not here either — you came from its avatar, you know whose screen this is.
       body: Column(
         children: [
-          _ModeBar(mode: _mode, onChanged: _setMode),
+          SafeArea(
+            bottom: false,
+            child: _Chrome(
+              mode: _mode,
+              onChanged: _setMode,
+              onCompact: () => _link?.compact(),
+              onClose: widget.onClose,
+            ),
+          ),
           if (failure != null)
             Container(
               width: double.infinity,
@@ -189,6 +181,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                   autofocus: _mode == ViewMode.full,
                   readOnly: _mode != ViewMode.full,
                   backgroundOpacity: 1,
+                  // Black and white, at the ends of the range rather than near them. A terminal
+                  // borrowed the app's dark grey and its off-white before, and the result read as
+                  // a panel of the app that happened to contain a shell; this reads as a terminal.
+                  theme: _terminalTheme,
                   textStyle: const TerminalStyle(
                     fontSize: 13,
                     fontFamily: monoFamily,
@@ -204,48 +200,144 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 }
 
 /// The three modes, named for what they mean to the person rather than to the protocol.
-class _ModeBar extends StatelessWidget {
-  const _ModeBar({required this.mode, required this.onChanged});
+/// Black is black and white is white.
+///
+/// tmux draws with the palette it is given, and the app's dark grey background plus its off-white
+/// ink made a terminal look like a panel of the app that happened to contain a shell. The ANSI
+/// sixteen are left as xterm's defaults — those are the colours a program picked on purpose, and
+/// re-tinting them would be answering for the program.
+const TerminalTheme _terminalTheme = TerminalTheme(
+  cursor: Color(0xFFFFFFFF),
+  selection: Color(0x40FFFFFF),
+  foreground: Color(0xFFFFFFFF),
+  background: Color(0xFF000000),
+  black: Color(0xFF000000),
+  red: Color(0xFFCD3131),
+  green: Color(0xFF0DBC79),
+  yellow: Color(0xFFE5E510),
+  blue: Color(0xFF2472C8),
+  magenta: Color(0xFFBC3FBC),
+  cyan: Color(0xFF11A8CD),
+  white: Color(0xFFE5E5E5),
+  brightBlack: Color(0xFF666666),
+  brightRed: Color(0xFFF14C4C),
+  brightGreen: Color(0xFF23D18B),
+  brightYellow: Color(0xFFF5F543),
+  brightBlue: Color(0xFF3B8EEA),
+  brightMagenta: Color(0xFFD670D6),
+  brightCyan: Color(0xFF29B8DB),
+  brightWhite: Color(0xFFFFFFFF),
+  searchHitBackground: Color(0xFFFFFF2B),
+  searchHitBackgroundCurrent: Color(0xFF31FF26),
+  searchHitForeground: Color(0xFF000000),
+);
+
+/// The one row above the terminal: the way out, the three modes, and compact.
+///
+/// Everything in it is small on purpose. This row costs two lines of terminal at a comfortable
+/// size, and a terminal is a thing you are reading — the chrome should be findable, not prominent.
+class _Chrome extends StatelessWidget {
+  const _Chrome({
+    required this.mode,
+    required this.onChanged,
+    required this.onCompact,
+    required this.onClose,
+  });
 
   final ViewMode mode;
   final void Function(ViewMode) onChanged;
+  final VoidCallback onCompact;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      color: scheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
         children: [
-          SegmentedButton<ViewMode>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: ViewMode.readonly,
-                icon: Icon(Icons.visibility_outlined),
-                label: Text('Watching'),
-              ),
-              ButtonSegment(
-                value: ViewMode.scroll,
-                icon: Icon(Icons.history),
-                label: Text('History'),
-              ),
-              ButtonSegment(
-                value: ViewMode.full,
-                icon: Icon(Icons.keyboard),
-                label: Text('Typing'),
-              ),
-            ],
-            selected: {mode},
-            onSelectionChanged: (selection) => onChanged(selection.first),
-          ),
+          if (onClose != null)
+            _SmallButton(
+              tooltip: 'close',
+              icon: Icons.close,
+              onPressed: onClose!,
+            ),
+          const SizedBox(width: 4),
+          // Icons alone, with tooltips: the three words did not fit beside everything else, and
+          // what the modes mean is a thing you learn once and then recognise by shape.
+          for (final option in const [
+            (
+              mode: ViewMode.readonly,
+              icon: Icons.visibility_outlined,
+              label: 'watching',
+            ),
+            (mode: ViewMode.scroll, icon: Icons.history, label: 'history'),
+            (mode: ViewMode.full, icon: Icons.keyboard, label: 'typing'),
+          ])
+            _SmallButton(
+              tooltip: option.label,
+              icon: option.icon,
+              selected: mode == option.mode,
+              onPressed: () => onChanged(option.mode),
+            ),
           const Spacer(),
           if (mode == ViewMode.full)
-            Text(
-              'the agent is not driving',
-              style: Theme.of(context).textTheme.labelSmall,
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text(
+                'the agent is not driving',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
             ),
+          _SmallButton(
+            tooltip: 'compact',
+            icon: Icons.compress,
+            onPressed: onCompact,
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// A 28px control. Material's default is 48 for a finger, which is right for a bar you press often
+/// and wrong for a strip that is stealing lines from the thing you are reading.
+class _SmallButton extends StatelessWidget {
+  const _SmallButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.selected = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: selected ? scheme.surface : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: Icon(
+              icon,
+              size: 16,
+              color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ),
     );
   }

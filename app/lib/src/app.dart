@@ -609,6 +609,18 @@ class _Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     final index = shell.currentIndex;
 
+    // Inside a conversation on a phone, the bar goes away — WeChat does not show one there, and the
+    // conversation wants those pixels more than a tab bar does.
+    //
+    // Read from the router's current URL, not remembered anywhere: the last version of this decided
+    // from a location it had captured earlier, so coming back out of a conversation left a screen
+    // with no bar at all. What is on screen is a function of where you are, and where you are is
+    // one thing, read once, here.
+    final immersive =
+        !isWide(context) &&
+        RegExp(r'^/chats/\d+$').hasMatch(GoRouterState.of(context).uri.path);
+    if (immersive) return Scaffold(body: shell);
+
     if (isWide(context)) {
       return Scaffold(
         body: Row(
