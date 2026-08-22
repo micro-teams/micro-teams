@@ -39,6 +39,12 @@ final stateStoreProvider = Provider<KeyValueStore>(
 
 /// Which network paths this app may reach the backend over. One manager for the whole app: two
 /// would be two opinions about which line is fastest, each blind to what the other measured.
+/// The lines this app may reach the backend over.
+///
+/// It starts with the one line every client already has — the origin the page came from. The
+/// deployment's real registry is adopted at startup by the composition root (see app.dart), which
+/// is where it has to happen: the client that asks `/mt/lines` is built FROM this manager, so this
+/// provider cannot ask for it without asking for itself.
 final linesProvider = Provider<mp.LineManager>(
   (ref) => mp.LineManager(registry: sameOriginOnly()),
 );

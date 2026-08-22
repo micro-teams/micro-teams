@@ -303,6 +303,33 @@ check(
 );
 await chat.close();
 
+// A deploy has to be visible on the visit it lands on, not the one after.
+//
+// The worker answers the application's own code from the network first, because those file names
+// never change: `main.dart.js` is called that in every build there will ever be. Cache-first on it
+// means the page you are looking at was assembled from the old cache while the new worker was
+// still installing — "one reload behind" and "not deployed" look identical from a chair.
+const revisit = await context.newPage();
+const codeRequests = [];
+revisit.on("request", (r) => {
+  const path = new URL(r.url()).pathname;
+  if (path === "/main.dart.js" || path === "/flutter_bootstrap.js") {
+    codeRequests.push(path);
+  }
+});
+await revisit.goto(BASE + "/", { waitUntil: "load" });
+await revisit
+  .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+    timeout: 60000,
+  })
+  .catch(() => {});
+check(
+  "a second visit still asks the server for the app's own code",
+  codeRequests.includes("/main.dart.js"),
+  codeRequests.join(" ") || "none",
+);
+await revisit.close();
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();
