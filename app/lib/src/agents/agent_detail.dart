@@ -12,6 +12,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../common/ui/change_avatar.dart';
+import '../common/ui/editable_name.dart';
+import '../common/ui/online_dot.dart';
 import 'agents_controller.dart';
 
 /// What this screen cannot do for itself: leave for another one.
@@ -108,8 +110,8 @@ class AgentDetail extends ConsumerWidget {
   String get _name =>
       agent.nickname.isEmpty ? 'agent #${agent.userId}' : agent.nickname;
 
-  /// The agent as the list currently has it, so a rename or a new avatar shows here without
-  /// closing the sheet. Falls back to what we were opened with while the list is refetching.
+  /// The agent as the list currently has it, so a rename or a new picture shows here without
+  /// leaving. Falls back to what we were opened with while the list is refetching.
   Agent _live(WidgetRef ref) {
     final fleet = ref.watch(agentsProvider).valueOrNull;
     for (final candidate in fleet?.agents ?? const <Agent>[]) {
@@ -118,58 +120,22 @@ class AgentDetail extends ConsumerWidget {
     return agent;
   }
 
-  Future<void> _rename(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController(text: agent.nickname);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename agent'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
-          onSubmitted: (value) => Navigator.pop(context, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
-    );
-    if (name == null || name.trim().isEmpty) return;
-    try {
-      await ref.read(agentsProvider.notifier).rename(agent, name);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
-      }
-    }
-  }
-
   Future<void> _close(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Close $_name?'),
+        title: Text('close $_name?'),
         content: const Text(
           'Its session ends. Anything it was in the middle of stops there.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text('cancel'),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Close it'),
+            child: const Text('close it'),
           ),
         ],
       ),
@@ -179,80 +145,158 @@ class AgentDetail extends ConsumerWidget {
       await ref.read(agentsProvider.notifier).close(agent);
       onGone();
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
-      }
+      if (context.mounted) _say(context, '$e');
     }
   }
+
+  static void _say(BuildContext context, String message) =>
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final live = _live(ref);
+    final scheme = Theme.of(context).colorScheme;
 
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: ChangeAvatar(
-                target: OtherAvatar(
-                  userId: live.userId,
-                  nickname: live.nickname,
-                  avatarId: live.avatarId,
-                  apply: (avatarId) => ref
-                      .read(agentsProvider.notifier)
-                      .setAvatar(live, avatarId),
+    // The React detail is a centred column in a reading-width card: a big avatar, the name, what it
+    // is, and then the things you can do — in that order, because you look at this to find out
+    // WHICH agent this is before you do anything to it.
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: ChangeAvatar(
+                    size: 96,
+                    target: OtherAvatar(
+                      userId: live.userId,
+                      nickname: live.nickname,
+                      avatarId: live.avatarId,
+                      apply: (avatarId) => ref
+                          .read(agentsProvider.notifier)
+                          .setAvatar(live, avatarId),
+                    ),
+                  ),
                 ),
+                const SizedBox(height: 16),
+                // The name is edited where it is written — see ui/editable_name.dart.
+                Center(
+                  child: EditableName(
+                    name: live.nickname.isEmpty
+                        ? 'agent #${live.userId}'
+                        : live.nickname,
+                    onRename: (name) async {
+                      try {
+                        await ref
+                            .read(agentsProvider.notifier)
+                            .rename(live, name);
+                      } catch (e) {
+                        if (context.mounted) _say(context, '$e');
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Center(child: OnlineDot(online: live.online)),
+                const SizedBox(height: 20),
+                Facts(
+                  rows: [
+                    (label: 'user id', value: '${live.userId}'),
+                    if (live.driver != null)
+                      (label: 'driver', value: live.driver!),
+                    if (machineName != null)
+                      (label: 'machine', value: machineName!),
+                    if (live.teamId != null)
+                      (label: 'team', value: '${live.teamId}'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Text(
+                    'tap the picture to change it · tap the face in a list to '
+                    'watch its live screen',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _Keepalive(agent: live),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: actions.onChat,
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('chat with agent'),
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () => _close(context, ref),
+                  style: TextButton.styleFrom(foregroundColor: scheme.error),
+                  icon: const Icon(Icons.power_settings_new),
+                  label: const Text('close agent'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What something IS, as a bordered list of label/value rows — the React `dl`.
+class Facts extends StatelessWidget {
+  const Facts({required this.rows, super.key});
+
+  final List<({String label, String value})> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          for (final (index, row) in rows.indexed) ...[
+            if (index > 0) Divider(height: 1, color: scheme.outlineVariant),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    row.label,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const Spacer(),
+                  Flexible(
+                    child: Text(
+                      row.value,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: Text(
-                live.nickname.isEmpty ? 'agent #${live.userId}' : live.nickname,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            Center(
-              child: Text(
-                live.online ? 'online' : 'offline',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _Row(label: 'user id', value: '${live.userId}'),
-            if (live.driver != null) _Row(label: 'driver', value: live.driver!),
-            if (machineName != null)
-              _Row(label: 'machine', value: machineName!),
-            const SizedBox(height: 8),
-            _Keepalive(agent: live),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: actions.onChat,
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: const Text('Chat with agent'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => _rename(context, ref),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Rename'),
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: () => _close(context, ref),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error,
-              ),
-              icon: const Icon(Icons.power_settings_new),
-              label: const Text('Close agent'),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -376,26 +420,4 @@ class _KeepaliveState extends ConsumerState<_Keepalive> {
       ],
     );
   }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 96,
-          child: Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ),
-        Expanded(child: Text(value)),
-      ],
-    ),
-  );
 }

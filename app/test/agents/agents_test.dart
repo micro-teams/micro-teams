@@ -177,7 +177,9 @@ void main() {
       );
       await settle(tester);
 
-      await tester.tap(find.text('Chat with agent'));
+      await tester.ensureVisible(find.text('chat with agent'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 9);
@@ -198,7 +200,9 @@ void main() {
       );
       await settle(tester);
 
-      await tester.tap(find.text('Chat with agent'));
+      await tester.ensureVisible(find.text('chat with agent'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 77);
@@ -221,7 +225,9 @@ void main() {
       );
       await settle(tester);
 
-      await tester.tap(find.text('Chat with agent'));
+      await tester.ensureVisible(find.text('chat with agent'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('chat with agent'));
       await tester.pumpAndSettle();
 
       expect(opened, 77);
@@ -238,7 +244,7 @@ void main() {
       await settle(tester);
 
       expect(
-        find.text('Remove from this team'),
+        find.byTooltip('remove from this team'),
         findsNothing,
         reason:
             'unbinding the last team orphans the machine and the backend forgets '
@@ -252,7 +258,7 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('Remove from this team'), findsOneWidget);
+      expect(find.byTooltip('remove from this team'), findsOneWidget);
     });
   });
 
@@ -261,11 +267,13 @@ void main() {
     await tester.pumpWidget(agentDetail(backend));
     await settle(tester);
 
-    await tester.tap(find.text('Close agent'));
+    await tester.ensureVisible(find.text('close agent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('close agent'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Close agent3?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    expect(find.text('close agent3?'), findsOneWidget);
+    await tester.tap(find.text('cancel'));
     await tester.pumpAndSettle();
 
     expect(
@@ -311,6 +319,46 @@ void main() {
       await settle(tester);
 
       expect(find.text('apply'), findsNothing);
+    });
+  });
+
+  group('where the buttons are', () {
+    testWidgets('each section carries the button that fills it', (
+      tester,
+    ) async {
+      // "Add device" belongs to the machines section and "open agent" to the agents one — the same
+      // place the React client put them. Both in the page's corner is one corner holding two
+      // different intentions.
+      await tester.pumpWidget(host(_FakeBackend()));
+      await tester.pumpAndSettle();
+
+      // Asked geometrically: the button's centre falls inside the heading's own box. Comparing
+      // tops or centres directly does not work — a button is taller than a heading, and the
+      // heading carries padding above it.
+      bool sitsIn(String section, String button) => tester
+          .getRect(find.byKey(ValueKey('section-$section')))
+          .contains(tester.getCenter(find.text(button)));
+
+      expect(sitsIn('machines', 'add device'), isTrue);
+      expect(sitsIn('agents', 'open agent'), isTrue);
+    });
+
+    testWidgets('a name is edited where it is written', (tester) async {
+      // No dialog: the name becomes a field and a tick, in place. A dialog for a name covers the
+      // thing being named — and is a frame somebody's back gesture goes looking for.
+      final backend = _FakeBackend();
+      await tester.pumpWidget(agentDetail(backend));
+      await settle(tester);
+
+      await tester.tap(find.byTooltip('rename'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+
+      await tester.enterText(find.byType(TextField).first, 'renamed');
+      await tester.tap(find.byTooltip('save'));
+      await settle(tester);
+
+      expect(backend.posted, contains('PUT /mt/agent/42/nickname'));
     });
   });
 }

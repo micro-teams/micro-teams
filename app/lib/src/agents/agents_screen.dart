@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import '../common/ui/avatar.dart';
+import '../common/ui/online_dot.dart';
 import '../common/ui/theme.dart';
 import '../common/ui/team_picker.dart';
 import 'add_device_dialog.dart';
@@ -46,22 +47,11 @@ class AgentsScreen extends ConsumerWidget {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: const Text('agents'),
-        actions: [
-          TeamPickerAction(onManage: onManageTeams),
-          IconButton(
-            tooltip: 'Add a device',
-            onPressed: () => showAddDeviceDialog(context),
-            icon: const Icon(Icons.devices_other),
-          ),
-          IconButton(
-            tooltip: 'Open agent',
-            onPressed: () => showOpenAgentDialog(
-              context,
-              machines: fleet.valueOrNull?.machines ?? const [],
-            ),
-            icon: const Icon(Icons.smart_toy_outlined),
-          ),
-        ],
+        // The two "make something" buttons are NOT here. They sit on the section they make
+        // something in — see the headings below, which is where the React client put them: an
+        // "open agent" button in the corner of a page belongs to the page, and this page has two
+        // lists that each grow a different way.
+        actions: [TeamPickerAction(onManage: onManageTeams)],
       ),
       body: fleet.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -101,28 +91,41 @@ class _Fleet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (fleet.agents.isEmpty && fleet.machines.isEmpty) {
-      // An empty list with no way out of it is a dead end. The way in is here, and it is the one
-      // that has to happen first: an agent runs ON something.
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          const Center(child: Text('No machines or agents in this team yet')),
-          const SizedBox(height: 16),
-          Center(
-            child: FilledButton.icon(
-              onPressed: () => showAddDeviceDialog(context),
-              icon: const Icon(Icons.devices_other),
-              label: const Text('Add a device'),
-            ),
-          ),
-        ],
-      );
-    }
-
+    // No special "everything is empty" screen: both sections say what they are for and carry the
+    // button that fills them, so an empty page is the same page with empty sections. A separate
+    // empty state is a second layout to keep in step with the first.
     return ListView(
       children: [
-        if (fleet.agents.isNotEmpty) const _Heading('Agents'),
+        _Heading(
+          'machines',
+          key: const ValueKey('section-machines'),
+          action: _SectionButton(
+            icon: Icons.add_circle_outline,
+            label: 'add device',
+            onPressed: () => showAddDeviceDialog(context),
+          ),
+        ),
+        for (final machine in fleet.machines)
+          _MachineRow(
+            machine: machine,
+            onOpen: () => onOpenMachine(machine),
+            selected: machine.id == selectedMachineId,
+          ),
+        if (fleet.machines.isEmpty)
+          const _Empty(
+            'no machines serve this team. Use "add device" — either enrol a new '
+            'host, or add one you already have.',
+          ),
+        _Heading(
+          'agents',
+          key: const ValueKey('section-agents'),
+          action: _SectionButton(
+            icon: Icons.smart_toy_outlined,
+            label: 'open agent',
+            onPressed: () =>
+                showOpenAgentDialog(context, machines: fleet.machines),
+          ),
+        ),
         for (final agent in fleet.agents)
           _AgentRow(
             agent: agent,
@@ -132,27 +135,85 @@ class _Fleet extends ConsumerWidget {
             onOpen: () => onOpenAgent(agent),
             selected: agent.userId == selectedAgentId,
           ),
-        if (fleet.machines.isNotEmpty) const _Heading('Machines'),
-        for (final machine in fleet.machines)
-          _MachineRow(
-            machine: machine,
-            onOpen: () => onOpenMachine(machine),
-            selected: machine.id == selectedMachineId,
-          ),
+        if (fleet.agents.isEmpty) const _Empty('no agents running — open one'),
       ],
     );
   }
 }
 
+/// A section's name, with the button that adds to THAT section beside it.
 class _Heading extends StatelessWidget {
-  const _Heading(this.text);
+  const _Heading(this.text, {this.action, super.key});
+
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
+    child: Row(
+      children: [
+        Text(
+          text,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const Spacer(),
+        if (action != null) action!,
+      ],
+    ),
+  );
+}
+
+/// The React section button: small, secondary, and it says what it does in words. An icon alone in
+/// a section header is a guess a reader has to make every time.
+class _SectionButton extends StatelessWidget {
+  const _SectionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => FilledButton.tonalIcon(
+    onPressed: onPressed,
+    icon: Icon(icon, size: 16),
+    label: Text(label),
+    style: FilledButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      textStyle: Theme.of(context).textTheme.labelMedium,
+    ),
+  );
+}
+
+/// What a section says when it has nothing in it — in a dashed box, so an empty section reads as
+/// empty rather than as still loading.
+class _Empty extends StatelessWidget {
+  const _Empty(this.text);
 
   final String text;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-    child: Text(text, style: Theme.of(context).textTheme.titleSmall),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          style: BorderStyle.solid,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+    ),
   );
 }
 
@@ -191,7 +252,7 @@ class _AgentRow extends StatelessWidget {
       ),
       subtitle: Row(
         children: [
-          _Dot(online: agent.online),
+          OnlineDot(online: agent.online),
           if (subtitle.isNotEmpty) ...[
             const SizedBox(width: 6),
             Flexible(
@@ -237,41 +298,9 @@ class _MachineRow extends StatelessWidget {
         child: Icon(Icons.dns_outlined, color: scheme.onSurfaceVariant),
       ),
       title: Text(machine.name),
-      subtitle: _Dot(online: machine.online),
+      subtitle: OnlineDot(online: machine.online),
       onTap: onOpen,
       selected: selected,
-    );
-  }
-}
-
-/// Online or not: an 8px dot and the word, in one colour when alive and the muted one when not.
-/// Ported from the React `OnlineDot`, which every agent and machine row used.
-class _Dot extends StatelessWidget {
-  const _Dot({required this.online});
-
-  final bool online;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final colour = online ? scheme.primary : scheme.onSurfaceVariant;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: online ? colour : colour.withValues(alpha: 0.5),
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          online ? 'online' : 'offline',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colour),
-        ),
-      ],
     );
   }
 }

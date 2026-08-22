@@ -140,7 +140,7 @@ void main() {
       await tester.pumpWidget(_host(_Fake()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Open agent'));
+      await tester.tap(find.text('open agent'));
       await tester.pumpAndSettle();
 
       // Not a list compiled into the client: a client that guesses offers a driver the server
@@ -157,7 +157,7 @@ void main() {
       // are the two people actually wanted to set.
       await tester.pumpWidget(_host(_Fake()));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Open agent'));
+      await tester.tap(find.text('open agent'));
       await tester.pumpAndSettle();
 
       expect(find.text('Machine'), findsOneWidget);
@@ -171,7 +171,7 @@ void main() {
       final backend = _Fake();
       await tester.pumpWidget(_host(backend));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Open agent'));
+      await tester.tap(find.text('open agent'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Open'));
@@ -195,7 +195,7 @@ void main() {
     ) async {
       await tester.pumpWidget(_host(_Fake()));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Open agent'));
+      await tester.tap(find.text('open agent'));
       await tester.pumpAndSettle();
 
       await tester.enterText(
@@ -218,7 +218,7 @@ void main() {
       await tester.pumpWidget(_host(_Fake(machineTeams: const [2])));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Add a device'));
+      await tester.tap(find.text('add device'));
       await tester.pumpAndSettle();
 
       // Scoped to the dialog: "box" is legitimately on the screen behind it — it is this team's
@@ -247,7 +247,7 @@ void main() {
       await tester.pumpWidget(_host(_Fake(machineTeams: const [1])));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Add a device'));
+      await tester.tap(find.text('add device'));
       await tester.pumpAndSettle();
 
       expect(find.text('A machine you already have'), findsNothing);
@@ -259,7 +259,7 @@ void main() {
       final backend = _Fake(machineTeams: const [2]);
       await tester.pumpWidget(_host(backend));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Add a device'));
+      await tester.tap(find.text('add device'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Add'));
