@@ -8,7 +8,7 @@ web build produced here.
 
     bash tool/codegen.sh          # generates packages/mt_api from ../MicroTeams-API.yml
     flutter pub get
-    flutter run -d chrome         # or: flutter build web --release
+    flutter run -d chrome         # or: flutter build web --release --no-web-resources-cdn
 
 A native build has no proxy in front of it and therefore no idea where the server is, so it has to
 be told:
@@ -21,7 +21,7 @@ which is also what lets the httpOnly refresh cookie work at all.
 ## Tests
 
     flutter test                       # unit and widget tests
-    flutter build web --release && node tool/launcher.mjs build/web && node tool/make-sw.mjs build/web
+    flutter build web --release --no-web-resources-cdn && node tool/launcher.mjs build/web && node tool/make-sw.mjs build/web
     npm ci && npx playwright install chromium && bash tool/check-web.sh
 
 The second one is not optional in CI, and it is the only thing that can answer the questions that
@@ -99,5 +99,11 @@ Three rules, each enforced by `test/architecture_test.dart` rather than by good 
   explicit `serviceWorkerUrl`, and doing that prints a warning saying it will stop working. Ours
   also gets to decide what to keep — the shell is precached, the engine is cached as it is actually
   fetched, so a first visit downloads only the wasm variant this browser chose.
+- **Nothing is fetched from anybody else.** `--no-web-resources-cdn` is not optional: without it
+  Flutter loads its ~7MB engine from `gstatic.com`, which means a network that cannot reach Google
+  cannot start this app at all, the largest asset in the product never travels over MultiPath's
+  lines, and our own worker cannot cache it (cross-origin, opaque). With the flag the engine is
+  served from the same origin as everything else, and the browser check asserts that no request
+  leaves it.
 - **A first visit needs the network; every one after it does not.** Anything claiming otherwise is
   claiming a browser can run a build it has never downloaded.
