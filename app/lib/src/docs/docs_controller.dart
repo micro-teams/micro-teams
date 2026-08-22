@@ -73,6 +73,39 @@ final docProvider = AsyncNotifierProvider.family<DocController, String, String>(
   DocController.new,
 );
 
+/// One file's commits, newest first.
+///
+/// Documents ARE a git repository, so history is a first-class thing to look at: it is how you find
+/// out what an agent changed while you were away. Separate from [docProvider] because the content
+/// changes on every save and the history is only asked for when somebody opens it.
+final docHistoryProvider = FutureProvider.family<List<DocCommit>, String>((
+  ref,
+  path,
+) async {
+  final team = ref.watch(currentTeamProvider);
+  if (team == null || path.isEmpty) return const [];
+  final response = await ref
+      .read(mtClientProvider)
+      .team
+      .getDocument(id: team.id, path: path, history: true);
+  return response.data?.history?.toList() ?? const <DocCommit>[];
+});
+
+/// What one commit changed, as a unified diff.
+final docDiffProvider =
+    FutureProvider.family<String, ({String path, String sha})>((
+      ref,
+      ask,
+    ) async {
+      final team = ref.watch(currentTeamProvider);
+      if (team == null) return '';
+      final response = await ref
+          .read(mtClientProvider)
+          .team
+          .getDocument(id: team.id, path: ask.path, diff: ask.sha);
+      return response.data?.diff ?? '';
+    });
+
 /// The things you do to the tree rather than to a file's text.
 class DocsAdmin {
   const DocsAdmin(this._ref);

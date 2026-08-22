@@ -16,6 +16,7 @@ import '../common/team_scope.dart';
 import '../common/ui/team_picker.dart';
 import '../common/ui/theme.dart';
 import '../teams/teams_screen.dart' show promptForText;
+import 'doc_history.dart';
 import 'docs_controller.dart';
 import 'markdown_view.dart';
 
@@ -284,6 +285,11 @@ class _DocPaneState extends ConsumerState<_DocPane> {
             : null,
         title: Text(nameOf(widget.path)),
         actions: [
+          IconButton(
+            tooltip: 'history',
+            onPressed: () => showDocHistory(context, path: widget.path),
+            icon: const Icon(Icons.history),
+          ),
           if (_editing) ...[
             TextButton(onPressed: _stopEditing, child: const Text('cancel')),
             TextButton(
