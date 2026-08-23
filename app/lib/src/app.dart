@@ -822,7 +822,6 @@ class _Rail extends ConsumerWidget {
                     // It is you: there is no live screen behind your own face, and a tap here means
                     // "my profile".
                     clickable: false,
-                    showMeta: false,
                   ),
                 ),
               ),

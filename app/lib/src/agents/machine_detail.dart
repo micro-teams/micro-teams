@@ -302,7 +302,6 @@ class MachineDetail extends ConsumerWidget {
                             avatarId: agent.avatarId,
                             size: 32,
                             clickable: false,
-                            showMeta: false,
                           ),
                           title: Text(
                             agent.nickname.isEmpty
