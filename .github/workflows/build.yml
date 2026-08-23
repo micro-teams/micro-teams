@@ -78,6 +78,12 @@ jobs:
     defaults:
       run:
         working-directory: app
+    # Lifted to the job because a step's `if` cannot see the secrets context — only env. Empty when
+    # the repository has no key, which is what the signing step tests for.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
     steps:
       - uses: actions/checkout@v7
       # openapi-generator (the codegen step) runs on the JVM, same as the applet's.
@@ -126,14 +132,14 @@ jobs:
       # arm64, and the manifest this produces takes another architecture as one more entry rather
       # than as a change to any code.
       - name: Write the release key, if this repository has one
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/microteams-release.p12
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/microteams-release.p12
           cat > android/key.properties <<PROPS
           storeFile=microteams-release.p12
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          keyPassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEYSTORE_PASSWORD
           PROPS
           echo "MT_APK_SIGNED=release" >> "$GITHUB_ENV"
 
