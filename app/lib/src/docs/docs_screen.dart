@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
+import '../common/errors.dart';
 
 import '../common/team_scope.dart';
 import '../common/ui/team_picker.dart';
@@ -55,6 +56,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
       return _DocPane(
         path: open,
         onBack: () => widget.onOpen(null),
+        onClose: () => widget.onOpen(null),
         onMoved: widget.onOpen,
         showBack: true,
       );
@@ -83,6 +85,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
                 : _DocPane(
                     key: ValueKey(open),
                     path: open,
+                    onClose: () => widget.onOpen(null),
                     onMoved: widget.onOpen,
                     showBack: false,
                   ),
@@ -415,6 +418,7 @@ class _DocPane extends ConsumerStatefulWidget {
   const _DocPane({
     required this.path,
     required this.showBack,
+    required this.onClose,
     this.onBack,
     this.onMoved,
     super.key,
@@ -423,6 +427,10 @@ class _DocPane extends ConsumerStatefulWidget {
   final String path;
   final bool showBack;
   final VoidCallback? onBack;
+
+  /// Stop showing this document. Not the same as [onBack], which exists only on the layout that has
+  /// a back button: a file that is not there any more has to be closable on both.
+  final VoidCallback onClose;
 
   /// The file is now at this path. The caller decides what that means — on both layouts it means
   /// opening it there.
@@ -506,11 +514,10 @@ class _DocPaneState extends ConsumerState<_DocPane> {
       ),
       body: doc.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('$error', textAlign: TextAlign.center),
-          ),
+        error: (error, _) => _DocProblem(
+          error: error,
+          path: widget.path,
+          onClose: widget.onClose,
         ),
         data: (content) => Center(
           child: ConstrainedBox(
@@ -541,6 +548,56 @@ class _DocPaneState extends ConsumerState<_DocPane> {
                     ),
                   ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What is shown where a document would be when there is no document to show.
+///
+/// A file that is not in the tree any more is the ordinary case here — somebody deleted or renamed
+/// it while this address was still open — and it is not really an error: it is an answer. Showing
+/// the backend's exception name in the middle of the screen told the reader nothing about which
+/// file was gone, and left them looking at a dead end with the tree one tap away and no hint of it.
+class _DocProblem extends StatelessWidget {
+  const _DocProblem({
+    required this.error,
+    required this.path,
+    required this.onClose,
+  });
+
+  final Object error;
+  final String path;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final gone = error is MtError && (error as MtError).isNotFound;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              gone ? '$path is not in the tree any more' : '$error',
+              textAlign: TextAlign.center,
+            ),
+            if (gone) ...[
+              const SizedBox(height: 8),
+              Text(
+                'It was deleted or renamed. Its history is still in the repository.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: onClose,
+                child: const Text('back to the tree'),
+              ),
+            ],
+          ],
         ),
       ),
     );
