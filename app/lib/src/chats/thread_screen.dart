@@ -249,8 +249,8 @@ class _MessageList extends StatelessWidget {
     // One selection area around the list, so a drag runs across bubbles the way it does on a web
     // page and the system's own copy is what copies. See this file's header for what it costs.
     return _ReadingColumn(
-      child: SelectionArea(
-        child: ListView.builder(
+      child: Builder(
+        builder: (context) => ListView.builder(
           controller: scroll,
           reverse: true,
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -523,14 +523,18 @@ class _PendingBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _BubbleWidth(
-                  child: Opacity(
-                    opacity: pending.isStuck ? 1 : 0.6,
-                    child: _BubbleBody(
-                      text: pending.content,
-                      mine: true,
-                      background: ownBubble,
-                      foreground: ownBubbleInk,
-                    ),
+                  // Faded by colour rather than wrapped in an Opacity: an opacity layer is a
+                  // saveLayer, and this is the one bubble that is on screen while the list is
+                  // moving — a message you have just sent.
+                  child: _BubbleBody(
+                    text: pending.content,
+                    mine: true,
+                    background: pending.isStuck
+                        ? ownBubble
+                        : ownBubble.withValues(alpha: 0.6),
+                    foreground: pending.isStuck
+                        ? ownBubbleInk
+                        : ownBubbleInk.withValues(alpha: 0.6),
                   ),
                 ),
                 const SizedBox(height: 2),
