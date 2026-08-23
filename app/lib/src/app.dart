@@ -40,6 +40,17 @@ import 'common/ui/app_dialog.dart';
 import 'common/ui/detail_pane.dart';
 import 'common/ui/theme.dart';
 
+/// Go somewhere that is not a frame.
+///
+/// Switching sections, or picking an item while its list stays on screen beside it: the
+/// surroundings do not move, so nothing has been stacked on anything and back has nothing to
+/// close. Without `neglect` each of these leaves a browser history entry, and back at the root of a
+/// section then walks BACKWARDS THROUGH WHERE YOU HAVE BEEN — into the conversation before the one
+/// you just left — which is not what back meant one press earlier. With it, the entries behind the
+/// app are the ones from before the app, which is where back at the root should go.
+void goLateral(BuildContext context, String location) =>
+    Router.neglect(context, () => context.go(location));
+
 class MicroTeamsApp extends ConsumerStatefulWidget {
   const MicroTeamsApp({super.key});
 
@@ -381,7 +392,7 @@ class _ChatsPane extends ConsumerWidget {
               ),
               body: ChatsScreen(
                 selectedId: open,
-                onOpen: (thread) => context.go('/chats/${thread.id}'),
+                onOpen: (thread) => goLateral(context, '/chats/${thread.id}'),
               ),
             ),
           ),
@@ -445,8 +456,13 @@ class _AgentsPane extends ConsumerWidget {
     final list = AgentsScreen(
       selectedAgentId: openAgentId,
       selectedMachineId: openMachineId,
-      onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
-      onOpenMachine: (machine) => context.go('/agents/machine/${machine.id}'),
+      // Beside the list it is lateral; on a phone the detail replaces the list, so it is a frame.
+      onOpenAgent: (agent) => wide
+          ? goLateral(context, '/agents/${agent.userId}')
+          : context.go('/agents/${agent.userId}'),
+      onOpenMachine: (machine) => wide
+          ? goLateral(context, '/agents/machine/${machine.id}')
+          : context.go('/agents/machine/${machine.id}'),
       onManageTeams: () => context.go('/teams'),
     );
 
@@ -480,14 +496,15 @@ class _AgentsPane extends ConsumerWidget {
                 userId: id,
                 asPane: true,
                 onChat: (threadId) => context.go('/chats/$threadId'),
-                onGone: () => context.go('/agents'),
+                onGone: () => goLateral(context, '/agents'),
               ),
               (_, final String id) => MachineDetailScreen(
                 key: ValueKey('machine-$id'),
                 machineId: id,
                 asPane: true,
-                onGone: () => context.go('/agents'),
-                onOpenAgent: (agent) => context.go('/agents/${agent.userId}'),
+                onGone: () => goLateral(context, '/agents'),
+                onOpenAgent: (agent) =>
+                    goLateral(context, '/agents/${agent.userId}'),
               ),
               _ => const Center(child: Text('pick an agent or a machine')),
             },
@@ -512,11 +529,14 @@ class _DocsPane extends StatelessWidget {
   Widget build(BuildContext context) => DocsScreen(
     openPath: openPath,
     onManageTeams: () => context.go('/teams'),
-    onOpen: (path) => context.go(
-      path == null
+    onOpen: (path) {
+      final to = path == null
           ? '/docs'
-          : '/docs/file?path=${Uri.encodeQueryComponent(path)}',
-    ),
+          : '/docs/file?path=${Uri.encodeQueryComponent(path)}';
+      // Beside the tree it is lateral; on a phone the document REPLACES the tree, so it is a frame
+      // and back has to close it.
+      isWide(context) ? goLateral(context, to) : context.go(to);
+    },
   );
 }
 
@@ -632,12 +652,33 @@ class _Shell extends StatelessWidget {
 
   /// Switch branches. Tapping the branch you are already in goes to its root — the standard "tap
   /// the tab again to get back to the top" — and any other tap lands where that branch left off.
-  void _go(int index) =>
-      shell.goBranch(index, initialLocation: index == shell.currentIndex);
+  void _go(BuildContext context, int index) => Router.neglect(
+    context,
+    () => shell.goBranch(index, initialLocation: index == shell.currentIndex),
+  );
 
   @override
   Widget build(BuildContext context) {
+    final path = GoRouterState.of(context).uri.path;
+    // Back is a pop on the display tree, and at the root of the tree there is nothing to pop.
+    //
+    // What it used to do there was go back to wherever you had been BEFORE — the browser's own
+    // history, which is a record of where you have been rather than of what is on top of what. So
+    // leaving a conversation and pressing back again took you into the conversation you had been
+    // in two screens ago, which is not what "back" had meant a moment earlier.
+    //
+    // What it does now is nothing. Leaving the site entirely would be the other honest answer, but
+    // a page cannot count how many of the entries behind it are its own — a reload wipes that
+    // knowledge while leaving the entries in place — so "go back to before MicroTeams" is not
+    // something this can compute, and guessing would sometimes throw somebody out of the app.
+    final atBranchRoot = _branches.any((d) => d.path == path);
+
+    return PopScope(canPop: !atBranchRoot, child: _body(context));
+  }
+
+  Widget _body(BuildContext context) {
     final index = shell.currentIndex;
+    final path = GoRouterState.of(context).uri.path;
 
     // Inside a conversation on a phone, the bar goes away — WeChat does not show one there, and the
     // conversation wants those pixels more than a tab bar does.
@@ -647,8 +688,7 @@ class _Shell extends StatelessWidget {
     // with no bar at all. What is on screen is a function of where you are, and where you are is
     // one thing, read once, here.
     final immersive =
-        !isWide(context) &&
-        RegExp(r'^/chats/\d+$').hasMatch(GoRouterState.of(context).uri.path);
+        !isWide(context) && RegExp(r'^/chats/\d+$').hasMatch(path);
     if (immersive) return Scaffold(body: shell);
 
     if (isWide(context)) {
@@ -660,8 +700,8 @@ class _Shell extends StatelessWidget {
               // keeps reading "docs" while it is up — the same as the React shell.
               current: index == _teams ? _docs : index,
               items: [for (final i in _railItems) (branch: i, d: _branches[i])],
-              onSelected: _go,
-              onProfile: () => _go(_profile),
+              onSelected: (i) => _go(context, i),
+              onProfile: () => _go(context, _profile),
             ),
             const VerticalDivider(width: 1),
             Expanded(child: shell),
@@ -695,7 +735,7 @@ class _Shell extends StatelessWidget {
                     key: ValueKey('destination-${_branches[i].label}'),
                     destination: _branches[i],
                     active: i == (index == _teams ? _docs : index),
-                    onTap: () => _go(i),
+                    onTap: () => _go(context, i),
                   ),
               ],
             ),

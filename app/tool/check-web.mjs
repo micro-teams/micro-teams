@@ -452,6 +452,45 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await deployContext.close();
 }
 
+// Back is a pop on the display tree, and at the root of a section there is nothing left to pop.
+//
+// The browser's history is a record of where you have BEEN, which is a different thing. Every tab
+// switch used to leave an entry in it, so back at the root of a section walked backwards through
+// the afternoon — into the section you had been in two taps ago — which is not what back meant one
+// press earlier. Moves that do not stack anything on anything now leave no entry, so the entries
+// behind the app are the ones from before the app, and back at the root leaves for them.
+{
+  const backPage = await context.newPage();
+  await backPage.goto(BASE + "/chats", { waitUntil: "load" });
+  await backPage.waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+    timeout: 30000,
+  });
+  await backPage.waitForTimeout(1200);
+  const before = await backPage.evaluate(() => history.length);
+
+  // The rail, tapped where a person taps it: docs, then agents.
+  for (const y of [78, 124]) {
+    await backPage.mouse.click(31, y);
+    await backPage.waitForTimeout(600);
+  }
+  const after = await backPage.evaluate(() => history.length);
+  const where = new URL(backPage.url()).pathname;
+  check(
+    "switching sections leaves nothing behind for back to walk into",
+    after === before && where !== "/chats",
+    `${before} then ${after}, at ${where}`,
+  );
+
+  await backPage.goBack({ waitUntil: "commit" }).catch(() => {});
+  await backPage.waitForTimeout(800);
+  check(
+    "so back at the root of a section leaves the app, rather than going somewhere inside it",
+    !backPage.url().startsWith(BASE),
+    backPage.url(),
+  );
+  await backPage.close();
+}
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();

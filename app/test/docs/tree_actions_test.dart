@@ -103,7 +103,9 @@ Future<void> settle(WidgetTester tester) async {
 /// With a hover first, because that is now what makes it visible: a column of identical "..."
 /// buttons down every row reads as more important than the names beside them.
 Future<void> actionsOn(WidgetTester tester, String name) async {
-  final row = find.ancestor(of: find.text(name), matching: find.byType(Row)).first;
+  final row = find
+      .ancestor(of: find.text(name), matching: find.byType(Row))
+      .first;
   final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
   await pointer.addPointer(location: Offset.zero);
   addTearDown(pointer.removePointer);
