@@ -17,6 +17,18 @@ class Endpoints {
   /// Empty on the web (same-origin, relative paths). A full `https://host[:port]` elsewhere.
   final String origin;
 
+  /// This deployment's address, spelled out in full.
+  ///
+  /// [origin] is empty on the web on purpose — every request the app makes is relative, which is
+  /// what keeps it on whatever host served it. But some strings LEAVE the browser: the command that
+  /// installs a connector on somebody's laptop cannot say `curl /install.sh`. Those need the
+  /// absolute address, and on the web the only honest source for it is the page's own URL.
+  ///
+  /// One place, so the answer to "where is this deployment?" is not inferred twice. When a native
+  /// client eventually asks for a server at sign-in, that answer lands here too and nothing else
+  /// changes.
+  String get publicOrigin => origin.isEmpty ? _pageOrigin() : origin;
+
   /// cheese-auth: users, login, refresh, avatars. Envelope responses.
   String get auth => '$origin/api';
 
@@ -59,6 +71,12 @@ class Endpoints {
         : '?token=${Uri.encodeComponent(token)}';
     return '/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query';
   }
+}
+
+/// Where this page came from. Only reachable on the web, where `Uri.base` is the page URL.
+String _pageOrigin() {
+  final page = Uri.base;
+  return '${page.scheme}://${page.authority}';
 }
 
 String _pageOriginAsWebSocket() {
