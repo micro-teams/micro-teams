@@ -11,7 +11,6 @@
 ///   * whether this is an agent at all — only agents are enumerated, so being in the answer is the
 ///     answer;
 ///   * whether it is working (busy / starting / compacting), which draws the pulsing ring;
-///   * `elapsed · tokens` under the face while it works, which is the one place a human can see
 ///     what an agent is spending;
 ///   * whether tapping it opens that agent's live screen.
 ///
@@ -50,7 +49,6 @@ class UserAvatar extends ConsumerStatefulWidget {
     this.avatarId,
     this.size = Metrics.avatarInBubble,
     this.clickable = true,
-    this.showMeta = true,
     super.key,
   });
 
@@ -66,10 +64,6 @@ class UserAvatar extends ConsumerStatefulWidget {
   /// Whether tapping an agent opens its live screen. False inside a group tile, where the tap
   /// belongs to the row.
   final bool clickable;
-
-  /// Whether `elapsed · tokens` is drawn under a working agent. False in a group tile, where there
-  /// is no room for it.
-  final bool showMeta;
 
   @override
   ConsumerState<UserAvatar> createState() => _UserAvatarState();
@@ -133,7 +127,6 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
     final agent = presence[widget.userId];
     final isAgent = agent != null;
     final working = isWorking(agent);
-    final meta = metaOf(agent);
     final avatarId = widget.avatarId ?? agent?.avatarId;
     final name = (widget.nickname ?? agent?.nickname ?? '${widget.userId}')
         .trim();
@@ -164,6 +157,9 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
               top: -inset,
               right: -inset,
               bottom: -inset,
+              // Keyed because it is the only thing that says an agent is working, and a pulsing
+              // circle drawn on a canvas is otherwise invisible to a test.
+              key: const ValueKey('working-ring'),
               child: AnimatedBuilder(
                 animation: _pulse,
                 builder: (context, _) {
@@ -188,8 +184,6 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
               ),
             ),
             picture,
-            if (widget.showMeta && meta.isNotEmpty)
-              Positioned(bottom: -15, child: _MetaPill(text: meta)),
           ],
         ),
       );
@@ -281,31 +275,6 @@ class _Picture extends ConsumerWidget {
   }
 }
 
-/// `elapsed · tokens`, in a violet pill that crosses the ring.
-class _MetaPill extends StatelessWidget {
-  const _MetaPill({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-    decoration: BoxDecoration(
-      color: workingViolet,
-      borderRadius: BorderRadius.circular(6),
-      // A crisp edge where the pill crosses the ring, the way the CSS box-shadow did it.
-      border: Border.all(
-        color: Theme.of(context).colorScheme.surface,
-        width: 2,
-      ),
-    ),
-    child: Text(
-      text,
-      style: const TextStyle(color: Colors.white, fontSize: 9, height: 1),
-    ),
-  );
-}
-
 /// A group's avatar: WeChat's grid, up to nine faces in one rounded tile.
 ///
 /// The part that makes it read as WeChat is that a row which is not full is CENTRED rather than
@@ -381,10 +350,8 @@ class MemberGridAvatar extends StatelessWidget {
                         nickname: member.nickname,
                         avatarId: member.avatarId,
                         size: tile,
-                        // The tap belongs to the row this tile is in, and there is no room under a
-                        // tile for the meta pill.
+                        // The tap belongs to the row this tile is in.
                         clickable: false,
-                        showMeta: false,
                       );
                     }(),
                   ],

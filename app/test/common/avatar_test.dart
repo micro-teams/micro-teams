@@ -90,25 +90,25 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
 
 void main() {
   group('a working agent', () {
-    testWidgets('says what it has spent, under its face', (tester) async {
+    testWidgets('wears the ring', (tester) async {
       await tester.pumpWidget(
         _host(_Fake(status: 'busy'), const UserAvatar(userId: 42)),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(find.text('2m · 31k'), findsOneWidget);
+      expect(find.byKey(const ValueKey('working-ring')), findsOneWidget);
     });
 
     testWidgets('says nothing while it is idle', (tester) async {
-      // A ring and a meter that are always on say nothing at all.
+      // A ring that is always on says nothing at all.
       await tester.pumpWidget(
         _host(_Fake(status: 'idle'), const UserAvatar(userId: 42)),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(find.text('2m · 31k'), findsNothing);
+      expect(find.byKey(const ValueKey('working-ring')), findsNothing);
     });
 
     testWidgets('counts starting and compacting as working too', (
@@ -120,7 +120,11 @@ void main() {
         );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 50));
-        expect(find.text('2m · 31k'), findsOneWidget, reason: status);
+        expect(
+          find.byKey(const ValueKey('working-ring')),
+          findsOneWidget,
+          reason: status,
+        );
       }
     });
   });

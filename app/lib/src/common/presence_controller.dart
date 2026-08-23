@@ -54,16 +54,6 @@ bool isWorking(Agent? agent) {
   return status == 'busy' || status == 'starting' || status == 'compacting';
 }
 
-/// `elapsed · tokens`, or empty when the agent has not said. Shown only while working.
-String metaOf(Agent? agent) {
-  final vars = agent?.vars ?? const <String, Object>{};
-  final parts = [
-    '${vars['elapsed'] ?? ''}',
-    '${vars['tokens'] ?? ''}',
-  ].where((p) => p.isNotEmpty);
-  return parts.join(' · ');
-}
-
 class AgentPresence extends Notifier<Presence> {
   @override
   Presence build() {
