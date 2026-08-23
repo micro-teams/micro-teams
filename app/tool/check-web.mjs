@@ -44,6 +44,10 @@ await page.addInitScript(() => {
   window.addEventListener("multipath:progress", (e) => window.__mpProgress.push(e.detail.percent));
 });
 
+// Every request this page makes, so the check below can say where the bytes came from.
+const fetched = [];
+page.on("request", (request) => fetched.push(request.url()));
+
 await page.goto(BASE + "/", { waitUntil: "load" });
 
 // The first document is the multipath launcher, not Flutter's: that request is the one thing that
@@ -102,6 +106,23 @@ const plainPainted = await plain
   .catch(() => false);
 check("the app also starts without the launcher, from /app.html", plainPainted);
 await plain.close();
+
+// Nothing comes from anybody else.
+//
+// Flutter's default is to load its ~7MB engine from gstatic.com. That means a network which cannot
+// reach Google cannot start this app at all; the largest asset in the product never travels over
+// MultiPath's lines, which is the whole point of having them; and our own worker cannot cache it,
+// because a cross-origin response is opaque. `--no-web-resources-cdn` puts the engine beside
+// everything else — and this check is what stops the flag going missing again, because losing it
+// looks like nothing at all from a machine that can reach Google.
+const foreign = fetched.filter(
+  (url) => !url.startsWith(BASE) && !url.startsWith("data:"),
+);
+check(
+  "every byte comes from this origin",
+  foreign.length === 0,
+  foreign.slice(0, 2).join(" ") || "none",
+);
 
 check(
   "the tab is named",
