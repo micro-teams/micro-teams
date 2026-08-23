@@ -74,3 +74,15 @@ flutter:
         - asset: fonts/LiberationMono-Regular.ttf
         - asset: fonts/LiberationMono-Bold.ttf
           weight: 700
+    # Chinese, bundled rather than fetched.
+    #
+    # CanvasKit does not use the system's fonts — it carries its own — and when a glyph is missing
+    # it goes to fonts.gstatic.com for a Noto fallback AT THE MOMENT the text is drawn. That is why
+    # Chinese appeared as boxes for a second on every start, and why it stayed boxes on a network
+    # that cannot reach Google. 8.3MB is the price of never having either.
+    #
+    # Regular only: Skia synthesises the bold, and a second 8MB file to avoid that is not a trade
+    # anybody would take.
+    - family: NotoSansSC
+      fonts:
+        - asset: fonts/NotoSansSC-Regular.otf

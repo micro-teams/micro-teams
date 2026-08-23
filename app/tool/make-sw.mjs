@@ -16,36 +16,13 @@
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
-import { createHash } from "node:crypto";
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { appVersion } from "./version.mjs";
 
 const dist = path.resolve(process.argv[2] ?? "build/web");
-
-/** What the version is taken over: the code, not the assets around it. */
-const VERSIONED = ["main.dart.js", "flutter_bootstrap.js", "index.html"];
-
-async function hashOf(files) {
-  const hash = createHash("sha256");
-  for (const file of files) {
-    hash.update(await readFile(path.join(dist, file)));
-  }
-  return hash.digest("hex").slice(0, 16);
-}
-
-async function present(files) {
-  const out = [];
-  for (const file of files) {
-    try {
-      await stat(path.join(dist, file));
-      out.push(file);
-    } catch {
-      // A build without main.dart.js is a build that will not run; the check will say so far more
-      // clearly than a missing-file crash here would.
-    }
-  }
-  return out;
-}
 
 /**
  * Flutter's own worker is deleted below, so the call that loads it has to go too.
@@ -69,34 +46,38 @@ if (!CALL.test(bootstrapSource)) {
 }
 await writeFile(bootstrap, bootstrapSource.replace(CALL, "_flutter.loader.load({});\n"));
 
-const version = await hashOf(await present(VERSIONED));
+// One version for the whole bundle, the same string CI stamped everything else with. It replaces
+// the hash this file used to compute over three files: a hash of its own devising could only ever
+// answer "did these three change?", while the question that matters is "is this the build that is
+// deployed?" — which only something outside the bundle can answer.
+const version = await appVersion();
 
-const source = await readFile(path.join(dist, "sw.js"), "utf8");
+// Read from web/sw.js rather than from the copy in the bundle, so running this step twice is not a
+// mistake anyone can make: the second run would otherwise find an already-stamped file, no
+// placeholder in it, and stop the build.
+const source = await readFile(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "sw.js"),
+  "utf8",
+);
 if (!source.includes("__MT_BUILD__")) {
-  console.error("sw.js has no __MT_BUILD__ placeholder — did web/sw.js change?");
+  console.error("web/sw.js has no __MT_BUILD__ placeholder — did it change?");
   process.exit(1);
 }
 await writeFile(path.join(dist, "sw.js"), source.replace("__MT_BUILD__", version));
 
 /**
- * What the server says is deployed, for the worker to check itself against.
+ * What the server says is deployed, as one line of text at the bundle root.
  *
- * Small on purpose: a worker asks for this on every navigation, and it is served without caching.
- * The per-file hashes are not used by the worker — the one version is enough to know it is behind —
- * but they make a broken deploy diagnosable from outside, which is how the 2026-08-21 one was
- * found: the worker's version simply did not match the files it was serving.
+ * The launcher carries the same string inside itself and asks for this on every start; when they
+ * disagree, everything cached under the origin is from the older build and goes. That check used to
+ * live in the worker, comparing a hash it had computed over three files on a 60-second timer — an
+ * arrangement in which the thing doing the checking was itself one of the things that could be
+ * stale. The question belongs to the one part of a page load that cannot be answered from a cache.
  */
-const files = {};
-for (const file of await present(VERSIONED)) {
-  files[`/${file}`] = createHash("sha256")
-    .update(await readFile(path.join(dist, file)))
-    .digest("hex")
-    .slice(0, 16);
-}
-await writeFile(
-  path.join(dist, "build.json"),
-  `${JSON.stringify({ version, files }, null, 2)}\n`,
-);
+await writeFile(path.join(dist, "version"), `${version}\n`);
+// The old answer to the same question. Left behind, a deployed bundle would carry two versions and
+// nothing would say which one was current.
+await rm(path.join(dist, "build.json"), { force: true });
 
 await rm(path.join(dist, "flutter_service_worker.js"), { force: true });
 

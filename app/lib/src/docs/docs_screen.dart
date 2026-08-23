@@ -45,9 +45,8 @@ class DocsScreen extends ConsumerStatefulWidget {
 }
 
 class _DocsScreenState extends ConsumerState<DocsScreen> {
-  /// Folders the reader has closed. Closed rather than open, so a fresh tree arrives expanded —
-  /// which is what you want the first time and every time you have not said otherwise.
-  final Set<String> _collapsed = {};
+  /// Folders the reader has opened. Empty is every folder closed, root included — see [flatten].
+  final Set<String> _expanded = {};
 
   @override
   Widget build(BuildContext context) {
@@ -65,10 +64,10 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
     }
 
     final tree = _TreePane(
-      collapsed: _collapsed,
+      expanded: _expanded,
       selected: open,
       onToggle: (path) => setState(() {
-        if (!_collapsed.remove(path)) _collapsed.add(path);
+        if (!_expanded.remove(path)) _expanded.add(path);
       }),
       onOpen: widget.onOpen,
       onManageTeams: widget.onManageTeams,
@@ -115,7 +114,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
 /// that has to be dismissed to see the thing you are naming.
 class _TreePane extends ConsumerStatefulWidget {
   const _TreePane({
-    required this.collapsed,
+    required this.expanded,
     required this.selected,
     required this.onToggle,
     required this.onOpen,
@@ -124,7 +123,7 @@ class _TreePane extends ConsumerStatefulWidget {
 
   final VoidCallback onManageTeams;
 
-  final Set<String> collapsed;
+  final Set<String> expanded;
   final String? selected;
   final void Function(String path) onToggle;
   final void Function(String? path) onOpen;
@@ -178,9 +177,7 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                 ),
               ),
               data: (root) {
-                final rows = widget.collapsed.contains('')
-                    ? const <({DocNode node, int depth})>[]
-                    : flatten(root, collapsed: widget.collapsed);
+                final rows = flatten(root, expanded: widget.expanded);
                 // The team is the tree's root folder, and it is a row like any other — which is
                 // what gives "create at the root" somewhere to live. The React client drew it the
                 // same way; a plus in the title bar was ours, and it left the root as the one
@@ -191,9 +188,9 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                     if (index == 0) {
                       return _TreeRow(
                         label: team.name,
-                        icon: widget.collapsed.contains('')
-                            ? Icons.folder_outlined
-                            : Icons.folder_open_outlined,
+                        icon: widget.expanded.contains('')
+                            ? Icons.folder_open_outlined
+                            : Icons.folder_outlined,
                         depth: 0,
                         selected: false,
                         onTap: () => widget.onToggle(''),
@@ -207,7 +204,7 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                     final row = rows[index - 1];
                     final node = row.node;
                     final folded =
-                        node.isFolder && widget.collapsed.contains(node.path);
+                        node.isFolder && !widget.expanded.contains(node.path);
                     return _TreeRow(
                       label: nameOf(node.path),
                       icon: node.isFolder

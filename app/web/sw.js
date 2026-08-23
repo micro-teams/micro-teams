@@ -24,63 +24,14 @@
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
-// Replaced at build time by tool/make-sw.mjs with a hash of the build. A new build is a new cache,
-// and the old one is deleted on activation.
+// Replaced at build time by tool/make-sw.mjs with the bundle's version — the same string the
+// launcher carries and /version serves. A new build is a new cache, and the old one is deleted on
+// activation. Noticing that a NEWER build exists is not this file's job any more: a worker asking
+// whether it is stale is a cached thing asking a question about itself, and it lived on a
+// 60-second timer that a deploy plus a reload fitted comfortably inside. The launcher asks, on the
+// one request of a page load that cannot be answered from a cache. See tool/launcher.mjs.
 const VERSION = "__MT_BUILD__";
 const CACHE = `microteams-${VERSION}`;
-
-/// What the SERVER says is deployed, written by the same build step and served without caching.
-///
-/// A worker is only replaced when its own bytes change, so a deploy that ships new application
-/// files beside an OLD sw.js is invisible: no update, no activate, no cache eviction, and every
-/// asset keeps coming from the cache this worker built. That is not hypothetical — it is exactly
-/// what happened on 2026-08-21, where main.dart.js was four builds newer than the worker caching
-/// it, and every visitor kept running the old application.
-///
-/// So the worker does not trust its own version to be current. It asks.
-const BUILD_URL = "/build.json";
-
-/// How often that question is worth asking. Cheap (a few dozen bytes, no-store) but not free, so
-/// it rides navigations rather than every request.
-const CHECK_EVERY_MS = 60_000;
-let lastChecked = 0;
-
-/**
- * Compare what we hold against what is deployed, and recover if they differ.
- *
- * Recovery is deliberately blunt: throw away every cache and ask the browser to re-examine the
- * worker script. The next request for anything goes to the network, which is the whole point —
- * being stale is precisely the state where the cache is worth nothing.
- */
-async function reconcileWithServer() {
-  const now = Date.now();
-  if (now - lastChecked < CHECK_EVERY_MS) return;
-  lastChecked = now;
-  try {
-    const response = await fetch(BUILD_URL, { cache: "no-store" });
-    if (!response.ok) return;
-    const deployed = await response.json();
-    if (!deployed || typeof deployed.version !== "string") return;
-    if (deployed.version === VERSION) return;
-
-    console.warn(
-      `sw: holding ${VERSION}, server has ${deployed.version} — dropping the cache`,
-    );
-    await dropCaches();
-    // And look for a new worker, which is the thing that was supposed to happen by itself.
-    await self.registration.update();
-  } catch (e) {
-    // Offline, or no build.json (an older deployment). Neither is a reason to do anything: what we
-    // hold is what we have.
-  }
-}
-
-/** Throw away everything this worker has cached, whatever build it belongs to. */
-async function dropCaches() {
-  for (const name of await caches.keys()) {
-    if (name.startsWith("microteams-")) await caches.delete(name);
-  }
-}
 
 /**
  * The files whose NAMES never change, and which therefore may not be answered from cache without
@@ -121,9 +72,11 @@ self.addEventListener("install", (event) => {
           }
         }),
       );
-      // Take over at once. A user who reloads because something looked wrong should get the new
-      // build, not the one that looked wrong.
-      await self.skipWaiting();
+      // NOT skipWaiting. A worker that takes over while a page is loading replaces the thing
+      // answering that page's requests half way through it, and everything still in flight — the
+      // engine, the fonts, a chunk of code — is dropped. That is what "the first load after an
+      // update fails" was. This one waits until the pages it would be replacing have gone, which
+      // is the only moment when taking over costs nobody anything.
     })(),
   );
 });
@@ -131,7 +84,9 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      await reconcileWithServer();
+      // Safe here in a way it was not before: without skipWaiting, activation only happens once the
+      // pages the previous worker was serving have gone, so nothing is mid-load when these caches
+      // disappear.
       for (const name of await caches.keys()) {
         if (name.startsWith("microteams-") && name !== CACHE) await caches.delete(name);
       }
@@ -139,25 +94,6 @@ self.addEventListener("activate", (event) => {
     })(),
   );
 });
-
-/**
- * Whether two responses carry the same bytes.
- *
- * By ETag when both have one, which is what nginx serves and costs nothing to compare; by length
- * otherwise. Deliberately NOT by reading both bodies: this runs on the path of every page load, and
- * a megabyte-scale comparison there would be a fix that cost more than the bug.
- */
-async function sameBytes(a, b) {
-  const tagA = a.headers.get("etag");
-  const tagB = b.headers.get("etag");
-  if (tagA && tagB) return tagA === tagB;
-  const lengthA = a.headers.get("content-length");
-  const lengthB = b.headers.get("content-length");
-  if (lengthA && lengthB) return lengthA === lengthB;
-  // Nothing to compare on. Assume unchanged rather than dropping the cache on every load: being
-  // wrong here costs one stale visit, and being wrong the other way costs every visit its cache.
-  return true;
-}
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
@@ -174,15 +110,16 @@ self.addEventListener("fetch", (event) => {
   // are told to open when the cache itself is the problem. The build stamp likewise: a cached
   // answer to "what is deployed?" is an answer about the past, which is the one thing it must
   // never be.
-  if (url.pathname === "/unregister.html" || url.pathname === "/build.json") {
+  // The escape hatch and the version stamp always come from the network. The stamp especially: a
+  // cached answer to "what is deployed?" is an answer about the past, which is the one thing it
+  // must never be — and it is the answer the launcher decides with.
+  if (url.pathname === "/unregister.html" || url.pathname === "/version") {
     return;
   }
 
   // A navigation to any route is answered with the document. This is the service-worker half of
   // nginx's try_files: /agents typed into the address bar has to open the app, offline too.
   if (request.mode === "navigate") {
-    // Every navigation is a chance to notice that this worker is behind the deployment.
-    event.waitUntil(reconcileWithServer());
     event.respondWith(
       (async () => {
         try {
@@ -221,22 +158,7 @@ self.addEventListener("fetch", (event) => {
         try {
           const fresh = await fetch(request);
           if (fresh.ok && fresh.type === "basic") {
-            // A 200 where we had a copy means the code CHANGED under us, and everything cached
-            // beside it belongs to the build before this one. That matters most for the engine,
-            // which is cache-first: a new main.dart.js running on the previous build's canvaskit
-            // is a page that reaches 100% and then never paints a frame. It is not hypothetical —
-            // it is what a reload right after a deploy did, because the reconcile below is
-            // throttled to a minute and a deploy plus a reload fits comfortably inside one.
-            //
-            // So the code answering differently is itself the signal: drop everything and let the
-            // rest of this load come from the network, where it will all be the same build.
-            const stale = await cache.match(request);
-            if (stale && !(await sameBytes(stale.clone(), fresh.clone()))) {
-              console.warn("sw: the code changed under us — dropping the cache");
-              await dropCaches();
-              await self.registration.update();
-            }
-            (await caches.open(CACHE)).put(request, fresh.clone());
+            cache.put(request, fresh.clone());
           }
           return fresh;
         } catch (_) {

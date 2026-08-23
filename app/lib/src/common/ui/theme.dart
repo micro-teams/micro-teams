@@ -75,7 +75,9 @@ ThemeData darkTheme() {
   // The whole UI is monospace, as the old one was. It is the single strongest thing about how this
   // product looks, and it is not decoration: a chat full of paths, ids and command output lines up.
   final base = ThemeData(colorScheme: scheme, useMaterial3: true);
-  final text = base.textTheme.apply(fontFamily: monoFamily);
+  final text = base.textTheme
+      .apply(fontFamily: monoFamily)
+      .apply(fontFamilyFallback: fontFallback);
 
   return base.copyWith(
     // The Play Store press effect, which is Android 12's: a soft, edgeless glow that fades out,
@@ -251,3 +253,10 @@ bool isWide(BuildContext context) =>
 /// monospace family — see pubspec.yaml. The terminal needs it to line up; the rest of the app uses
 /// it because the product looks like this.
 const String monoFamily = 'LiberationMono';
+
+/// What draws a glyph the mono font does not have — Chinese, chiefly.
+///
+/// Bundled rather than left to the engine. CanvasKit has no access to the system's fonts, so a
+/// missing glyph sends it to fonts.gstatic.com at the moment the text is drawn: boxes for the first
+/// second on every start, and boxes forever on a network that cannot reach Google.
+const List<String> fontFallback = ['NotoSansSC'];

@@ -261,6 +261,9 @@ void main() {
     await tester.tap(find.text('docs'));
     await tester.pumpAndSettle();
 
+    // The tree starts closed — the team's own row and nothing under it.
+    await tester.tap(find.byIcon(Icons.folder_outlined).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('notes.md'));
     await tester.pumpAndSettle();
 

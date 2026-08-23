@@ -98,6 +98,18 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Open the tree down to the file these tests work on.
+///
+/// Nothing is open to begin with — a tree that arrives fully expanded is a list of every file in
+/// the repository — so a test that wants a row inside a folder has to do what a reader does.
+Future<void> openTree(WidgetTester tester) async {
+  // The team's own row is the tree's root; the same name is also on the team picker in the header.
+  await tester.tap(find.byIcon(Icons.folder_outlined).first);
+  await settle(tester);
+  await tester.tap(find.text('notes'));
+  await settle(tester);
+}
+
 /// Open the actions menu on the row showing [name].
 ///
 /// With a hover first, because that is now what makes it visible: a column of identical "..."
@@ -123,6 +135,7 @@ void main() {
   testWidgets('every node carries its own actions', (tester) async {
     await tester.pumpWidget(_host(_Fake()));
     await settle(tester);
+    await openTree(tester);
 
     await actionsOn(tester, 'idea.md');
     expect(find.text('new file'), findsOneWidget);
@@ -135,6 +148,7 @@ void main() {
     final backend = _Fake();
     await tester.pumpWidget(_host(backend));
     await settle(tester);
+    await openTree(tester);
 
     await actionsOn(tester, 'idea.md');
     await tester.tap(find.text('rename'));
@@ -159,6 +173,7 @@ void main() {
     final backend = _Fake();
     await tester.pumpWidget(_host(backend));
     await settle(tester);
+    await openTree(tester);
 
     await actionsOn(tester, 'notes');
     await tester.tap(find.text('new file'));
@@ -181,6 +196,7 @@ void main() {
     final backend = _Fake();
     await tester.pumpWidget(_host(backend));
     await settle(tester);
+    await openTree(tester);
 
     await actionsOn(tester, 'idea.md');
     await tester.tap(find.text('new file'));
@@ -196,6 +212,7 @@ void main() {
     final backend = _Fake();
     await tester.pumpWidget(_host(backend));
     await settle(tester);
+    await openTree(tester);
 
     await actionsOn(tester, 'idea.md');
     await tester.tap(find.text('delete'));

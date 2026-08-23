@@ -20,7 +20,7 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 
@@ -106,7 +106,7 @@ async function backend(req, res) {
         chats: [
           {
             id: 5,
-            title: "probe",
+            title: "现场 probe",
             updatedAt: "2026-08-21T00:00:00Z",
             members: [{ userId: 1, nickname: "Prober" }],
           },
@@ -115,7 +115,7 @@ async function backend(req, res) {
       });
     case "GET /mt/chat/5":
       return json(res, 200, {
-        thread: { id: 5, title: "probe", createdAt: "2026-08-21T00:00:00Z" },
+        thread: { id: 5, title: "现场 probe", createdAt: "2026-08-21T00:00:00Z" },
         members: [
           {
             id: 1,
@@ -182,6 +182,20 @@ const server = createServer(async (req, res) => {
   const requestPath = (req.url ?? "/").split("?")[0];
   if (requestPath.startsWith("/api/") || requestPath.startsWith("/mt/")) {
     return backend(req, res);
+  }
+
+  // As nginx serves it: never stored. It is the one thing a cached client asks in order to find out
+  // that it is a cached client, and an answer about the past would defeat the whole arrangement.
+  if (requestPath === "/version") {
+    try {
+      const body = await readFile(path.join(root, "version"), "utf8");
+      res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      res.end("no version");
+    }
+    return;
   }
 
   const file = await resolve(req.url ?? "/");

@@ -157,9 +157,15 @@ final docsAdminProvider = Provider<DocsAdmin>(DocsAdmin.new);
 /// Done here rather than in the widget because it is a rule about documents, not about pixels, and
 /// because a list is what a `ListView.builder` can be lazy about — a nested column of widgets is
 /// built in full however little of it is on screen.
+/// [expanded] holds the folders the reader has opened — everything else is closed, root included.
+///
+/// Open-by-default was the other way round, and it meant the first screen of a real repository was
+/// a list of every file in it. Closed, the first screen is the shape of the project, which is the
+/// thing you can navigate by. It also makes "what is open" the reader's own short list rather than
+/// a growing record of what they have shut.
 List<({DocNode node, int depth})> flatten(
   DocNode? root, {
-  required Set<String> collapsed,
+  required Set<String> expanded,
 }) {
   final rows = <({DocNode node, int depth})>[];
 
@@ -171,12 +177,15 @@ List<({DocNode node, int depth})> flatten(
       });
     for (final node in sorted) {
       rows.add((node: node, depth: depth));
-      if (node.isFolder && !collapsed.contains(node.path)) {
+      if (node.isFolder && expanded.contains(node.path)) {
         walk(node.children ?? const [], depth + 1);
       }
     }
   }
 
+  // The root is a folder like any other — the team's own row in the tree — so a tree nobody has
+  // opened shows nothing under it.
+  if (!expanded.contains('')) return rows;
   walk(root?.children ?? const [], 0);
   return rows;
 }

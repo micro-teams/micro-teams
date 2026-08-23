@@ -194,7 +194,11 @@ void main() {
     );
     await settle(tester);
 
-    await tester.tap(find.byIcon(Icons.more_horiz).first);
+    // Nothing is open to begin with: the tree shows the team's own row and nothing under it.
+    await tester.tap(find.byIcon(Icons.folder_outlined).first);
+    await settle(tester);
+
+    await tester.tap(find.byIcon(Icons.more_horiz).last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('rename'));
     await tester.pumpAndSettle();
