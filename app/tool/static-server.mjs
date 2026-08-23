@@ -60,6 +60,23 @@ async function resolve(urlPath) {
 /** Everything the fake backend remembers: the messages posted to it. */
 const posted = [];
 
+// A conversation with a history, for measuring what scrolling one costs. Off by default: every
+// other check wants a conversation it can read at a glance.
+const history = Number(process.env.FAKE_MESSAGES ?? 0);
+for (let i = 0; i < history; i++) {
+  posted.push({
+    id: i + 1,
+    threadId: 5,
+    senderId: i % 3 === 0 ? 1 : 2,
+    content:
+      i % 5 === 0
+        ? `第 ${i} 条消息，中文与 English mixed，长到要换行：${"字".repeat(40)}`
+        : `message ${i} — ordinary length, the sort of thing people actually send`,
+    createdAt: new Date(Date.UTC(2026, 7, 21, 0, 0, i)).toISOString(),
+    clientToken: null,
+  });
+}
+
 function json(res, status, body) {
   const text = JSON.stringify(body);
   res.writeHead(status, {

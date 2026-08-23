@@ -19,6 +19,7 @@ import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/teams/team_screen.dart';
 import 'package:microteams/src/teams/teams_screen.dart';
 import '../support/router_host.dart';
+import 'package:microteams/src/common/ui/menu.dart';
 
 /// One team with two members, and a log of every request made.
 class _Fake implements HttpClientAdapter {
@@ -125,16 +126,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Typed on Object, because the menu now carries the generated role enum itself rather than a
-    // 'role:NAME' string — see the comment on the button.
-    final menus = tester
-        .widgetList<PopupMenuButton<Object>>(
-          find.byType(PopupMenuButton<Object>),
-        )
-        .toList();
-    expect(menus, hasLength(2));
-    expect(menus.first.enabled, isFalse, reason: 'the first row is me');
-    expect(menus.last.enabled, isTrue);
+    // One menu, on the other person's row: your own row has none at all. A disabled button that
+    // looks like the others is an invitation to press it and be told no.
+    expect(find.byType(AppMenu<Object>), findsOneWidget);
+    final rows = find.byType(ListTile);
+    expect(
+      find.descendant(of: rows.first, matching: find.byType(AppMenu<Object>)),
+      findsNothing,
+      reason: 'the first row is me',
+    );
   });
 
   testWidgets('changing a role asks the server, then asks the roster again', (
@@ -147,9 +147,12 @@ void main() {
     await tester.pumpAndSettle();
     backend.asked.clear();
 
-    await tester.tap(find.byType(PopupMenuButton<Object>).last);
+    await tester.tap(find.byType(AppMenu<Object>).last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('make admin'));
+    await tester.pumpAndSettle();
+    // Twice: the roster is asked for again only after the change has been accepted, which is a
+    // round of its own.
     await tester.pumpAndSettle();
 
     expect(backend.asked, contains('PATCH /mt/team/1/members/2'));

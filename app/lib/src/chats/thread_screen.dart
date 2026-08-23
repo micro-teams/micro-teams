@@ -20,14 +20,17 @@
 ///     a `List<Widget>` of every message on every rebuild, which does all the work `ListView
 ///     .builder` exists to avoid — and it did it again on each arriving message.
 ///   * message text IS selectable, with one `SelectionArea` around the list, and you copy with
-///     whatever your system uses to copy. This is a deliberate reversal, and the cost is on the
-///     record: measured against a 300-message conversation in a browser, that `SelectionArea`
-///     dropped 125 of 274 frames while scrolling (p95 50ms against a 16.7ms budget) where having
-///     none dropped zero. It went back in because copying half a message — or a code fence out of
-///     an agent's reply — is something people do constantly here, and "long-press copies the whole
-///     bubble" cannot do it at all. The list is still virtualised, so what is in the selection tree
-///     is what is on screen; if this ever feels heavy on a real phone, that measurement is where to
-///     start, not this comment.
+///     whatever your system uses to copy. Copying half a message — or a code fence out of an
+///     agent's reply — is something people do constantly here, and "long-press copies the whole
+///     bubble" cannot do it at all.
+///
+///     This once carried a measurement saying that `SelectionArea` dropped 125 frames in 274 while
+///     scrolling. Re-measured with tool/measure-frames.mjs against a 300-message conversation,
+///     removing it made no difference at all — 20 to 34 frames over budget either way, with the
+///     median pinned at the display's own 16.7ms. That does not prove it is free; it proves the
+///     old number described a machine or a build that is not this one. If it ever feels heavy on a
+///     real phone, measure it there — that ruler is in the repo, and a number nobody can reproduce
+///     is worse than no number.
 library;
 
 import 'dart:math' as math;
@@ -523,14 +526,18 @@ class _PendingBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _BubbleWidth(
-                  child: Opacity(
-                    opacity: pending.isStuck ? 1 : 0.6,
-                    child: _BubbleBody(
-                      text: pending.content,
-                      mine: true,
-                      background: ownBubble,
-                      foreground: ownBubbleInk,
-                    ),
+                  // Faded by colour rather than wrapped in an Opacity: an opacity layer is a
+                  // saveLayer, and this is the one bubble that is on screen while the list is
+                  // moving — a message you have just sent.
+                  child: _BubbleBody(
+                    text: pending.content,
+                    mine: true,
+                    background: pending.isStuck
+                        ? ownBubble
+                        : ownBubble.withValues(alpha: 0.6),
+                    foreground: pending.isStuck
+                        ? ownBubbleInk
+                        : ownBubbleInk.withValues(alpha: 0.6),
                   ),
                 ),
                 const SizedBox(height: 2),

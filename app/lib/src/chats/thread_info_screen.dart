@@ -221,6 +221,35 @@ class _MemberGrid extends StatelessWidget {
   final VoidCallback? onAdd;
   final void Function(int userId) onRemove;
 
+  /// Taking somebody out of a conversation is not undoable from here — they would have to be
+  /// invited back, and they will have seen it happen. A cross at the corner of a face is also the
+  /// easiest thing in this screen to press by accident.
+  Future<void> _confirmRemove(BuildContext context, ThreadMember member) async {
+    final name = (member.nickname ?? '').trim().isEmpty
+        ? 'user ${member.userId}'
+        : member.nickname!.trim();
+    final confirmed = await showAppDialog<bool>(
+      context,
+      builder: (context) => AlertDialog(
+        title: Text('remove $name?'),
+        content: const Text(
+          'They stop seeing this conversation. Someone can add them back.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onRemove(member.userId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -255,7 +284,7 @@ class _MemberGrid extends StatelessWidget {
                           iconSize: 16,
                           visualDensity: VisualDensity.compact,
                           tooltip: 'Remove user ${member.userId}',
-                          onPressed: () => onRemove(member.userId),
+                          onPressed: () => _confirmRemove(context, member),
                           icon: CircleAvatar(
                             radius: 10,
                             backgroundColor: scheme.error,

@@ -168,21 +168,36 @@ void main() {
       expect(find.byTooltip('Remove user 2'), findsNothing);
     });
 
-    testWidgets(
-      'removing somebody asks the server, then asks again who is in',
-      (tester) async {
-        final backend = _Fake();
-        await tester.pumpWidget(
-          _host(backend, ThreadInfoScreen(threadId: 5, onGone: () {})),
-        );
-        await tester.pumpAndSettle();
+    testWidgets('removing somebody asks first, then asks the server', (
+      tester,
+    ) async {
+      // A cross at the corner of a face is the easiest thing on this screen to press by accident,
+      // and the person taken out will have seen it happen.
+      final backend = _Fake();
+      await tester.pumpWidget(
+        _host(backend, ThreadInfoScreen(threadId: 5, onGone: () {})),
+      );
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.byTooltip('Remove user 3'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Remove user 3'));
+      await tester.pumpAndSettle();
+      expect(backend.wrote, isNot(contains('DELETE /mt/chat/5/members/3')));
 
-        expect(backend.wrote, contains('DELETE /mt/chat/5/members/3'));
-      },
-    );
+      await tester.tap(find.widgetWithText(TextButton, 'cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        backend.wrote,
+        isNot(contains('DELETE /mt/chat/5/members/3')),
+        reason: 'cancel means cancel',
+      );
+
+      await tester.tap(find.byTooltip('Remove user 3'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'remove'));
+      await tester.pumpAndSettle();
+
+      expect(backend.wrote, contains('DELETE /mt/chat/5/members/3'));
+    });
 
     testWidgets('deleting the whole conversation needs confirming', (
       tester,

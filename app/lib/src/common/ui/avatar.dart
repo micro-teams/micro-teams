@@ -74,7 +74,20 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
   late final AnimationController _pulse = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1600),
-  )..repeat();
+  )..repeat(reverse: true);
+
+  /// 0.35 → 1 opacity and 1 → 1.08 scale, out and back. The same curve as the React keyframes,
+  /// which is what makes it read as the same app; `reverse: true` on the controller is what makes
+  /// the "and back" free rather than arithmetic done on every tick.
+  late final Animation<double> _ring = Tween<double>(
+    begin: 0.35,
+    end: 1,
+  ).animate(_pulse);
+
+  late final Animation<double> _ringScale = Tween<double>(
+    begin: 1,
+    end: 1.08,
+  ).animate(_pulse);
 
   /// Held rather than read on demand, and taken eagerly in initState: `ref` is unusable once the
   /// widget is disposed, and untrack has to happen exactly then — an avatar that scrolled away must
@@ -160,27 +173,22 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
               // Keyed because it is the only thing that says an agent is working, and a pulsing
               // circle drawn on a canvas is otherwise invisible to a test.
               key: const ValueKey('working-ring'),
-              child: AnimatedBuilder(
-                animation: _pulse,
-                builder: (context, _) {
-                  // 0.35 → 1 opacity, 1 → 1.08 scale, and back. The same curve as the CSS
-                  // keyframes, which is what makes it read as the same app.
-                  final t = (_pulse.value * 2 <= 1)
-                      ? _pulse.value * 2
-                      : 2 - _pulse.value * 2;
-                  return Opacity(
-                    opacity: 0.35 + 0.65 * t,
-                    child: Transform.scale(
-                      scale: 1 + 0.08 * t,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: workingViolet, width: 2),
-                        ),
-                      ),
+              // FadeTransition and ScaleTransition rather than an AnimatedBuilder that rebuilds
+              // this subtree sixty times a second: they drive the render objects directly, so a
+              // pulsing ring costs no widget building at all. Flutter's own performance guidance
+              // says exactly this about Opacity in an animation, and there is one of these per
+              // working agent on screen.
+              child: FadeTransition(
+                opacity: _ring,
+                child: ScaleTransition(
+                  scale: _ringScale,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: workingViolet, width: 2),
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
             picture,
@@ -260,6 +268,10 @@ class _Picture extends ConsumerWidget {
 
     return ClipRRect(
       borderRadius: radius,
+      // hardEdge, not the default antiAlias: an antialiased clip is a saveLayer, and there is one
+      // of these per row of every list in the app. The corner is 8px on a 44px square — nobody has
+      // ever seen the difference, and Flutter's guidance is to spend clips carefully.
+      clipBehavior: Clip.hardEdge,
       child: Image.network(
         '${ref.watch(endpointsProvider).auth}/avatars/$id',
         width: size,

@@ -37,18 +37,12 @@ class DetailPane extends StatelessWidget {
         if (current != null) current,
       ],
     ),
-    transitionBuilder: (child, animation) => FadeTransition(
-      opacity: animation,
-      child: SlideTransition(
-        // From slightly to the right, the direction a phone's push comes from. Small, because the
-        // pane is not moving into place — it is already in place, and only its contents changed.
-        position: Tween<Offset>(
-          begin: const Offset(0.02, 0),
-          end: Offset.zero,
-        ).animate(animation),
-        child: child,
-      ),
-    ),
+    // A fade and nothing else. There was a small slide, and it was wrong for the case that happens
+    // most: moving between two conversations is not arriving from anywhere, so sliding in from the
+    // side described a movement that had not happened — and a movement you did not ask for, twenty
+    // times an afternoon, is an irritation rather than an effect.
+    transitionBuilder: (child, animation) =>
+        FadeTransition(opacity: animation, child: child),
     child: child,
   );
 }

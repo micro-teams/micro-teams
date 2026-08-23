@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../team_scope.dart';
+import 'menu.dart';
 
 class TeamPickerAction extends ConsumerWidget {
   const TeamPickerAction({required this.onManage, super.key});
@@ -29,7 +30,7 @@ class TeamPickerAction extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.only(right: 4),
-      child: PopupMenuButton<int>(
+      child: AppMenu<int>(
         tooltip: 'Team',
         onSelected: (id) {
           if (id == _manage) {
@@ -38,15 +39,15 @@ class TeamPickerAction extends ConsumerWidget {
           }
           ref.read(selectedTeamProvider.notifier).select(id);
         },
-        itemBuilder: (context) => [
+        items: [
           for (final team in teams)
-            CheckedPopupMenuItem(
+            AppMenuItem(
               value: team.id,
+              label: team.name,
               checked: team.id == current?.id,
-              child: Text(team.name),
             ),
-          if (teams.isNotEmpty) const PopupMenuDivider(),
-          const PopupMenuItem(value: _manage, child: Text('manage teams')),
+          if (teams.isNotEmpty) const AppMenuDivider(),
+          const AppMenuItem(value: _manage, label: 'manage teams'),
         ],
         child: Container(
           constraints: const BoxConstraints(maxWidth: 160),

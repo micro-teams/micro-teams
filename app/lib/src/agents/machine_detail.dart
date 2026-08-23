@@ -20,6 +20,7 @@ import 'agent_detail.dart' show Facts;
 import 'agents_controller.dart';
 import '../common/ui/app_dialog.dart';
 import '../common/ui/section_action.dart';
+import '../common/ui/menu.dart';
 
 /// The machine's own screen: a frame on the stack, like the agent's.
 class MachineDetailScreen extends ConsumerWidget {
@@ -234,7 +235,7 @@ class MachineDetail extends ConsumerWidget {
                       '${live.teamIds.length == 1 ? 'team' : 'teams'}',
                   action: elsewhere.isEmpty
                       ? null
-                      : PopupMenuButton<int>(
+                      : AppMenu<int>(
                           tooltip: 'add to team',
                           onSelected: (teamId) => _guard(
                             context,
@@ -242,12 +243,9 @@ class MachineDetail extends ConsumerWidget {
                                 .read(agentsProvider.notifier)
                                 .bind(live.id, teamId: teamId),
                           ),
-                          itemBuilder: (context) => [
+                          items: [
                             for (final team in elsewhere)
-                              PopupMenuItem(
-                                value: team.id,
-                                child: Text(team.name),
-                              ),
+                              AppMenuItem(value: team.id, label: team.name),
                           ],
                           child: const SectionActionLabel('add to team'),
                         ),
