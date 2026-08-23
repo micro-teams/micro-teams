@@ -135,7 +135,11 @@ GoRouter _buildRouter(WidgetRef ref) {
       // is the bug that used to bounce a signed-in user out on every reload.
       if (session.isLoading) return null;
 
-      final signedIn = session.value != null;
+      // valueOrNull, not value: `value` RETHROWS when the provider is in an error state, and this
+      // runs inside the router's redirect — where a throw means no route resolves at all, no first
+      // frame is painted, and the loading screen sits at 100% forever with nothing to press. A
+      // session that failed to restore is not a crash; it is somebody who is not signed in.
+      final signedIn = session.valueOrNull != null;
       // Both screens that exist before a session. Bouncing someone off /register back to /login
       // for not being signed in is how registration became unreachable.
       const anonymous = {'/login', '/register'};
