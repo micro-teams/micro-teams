@@ -169,11 +169,25 @@ const server = createServer(async (req, res) => {
   const file = await resolve(req.url ?? "/");
   try {
     const info = await stat(file);
+    // The same rules nginx serves under, because the checks here measure caching: an ETag with
+    // `no-cache` means "ask me, and I will usually say 304" — which is what makes a warm visit cost
+    // a round trip rather than a re-download. A blanket `no-store` would have made every measure-
+    // ment here a measurement of a server that nobody deploys.
+    const etag = `"${info.size.toString(16)}-${info.mtimeMs.toString(16)}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache" });
+      res.end();
+      if (process.env.LOG_REQUESTS) console.log(`served 304 ${requestPath} 0`);
+      return;
+    }
+    if (process.env.LOG_REQUESTS) {
+      console.log(`served 200 ${requestPath} ${info.size}`);
+    }
     res.writeHead(200, {
       "Content-Type": types[path.extname(file)] ?? "application/octet-stream",
       "Content-Length": info.size,
-      // The service worker is the thing under test; a cached copy of it would test yesterday.
-      "Cache-Control": "no-store",
+      ETag: etag,
+      "Cache-Control": "no-cache",
     });
     createReadStream(file).pipe(res);
   } catch {

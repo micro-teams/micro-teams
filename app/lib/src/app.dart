@@ -64,11 +64,13 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     // was never once in effect. Nothing looked wrong either, because one working line is
     // indistinguishable from a routing layer with nothing to route between. The panel at /__lines
     // showing a single line is what finally said so.
+    final lines = ref.read(linesProvider);
     unawaited(
-      adoptRegistry(
-        ref.read(linesProvider),
-        ref.read(mtClientProvider).transport,
-      ),
+      adoptRegistry(lines, ref.read(mtClientProvider).transport).then((_) {
+        // Measuring starts after the registry arrives, because measuring one line and then being
+        // handed three more is a table that is wrong for as long as the first interval lasts.
+        lines.start();
+      }),
     );
   }
 

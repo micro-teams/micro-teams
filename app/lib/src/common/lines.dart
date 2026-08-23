@@ -78,10 +78,7 @@ String socketUrlOver(Line? line, Endpoints endpoints, String path) {
   return endpoints.socketUrl(origin, path);
 }
 
-/// Measure every line, by asking each one the question that costs least to answer.
-///
-/// `/mt/probe` is MultiPath's own endpoint and must never be cached — a cached probe reports the
-/// latency of the disk rather than of the line.
+/// How this app sends one probe.
 ///
 /// On its OWN client, not the app's. The app's client hangs five layers on every request, and one
 /// of them picks a line: a probe sent through it would measure whichever line the router chose,
@@ -91,18 +88,18 @@ String socketUrlOver(Line? line, Endpoints endpoints, String path) {
 /// What counts as an answer is decided here rather than by the library, deliberately: a 500 is a
 /// perfectly prompt reply, and a probe that recorded it as a success would leave a broken line
 /// ranked first.
-Future<void> probeLines(LineManager manager, {required String origin}) {
-  final probeClient = Dio(BaseOptions(validateStatus: (_) => true));
-  return manager
-      .probe((line) async {
-        final base = line.url.isEmpty ? origin : line.url;
-        final response = await probeClient.getUri<Object?>(
-          Uri.parse('$base/mt/probe'),
-        );
-        final status = response.statusCode ?? 0;
-        if (status < 200 || status >= 300) {
-          throw StateError('${line.id} answered $status');
-        }
-      })
-      .whenComplete(probeClient.close);
+SendProbe probeSender({required String origin}) {
+  final client = Dio(BaseOptions(validateStatus: (_) => true));
+  return (url) async {
+    final target = url.startsWith('http') ? url : '$origin$url';
+    final response = await client.getUri<List<int>>(
+      Uri.parse(target),
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final status = response.statusCode ?? 0;
+    return ProbeOutcome(
+      ok: status >= 200 && status < 300,
+      bytes: response.data?.length ?? 0,
+    );
+  };
 }

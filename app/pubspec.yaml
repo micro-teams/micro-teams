@@ -40,7 +40,10 @@ dependencies:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      ref: main
+      # micro-teams/multipath#25 until it lands: the Dart package forgot everything it measured
+      # between visits, so every cold start ranked on configured weight. Back to a tag once 0.1.5
+      # is cut.
+      ref: feat/dart-health-persistence
   web_socket_channel: ^3.0.1
 
   # The live terminal. Proven against a real device before any of this was written — see

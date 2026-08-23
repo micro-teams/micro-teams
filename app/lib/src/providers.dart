@@ -14,6 +14,7 @@ import 'common/config.dart';
 import 'common/errors.dart';
 import 'common/key_value.dart';
 import 'common/lines.dart';
+import 'common/prefs_store.dart';
 import 'common/stream_lines.dart';
 import 'common/api.dart';
 import 'common/updates/socket.dart';
@@ -45,21 +46,29 @@ final stateStoreProvider = Provider<KeyValueStore>(
 /// deployment's real registry is adopted at startup by the composition root (see app.dart), which
 /// is where it has to happen: the client that asks `/mt/lines` is built FROM this manager, so this
 /// provider cannot ask for it without asking for itself.
-final linesProvider = Provider<mp.LineManager>(
-  (ref) => mp.LineManager(registry: sameOriginOnly()),
-);
+final linesProvider = Provider<mp.LineManager>((ref) {
+  final manager = mp.LineManager(
+    registry: sameOriginOnly(),
+    // How a probe is sent. Without it the manager measures nothing and ranks on configured weight —
+    // which is what this client did until now, and why every line but the one real traffic happened
+    // to use sat at "never measured" forever.
+    send: probeSender(origin: ref.watch(endpointsProvider).origin),
+    // What the last visit measured, so the ranking does not start from the registry's fixed order
+    // every time. start() seeds from it in the background; stop() writes it back.
+    storage: const PrefsHealthStore(),
+  );
+  ref.onDispose(manager.stop);
+  return manager;
+});
 
 final authApiProvider = Provider<AuthApi>((ref) {
   return AuthApi(baseUrl: ref.watch(endpointsProvider).auth);
 });
 
-/// Measures every line, on request. Nothing calls this on a timer: probing costs real requests, and
-/// a client that measured constantly would be spending a phone's battery to keep a table warm that
-/// ordinary traffic already updates.
+/// Measures every line, now. The panel's refresh button; the loop runs on its own once started.
 final probeLinesProvider = Provider<Future<void> Function()>((ref) {
   final manager = ref.watch(linesProvider);
-  final origin = ref.watch(endpointsProvider).origin;
-  return () => probeLines(manager, origin: origin);
+  return manager.probeNow;
 });
 
 final mtClientProvider = Provider<MtClient>((ref) {
