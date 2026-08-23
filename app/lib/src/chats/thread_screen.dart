@@ -625,20 +625,27 @@ class _Composer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: ConstrainedBox(
-                    // The floor, not the height: growing to six lines is what maxLines is for.
-                    constraints: const BoxConstraints(
-                      minHeight: Metrics.composerHeight,
-                    ),
-                    child: TextField(
-                      controller: controller,
-                      minLines: 1,
-                      maxLines: 6,
-                      textInputAction: TextInputAction.newline,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(fontSize: 14),
-                      decoration: const InputDecoration(hintText: 'message…'),
+                  child: TextField(
+                    controller: controller,
+                    minLines: 1,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.newline,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(fontSize: 14),
+                    // The padding is spelled out here rather than left to the theme, and the field
+                    // is not wrapped in a minimum height. Both of those were how it ended up 48
+                    // tall next to a 40 tall button: the box was told its floor while the field
+                    // inside it kept Material's own idea of comfortable padding, and the eight
+                    // pixels of difference sat above the text where nothing explained them.
+                    // One line of text at 14 with 10 above and below IS the button's height.
+                    decoration: const InputDecoration(
+                      hintText: 'message…',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                 ),

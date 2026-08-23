@@ -25,7 +25,9 @@ const String teamsPath = '/mt/team?page_size=$_teamsPageSize';
 class TeamsController extends AsyncNotifier<List<Team>> {
   @override
   Future<List<Team>> build() async {
-    final session = ref.watch(sessionProvider).value;
+    // valueOrNull: `value` rethrows a failed session, and this is read while a screen is being
+    // built — a throw there costs the frame, not just the data.
+    final session = ref.watch(sessionProvider).valueOrNull;
     if (session == null) return const [];
 
     final response = await ref

@@ -18,6 +18,7 @@ import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/teams/team_screen.dart';
 import 'package:microteams/src/teams/teams_screen.dart';
+import '../support/router_host.dart';
 
 /// One team with two members, and a log of every request made.
 class _Fake implements HttpClientAdapter {
@@ -98,7 +99,7 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(theme: darkTheme(), home: child),
+  child: routed(child, theme: darkTheme()),
 );
 
 void main() {

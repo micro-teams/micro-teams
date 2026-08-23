@@ -15,6 +15,7 @@ import '../common/ui/change_avatar.dart';
 import '../common/ui/editable_name.dart';
 import '../common/ui/online_dot.dart';
 import 'agents_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 /// What this screen cannot do for itself: leave for another one.
 class AgentActions {
@@ -121,8 +122,8 @@ class AgentDetail extends ConsumerWidget {
   }
 
   Future<void> _close(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('close $_name?'),
         content: const Text(

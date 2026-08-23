@@ -143,9 +143,14 @@ ThemeData darkTheme() {
       selectedLabelTextStyle: text.labelMedium!.copyWith(color: brandGreen),
       unselectedLabelTextStyle: text.labelMedium!.copyWith(color: _inkMuted),
     ),
-    listTileTheme: const ListTileThemeData(
+    // One size for a row's name and one for what is under it, set here rather than at each list.
+    // A tree row written at 14 next to a fleet row written at Material's default 16 is two lists
+    // that were meant to be one column, and neither of them looks wrong until you see the other.
+    listTileTheme: ListTileThemeData(
       selectedTileColor: _hover,
       iconColor: _inkMuted,
+      titleTextStyle: text.bodyMedium,
+      subtitleTextStyle: text.bodySmall?.copyWith(color: _inkMuted),
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,

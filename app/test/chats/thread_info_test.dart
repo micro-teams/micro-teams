@@ -17,6 +17,7 @@ import 'package:microteams/src/chats/thread_info_screen.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/providers.dart';
+import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
   _Fake({this.myRole = 'OWNER'});
@@ -104,7 +105,7 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(home: child),
+  child: routed(child),
 );
 
 void main() {

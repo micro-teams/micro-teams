@@ -452,6 +452,72 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await deployContext.close();
 }
 
+// Back is a pop on the display tree, and at the root of a section there is nothing left to pop.
+//
+// The browser's history is a record of where you have BEEN, which is a different thing. Every tab
+// switch used to leave an entry in it, so back at the root of a section walked backwards through
+// the afternoon — into the section you had been in two taps ago — which is not what back meant one
+// press earlier. Moves that do not stack anything on anything now leave no entry, so the entries
+// behind the app are the ones from before the app, and back at the root leaves for them.
+{
+  const backPage = await context.newPage();
+  await backPage.goto(BASE + "/chats", { waitUntil: "load" });
+  await backPage.waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+    timeout: 30000,
+  });
+  await backPage.waitForTimeout(1200);
+  const before = await backPage.evaluate(() => history.length);
+
+  // The rail, tapped where a person taps it: docs, then agents.
+  for (const y of [78, 124]) {
+    await backPage.mouse.click(31, y);
+    await backPage.waitForTimeout(600);
+  }
+  const after = await backPage.evaluate(() => history.length);
+  const where = new URL(backPage.url()).pathname;
+  check(
+    "switching sections leaves nothing behind for back to walk into",
+    after === before && where !== "/chats",
+    `${before} then ${after}, at ${where}`,
+  );
+
+  await backPage.goBack({ waitUntil: "commit" }).catch(() => {});
+  await backPage.waitForTimeout(800);
+  check(
+    "so back at the root of a section leaves the app, rather than going somewhere inside it",
+    !backPage.url().startsWith(BASE),
+    backPage.url(),
+  );
+  await backPage.close();
+}
+
+// What the screen says when the app never starts.
+//
+// The percentage reaching 100 and staying there is the worst thing this screen can do: it looks
+// exactly like a broken app and offers nothing to press. It happened for real — a deploy landing
+// under a running client — and the first thing anybody could say about it was "it just sits there".
+{
+  // Its own context: a worker from an earlier check would serve the app's code out of its cache,
+  // which is not something a page-level route interception can stop — and the app would start.
+  const stuckContext = await browser.newContext();
+  const stuck = await stuckContext.newPage();
+  await stuck.addInitScript(() => {
+    window.__mtSlowAfter = 1200;
+  });
+  // The app's code never arrives, so no first frame is ever painted.
+  await stuck.route("**/main.dart.js", (route) => route.abort());
+  await stuck.goto(BASE + "/", { waitUntil: "commit" });
+  await stuck.waitForTimeout(3000);
+
+  const said = await stuck
+    .locator("#mt-splash-slow")
+    .isVisible()
+    .catch(() => false);
+  const ways = await stuck.locator("#mt-splash-ways a").count();
+  check("an app that never starts says so, and offers a way out", said && ways === 2, `${ways} ways`);
+  await stuckContext.close();
+}
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();

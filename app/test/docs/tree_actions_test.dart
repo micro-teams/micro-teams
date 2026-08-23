@@ -11,6 +11,7 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,7 @@ import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/docs/docs_screen.dart';
 import 'package:microteams/src/providers.dart';
+import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
   final List<({String call, Object? body})> wrote = [];
@@ -85,9 +87,9 @@ Widget _host(_Fake backend) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(
+  child: routed(
+    DocsScreen(onManageTeams: () {}, onOpen: (_) {}),
     theme: darkTheme(),
-    home: DocsScreen(onManageTeams: () {}, onOpen: (_) {}),
   ),
 );
 
@@ -97,12 +99,22 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 /// Open the actions menu on the row showing [name].
+///
+/// With a hover first, because that is now what makes it visible: a column of identical "..."
+/// buttons down every row reads as more important than the names beside them.
 Future<void> actionsOn(WidgetTester tester, String name) async {
+  final row = find
+      .ancestor(of: find.text(name), matching: find.byType(Row))
+      .first;
+  final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await pointer.addPointer(location: Offset.zero);
+  addTearDown(pointer.removePointer);
+  await tester.pump();
+  await pointer.moveTo(tester.getCenter(row));
+  await tester.pumpAndSettle();
+
   await tester.tap(
-    find.descendant(
-      of: find.ancestor(of: find.text(name), matching: find.byType(Row)).first,
-      matching: find.byIcon(Icons.more_horiz),
-    ),
+    find.descendant(of: row, matching: find.byIcon(Icons.more_horiz)),
   );
   await tester.pumpAndSettle();
 }

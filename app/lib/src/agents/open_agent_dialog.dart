@@ -17,13 +17,14 @@ import 'package:mt_api/mt_api.dart';
 
 import '../common/team_scope.dart';
 import 'agents_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 /// Shows the form. Returns the opened agent, or null if it was dismissed.
 Future<OpenedAgent?> showOpenAgentDialog(
   BuildContext context, {
   required List<Machine> machines,
-}) => showDialog<OpenedAgent>(
-  context: context,
+}) => showAppDialog<OpenedAgent>(
+  context,
   builder: (context) => OpenAgentDialog(machines: machines),
 );
 

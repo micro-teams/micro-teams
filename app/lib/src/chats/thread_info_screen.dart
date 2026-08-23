@@ -13,6 +13,7 @@ import 'package:mt_api/mt_api.dart';
 import '../common/ui/avatar.dart';
 import '../providers.dart';
 import 'thread_info_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 class ThreadInfoScreen extends ConsumerWidget {
   const ThreadInfoScreen({
@@ -32,8 +33,8 @@ class ThreadInfoScreen extends ConsumerWidget {
     String current,
   ) async {
     final controller = TextEditingController(text: current);
-    final title = await showDialog<String>(
-      context: context,
+    final title = await showAppDialog<String>(
+      context,
       builder: (context) => AlertDialog(
         title: const Text('Rename chat'),
         content: TextField(
@@ -63,8 +64,8 @@ class ThreadInfoScreen extends ConsumerWidget {
 
   Future<void> _add(BuildContext context, WidgetRef ref) async {
     final controller = TextEditingController();
-    final id = await showDialog<String>(
-      context: context,
+    final id = await showAppDialog<String>(
+      context,
       builder: (context) => AlertDialog(
         title: const Text('Add someone'),
         content: TextField(
@@ -98,8 +99,8 @@ class ThreadInfoScreen extends ConsumerWidget {
   }
 
   Future<void> _dissolve(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: const Text('Delete this chat?'),
         content: const Text(

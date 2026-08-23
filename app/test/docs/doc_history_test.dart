@@ -18,6 +18,7 @@ import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/docs/doc_history.dart';
 import 'package:microteams/src/docs/docs_screen.dart';
 import 'package:microteams/src/providers.dart';
+import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
   final List<String> asked = [];
@@ -94,9 +95,9 @@ Widget _host(_Fake backend) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(
+  child: routed(
+    const Scaffold(body: DocHistory(path: 'notes.md')),
     theme: darkTheme(),
-    home: const Scaffold(body: DocHistory(path: 'notes.md')),
   ),
 );
 
@@ -181,13 +182,13 @@ void main() {
             ),
           ),
         ],
-        child: MaterialApp(
-          theme: darkTheme(),
-          home: DocsScreen(
+        child: routed(
+          DocsScreen(
             openPath: 'notes.md',
             onManageTeams: () {},
             onOpen: (path) => movedTo = path,
           ),
+          theme: darkTheme(),
         ),
       ),
     );
