@@ -70,10 +70,22 @@ const painted = await page
   .catch(() => false);
 check("the app paints a first frame", painted);
 
-// A percentage of the 13KB bootstrap would be a lie told quickly. What is counted is main.dart.js,
-// which is 3.4MB and is what the visitor is actually waiting for.
+// A bar that moves, rather than one that sits at 0 and then says 100.
+//
+// It used to do exactly that, for two reasons that are both about arithmetic: it counted one file
+// out of ten megabytes, and it took that file's size from a Content-Length that counts COMPRESSED
+// bytes while what it was adding up were decompressed ones. So it reached 99 after a few chunks of
+// a gzipped megabyte and waited there. The sizes now come from the build, over everything the first
+// frame needs — code, engine, fonts.
 const progress = await page.evaluate(() => window.__mpProgress ?? []);
-check("the launcher reported progress while loading", progress.length > 1, progress.join(" "));
+const distinct = new Set(progress).size;
+check(
+  "the launcher reported progress while loading",
+  distinct >= 10,
+  `${distinct} distinct steps: ${progress.slice(0, 12).join(" ")}…`,
+);
+const rising = progress.every((p, i) => i === 0 || p >= progress[i - 1]);
+check("and the bar only ever goes forwards", rising);
 check(
   "and it got to 100 only once the app had been imported",
   progress[progress.length - 1] === 100 && progress.every((p, i) => i === 0 || p >= progress[i - 1]),
@@ -166,23 +178,27 @@ check(
   flutterSw,
 );
 
-// The worker and the files have to be from the same build, or a deploy lands invisibly: the worker
-// is only replaced when its own bytes change, so an old worker keeps serving an old app out of its
-// own cache no matter what was uploaded beside it.
+// One version, said in every place a bundle says it. They are written by one build step from one
+// string, so a disagreement here means a step ran against a different build than the others — which
+// is exactly how a deploy used to land invisibly.
 const stamped = await page.evaluate(async () => {
-  const [sw, build] = await Promise.all([
+  const [sw, served, launcher] = await Promise.all([
     fetch("/sw.js").then((r) => r.text()),
-    fetch("/build.json").then((r) => r.json()),
+    fetch("/version").then((r) => r.text()),
+    fetch("/index.html").then((r) => r.text()),
   ]);
   return {
     worker: /const VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
-    build: build.version ?? null,
+    served: served.trim(),
+    launcher: /const __version = "([^"]+)"/.exec(launcher)?.[1] ?? null,
   };
 });
 check(
-  "the worker and the build stamp agree",
-  stamped.worker != null && stamped.worker === stamped.build,
-  `worker ${stamped.worker}, stamp ${stamped.build}`,
+  "the worker, the launcher and /version all say the same build",
+  stamped.worker != null &&
+    stamped.worker === stamped.served &&
+    stamped.launcher === stamped.served,
+  `worker ${stamped.worker}, launcher ${stamped.launcher}, served ${stamped.served}`,
 );
 
 const manifest = await page.evaluate(async () => {
@@ -406,10 +422,12 @@ await revisit.close();
 //
 // This is the shape of the worst failure this client has had: reach 100%, then never paint. The
 // application's own code is network-first, so a reload right after a deploy gets the NEW
-// main.dart.js — while the engine beside it is cache-first and comes back from the cache, which
-// still holds the PREVIOUS build's canvaskit. A new app on an old engine does not start, and the
-// build.json reconcile cannot save it because it is throttled to a minute and a deploy plus a
-// reload fits inside one.
+// main.dart.js — while the engine beside it is cache-first and came from a cache still holding the
+// PREVIOUS build's canvaskit. A new app on an old engine does not start.
+//
+// What answers it now is the version: the launcher knows which build filled the caches on this
+// machine, sees that it is not this one, and throws all of it away before the application is asked
+// to run on any of it.
 if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   const DEPLOY = process.env.CHECK_WEB_DEPLOY_BASE;
   const marker = `deployed-${Date.now()}`;
@@ -440,6 +458,14 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await deployPage.reload({ waitUntil: "commit" });
   const started = await ready();
   check("and starts again on the reload right after a deploy", started);
+
+  // Not a detail: the caches that were filled by the previous build are gone, rather than being
+  // mixed with the new code.
+  const held = await deployPage.evaluate(() => localStorage.getItem("multipath:version"));
+  const servedNow = await deployPage.evaluate(() =>
+    fetch("/version").then((r) => r.text()).then((t) => t.trim()),
+  );
+  check("and knows which build it is now running", held === servedNow, `${held} / ${servedNow}`);
 
   // The point of the check, not a detail of it: whatever the page is running, the engine it got
   // must belong to the same build as the code.
@@ -491,30 +517,44 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await backPage.close();
 }
 
-// What the screen says when the app never starts.
+// What the screen says when the app has not started yet.
 //
-// The percentage reaching 100 and staying there is the worst thing this screen can do: it looks
+// A percentage that reaches 100 and stays there is the worst thing this screen can do: it looks
 // exactly like a broken app and offers nothing to press. It happened for real — a deploy landing
-// under a running client — and the first thing anybody could say about it was "it just sits there".
+// under a running client — and all anybody could say about it was "it just sits there".
+//
+// Driven by making the deadline one millisecond rather than by breaking the app, and that is a
+// deliberate limit of this check: it proves the timer fires, the sentence appears and both ways out
+// are there, not that any particular failure produces it. A blocked engine no longer produces it
+// either — Flutter falls back to another renderer and starts anyway, which is a good thing that
+// makes "never starts" hard to stage from outside.
 {
-  // Its own context: a worker from an earlier check would serve the app's code out of its cache,
-  // which is not something a page-level route interception can stop — and the app would start.
   const stuckContext = await browser.newContext();
   const stuck = await stuckContext.newPage();
   await stuck.addInitScript(() => {
-    window.__mtSlowAfter = 1200;
+    window.__mtSlowAfter = 1;
   });
-  // The app's code never arrives, so no first frame is ever painted.
-  await stuck.route("**/main.dart.js", (route) => route.abort());
   await stuck.goto(BASE + "/", { waitUntil: "commit" });
-  await stuck.waitForTimeout(3000);
+  await stuck.waitForTimeout(600);
 
-  const said = await stuck
-    .locator("#mt-splash-slow")
-    .isVisible()
-    .catch(() => false);
+  const said = await stuck.locator("#mt-splash-slow").isVisible().catch(() => false);
   const ways = await stuck.locator("#mt-splash-ways a").count();
-  check("an app that never starts says so, and offers a way out", said && ways === 2, `${ways} ways`);
+  check("a screen that has not started yet says so, and offers a way out", said && ways === 2, `${ways} ways`);
+
+  // And it goes away by itself the moment there is something to look at.
+  const arrived = await stuck
+    .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, { timeout: 60000 })
+    .then(() => true)
+    .catch(() => false);
+  check("the app it was waiting for does arrive", arrived);
+  await stuck.waitForTimeout(600);
+  // By opacity: the splash fades rather than being removed, and a faded element is still "visible"
+  // to a browser — it is the reader it has stopped talking to.
+  const opacity = await stuck.evaluate(() => {
+    const splash = document.getElementById("mt-splash");
+    return splash ? getComputedStyle(splash).opacity : "gone";
+  });
+  check("and stops saying it once the app is on screen", opacity === "0" || opacity === "gone", opacity);
   await stuckContext.close();
 }
 

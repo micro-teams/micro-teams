@@ -97,12 +97,19 @@ jobs:
       # The Dart client comes from the same repo-root contract the backend generates its Api
       # interfaces from. It is gitignored, so this step is not optional — without it nothing below
       # compiles.
+      # One version for the whole bundle: the product version from the repo-root VERSION file plus
+      # the commit that produced it. The app is built with it, the launcher carries it, the worker
+      # is stamped with it and /version serves it — four things that agree by construction rather
+      # than by four calculations that agree until one of them changes.
+      - name: Decide this bundle's version
+        run: echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
       - run: bash tool/codegen.sh
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build web --release --no-web-resources-cdn
+      - run: flutter build web --release --no-web-resources-cdn --dart-define=MT_VERSION=$MT_VERSION
       # The first request cannot be spread across lines, so it is made small and given one job:
       # register the worker, carry the registry inline, and start Flutter on whichever line answers
       # first. Before make-sw, because the launcher IS the document the worker precaches and hashes.

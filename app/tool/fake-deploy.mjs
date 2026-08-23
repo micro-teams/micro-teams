@@ -12,7 +12,6 @@
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
-import { createHash } from "node:crypto";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -26,23 +25,19 @@ for (const file of ["main.dart.js", ENGINE]) {
   await appendFile(path.join(dist, file), `\n// ${marker}\n`);
 }
 
-const VERSIONED = ["main.dart.js", "flutter_bootstrap.js", "index.html"];
-const hash = createHash("sha256");
-const files = {};
-for (const file of VERSIONED) {
-  const bytes = await readFile(path.join(dist, file));
-  hash.update(bytes);
-  files[`/${file}`] = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-}
-const version = hash.digest("hex").slice(0, 16);
-
+// A deploy is a new version, said in all the places a build says it: the launcher carries it, the
+// worker is stamped with it, and /version serves it.
 const sw = await readFile(path.join(dist, "sw.js"), "utf8");
 const current = /const VERSION = "([^"]+)"/.exec(sw)?.[1];
 if (!current) {
   console.error("no stamped VERSION in sw.js — run tool/make-sw.mjs first");
   process.exit(1);
 }
+const version = `${current.split("-")[0]}-${marker.slice(-7)}`;
+
 await writeFile(path.join(dist, "sw.js"), sw.replace(current, version));
-await writeFile(path.join(dist, "build.json"), `${JSON.stringify({ version, files }, null, 2)}\n`);
+await writeFile(path.join(dist, "version"), `${version}\n`);
+const launcher = await readFile(path.join(dist, "index.html"), "utf8");
+await writeFile(path.join(dist, "index.html"), launcher.split(current).join(version));
 
 console.log(`deployed ${current} -> ${version} (${marker})`);

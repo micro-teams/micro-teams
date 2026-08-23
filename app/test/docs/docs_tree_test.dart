@@ -22,7 +22,7 @@ void main() {
   ]);
 
   test('folders come before files, and each group is alphabetical', () {
-    final rows = flatten(tree, collapsed: const {});
+    final rows = flatten(tree, expanded: {'', 'notes', 'archive'});
     expect(rows.map((r) => r.node.path).toList(), [
       'archive',
       'archive/old.md',
@@ -34,22 +34,48 @@ void main() {
   });
 
   test('depth is carried, so a row knows how far to indent', () {
-    final rows = flatten(tree, collapsed: const {});
+    final rows = flatten(tree, expanded: {'', 'notes', 'archive'});
     expect(rows.firstWhere((r) => r.node.path == 'notes').depth, 0);
     expect(rows.firstWhere((r) => r.node.path == 'notes/a.md').depth, 1);
   });
 
-  test('a collapsed folder hides its children but stays itself', () {
-    final rows = flatten(tree, collapsed: {'notes'});
-    final paths = rows.map((r) => r.node.path).toList();
-    expect(paths, contains('notes'));
-    expect(paths, isNot(contains('notes/a.md')));
-    expect(paths, contains('archive/old.md'), reason: 'only notes was closed');
+  test(
+    'a folder that has not been opened hides its children but stays itself',
+    () {
+      final rows = flatten(tree, expanded: {'', 'archive'});
+      final paths = rows.map((r) => r.node.path).toList();
+      expect(paths, contains('notes'));
+      expect(paths, isNot(contains('notes/a.md')));
+      expect(
+        paths,
+        contains('archive/old.md'),
+        reason: 'only notes was closed',
+      );
+    },
+  );
+
+  test('nothing opened is nothing shown but the top level', () {
+    // The default, and the point of it: a tree that arrives fully expanded is a list of every file
+    // in the repository, with the one you came for somewhere in the middle.
+    final rows = flatten(tree, expanded: {''});
+    expect(rows.map((r) => r.node.path).toList(), [
+      'archive',
+      'notes',
+      'README.md',
+    ]);
+    expect(
+      flatten(tree, expanded: const {}),
+      isEmpty,
+      reason: 'the root itself is closed too',
+    );
   });
 
   test('an empty tree is an empty list, not a crash', () {
-    expect(flatten(null, collapsed: const {}), isEmpty);
-    expect(flatten(folder('', const []), collapsed: const {}), isEmpty);
+    expect(flatten(null, expanded: {'', 'notes', 'archive'}), isEmpty);
+    expect(
+      flatten(folder('', const []), expanded: {'', 'notes', 'archive'}),
+      isEmpty,
+    );
   });
 
   group('nameOf', () {

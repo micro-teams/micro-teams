@@ -26,6 +26,8 @@
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { appVersion } from "./version.mjs";
+import { preloadFor } from "./manifest.mjs";
 import { buildLauncher } from "@micro-teams/multipath";
 
 const dist = path.resolve(process.argv[2] ?? "build/web");
@@ -115,6 +117,8 @@ const HEAD = `<base href="/">
 ${SPLASH_CSS}`;
 
 export async function build(dir) {
+  const version = await appVersion();
+
   // Idempotent: after the first run index.html is the launcher, so a second run must read app.html
   // rather than turn the launcher into the input for another launcher. Running a build step twice
   // must not be a mistake anyone can make.
@@ -131,8 +135,19 @@ export async function build(dir) {
     path.join(dir, "index.html"),
     buildLauncher({
       appEntry: "/flutter_bootstrap.js",
-      // The 3.4MB the visitor is actually waiting for, fetched on the winning line and counted.
-      preload: ["/main.dart.js"],
+      // Everything the first frame needs — code, engine, fonts — with the sizes the build measured,
+      // so the percentage is a percentage of the whole wait rather than of one file out of ten
+      // megabytes. See tool/manifest.mjs.
+      preload: await preloadFor(dir),
+      // What this build is, and where to ask what is deployed. A cached client cannot answer that
+      // question about itself: every copy it holds is its own. On disagreement the launcher drops
+      // the caches, the remembered responses and the worker, and reloads once into the new build.
+      version,
+      versionUrl: "/version",
+      // Where the app's own request cache lives. shared_preferences prefixes everything it writes
+      // with "flutter." on the web; ours is mt:cache: under that. A remembered response from the
+      // previous build may no longer mean what it says.
+      clearOnUpdate: ["flutter.mt:cache:", "flutter.mt:lines:health"],
       serviceWorker: "/sw.js",
       // Hand-written and free of imports, so "classic" — see web/sw.js. Registering a module worker
       // as classic fails quietly: the page works from the network and only the cache is never
