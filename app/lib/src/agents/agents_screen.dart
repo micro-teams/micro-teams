@@ -16,6 +16,7 @@ import '../common/ui/team_picker.dart';
 import 'add_device_dialog.dart';
 import 'agents_controller.dart';
 import 'open_agent_dialog.dart';
+import '../common/ui/section_action.dart';
 
 class AgentsScreen extends ConsumerWidget {
   const AgentsScreen({
@@ -99,8 +100,7 @@ class _Fleet extends ConsumerWidget {
         _Heading(
           'machines',
           key: const ValueKey('section-machines'),
-          action: _SectionButton(
-            icon: Icons.add_circle_outline,
+          action: SectionAction(
             label: 'add device',
             onPressed: () => showAddDeviceDialog(context),
           ),
@@ -119,8 +119,7 @@ class _Fleet extends ConsumerWidget {
         _Heading(
           'agents',
           key: const ValueKey('section-agents'),
-          action: _SectionButton(
-            icon: Icons.smart_toy_outlined,
+          action: SectionAction(
             label: 'open agent',
             onPressed: () =>
                 showOpenAgentDialog(context, machines: fleet.machines),
@@ -162,32 +161,6 @@ class _Heading extends StatelessWidget {
         const Spacer(),
         if (action != null) action!,
       ],
-    ),
-  );
-}
-
-/// The React section button: small, secondary, and it says what it does in words. An icon alone in
-/// a section header is a guess a reader has to make every time.
-class _SectionButton extends StatelessWidget {
-  const _SectionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => FilledButton.tonalIcon(
-    onPressed: onPressed,
-    icon: Icon(icon, size: 16),
-    label: Text(label),
-    style: FilledButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      textStyle: Theme.of(context).textTheme.labelMedium,
     ),
   );
 }

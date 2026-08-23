@@ -209,7 +209,9 @@ void main() {
     await tester.tap(_rail('docs'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Team One'));
+    // By tooltip: the team's name is also the tree's root row now, so the name alone is two
+    // widgets and neither is more obviously "the picker" than the other.
+    await tester.tap(find.byTooltip('Team'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('manage teams'));
     await tester.pumpAndSettle();
@@ -283,7 +285,9 @@ void main() {
 
     await tester.tap(_rail('docs'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Team One'));
+    // By tooltip: the team's name is also the tree's root row now, so the name alone is two
+    // widgets and neither is more obviously "the picker" than the other.
+    await tester.tap(find.byTooltip('Team'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('manage teams'));
     await tester.pumpAndSettle();

@@ -158,17 +158,6 @@ class _TreePaneState extends ConsumerState<_TreePane> {
         actions: [
           // Top-right, next to the actions, not a bar of its own under the title (T-007).
           TeamPickerAction(onManage: widget.onManageTeams),
-          // The root's actions. Every other node carries its own, on the row.
-          if (team != null)
-            PopupMenuButton<String>(
-              tooltip: 'new',
-              icon: const Icon(Icons.add),
-              onSelected: (choice) => _create(folder: choice == 'folder'),
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'file', child: Text('new file')),
-                PopupMenuItem(value: 'folder', child: Text('new folder')),
-              ],
-            ),
         ],
       ),
       body: team == null
@@ -189,84 +178,66 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                 ),
               ),
               data: (root) {
-                final rows = flatten(root, collapsed: widget.collapsed);
-                if (rows.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'no documents yet',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  );
-                }
+                final rows = widget.collapsed.contains('')
+                    ? const <({DocNode node, int depth})>[]
+                    : flatten(root, collapsed: widget.collapsed);
+                // The team is the tree's root folder, and it is a row like any other — which is
+                // what gives "create at the root" somewhere to live. The React client drew it the
+                // same way; a plus in the title bar was ours, and it left the root as the one
+                // folder you could not point at.
                 return ListView.builder(
-                  itemCount: rows.length,
+                  itemCount: rows.length + 1,
                   itemBuilder: (context, index) {
-                    final row = rows[index];
+                    if (index == 0) {
+                      return _TreeRow(
+                        label: team.name,
+                        icon: widget.collapsed.contains('')
+                            ? Icons.folder_outlined
+                            : Icons.folder_open_outlined,
+                        depth: 0,
+                        selected: false,
+                        onTap: () => widget.onToggle(''),
+                        menu: _NodeMenu(
+                          isRoot: true,
+                          onSelected: (action) =>
+                              _create(folder: action == 'folder'),
+                        ),
+                      );
+                    }
+                    final row = rows[index - 1];
                     final node = row.node;
                     final folded =
                         node.isFolder && widget.collapsed.contains(node.path);
-                    return Material(
-                      color: node.path == widget.selected
-                          ? scheme.surfaceContainerHighest
-                          : Colors.transparent,
-                      child: InkWell(
-                        onTap: () => node.isFolder
-                            ? widget.onToggle(node.path)
-                            : widget.onOpen(node.path),
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            12.0 + row.depth * 14,
-                            8,
-                            12,
-                            8,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                node.isFolder
-                                    ? (folded
-                                          ? Icons.folder_outlined
-                                          : Icons.folder_open_outlined)
-                                    : Icons.description_outlined,
-                                size: 16,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _renaming == node.path
-                                    ? _NameField(
-                                        controller: _name,
-                                        onDone: () => _renameTo(node.path),
-                                        onCancel: () =>
-                                            setState(() => _renaming = null),
-                                      )
-                                    : Text(
-                                        nameOf(node.path),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodyMedium,
-                                      ),
-                              ),
-                              if (_renaming == node.path)
-                                IconButton(
-                                  tooltip: 'rename',
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _renameTo(node.path),
-                                  icon: const Icon(Icons.check, size: 18),
-                                )
-                              else
-                                _NodeMenu(
-                                  node: node,
-                                  onSelected: (action) => _act(action, node),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    return _TreeRow(
+                      label: nameOf(node.path),
+                      icon: node.isFolder
+                          ? (folded
+                                ? Icons.folder_outlined
+                                : Icons.folder_open_outlined)
+                          : Icons.description_outlined,
+                      depth: row.depth + 1,
+                      selected: node.path == widget.selected,
+                      onTap: () => node.isFolder
+                          ? widget.onToggle(node.path)
+                          : widget.onOpen(node.path),
+                      field: _renaming == node.path
+                          ? _NameField(
+                              controller: _name,
+                              onDone: () => _renameTo(node.path),
+                              onCancel: () => setState(() => _renaming = null),
+                            )
+                          : null,
+                      menu: _renaming == node.path
+                          ? IconButton(
+                              tooltip: 'rename',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => _renameTo(node.path),
+                              icon: const Icon(Icons.check, size: 16),
+                            )
+                          : _NodeMenu(
+                              isRoot: false,
+                              onSelected: (action) => _act(action, node),
+                            ),
                     );
                   },
                 );
@@ -371,27 +342,144 @@ class _TreePaneState extends ConsumerState<_TreePane> {
 
 /// A row's own actions. The root's live in the header — it has no row.
 class _NodeMenu extends StatelessWidget {
-  const _NodeMenu({required this.node, required this.onSelected});
+  const _NodeMenu({required this.isRoot, required this.onSelected});
 
-  final DocNode node;
+  /// The root can be created in, and nothing else: there is no renaming, moving or deleting the
+  /// team's own tree.
+  final bool isRoot;
+
   final void Function(String action) onSelected;
 
+  /// `showMenu` rather than a `PopupMenuButton`, and that is not a style choice.
+  ///
+  /// A PopupMenuButton delivers the chosen value through ITS OWN state — and only if that state is
+  /// still mounted. This button is hidden when the pointer is not on the row, opening the menu
+  /// takes the pointer off the row, and the choice then arrived at a widget that was no longer
+  /// there: the menu closed and nothing happened. Awaiting the menu here puts the answer in the
+  /// hands of whoever asked the question, which is where it belongs.
+  Future<void> _open(BuildContext context) async {
+    final button = context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (button == null || overlay == null) return;
+    final origin = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final chosen = await showMenu<String>(
+      context: context,
+      constraints: const BoxConstraints(minWidth: 160),
+      position: RelativeRect.fromLTRB(
+        origin.dx,
+        origin.dy + button.size.height,
+        overlay.size.width - origin.dx - button.size.width,
+        0,
+      ),
+      items: [
+        const PopupMenuItem(value: 'file', child: Text('new file')),
+        const PopupMenuItem(value: 'folder', child: Text('new folder')),
+        if (!isRoot) ...const [
+          PopupMenuDivider(),
+          PopupMenuItem(value: 'rename', child: Text('rename')),
+          PopupMenuItem(value: 'move', child: Text('move')),
+          PopupMenuDivider(),
+          PopupMenuItem(value: 'delete', child: Text('delete')),
+        ],
+      ],
+    );
+    if (chosen != null) onSelected(chosen);
+  }
+
   @override
-  Widget build(BuildContext context) => PopupMenuButton<String>(
+  Widget build(BuildContext context) => IconButton(
     tooltip: 'actions',
-    icon: const Icon(Icons.more_horiz, size: 18),
+    icon: const Icon(Icons.more_horiz, size: 16),
+    iconSize: 16,
     padding: EdgeInsets.zero,
-    onSelected: onSelected,
-    itemBuilder: (context) => const [
-      PopupMenuItem(value: 'file', child: Text('new file')),
-      PopupMenuItem(value: 'folder', child: Text('new folder')),
-      PopupMenuDivider(),
-      PopupMenuItem(value: 'rename', child: Text('rename')),
-      PopupMenuItem(value: 'move', child: Text('move')),
-      PopupMenuDivider(),
-      PopupMenuItem(value: 'delete', child: Text('delete')),
-    ],
+    visualDensity: VisualDensity.compact,
+    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+    onPressed: () => _open(context),
   );
+}
+
+/// One row of the tree, at whatever depth, and the rule about when its actions are visible.
+///
+/// The "..." is not drawn until the row is pointed at, selected or focused. A column of them down
+/// the right-hand side of every row is a column of noise: they are all the same, none of them is
+/// about the file you are reading, and together they read as more important than the names.
+class _TreeRow extends StatefulWidget {
+  const _TreeRow({
+    required this.label,
+    required this.icon,
+    required this.depth,
+    required this.selected,
+    required this.onTap,
+    required this.menu,
+    this.field,
+  });
+
+  final String label;
+  final IconData icon;
+  final int depth;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget menu;
+
+  /// Shown instead of the name while the name is being typed.
+  final Widget? field;
+
+  @override
+  State<_TreeRow> createState() => _TreeRowState();
+}
+
+class _TreeRowState extends State<_TreeRow> {
+  bool _pointed = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Renaming counts: the tick lives where the "..." was, and it must not vanish when the pointer
+    // leaves the row somebody is typing in.
+    final showActions =
+        _pointed || _focused || widget.selected || widget.field != null;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _pointed = true),
+      onExit: (_) => setState(() => _pointed = false),
+      child: Focus(
+        onFocusChange: (has) => setState(() => _focused = has),
+        child: Material(
+          color: widget.selected
+              ? scheme.surfaceContainerHighest
+              : Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(12.0 + widget.depth * 14, 4, 4, 4),
+              child: Row(
+                children: [
+                  Icon(widget.icon, size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child:
+                        widget.field ??
+                        Text(
+                          widget.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                  ),
+                  // Kept in the layout when hidden, so a row does not change width under the
+                  // pointer — a name that reflows as you move across the list is worse than a
+                  // button you cannot see.
+                  SizedBox(width: 28, child: showActions ? widget.menu : null),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// A name being typed, in the place the name was.

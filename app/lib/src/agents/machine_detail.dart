@@ -19,6 +19,7 @@ import '../common/ui/online_dot.dart';
 import 'agent_detail.dart' show Facts;
 import 'agents_controller.dart';
 import '../common/ui/app_dialog.dart';
+import '../common/ui/section_action.dart';
 
 /// The machine's own screen: a frame on the stack, like the agent's.
 class MachineDetailScreen extends ConsumerWidget {
@@ -248,13 +249,7 @@ class MachineDetail extends ConsumerWidget {
                                 child: Text(team.name),
                               ),
                           ],
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: Text('add to team'),
-                          ),
+                          child: const SectionActionLabel('add to team'),
                         ),
                 ),
                 _Bordered(
