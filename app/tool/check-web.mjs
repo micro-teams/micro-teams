@@ -349,6 +349,25 @@ check(
   codeRequests.includes("/main.dart.js"),
   codeRequests.join(" ") || "none",
 );
+
+// …and asks for nothing else. The engine is 5MB of wasm and the fonts are another megabyte; if a
+// warm visit pulls those again, the cache is not doing the one job it exists for. This is the
+// assertion that would catch a version stamp that disagrees with itself, since a mismatch makes the
+// worker throw its cache away on every single navigation — which looks like nothing at all except
+// in the bytes.
+const heavy = await revisit.evaluate(() =>
+  performance
+    .getEntriesByType("resource")
+    .filter((entry) => /canvaskit|\.ttf|\.otf/.test(entry.name))
+    .map((entry) => ({ name: new URL(entry.name).pathname, transferred: entry.transferSize })),
+);
+const downloaded = heavy.filter((entry) => entry.transferred > 0);
+check(
+  "and downloads the engine and the fonts from its cache, not the network",
+  heavy.length > 0 && downloaded.length === 0,
+  downloaded.map((e) => `${e.name}:${e.transferred}`).join(" ") ||
+    `${heavy.length} from cache`,
+);
 await revisit.close();
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
