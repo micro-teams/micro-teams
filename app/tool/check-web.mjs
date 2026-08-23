@@ -491,6 +491,33 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await backPage.close();
 }
 
+// What the screen says when the app never starts.
+//
+// The percentage reaching 100 and staying there is the worst thing this screen can do: it looks
+// exactly like a broken app and offers nothing to press. It happened for real — a deploy landing
+// under a running client — and the first thing anybody could say about it was "it just sits there".
+{
+  // Its own context: a worker from an earlier check would serve the app's code out of its cache,
+  // which is not something a page-level route interception can stop — and the app would start.
+  const stuckContext = await browser.newContext();
+  const stuck = await stuckContext.newPage();
+  await stuck.addInitScript(() => {
+    window.__mtSlowAfter = 1200;
+  });
+  // The app's code never arrives, so no first frame is ever painted.
+  await stuck.route("**/main.dart.js", (route) => route.abort());
+  await stuck.goto(BASE + "/", { waitUntil: "commit" });
+  await stuck.waitForTimeout(3000);
+
+  const said = await stuck
+    .locator("#mt-splash-slow")
+    .isVisible()
+    .catch(() => false);
+  const ways = await stuck.locator("#mt-splash-ways a").count();
+  check("an app that never starts says so, and offers a way out", said && ways === 2, `${ways} ways`);
+  await stuckContext.close();
+}
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();

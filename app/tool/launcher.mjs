@@ -54,7 +54,36 @@ async function exists(file) {
 const SPLASH = `<div id="mt-splash">
   <div id="mt-splash-name">MicroTeams</div>
   <div id="mt-splash-percent" data-multipath-progress>0%</div>
-</div>`;
+  <div id="mt-splash-slow" hidden>
+    <div>This is taking longer than it should.</div>
+    <div id="mt-splash-ways">
+      <a href="" onclick="location.reload();return false">try again</a>
+      &nbsp;·&nbsp;
+      <a href="/unregister.html">clear this app&#39;s cache</a>
+    </div>
+  </div>
+</div>
+<script>
+// A percentage that reaches 100 and stays there is the worst thing this screen can do: it is
+// indistinguishable from a broken app, and it offers nothing to press. If the app has not painted
+// its first frame by now, say so and offer the two things that actually help.
+//
+// Deliberately not a reload of its own: a page that reloads itself when something is wrong is a
+// page that can spend all afternoon reloading, and the second attempt is not more likely to work
+// than the first unless a human changes something.
+(function () {
+  var after = window.__mtSlowAfter || 20000;
+  setTimeout(function () {
+    if (document.documentElement.dataset.mtReady === "1") return;
+    var slow = document.getElementById("mt-splash-slow");
+    if (slow) slow.hidden = false;
+    console.error(
+      "mt: no first frame after " + after + "ms — the app did not start. Loaded: " +
+        (document.querySelector("[data-multipath-progress]") || {}).textContent
+    );
+  }, after);
+})();
+</script>`;
 
 const SPLASH_CSS = `<style>
 html, body { margin: 0; padding: 0; height: 100%; background: #060606; }
@@ -66,6 +95,8 @@ html, body { margin: 0; padding: 0; height: 100%; background: #060606; }
   transition: opacity .2s ease;
 }
 #mt-splash-percent { color: #8a8a8a; font-variant-numeric: tabular-nums; }
+#mt-splash-slow { color: #8a8a8a; font-size: 13px; text-align: center; line-height: 1.8; }
+#mt-splash-slow a { color: #f5f5f5; }
 html[data-mt-ready="1"] #mt-splash { opacity: 0; pointer-events: none; }
 [data-multipath-error] { position: fixed; inset: auto 0 24px; text-align: center;
   color: #f5f5f5; font: 400 14px system-ui, sans-serif; z-index: 2147483647; }
