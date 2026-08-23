@@ -11,12 +11,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:microteams/src/common/stream_lines.dart';
+import 'package:multipath/multipath.dart' as mp;
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/terminal/screen_link.dart';
 import 'package:microteams/src/terminal/terminal_screen.dart';
 
-class _FakeSocket implements ScreenSocket {
+class _FakeSocket extends ScreenSocket {
   final _incoming = StreamController<Object?>.broadcast();
   final List<Object?> sent = [];
 
@@ -51,6 +53,50 @@ Widget host(_FakeSocket socket) => ProviderScope(
 );
 
 void main() {
+  testWidgets('the screen is dialled over a line, not over the page origin', (
+    tester,
+  ) async {
+    // The live screen is the app's heaviest stream, and it was the last connection still hard-wired
+    // to whichever host served the document.
+    final socket = _FakeSocket();
+    final dialled = <Uri>[];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          endpointsProvider.overrideWithValue(
+            const Endpoints(origin: 'http://machine.test'),
+          ),
+          streamLinesProvider.overrideWithValue(
+            StreamLines(
+              selector: mp.StreamSelector(
+                lines: () => mp.parseRegistry({
+                  'lines': [
+                    {'id': 'near', 'url': 'https://near.example.com'},
+                  ],
+                }).lines,
+              ),
+              endpoints: const Endpoints(origin: 'http://machine.test'),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: TerminalScreen(
+            sessionId: 's1',
+            connect: (url) {
+              dialled.add(url);
+              return socket;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      dialled.single.toString(),
+      'wss://near.example.com/mt/machine/screen/s1',
+    );
+  });
   testWidgets('shows what the machine sends', (tester) async {
     final socket = _FakeSocket();
     await tester.pumpWidget(host(socket));

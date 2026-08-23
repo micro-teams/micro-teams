@@ -24,6 +24,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
 import '../providers.dart';
+import '../common/stream_lines.dart';
 import '../common/ui/theme.dart';
 import 'screen_link.dart';
 
@@ -80,20 +81,34 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _terminal.onResize = (cols, rows, _, _) =>
         _link?.sendSize(cols: cols, rows: rows);
 
-    final endpoints = ref.read(endpointsProvider);
+    // Over a line, not over the page's origin. A live screen is the app's heaviest stream — every
+    // keystroke and every frame of output — and it was the one connection still hard-wired to
+    // whichever host served the document, so a viewer on the far side of the world watched a
+    // machine sitting next to a nearer line.
+    final streams = ref.read(streamLinesProvider);
+    StreamDial? dial;
     _link = ScreenLink(
       // Read the token per dial: a socket that reconnects with an expired token is refused, and a
-      // refusal looks exactly like a machine that has gone quiet.
-      url: () => endpoints.screenSocket(
-        widget.sessionId,
-        ref.read(sessionProvider).valueOrNull?.accessToken,
-      ),
+      // refusal looks exactly like a machine that has gone quiet. The line is chosen per dial for
+      // the same reason — one that cannot hold a stream is skipped on the next attempt rather than
+      // retried forever.
+      url: () {
+        final token = ref.read(sessionProvider).valueOrNull?.accessToken;
+        dial = streams.dial(
+          ref.read(endpointsProvider).screenPath(widget.sessionId, token),
+        );
+        return dial!.url;
+      },
+      onOpened: () => dial?.opened(DateTime.now()),
       // The terminal takes text; the wire carries bytes. Decoding here rather than in the
       // link keeps the link free of any opinion about what the bytes mean.
       onBytes: (bytes) => _terminal.write(
         const Utf8Decoder(allowMalformed: true).convert(bytes),
       ),
-      onClosed: _handleClosed,
+      onClosed: () {
+        dial?.closed(DateTime.now());
+        _handleClosed();
+      },
       connect: widget.connect,
     )..open();
     _everOpened = true;

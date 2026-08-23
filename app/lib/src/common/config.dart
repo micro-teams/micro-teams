@@ -48,14 +48,16 @@ class Endpoints {
   ///
   /// The path mirrors MachineWebSocketConfig's `/machine/screen/*` mapping. The screen id is a
   /// string, not a number: it is the session id the connector chose.
-  String screenSocket(String sessionId, String? token) {
+  String screenSocket(String sessionId, String? token) =>
+      socketUrl(origin, screenPath(sessionId, token));
+
+  /// The path alone, for a caller that is choosing the host itself — which is what routing a stream
+  /// over a line means.
+  String screenPath(String sessionId, String? token) {
     final query = token == null || token.isEmpty
         ? ''
         : '?token=${Uri.encodeComponent(token)}';
-    return socketUrl(
-      origin,
-      '/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query',
-    );
+    return '/mt/machine/screen/${Uri.encodeComponent(sessionId)}$query';
   }
 }
 

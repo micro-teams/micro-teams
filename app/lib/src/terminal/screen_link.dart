@@ -27,6 +27,11 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 /// writes, and a class nobody can test is a class whose promises are only claims.
 abstract class ScreenSocket {
   Stream<Object?> get incoming;
+
+  /// Completes once the handshake is done. Concrete here rather than required, because for a fake
+  /// the connection is up the moment it exists — and a fake nobody can write is a class nobody can
+  /// test.
+  Future<void> get ready => Future<void>.value();
   void send(Object? data);
   void close();
 }
@@ -35,6 +40,9 @@ class _WebSocket implements ScreenSocket {
   _WebSocket(Uri url) : _channel = WebSocketChannel.connect(url);
 
   final WebSocketChannel _channel;
+
+  @override
+  Future<void> get ready => _channel.ready;
 
   @override
   Stream<Object?> get incoming => _channel.stream;
@@ -78,6 +86,7 @@ class ScreenLink {
     required this.url,
     required this.onBytes,
     required this.onClosed,
+    this.onOpened,
     ScreenSocket Function(Uri url)? connect,
   }) : _connect = connect ?? _WebSocket.new;
 
@@ -90,6 +99,10 @@ class ScreenLink {
   /// class's: the first connection failing means "gone or not watchable", a later one means "try
   /// again", and only the caller knows which one this was.
   final void Function() onClosed;
+
+  /// Called once the handshake has actually completed. Whoever chose the line needs to know the
+  /// difference between a line that accepted the connection and one that only looked like it would.
+  final void Function()? onOpened;
 
   final ScreenSocket Function(Uri url) _connect;
 
@@ -116,6 +129,16 @@ class ScreenLink {
       onError: (Object _) => _handleClosed(),
       cancelOnError: true,
     );
+    final announced = onOpened;
+    if (announced != null) {
+      unawaited(
+        channel.ready.then((_) {
+          // Not if this dial has already been abandoned: a late handshake for a socket the screen
+          // has closed says nothing about the line that is carrying it now.
+          if (!_closed && _channel == channel) announced();
+        }, onError: (Object _) {}),
+      );
+    }
     // Say what we are as soon as we arrive, rather than leaving the driver to assume.
     sendControl();
   }
