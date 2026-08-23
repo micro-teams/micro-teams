@@ -347,8 +347,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "feat/dart-health-persistence"
-      resolved-ref: "6847596158c2f7f5b3f91735d36d709792ffe4ba"
+      ref: main
+      resolved-ref: "6dc934119797721f1a4366a1d66d08e0ed9aeed6"
       url: "https://github.com/micro-teams/multipath.git"
     source: git
     version: "0.1.1"

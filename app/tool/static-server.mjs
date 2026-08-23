@@ -152,9 +152,27 @@ async function backend(req, res) {
     case "GET /mt/machine":
       return json(res, 200, { machines: [], page });
     case "GET /mt/lines":
+      // Two lines, not one: with a single line every ranking question has the same answer, so a
+      // client that never measured anything would look exactly like one that did. The second is
+      // this same server under its absolute URL — enough for the client to have to resolve a URL
+      // and send a real probe to it.
       return json(res, 200, {
-        lines: [{ id: "origin", url: "", transport: "same-origin", weight: 100 }],
+        lines: [
+          { id: "origin", url: "", transport: "same-origin", weight: 100 },
+          // localhost rather than 127.0.0.1, so it is a genuinely different ORIGIN to the browser
+          // — the probe has to be a cross-origin request, which is what a real second line is.
+          { id: "second", url: `http://localhost:${port}`, transport: "direct", weight: 90 },
+        ],
       });
+
+    // What a probe asks for. 204 because the answer's only content is that it arrived.
+    case "GET /mt/probe":
+      res.writeHead(204, {
+        "Cache-Control": "no-store",
+        // As the deployment's nginx answers a probe from another line's host.
+        "Access-Control-Allow-Origin": req.headers.origin ?? "*",
+      });
+      return res.end();
     default:
       return json(res, 404, { message: `no fake for ${call}` });
   }

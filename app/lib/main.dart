@@ -14,7 +14,6 @@ import 'src/providers.dart';
 import 'package:multipath/multipath.dart' as mp;
 
 import './src/common/key_value.dart';
-import './src/common/lines.dart';
 import './src/common/prefs_store.dart';
 import './src/common/ready_signal.dart';
 import './src/common/url_strategy.dart';
@@ -30,18 +29,18 @@ Future<void> main() async {
   await cache.restore();
   final state = await KeyValueStore.open();
 
-  // One line manager for the whole app, adopting the deployment's real registry in the background.
-  // Deliberately not awaited: the same-origin line is what the app was going to use anyway, and a
-  // client that waited for a routing table would have made the transport a startup dependency —
-  // exactly backwards for the thing whose job is to survive one route being down.
-  final lines = mp.LineManager(registry: sameOriginOnly());
+  // The line manager is NOT built here. It was, and the manager built here had no way to send a
+  // probe and nowhere to remember what it measured — so it quietly replaced the one in
+  // providers.dart that had both, and every line except the one real traffic used sat at "never
+  // measured" in production while the tests, which use the provider, measured everything correctly.
+  // An override that constructs a second, poorer copy of a provider is a hard thing to see; the
+  // rule that follows is that a provider with wiring in it is built in exactly one place.
 
   runApp(
     ProviderScope(
       overrides: [
         requestCacheProvider.overrideWithValue(cache),
         stateStoreProvider.overrideWithValue(state),
-        linesProvider.overrideWithValue(lines),
       ],
       child: const MicroTeamsApp(),
     ),
