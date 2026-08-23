@@ -16,6 +16,7 @@ import '../providers.dart';
 import 'team_admin_controller.dart';
 import '../common/ui/prompt.dart';
 import '../common/ui/app_dialog.dart';
+import '../common/ui/menu.dart';
 
 class TeamScreen extends ConsumerWidget {
   const TeamScreen({
@@ -216,30 +217,37 @@ class _MemberRow extends StatelessWidget {
       ),
       // Typed on the enum itself, not on 'role:NAME' strings: a role added, renamed or removed in
       // the contract has to break the build here rather than fall through a firstWhere at runtime.
-      trailing: PopupMenuButton<Object>(
-        // Your own row offers nothing: demoting or removing yourself out of a team you administer
-        // is the one action with no way back from inside the app.
-        enabled: !isMe,
-        itemBuilder: (context) => [
-          for (final role in ChangeRoleRequestRoleEnum.values)
-            PopupMenuItem<Object>(
-              value: role,
-              child: Text('make ${role.name.toLowerCase()}'),
+      // Your own row offers nothing: demoting or removing yourself out of a team you administer is
+      // the one action with no way back from inside the app.
+      trailing: isMe
+          ? null
+          : AppMenu<Object>(
+              tooltip: 'actions',
+              items: [
+                for (final role in ChangeRoleRequestRoleEnum.values)
+                  AppMenuItem(
+                    value: role,
+                    label: 'make ${role.name.toLowerCase()}',
+                  ),
+                const AppMenuDivider(),
+                const AppMenuItem(
+                  value: _remove,
+                  label: 'remove',
+                  danger: true,
+                ),
+              ],
+              onSelected: (choice) {
+                if (choice == _remove) {
+                  onRemove();
+                  return;
+                }
+                onRole(choice as ChangeRoleRequestRoleEnum);
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.more_horiz, size: 18),
+              ),
             ),
-          const PopupMenuDivider(),
-          PopupMenuItem<Object>(
-            value: _remove,
-            child: Text('remove', style: TextStyle(color: scheme.error)),
-          ),
-        ],
-        onSelected: (choice) {
-          if (choice == _remove) {
-            onRemove();
-            return;
-          }
-          onRole(choice as ChangeRoleRequestRoleEnum);
-        },
-      ),
     );
   }
 }

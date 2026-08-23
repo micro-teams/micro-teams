@@ -260,7 +260,13 @@ class _ChatRow extends StatelessWidget {
                     Text(
                       preview,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      // Clipped, not ellipsised. A row that ends in "…" says the message goes on,
+                      // which every message does; the three dots cost a word of the message to
+                      // tell you something you already knew. The title above it keeps its ellipsis
+                      // — a name that is cut off is a different matter, because there the end of
+                      // the string is part of what identifies it.
+                      overflow: TextOverflow.clip,
+                      softWrap: false,
                       style: text.bodyMedium?.copyWith(
                         fontSize: 14,
                         height: 1.4,

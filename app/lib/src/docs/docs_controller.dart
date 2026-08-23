@@ -152,6 +152,34 @@ class DocsAdmin {
 
 final docsAdminProvider = Provider<DocsAdmin>(DocsAdmin.new);
 
+/// Which folders are open, and which row the reader last pointed at.
+///
+/// Outside the screen, and that is the whole reason it exists. Opening a document is a different
+/// ROUTE, so the widget holding the tree is rebuilt from nothing — and the first document anybody
+/// opened took the expansion state with it, folding the tree back up under them. It was invisible
+/// while the default was "everything open", because a fresh empty set meant exactly that.
+class DocsTreeView extends Notifier<({Set<String> expanded, String? touched})> {
+  @override
+  ({Set<String> expanded, String? touched}) build() =>
+      (expanded: const {}, touched: null);
+
+  void toggle(String path) {
+    final next = {...state.expanded};
+    if (!next.remove(path)) next.add(path);
+    state = (expanded: next, touched: path);
+  }
+
+  /// The row a finger last landed on. On a desktop the pointer says which row you mean; a touch
+  /// screen has no such thing, so the last tap has to say it instead — otherwise a folder's own
+  /// actions are unreachable on a phone, which is where they were.
+  void touch(String path) => state = (expanded: state.expanded, touched: path);
+}
+
+final docsTreeViewProvider =
+    NotifierProvider<DocsTreeView, ({Set<String> expanded, String? touched})>(
+      DocsTreeView.new,
+    );
+
 /// The tree flattened for display, deepest-last, folders before files at each level.
 ///
 /// Done here rather than in the widget because it is a rule about documents, not about pixels, and

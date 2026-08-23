@@ -23,6 +23,7 @@ import 'doc_history.dart';
 import 'docs_controller.dart';
 import 'markdown_view.dart';
 import '../common/ui/app_dialog.dart';
+import '../common/ui/menu.dart';
 
 class DocsScreen extends ConsumerStatefulWidget {
   const DocsScreen({
@@ -45,9 +46,6 @@ class DocsScreen extends ConsumerStatefulWidget {
 }
 
 class _DocsScreenState extends ConsumerState<DocsScreen> {
-  /// Folders the reader has opened. Empty is every folder closed, root included — see [flatten].
-  final Set<String> _expanded = {};
-
   @override
   Widget build(BuildContext context) {
     final wide = isWide(context);
@@ -64,11 +62,7 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
     }
 
     final tree = _TreePane(
-      expanded: _expanded,
       selected: open,
-      onToggle: (path) => setState(() {
-        if (!_expanded.remove(path)) _expanded.add(path);
-      }),
       onOpen: widget.onOpen,
       onManageTeams: widget.onManageTeams,
     );
@@ -114,18 +108,14 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
 /// that has to be dismissed to see the thing you are naming.
 class _TreePane extends ConsumerStatefulWidget {
   const _TreePane({
-    required this.expanded,
     required this.selected,
-    required this.onToggle,
     required this.onOpen,
     required this.onManageTeams,
   });
 
   final VoidCallback onManageTeams;
 
-  final Set<String> expanded;
   final String? selected;
-  final void Function(String path) onToggle;
   final void Function(String? path) onOpen;
 
   @override
@@ -177,7 +167,9 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                 ),
               ),
               data: (root) {
-                final rows = flatten(root, expanded: widget.expanded);
+                final view = ref.watch(docsTreeViewProvider);
+                final tree = ref.read(docsTreeViewProvider.notifier);
+                final rows = flatten(root, expanded: view.expanded);
                 // The team is the tree's root folder, and it is a row like any other — which is
                 // what gives "create at the root" somewhere to live. The React client drew it the
                 // same way; a plus in the title bar was ours, and it left the root as the one
@@ -188,12 +180,15 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                     if (index == 0) {
                       return _TreeRow(
                         label: team.name,
-                        icon: widget.expanded.contains('')
+                        icon: view.expanded.contains('')
                             ? Icons.folder_open_outlined
                             : Icons.folder_outlined,
                         depth: 0,
-                        selected: false,
-                        onTap: () => widget.onToggle(''),
+                        // A folder is never the OPEN document, so "selected" here means the row
+                        // you last touched — which is what makes its actions reachable without a
+                        // pointer to hover with.
+                        selected: view.touched == '',
+                        onTap: () => tree.toggle(''),
                         menu: _NodeMenu(
                           isRoot: true,
                           onSelected: (action) =>
@@ -204,7 +199,7 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                     final row = rows[index - 1];
                     final node = row.node;
                     final folded =
-                        node.isFolder && !widget.expanded.contains(node.path);
+                        node.isFolder && !view.expanded.contains(node.path);
                     return _TreeRow(
                       label: nameOf(node.path),
                       icon: node.isFolder
@@ -213,10 +208,17 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                                 : Icons.folder_open_outlined)
                           : Icons.description_outlined,
                       depth: row.depth + 1,
-                      selected: node.path == widget.selected,
-                      onTap: () => node.isFolder
-                          ? widget.onToggle(node.path)
-                          : widget.onOpen(node.path),
+                      selected:
+                          node.path == widget.selected ||
+                          node.path == view.touched,
+                      onTap: () {
+                        if (node.isFolder) {
+                          tree.toggle(node.path);
+                        } else {
+                          tree.touch(node.path);
+                          widget.onOpen(node.path);
+                        }
+                      },
                       field: _renaming == node.path
                           ? _NameField(
                               controller: _name,
@@ -227,7 +229,13 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                       menu: _renaming == node.path
                           ? IconButton(
                               tooltip: 'rename',
+                              iconSize: 16,
+                              padding: EdgeInsets.zero,
                               visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 24,
+                                height: 24,
+                              ),
                               onPressed: () => _renameTo(node.path),
                               icon: const Icon(Icons.check, size: 16),
                             )
@@ -347,52 +355,26 @@ class _NodeMenu extends StatelessWidget {
 
   final void Function(String action) onSelected;
 
-  /// `showMenu` rather than a `PopupMenuButton`, and that is not a style choice.
-  ///
-  /// A PopupMenuButton delivers the chosen value through ITS OWN state — and only if that state is
-  /// still mounted. This button is hidden when the pointer is not on the row, opening the menu
-  /// takes the pointer off the row, and the choice then arrived at a widget that was no longer
-  /// there: the menu closed and nothing happened. Awaiting the menu here puts the answer in the
-  /// hands of whoever asked the question, which is where it belongs.
-  Future<void> _open(BuildContext context) async {
-    final button = context.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (button == null || overlay == null) return;
-    final origin = button.localToGlobal(Offset.zero, ancestor: overlay);
-    final chosen = await showMenu<String>(
-      context: context,
-      constraints: const BoxConstraints(minWidth: 160),
-      position: RelativeRect.fromLTRB(
-        origin.dx,
-        origin.dy + button.size.height,
-        overlay.size.width - origin.dx - button.size.width,
-        0,
-      ),
-      items: [
-        const PopupMenuItem(value: 'file', child: Text('new file')),
-        const PopupMenuItem(value: 'folder', child: Text('new folder')),
-        if (!isRoot) ...const [
-          PopupMenuDivider(),
-          PopupMenuItem(value: 'rename', child: Text('rename')),
-          PopupMenuItem(value: 'move', child: Text('move')),
-          PopupMenuDivider(),
-          PopupMenuItem(value: 'delete', child: Text('delete')),
-        ],
-      ],
-    );
-    if (chosen != null) onSelected(chosen);
-  }
-
   @override
-  Widget build(BuildContext context) => IconButton(
+  Widget build(BuildContext context) => AppMenu<String>(
     tooltip: 'actions',
-    icon: const Icon(Icons.more_horiz, size: 16),
-    iconSize: 16,
-    padding: EdgeInsets.zero,
-    visualDensity: VisualDensity.compact,
-    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-    onPressed: () => _open(context),
+    onSelected: onSelected,
+    items: [
+      const AppMenuItem(value: 'file', label: 'new file'),
+      const AppMenuItem(value: 'folder', label: 'new folder'),
+      if (!isRoot) ...const [
+        AppMenuDivider<String>(),
+        AppMenuItem(value: 'rename', label: 'rename'),
+        AppMenuItem(value: 'move', label: 'move'),
+        AppMenuDivider<String>(),
+        AppMenuItem(value: 'delete', label: 'delete', danger: true),
+      ],
+    ],
+    child: const SizedBox(
+      width: 24,
+      height: 24,
+      child: Icon(Icons.more_horiz, size: 16),
+    ),
   );
 }
 
@@ -465,10 +447,15 @@ class _TreeRowState extends State<_TreeRow> {
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                   ),
-                  // Kept in the layout when hidden, so a row does not change width under the
-                  // pointer — a name that reflows as you move across the list is worse than a
-                  // button you cannot see.
-                  SizedBox(width: 28, child: showActions ? widget.menu : null),
+                  // The box is there whether or not the button is: it holds the row's height as
+                  // well as its width. Without a height the row GREW when it was selected — the
+                  // one you were reading became taller than the ones around it and the list moved
+                  // under your eyes, which is a worse thing to do than showing a button.
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: showActions ? widget.menu : null,
+                  ),
                 ],
               ),
             ),
