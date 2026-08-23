@@ -48,9 +48,18 @@ class MultiPathAdapter implements HttpClientAdapter {
       // A same-origin line is left completely alone — the request goes out exactly as Dio built it.
       // Rewriting it would drop the base URL and produce a host-less path, which happens to work in
       // a browser and fails everywhere else; the adoption case must change nothing at all.
+      // The query travels INSIDE the path here, so the parameters have to be cleared with it —
+      // Dio appends `queryParameters` to whatever query the path already carries, and the result
+      // is every parameter twice. Spring binds a repeated `path=&path=` into the single string
+      // "," and answers "file not found in git: ,", which is what opening docs did the day the
+      // second line started being used. Nobody saw it before that, because the same-origin branch
+      // above leaves the request completely alone.
       final routed = line.url.isEmpty
           ? options
-          : (options.copyWith(path: line.resolve(path))..baseUrl = '');
+          : (options.copyWith(
+              path: line.resolve(path),
+              queryParameters: const <String, dynamic>{},
+            )..baseUrl = '');
       return _inner.fetch(
         routed,
         body == null ? null : Stream.value(body),
