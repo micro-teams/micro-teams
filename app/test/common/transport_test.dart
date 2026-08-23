@@ -79,6 +79,25 @@ MtClient _client(_Wire wire, {mp.Registry? registry}) => MtClient(
 );
 
 void main() {
+  test('a request routed to another line keeps its query exactly once', () async {
+    // Dio appends queryParameters to whatever query the path already has. The path handed to a
+    // line carries the query with it — a line is an origin, everything after it belongs to the
+    // request — so leaving the parameters on duplicates every one of them. Spring binds a repeated
+    // `path=&path=` into the single string "," and answers "file not found in git: ,", which is
+    // exactly what opening docs did once a second line was actually in use.
+    final wire = _Wire(dead: {'a.test'});
+    final client = _client(wire);
+    // The fake wire answers with a body that is not a DocNode; what is under test is the URL
+    // that left, not what came back.
+    try {
+      await client.team.getDocument(id: 1, recursive: true);
+    } catch (_) {}
+
+    final routed = wire.urls.firstWhere((u) => u.startsWith('https://b.test'));
+    final query = Uri.parse(routed).queryParametersAll;
+    expect(query['path'], hasLength(1), reason: routed);
+    expect(query['recursive'], hasLength(1), reason: routed);
+  });
   test('a single same-origin line sends exactly what it always sent', () async {
     // The adoption case, and the reason this could be turned on at all: with one same-origin line
     // the request that leaves is byte for byte the one that left before MultiPath existed.

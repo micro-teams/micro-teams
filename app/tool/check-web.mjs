@@ -17,6 +17,7 @@
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
+import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 
 const BASE = process.env.CHECK_WEB_BASE ?? "http://127.0.0.1:8931";
@@ -399,6 +400,56 @@ await revisit.close();
   // client that only ever measured the one it was served from would show exactly one here.
   check("every line in the registry is actually probed", probes.size >= 2, [...probes].join(" "));
   await probePage.close();
+}
+
+// A deploy, on top of a browser that is already running the build before it.
+//
+// This is the shape of the worst failure this client has had: reach 100%, then never paint. The
+// application's own code is network-first, so a reload right after a deploy gets the NEW
+// main.dart.js — while the engine beside it is cache-first and comes back from the cache, which
+// still holds the PREVIOUS build's canvaskit. A new app on an old engine does not start, and the
+// build.json reconcile cannot save it because it is throttled to a minute and a deploy plus a
+// reload fits inside one.
+if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
+  const DEPLOY = process.env.CHECK_WEB_DEPLOY_BASE;
+  const marker = `deployed-${Date.now()}`;
+  const deployContext = await browser.newContext();
+  const deployPage = await deployContext.newPage();
+  const deployErrors = [];
+  deployPage.on("pageerror", (e) => deployErrors.push(String(e)));
+
+  const ready = () =>
+    deployPage
+      .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+        timeout: 40000,
+      })
+      .then(() => true)
+      .catch(() => false);
+
+  // A deep link, because that is where it was seen — and because a route other than "/" is the
+  // one the worker answers from its own precache rather than from the server.
+  await deployPage.goto(DEPLOY + "/chats/206", { waitUntil: "load" });
+  check("a deep link starts the app before the deploy", await ready());
+
+  execFileSync("node", [
+    new URL("fake-deploy.mjs", import.meta.url).pathname,
+    process.env.CHECK_WEB_DEPLOY_DIR,
+    marker,
+  ]);
+
+  await deployPage.reload({ waitUntil: "commit" });
+  const started = await ready();
+  check("and starts again on the reload right after a deploy", started);
+
+  // The point of the check, not a detail of it: whatever the page is running, the engine it got
+  // must belong to the same build as the code.
+  const engine = await deployPage.evaluate(async (needle) => {
+    const response = await fetch("/canvaskit/chromium/canvaskit.js");
+    return (await response.text()).includes(needle);
+  }, marker);
+  check("with the engine from the build that was just deployed, not the one before it", engine);
+  check("and no page errors while it started", deployErrors.length === 0, deployErrors[0] ?? "");
+  await deployContext.close();
 }
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));

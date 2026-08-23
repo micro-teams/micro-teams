@@ -66,14 +66,19 @@ async function reconcileWithServer() {
     console.warn(
       `sw: holding ${VERSION}, server has ${deployed.version} — dropping the cache`,
     );
-    for (const name of await caches.keys()) {
-      if (name.startsWith("microteams-")) await caches.delete(name);
-    }
+    await dropCaches();
     // And look for a new worker, which is the thing that was supposed to happen by itself.
     await self.registration.update();
   } catch (e) {
     // Offline, or no build.json (an older deployment). Neither is a reason to do anything: what we
     // hold is what we have.
+  }
+}
+
+/** Throw away everything this worker has cached, whatever build it belongs to. */
+async function dropCaches() {
+  for (const name of await caches.keys()) {
+    if (name.startsWith("microteams-")) await caches.delete(name);
   }
 }
 
@@ -134,6 +139,25 @@ self.addEventListener("activate", (event) => {
     })(),
   );
 });
+
+/**
+ * Whether two responses carry the same bytes.
+ *
+ * By ETag when both have one, which is what nginx serves and costs nothing to compare; by length
+ * otherwise. Deliberately NOT by reading both bodies: this runs on the path of every page load, and
+ * a megabyte-scale comparison there would be a fix that cost more than the bug.
+ */
+async function sameBytes(a, b) {
+  const tagA = a.headers.get("etag");
+  const tagB = b.headers.get("etag");
+  if (tagA && tagB) return tagA === tagB;
+  const lengthA = a.headers.get("content-length");
+  const lengthB = b.headers.get("content-length");
+  if (lengthA && lengthB) return lengthA === lengthB;
+  // Nothing to compare on. Assume unchanged rather than dropping the cache on every load: being
+  // wrong here costs one stale visit, and being wrong the other way costs every visit its cache.
+  return true;
+}
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
@@ -197,7 +221,22 @@ self.addEventListener("fetch", (event) => {
         try {
           const fresh = await fetch(request);
           if (fresh.ok && fresh.type === "basic") {
-            cache.put(request, fresh.clone());
+            // A 200 where we had a copy means the code CHANGED under us, and everything cached
+            // beside it belongs to the build before this one. That matters most for the engine,
+            // which is cache-first: a new main.dart.js running on the previous build's canvaskit
+            // is a page that reaches 100% and then never paints a frame. It is not hypothetical —
+            // it is what a reload right after a deploy did, because the reconcile below is
+            // throttled to a minute and a deploy plus a reload fits comfortably inside one.
+            //
+            // So the code answering differently is itself the signal: drop everything and let the
+            // rest of this load come from the network, where it will all be the same build.
+            const stale = await cache.match(request);
+            if (stale && !(await sameBytes(stale.clone(), fresh.clone()))) {
+              console.warn("sw: the code changed under us — dropping the cache");
+              await dropCaches();
+              await self.registration.update();
+            }
+            (await caches.open(CACHE)).put(request, fresh.clone());
           }
           return fresh;
         } catch (_) {

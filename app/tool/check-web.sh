@@ -20,12 +20,27 @@ if [ ! -f "$DIST/index.html" ]; then
   exit 1
 fi
 
+# A second copy, on its own port, so one check can deploy on top of a browser that is already
+# running the build — see tool/fake-deploy.mjs. It is a copy because that check rewrites what it
+# serves, and the build everything else is checked against must not move under them.
+DEPLOY_DIR="$(mktemp -d)"
+cp -r "$DIST/." "$DEPLOY_DIR/"
+DEPLOY_PORT=$((PORT + 1))
+
 server=""
-cleanup() { [ -n "$server" ] && kill "$server" 2>/dev/null || true; }
+deploy_server=""
+cleanup() {
+  [ -n "$server" ] && kill "$server" 2>/dev/null || true
+  [ -n "$deploy_server" ] && kill "$deploy_server" 2>/dev/null || true
+  rm -rf "$DEPLOY_DIR"
+}
 trap cleanup EXIT
 
 PORT="$PORT" node "$HERE/static-server.mjs" "$DIST" >/dev/null 2>&1 &
 server=$!
+
+PORT="$DEPLOY_PORT" node "$HERE/static-server.mjs" "$DEPLOY_DIR" >/dev/null 2>&1 &
+deploy_server=$!
 
 for _ in $(seq 1 30); do
   # --noproxy: a proxy in the environment will happily intercept a loopback request and reset it,
@@ -34,4 +49,7 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-CHECK_WEB_BASE="http://127.0.0.1:$PORT" node "$HERE/check-web.mjs"
+CHECK_WEB_BASE="http://127.0.0.1:$PORT" \
+  CHECK_WEB_DEPLOY_BASE="http://127.0.0.1:$DEPLOY_PORT" \
+  CHECK_WEB_DEPLOY_DIR="$DEPLOY_DIR" \
+  node "$HERE/check-web.mjs"
