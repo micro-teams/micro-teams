@@ -24,6 +24,7 @@ import java.time.ZoneOffset
 import org.rucca.cheese.common.error.BadRequestError
 import org.rucca.cheese.common.error.NotFoundError
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -39,6 +40,7 @@ class ThreadService(
     // (the agent module implements AgentUsers). Chat only ever asks, and only when a caller asked
     // it to — a deployment with no such module simply answers nobody.
     private val agentUsers: ObjectProvider<AgentUsers>,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     /**
      * Reject any id that does not refer to an existing user before it can be added as a thread
@@ -150,6 +152,9 @@ class ThreadService(
                     }
                 )
         }
+        // A new thread has no messages, so nothing has "moved" and the message event that normally
+        // refreshes a chat list never fires. Everybody who is now in it has a list that changed.
+        announceMembership(t.id!!)
         return t.toDTO()
     }
 
@@ -172,6 +177,7 @@ class ThreadService(
             threadRepository.findById(threadId).orElseThrow { NotFoundError("thread", threadId) }
         t.deletedAt = LocalDateTime.now()
         threadRepository.save(t)
+        announceMembership(threadId)
     }
 
     fun listMembers(threadId: Long): List<ThreadMemberDTO> =
@@ -195,10 +201,26 @@ class ThreadService(
                 }
             )
         }
+        announceMembership(threadId)
     }
 
     fun removeMember(threadId: Long, userId: Long) {
         threadMemberRepository.deleteByThreadIdAndUserId(threadId, userId)
+        // Including the person who left: their list lost a group, which is a change to it.
+        announceMembership(threadId, alsoTell = setOf(userId))
+    }
+
+    /**
+     * Say that a thread's membership changed, to whoever cares.
+     *
+     * Published rather than pushed: this service does not know that a socket exists, and the day it
+     * does is the day "remember to notify the socket" becomes something every new feature has to
+     * get right. See ThreadMembershipChangedEvent.
+     */
+    private fun announceMembership(threadId: Long, alsoTell: Set<Long> = emptySet()) {
+        val members =
+            threadMemberRepository.findByThreadId(threadId).mapNotNull { it.userId }.toSet()
+        eventPublisher.publishEvent(ThreadMembershipChangedEvent(threadId, members + alsoTell))
     }
 
     fun changeMemberRole(threadId: Long, userId: Long, role: ThreadMemberRole) {

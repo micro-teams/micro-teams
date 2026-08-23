@@ -254,6 +254,13 @@ void main() {
       expect(find.text('A machine you already have'), findsNothing);
       // The other half is always there: it is a tutorial, and it needs no data.
       expect(find.textContaining('install.sh'), findsOneWidget);
+      // And it carries the deployment's address in full. This command is typed on ANOTHER machine,
+      // where `curl -fsSL /install.sh` means nothing at all — and on the web the app's own origin
+      // is deliberately the empty string, because every request it makes is relative.
+      expect(
+        find.textContaining('http://backend.test/install.sh'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('adding a spare machine binds it to this team', (tester) async {

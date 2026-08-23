@@ -621,57 +621,61 @@ class _Composer extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: _ReadingColumn(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    minLines: 1,
-                    maxLines: 6,
-                    textInputAction: TextInputAction.newline,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(fontSize: 14),
-                    // The padding is spelled out here rather than left to the theme, and the field
-                    // is not wrapped in a minimum height. Both of those were how it ended up 48
-                    // tall next to a 40 tall button: the box was told its floor while the field
-                    // inside it kept Material's own idea of comfortable padding, and the eight
-                    // pixels of difference sat above the text where nothing explained them.
-                    // One line of text at 14 with 10 above and below IS the button's height.
-                    decoration: const InputDecoration(
-                      hintText: 'message…',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
+            // The row is as tall as the field, and the button is stretched to it. Matching heights
+            // by writing the same number in two places did not hold: what you see of the field is
+            // the box its DECORATION paints, and Material reserves a little more around a button
+            // than around a border, so the two ended up agreeing in the widget tree and disagreeing
+            // on screen. Measuring one against the other removes the question.
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 6,
+                      textInputAction: TextInputAction.newline,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(fontSize: 14),
+                      // The padding is spelled out here rather than left to the theme, and the field
+                      // is not wrapped in a minimum height. Both of those were how it ended up 48
+                      // tall next to a 40 tall button: the box was told its floor while the field
+                      // inside it kept Material's own idea of comfortable padding, and the eight
+                      // pixels of difference sat above the text where nothing explained them.
+                      // One line of text at 14 with 10 above and below IS the button's height.
+                      decoration: const InputDecoration(
+                        hintText: 'message…',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: Metrics.composerHeight,
-                  child: FilledButton(
+                  const SizedBox(width: 8),
+                  FilledButton(
                     onPressed: onSend,
                     style: FilledButton.styleFrom(
                       // WeChat's green, not the brand green — the React composer's own choice.
                       backgroundColor: sendGreen,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 20),
-                      // Material inflates a button to a 48px touch target by default, which is why
-                      // it stayed taller than the field however carefully the box around it was
-                      // set. The composer row is already comfortably tappable.
+                      // Material inflates a button to a 48px touch target by default, and it is
+                      // the row that decides the height here. The composer row is already
+                      // comfortably tappable.
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      minimumSize: const Size(0, Metrics.composerHeight),
+                      minimumSize: Size.zero,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                     child: const Text('send'),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
