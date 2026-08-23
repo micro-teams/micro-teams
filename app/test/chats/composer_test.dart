@@ -119,7 +119,10 @@ void main() {
       await tester.pumpWidget(_host(_Fake()));
       await tester.pumpAndSettle();
 
-      final field = tester.getRect(find.byType(TextField));
+      // The decorator, not the TextField: what you SEE of the field is the box its decoration
+      // paints, and those two were not the same box — the widget tree agreed on 40 while the
+      // screen showed a shorter field with its top edge below the button's.
+      final field = tester.getRect(find.byType(InputDecorator));
       final button = tester.getRect(find.byType(FilledButton));
       expect(field.height, button.height);
       expect(field.top, button.top, reason: 'and they start at the same line');
