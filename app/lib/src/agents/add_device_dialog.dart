@@ -28,7 +28,9 @@ class AddDeviceDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final origin = ref.watch(endpointsProvider).origin;
+    // publicOrigin, not origin: this command is run on ANOTHER machine, where a relative URL means
+    // nothing. On the web `origin` is deliberately empty — see common/config.dart.
+    final origin = ref.watch(endpointsProvider).publicOrigin;
     final team = ref.watch(currentTeamProvider);
     final mine =
         ref.watch(allMachinesProvider).valueOrNull ?? const <Machine>[];

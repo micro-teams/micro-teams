@@ -37,9 +37,11 @@ package app.microteams.updates.map
 import app.microteams.chat.message.MessagePostedEvent
 import app.microteams.chat.message.MessageRepository
 import app.microteams.chat.thread.ThreadMemberRepository
+import app.microteams.chat.thread.ThreadMembershipChangedEvent
 import app.microteams.updates.SyncedQuery
 import app.microteams.updates.Topic
 import app.microteams.updates.TopicState
+import app.microteams.updates.UpdateFrame
 import app.microteams.updates.UpdateKind
 import app.microteams.updates.UpdatesRegistry
 import org.slf4j.LoggerFactory
@@ -74,6 +76,40 @@ class ChatsQuery(
                 }
                 .maxOrNull() ?: 0
         return TopicState(seq = newest, digest = "${threadIds.size}")
+    }
+
+    /**
+     * Being added to a group, or losing one, changes a list without moving any message.
+     *
+     * Sent as a `state` frame rather than as an event, and that is not a detail: `publish` needs a
+     * cursor that only ever grows, and this topic's cursor is the newest MESSAGE id — a brand-new
+     * thread has no message to point at, so there is no honest number to advance it to. A state
+     * frame says what the list should look like right now (its digest is how many groups you are
+     * in), and a client whose own count disagrees fetches. Nothing has to lie about a cursor.
+     *
+     * The 30-second verifier already broadcasts exactly this, so nothing here is a new mechanism —
+     * this is the same sentence, said at the moment it becomes true instead of within half a
+     * minute.
+     */
+    @TransactionalEventListener(fallbackExecution = true)
+    fun onMembershipChanged(event: ThreadMembershipChangedEvent) {
+        for (userId in event.userIds) {
+            try {
+                val topic = Topic.Chats(userId)
+                val state = digest(topic)
+                registry.broadcast(
+                    topic.name,
+                    UpdateFrame.state(topic.name, state.seq, state.digest),
+                )
+            } catch (e: Exception) {
+                logger.warn(
+                    "updates: failed telling {} that thread {} changed membership",
+                    userId,
+                    event.threadId,
+                    e,
+                )
+            }
+        }
     }
 
     /** One committed message moves the list of everyone in that group — including its author. */
