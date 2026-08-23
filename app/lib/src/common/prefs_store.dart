@@ -56,3 +56,36 @@ class PrefsCacheStore extends CacheStore {
     }
   }
 }
+
+const String _healthKey = 'mt:lines:health:v1';
+
+/// The same shelf, for what MultiPath measured about each line.
+///
+/// Small and worth keeping: without it every cold start ranks lines by the registry's configured
+/// weight, which is a guess that never improves, and the first few requests of every visit go out
+/// before anything has been measured.
+class PrefsHealthStore extends HealthStore {
+  const PrefsHealthStore();
+
+  @override
+  Future<String?> load() async {
+    try {
+      return (await SharedPreferences.getInstance()).getString(_healthKey);
+    } catch (_) {
+      // No memory of the last visit is exactly the first-visit case, which works.
+      return null;
+    }
+  }
+
+  @override
+  Future<void> save(String encoded) async {
+    try {
+      await (await SharedPreferences.getInstance()).setString(
+        _healthKey,
+        encoded,
+      );
+    } catch (_) {
+      // A performance hint is never worth an error the application has to handle.
+    }
+  }
+}

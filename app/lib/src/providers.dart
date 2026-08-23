@@ -14,6 +14,7 @@ import 'common/config.dart';
 import 'common/errors.dart';
 import 'common/key_value.dart';
 import 'common/lines.dart';
+import 'common/prefs_store.dart';
 import 'common/stream_lines.dart';
 import 'common/api.dart';
 import 'common/updates/socket.dart';
@@ -52,6 +53,9 @@ final linesProvider = Provider<mp.LineManager>((ref) {
     // which is what this client did until now, and why every line but the one real traffic happened
     // to use sat at "never measured" forever.
     send: probeSender(origin: ref.watch(endpointsProvider).origin),
+    // What the last visit measured, so the ranking does not start from the registry's fixed order
+    // every time. start() seeds from it in the background; stop() writes it back.
+    storage: const PrefsHealthStore(),
   );
   ref.onDispose(manager.stop);
   return manager;

@@ -347,8 +347,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "feat/dart-prober"
-      resolved-ref: "5545a524d6ee7c1908d2fcc1fbbacfcad027285d"
+      ref: "feat/dart-health-persistence"
+      resolved-ref: "6847596158c2f7f5b3f91735d36d709792ffe4ba"
       url: "https://github.com/micro-teams/multipath.git"
     source: git
     version: "0.1.1"
