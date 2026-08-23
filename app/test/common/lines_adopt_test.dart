@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/lines.dart';
+import 'package:multipath/multipath.dart';
 import 'package:microteams/src/app.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/providers.dart';
@@ -153,6 +154,11 @@ void main() {
     final backend = _AppFake();
     final container = ProviderContainer(
       overrides: [
+        // A manager with no way to send a probe: this test is about whether the registry is
+        // ASKED for, and a live measuring loop would leave its timers running past the end of it.
+        linesProvider.overrideWithValue(
+          LineManager(registry: sameOriginOnly()),
+        ),
         // Signed OUT on purpose: the app asks for the registry before it asks who you are — a
         // client that had to be logged in before it could route would have made the transport
         // depend on the session. It also keeps this test to one screen and one request.

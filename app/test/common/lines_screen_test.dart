@@ -94,4 +94,33 @@ void main() {
 
     expect(find.textContaining('502'), findsOneWidget);
   });
+
+  testWidgets('the refresh button measures rather than redraws', (
+    tester,
+  ) async {
+    // The panel is a window onto the health table, and the table only fills in when something
+    // probes. Before this the button called a helper that did one round by hand; now it asks the
+    // manager, which is the thing that also runs the loop.
+    var probed = 0;
+    final manager = _managerWith(
+      const mp.Registry([
+        mp.Line(id: 'origin', transport: 'same-origin', weight: 100),
+      ]),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          linesProvider.overrideWithValue(manager),
+          probeLinesProvider.overrideWithValue(() async => probed += 1),
+        ],
+        child: MaterialApp(theme: darkTheme(), home: const LinesScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('measure now'));
+    await tester.pumpAndSettle();
+
+    expect(probed, 1);
+  });
 }
