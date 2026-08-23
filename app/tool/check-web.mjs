@@ -115,8 +115,14 @@ await plain.close();
 // because a cross-origin response is opaque. `--no-web-resources-cdn` puts the engine beside
 // everything else — and this check is what stops the flag going missing again, because losing it
 // looks like nothing at all from a machine that can reach Google.
+// A probe to the registry's other line is the one thing that is SUPPOSED to leave this origin —
+// that is what a second line is. It is exempt by path, not by host, so an asset served from
+// somewhere else still fails this.
 const foreign = fetched.filter(
-  (url) => !url.startsWith(BASE) && !url.startsWith("data:"),
+  (url) =>
+    !url.startsWith(BASE) &&
+    !url.startsWith("data:") &&
+    new URL(url).pathname !== "/mt/probe",
 );
 check(
   "every byte comes from this origin",
@@ -369,6 +375,31 @@ check(
     `${heavy.length} from cache`,
 );
 await revisit.close();
+
+// Measuring, not just routing. Every line but the one real traffic happened to use sat at "never
+// measured" in production for weeks, and nothing here could see it: the fake registry had a single
+// line, and with one line a client that measures and a client that does not look identical.
+{
+  const probes = new Set();
+  const probePage = await context.newPage();
+  probePage.on("request", (r) => {
+    const url = new URL(r.url());
+    if (url.pathname === "/mt/probe") probes.add(url.origin);
+  });
+  await probePage.goto(BASE + "/", { waitUntil: "load" });
+  await probePage.waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
+    timeout: 30000,
+  });
+  // The registry has to arrive before measuring starts, so this is a wait, not an instant.
+  await probePage
+    .waitForRequest((r) => new URL(r.url()).pathname === "/mt/probe", { timeout: 20000 })
+    .catch(() => {});
+  await probePage.waitForTimeout(2000);
+  // Both lines, not just the near one: the registry's second line is a different origin, so a
+  // client that only ever measured the one it was served from would show exactly one here.
+  check("every line in the registry is actually probed", probes.size >= 2, [...probes].join(" "));
+  await probePage.close();
+}
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
