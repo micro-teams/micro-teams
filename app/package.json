@@ -12,6 +12,6 @@
     "playwright": "1.62.1"
   },
   "dependencies": {
-    "@micro-teams/multipath": "main"
+    "@micro-teams/multipath": "0.1.6-main.110"
   }
 }
