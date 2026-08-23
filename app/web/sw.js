@@ -110,6 +110,11 @@ self.addEventListener("fetch", (event) => {
   // are told to open when the cache itself is the problem. The build stamp likewise: a cached
   // answer to "what is deployed?" is an answer about the past, which is the one thing it must
   // never be.
+  // Installers are not part of the app: they are megabytes somebody downloads once, and a browser
+  // cache is the wrong place for them. Left to the rule below they would be cached forever, since
+  // their paths never change.
+  if (url.pathname.startsWith("/downloads/")) return;
+
   // The escape hatch and the version stamp always come from the network. The stamp especially: a
   // cached answer to "what is deployed?" is an answer about the past, which is the one thing it
   // must never be — and it is the answer the launcher decides with.

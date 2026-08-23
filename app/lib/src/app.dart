@@ -39,6 +39,8 @@ import 'common/ui/destination_button.dart';
 import 'common/ui/app_dialog.dart';
 import 'common/ui/detail_pane.dart';
 import 'common/ui/theme.dart';
+import 'common/server_version.dart';
+import 'common/ui/must_update.dart';
 
 /// Go somewhere that is not a frame.
 ///
@@ -111,6 +113,21 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
   Widget build(BuildContext context) {
     // Reading it here is what opens it, and closing the session closes it.
     ref.watch(updatesSocketProvider);
+
+    // A native client that is a generation behind the deployment is stopped here, above the router
+    // — not redirected to a route, because a route is somewhere you can navigate away from. On the
+    // web this is always null: the launcher deals with a stale client by dropping its caches and
+    // reloading, which needs nobody's cooperation. See common/server_version.dart.
+    final mustUpdate = ref.watch(mustUpdateToProvider);
+    if (mustUpdate != null) {
+      return MaterialApp(
+        title: 'MicroTeams',
+        debugShowCheckedModeBanner: false,
+        theme: darkTheme(),
+        themeMode: ThemeMode.dark,
+        home: MustUpdate(deployed: mustUpdate),
+      );
+    }
 
     return MaterialApp.router(
       title: 'MicroTeams',

@@ -558,6 +558,37 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
   await stuckContext.close();
 }
 
+// The installable clients: listed, reachable, and never cached.
+//
+// An APK is tens of megabytes that somebody downloads once. Left to the worker's ordinary rule —
+// cache anything that is not code — it would live in the browser's storage forever, because its
+// path never changes.
+{
+  const downloads = await page.evaluate(async () => {
+    const manifest = await fetch("/downloads/clients.json").then((r) => (r.ok ? r.json() : null));
+    return { manifest };
+  });
+  check(
+    "the deployment says which clients it ships",
+    downloads.manifest != null && Array.isArray(downloads.manifest.clients),
+    `${downloads.manifest?.clients?.length ?? "none"} listed`,
+  );
+
+  const client = downloads.manifest?.clients?.[0];
+  if (client) {
+    const stored = await page.evaluate(async (url) => {
+      // Ask for it the way the download button does, then look for it in the caches.
+      await fetch(url, { method: "HEAD" }).catch(() => {});
+      for (const name of await caches.keys()) {
+        const hit = await (await caches.open(name)).match(url);
+        if (hit) return name;
+      }
+      return null;
+    }, client.url);
+    check("and does not put an installer in the browser's cache", stored === null, stored ?? "none");
+  }
+}
+
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 
 await browser.close();

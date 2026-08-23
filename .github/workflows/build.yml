@@ -102,20 +102,57 @@ jobs:
       # is stamped with it and /version serves it — four things that agree by construction rather
       # than by four calculations that agree until one of them changes.
       - name: Decide this bundle's version
-        run: echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+        run: |
+          {
+            echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}"
+            echo "MT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            # Android needs a number that only ever goes up, and it has to be a number: the run
+            # number is the only monotonic thing here that survives a rebuild of the same commit.
+            echo "MT_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
+          } >> "$GITHUB_ENV"
 
       - run: bash tool/codegen.sh
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build web --release --no-web-resources-cdn --dart-define=MT_VERSION=$MT_VERSION
+      - run: |
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=MT_VERSION=$MT_VERSION \
+            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
+
+      # The installable client, built from the same commit and stamped with the same version as the
+      # web bundle it will be published beside. arm64 only for now: every phone sold in years is
+      # arm64, and the manifest this produces takes another architecture as one more entry rather
+      # than as a change to any code.
+      - name: Write the release key, if this repository has one
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/microteams-release.p12
+          cat > android/key.properties <<PROPS
+          storeFile=microteams-release.p12
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PROPS
+          echo "MT_APK_SIGNED=release" >> "$GITHUB_ENV"
+
+      - name: Build the Android client
+        run: |
+          flutter build apk --release --split-per-abi --target-platform android-arm64 \
+            --build-name="${MT_VERSION%%-*}" --build-number="$MT_BUILD_NUMBER" \
+            --dart-define=MT_VERSION=$MT_VERSION \
+            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
       # The first request cannot be spread across lines, so it is made small and given one job:
       # register the worker, carry the registry inline, and start Flutter on whichever line answers
       # first. Before make-sw, because the launcher IS the document the worker precaches and hashes.
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The clients go into the bundle before it is stamped, so what is deployed and what
+      # clients.json says are the same thing by construction.
+      - run: node tool/add-clients.mjs build/web build/app/outputs/flutter-apk
+
       - run: node tool/launcher.mjs build/web
 
       # Stamps the service worker with a hash of the build and removes Flutter's deprecated one.
@@ -138,6 +175,15 @@ jobs:
           retention-days: 1
           name: web-dist
           path: app/build/web
+
+      # Separately as well as inside the bundle: the bundle is what gets deployed, and this is what
+      # somebody downloads from a build that was never deployed.
+      - name: Upload the Android client
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: android-apk
+          path: app/build/app/outputs/flutter-apk/*.apk
 
   build-applet:
     runs-on: ubuntu-latest

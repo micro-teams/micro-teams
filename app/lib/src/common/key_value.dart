@@ -56,10 +56,17 @@ class KeyValueStore {
   ///
   /// Called on sign-out for the same reason the request cache is scoped: one account must never be
   /// shown another's unsent messages.
-  void clear() {
+  /// Forget everything about the person who was signed in.
+  ///
+  /// [keep] survives, and one thing does: which server this client talks to. That is a property of
+  /// the installation rather than of the account — a native client that forgot it on sign-out would
+  /// ask the person to type their server again every time they signed out, which is a question they
+  /// have already answered.
+  void clear({Set<String> keep = const {}}) {
     for (final key in _snapshot.keys.toList()) {
+      if (keep.contains(key)) continue;
       _prefs?.remove('$_prefix$key');
+      _snapshot.remove(key);
     }
-    _snapshot.clear();
   }
 }

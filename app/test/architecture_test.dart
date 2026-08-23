@@ -20,6 +20,8 @@ import 'package:flutter_test/flutter_test.dart';
 /// Files that are allowed to know the network exists.
 const _plumbing = {
   'lib/src/common/api.dart',
+  // Where a deployment is named, once — see the test below.
+  'lib/src/common/build_info.dart',
   'lib/src/common/lines.dart',
   'lib/src/common/multipath_adapter.dart',
   'lib/src/common/config.dart',
@@ -84,6 +86,22 @@ void main() {
     }
 
     expect(offenders, isEmpty, reason: offenders.join('\n'));
+  });
+
+  test('one deployment is named, in one place', () {
+    // A native client is installed rather than served, so it has to start SOMEWHERE, and that
+    // somewhere is a hostname written into the source. One is a default; two is a pair that will
+    // disagree — and the day they disagree, half the app talks to one server and half to the other.
+    final naming = <String>[];
+    for (final file in _dartFiles('lib')) {
+      if (file.readAsStringSync().contains('microteams.app')) {
+        naming.add(file.path);
+      }
+    }
+
+    expect(naming, [
+      'lib/src/common/build_info.dart',
+    ], reason: naming.join('\n'));
   });
 
   test('common/ does not know what a chat is', () {

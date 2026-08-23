@@ -20,7 +20,37 @@ import 'common/api.dart';
 import 'common/updates/socket.dart';
 import 'common/updates/store.dart';
 
-final endpointsProvider = Provider<Endpoints>((ref) => defaultEndpoints());
+/// Where this run talks to.
+///
+/// Watches the stored server so that changing it at sign-in rebuilds everything underneath —
+/// the clients, the line manager, the sockets — rather than leaving half the app talking to the
+/// previous one. On the web the setting is not consulted at all: the page's own origin IS the
+/// server, and a client that could point elsewhere would be a client that can be pointed at a
+/// server that never set its cookie.
+final endpointsProvider = Provider<Endpoints>((ref) {
+  return endpointsFor(saved: ref.watch(serverProvider));
+});
+
+/// Which server a native client talks to, as chosen at sign-in.
+///
+/// A notifier rather than a read of the store, because everything below it — the clients, the line
+/// manager, the sockets — has to be rebuilt when it changes. Reading the store directly would give
+/// the right answer once and never again.
+class ServerSetting extends Notifier<String?> {
+  @override
+  String? build() => ref.read(stateStoreProvider).get(serverSetting);
+
+  void use(String origin) {
+    final chosen = trimTrailingSlash(origin.trim());
+    if (chosen == state) return;
+    ref.read(stateStoreProvider).set(serverSetting, chosen);
+    state = chosen;
+  }
+}
+
+final serverProvider = NotifierProvider<ServerSetting, String?>(
+  ServerSetting.new,
+);
 
 /// What the same request returned last time. MultiPath's, so the keys, the scoping, the eviction
 /// and the expiry are the rules every client in the org shares — and so nothing in this app has to
@@ -280,5 +310,7 @@ void watchTopic(
 /// exactly the accident this prevents.
 void _scopeTo(Ref ref, int? userId) {
   ref.read(requestCacheProvider).setScope(userId == null ? '' : '$userId');
-  if (userId == null) ref.read(stateStoreProvider).clear();
+  if (userId == null) {
+    ref.read(stateStoreProvider).clear(keep: const {serverSetting});
+  }
 }
