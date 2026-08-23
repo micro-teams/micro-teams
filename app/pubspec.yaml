@@ -34,14 +34,13 @@ dependencies:
   dio: ^5.7.0
 
   # Transport resilience: the line registry, hedged reads, idempotent write failover, the stream
-  # line policy, and the request cache. #21 has landed, so this follows main; it becomes a tag as
-  # soon as one is cut for the Dart package.
+  # line policy, and the request cache. Pinned to the release rather than to a branch: a git ref
+  # that moves means two people building the same commit can get different code.
   multipath:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      # Back to a tag once 0.1.5 is cut.
-      ref: main
+      ref: v0.1.6
   web_socket_channel: ^3.0.1
 
   # The live terminal. Proven against a real device before any of this was written — see
