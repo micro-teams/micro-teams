@@ -14,7 +14,8 @@ import '../common/ui/avatar.dart';
 import '../common/ui/theme.dart';
 import '../providers.dart';
 import 'team_admin_controller.dart';
-import 'teams_screen.dart' show promptForText;
+import '../common/ui/prompt.dart';
+import '../common/ui/app_dialog.dart';
 
 class TeamScreen extends ConsumerWidget {
   const TeamScreen({
@@ -142,8 +143,8 @@ class TeamScreen extends ConsumerWidget {
     TeamMember member,
   ) async {
     final name = member.nickname ?? 'user #${member.userId}';
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('remove $name?'),
         content: const Text('They can be added back afterwards.'),

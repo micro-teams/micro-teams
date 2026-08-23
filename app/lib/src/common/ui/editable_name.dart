@@ -1,9 +1,10 @@
-/// A name you can change where it is written.
+/// A name, with the way to change it beside it.
 ///
-/// Tap the pencil and the name becomes a field with a tick beside it; press the tick (or Enter) and
-/// it is saved. There is no dialog, and that is the point: a dialog for a name covers the thing
-/// being named, has to be dismissed to see the result, and — as this app learned twice — is a frame
-/// somebody's back gesture will look for and not find, closing the screen underneath instead.
+/// The change happens in a dialog. That was not always true here — for a while it was edited in
+/// place, on the grounds that a dialog covers the thing being named — and the real objection turned
+/// out to be different: a dialog pushed outside the router was a frame the back gesture went
+/// looking for and did not find, so back closed the screen underneath instead. That is fixed where
+/// it belonged, in ui/app_dialog.dart, and a dialog is now an ordinary frame on the display stack.
 ///
 /// One control, used wherever something has a name a human may change: an agent, a machine, and
 /// whatever comes next.
@@ -11,10 +12,13 @@ library;
 
 import 'package:flutter/material.dart';
 
-class EditableName extends StatefulWidget {
+import 'prompt.dart';
+
+class EditableName extends StatelessWidget {
   const EditableName({
     required this.name,
     required this.onRename,
+    this.title,
     this.style,
     super.key,
   });
@@ -24,94 +28,43 @@ class EditableName extends StatefulWidget {
   /// Saves. Failures are the caller's to report — it knows what it was renaming.
   final Future<void> Function(String name) onRename;
 
+  /// What the dialog is called. Defaults to renaming whatever [name] currently is.
+  final String? title;
+
   final TextStyle? style;
 
-  @override
-  State<EditableName> createState() => _EditableNameState();
-}
-
-class _EditableNameState extends State<EditableName> {
-  final _controller = TextEditingController();
-  bool _editing = false;
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _start() {
-    setState(() {
-      _editing = true;
-      _controller.text = widget.name;
-    });
-  }
-
-  Future<void> _save() async {
-    final name = _controller.text.trim();
-    if (name.isEmpty || name == widget.name) {
-      setState(() => _editing = false);
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      await widget.onRename(name);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _editing = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final style = widget.style ?? Theme.of(context).textTheme.titleMedium;
-
-    if (!_editing) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(child: Text(widget.name, style: style)),
-          IconButton(
-            tooltip: 'rename',
-            visualDensity: VisualDensity.compact,
-            onPressed: _start,
-            icon: const Icon(Icons.edit_outlined, size: 18),
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 200,
-          child: TextField(
-            controller: _controller,
-            autofocus: true,
-            style: style,
-            decoration: const InputDecoration(isDense: true),
-            onSubmitted: (_) => _save(),
-          ),
-        ),
-        IconButton(
-          tooltip: 'save',
-          visualDensity: VisualDensity.compact,
-          onPressed: _saving ? null : _save,
-          icon: _saving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.check, size: 18),
-        ),
-      ],
+  Future<void> _edit(BuildContext context) async {
+    final next = await promptForText(
+      context,
+      title: title ?? 'rename $name',
+      hint: 'name',
+      action: 'rename',
+      initial: name,
     );
+    // Dismissed, or handed back the name it already had: neither is a change to save.
+    if (next == null || next.trim().isEmpty || next.trim() == name) return;
+    await onRename(next.trim());
   }
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Flexible(
+        child: Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style ?? Theme.of(context).textTheme.titleMedium,
+        ),
+      ),
+      const SizedBox(width: 4),
+      IconButton(
+        tooltip: 'rename',
+        visualDensity: VisualDensity.compact,
+        onPressed: () => _edit(context),
+        icon: const Icon(Icons.edit_outlined, size: 16),
+      ),
+    ],
+  );
 }

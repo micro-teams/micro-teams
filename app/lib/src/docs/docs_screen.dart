@@ -16,11 +16,13 @@ import '../common/errors.dart';
 
 import '../common/team_scope.dart';
 import '../common/ui/team_picker.dart';
+import '../common/ui/detail_pane.dart';
 import '../common/ui/theme.dart';
-import '../teams/teams_screen.dart' show promptForText;
+import '../common/ui/prompt.dart';
 import 'doc_history.dart';
 import 'docs_controller.dart';
 import 'markdown_view.dart';
+import '../common/ui/app_dialog.dart';
 
 class DocsScreen extends ConsumerStatefulWidget {
   const DocsScreen({
@@ -80,15 +82,20 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
           SizedBox(width: Metrics.listPaneWidth, child: tree),
           const VerticalDivider(width: 1),
           Expanded(
-            child: open == null
-                ? const Center(child: Text('pick a document'))
-                : _DocPane(
-                    key: ValueKey(open),
-                    path: open,
-                    onClose: () => widget.onOpen(null),
-                    onMoved: widget.onOpen,
-                    showBack: false,
-                  ),
+            child: DetailPane(
+              child: open == null
+                  ? const Center(
+                      key: ValueKey('no-document'),
+                      child: Text('pick a document'),
+                    )
+                  : _DocPane(
+                      key: ValueKey(open),
+                      path: open,
+                      onClose: () => widget.onOpen(null),
+                      onMoved: widget.onOpen,
+                      showBack: false,
+                    ),
+            ),
           ),
         ],
       ),
@@ -335,8 +342,8 @@ class _TreePaneState extends ConsumerState<_TreePane> {
   }
 
   Future<void> _delete(DocNode node) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('delete ${nameOf(node.path)}?'),
         content: Text(

@@ -18,6 +18,7 @@ import '../common/ui/editable_name.dart';
 import '../common/ui/online_dot.dart';
 import 'agent_detail.dart' show Facts;
 import 'agents_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 /// The machine's own screen: a frame on the stack, like the agent's.
 class MachineDetailScreen extends ConsumerWidget {
@@ -110,8 +111,8 @@ class MachineDetail extends ConsumerWidget {
   }
 
   Future<void> _unbind(BuildContext context, WidgetRef ref, int teamId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('stop using ${machine.name} in this team?'),
         content: const Text('Other teams keep it.'),
@@ -135,8 +136,8 @@ class MachineDetail extends ConsumerWidget {
   }
 
   Future<void> _forget(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('de-register ${machine.name}?'),
         content: const Text(

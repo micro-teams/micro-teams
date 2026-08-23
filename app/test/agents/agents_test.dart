@@ -23,6 +23,7 @@ import 'package:microteams/src/agents/agents_screen.dart';
 import 'package:microteams/src/agents/machine_detail.dart';
 import 'package:mt_api/mt_api.dart';
 import 'package:microteams/src/common/api.dart';
+import '../support/router_host.dart';
 
 /// Answers the four calls this screen makes, and records what it was asked to do.
 class _FakeBackend implements HttpClientAdapter {
@@ -143,7 +144,7 @@ Widget _scope(_FakeBackend backend, Widget child) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(home: child),
+  child: routed(child),
 );
 
 /// Settled twice on purpose. The fleet is asked for only once the TEAM has arrived, so the first
@@ -343,22 +344,31 @@ void main() {
       expect(sitsIn('agents', 'open agent'), isTrue);
     });
 
-    testWidgets('a name is edited where it is written', (tester) async {
-      // No dialog: the name becomes a field and a tick, in place. A dialog for a name covers the
-      // thing being named — and is a frame somebody's back gesture goes looking for.
+    testWidgets('a name is changed in a dialog, and the dialog is a frame', (
+      tester,
+    ) async {
+      // In a dialog again — but a dialog that is a route, so back closes the question rather than
+      // the screen it was asked about. See common/ui/app_dialog.dart.
       final backend = _FakeBackend();
       await tester.pumpWidget(agentDetail(backend));
       await settle(tester);
 
       await tester.tap(find.byTooltip('rename'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AlertDialog), findsOneWidget);
 
-      await tester.enterText(find.byType(TextField).first, 'renamed');
-      await tester.tap(find.byTooltip('save'));
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        'renamed',
+      );
+      await tester.tap(find.widgetWithText(TextButton, 'rename'));
       await settle(tester);
 
       expect(backend.posted, contains('PUT /mt/agent/42/nickname'));
+      expect(find.byType(AlertDialog), findsNothing);
     });
   });
 }

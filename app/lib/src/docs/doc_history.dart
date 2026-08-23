@@ -11,10 +11,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mt_api/mt_api.dart';
 
 import 'docs_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 Future<void> showDocHistory(BuildContext context, {required String path}) =>
-    showDialog<void>(
-      context: context,
+    showAppDialog<void>(
+      context,
       builder: (context) => AlertDialog(
         title: Text('history of ${nameOf(path)}'),
         content: SizedBox(
@@ -72,8 +73,8 @@ class DocHistory extends ConsumerWidget {
   }
 
   Future<void> _showDiff(BuildContext context, DocCommit commit) =>
-      showDialog<void>(
-        context: context,
+      showAppDialog<void>(
+        context,
         builder: (context) => AlertDialog(
           title: Text(
             'diff ${commit.sha.substring(0, commit.sha.length.clamp(0, 7))}',

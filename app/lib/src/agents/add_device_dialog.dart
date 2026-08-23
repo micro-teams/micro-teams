@@ -18,11 +18,10 @@ import 'package:mt_api/mt_api.dart';
 import '../common/team_scope.dart';
 import '../providers.dart';
 import 'agents_controller.dart';
+import '../common/ui/app_dialog.dart';
 
-Future<void> showAddDeviceDialog(BuildContext context) => showDialog<void>(
-  context: context,
-  builder: (context) => const AddDeviceDialog(),
-);
+Future<void> showAddDeviceDialog(BuildContext context) =>
+    showAppDialog<void>(context, builder: (context) => const AddDeviceDialog());
 
 class AddDeviceDialog extends ConsumerWidget {
   const AddDeviceDialog({super.key});

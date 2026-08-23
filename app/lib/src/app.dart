@@ -36,6 +36,8 @@ import 'common/lines.dart';
 import 'common/lines_screen.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/destination_button.dart';
+import 'common/ui/app_dialog.dart';
+import 'common/ui/detail_pane.dart';
 import 'common/ui/theme.dart';
 
 class MicroTeamsApp extends ConsumerStatefulWidget {
@@ -284,6 +286,13 @@ GoRouter _buildRouter(WidgetRef ref) {
           ),
         ],
       ),
+      // Every dialog in the app, at one address. On the display stack rather than beside it, so
+      // that back closes the question rather than the page the question is about — see
+      // common/ui/app_dialog.dart.
+      GoRoute(
+        path: appDialogPath,
+        pageBuilder: (context, state) => appDialogPage<Object?>(state.extra),
+      ),
       // Nothing links here. It is for the moment somebody asks "is it the network?" — see
       // common/lines_screen.dart.
       GoRoute(path: '/__lines', pageBuilder: _page(const LinesScreen())),
@@ -378,16 +387,21 @@ class _ChatsPane extends ConsumerWidget {
           ),
           const VerticalDivider(width: 1),
           Expanded(
-            child: open == null
-                ? const Center(child: Text('pick a conversation'))
-                // asPane: beside the list, not on top of it. No back button — see ThreadScreen.
-                : ThreadScreen(
-                    key: ValueKey(open),
-                    threadId: open,
-                    asPane: true,
-                    onOpenScreen: (sid) => openScene(context, sid: sid),
-                    onOpenInfo: () => context.go('/chats/$open/info'),
-                  ),
+            child: DetailPane(
+              child: open == null
+                  ? const Center(
+                      key: ValueKey('no-conversation'),
+                      child: Text('pick a conversation'),
+                    )
+                  // asPane: beside the list, not on top of it. No back button — see ThreadScreen.
+                  : ThreadScreen(
+                      key: ValueKey(open),
+                      threadId: open,
+                      asPane: true,
+                      onOpenScreen: (sid) => openScene(context, sid: sid),
+                      onOpenInfo: () => context.go('/chats/$open/info'),
+                    ),
+            ),
           ),
         ],
       ),

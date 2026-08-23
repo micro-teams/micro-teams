@@ -19,6 +19,7 @@ import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/providers.dart';
+import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
   _Fake({this.machineTeams = const [1]});
@@ -125,8 +126,8 @@ Widget _host(_Fake backend) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(
-    home: AgentsScreen(
+  child: routed(
+    AgentsScreen(
       onOpenAgent: (_) {},
       onOpenMachine: (_) {},
       onManageTeams: () {},

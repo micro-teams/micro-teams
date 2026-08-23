@@ -10,12 +10,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'chats_controller.dart';
+import '../common/ui/app_dialog.dart';
 
 /// Shows the form. Returns the new thread's id, or null if it was dismissed.
-Future<int?> showNewChatDialog(BuildContext context) => showDialog<int>(
-  context: context,
-  builder: (context) => const NewChatDialog(),
-);
+Future<int?> showNewChatDialog(BuildContext context) =>
+    showAppDialog<int>(context, builder: (context) => const NewChatDialog());
 
 /// "12, 34 56" as ids. Anything that is not a number is dropped rather than refused: the field
 /// accepts what someone pasted, and a stray comma is not an error worth stopping for.

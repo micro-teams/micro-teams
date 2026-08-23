@@ -20,6 +20,7 @@ import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/docs/docs_screen.dart';
 import 'package:microteams/src/providers.dart';
+import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
   final List<({String call, Object? body})> wrote = [];
@@ -85,9 +86,9 @@ Widget _host(_Fake backend) => ProviderScope(
       ),
     ),
   ],
-  child: MaterialApp(
+  child: routed(
+    DocsScreen(onManageTeams: () {}, onOpen: (_) {}),
     theme: darkTheme(),
-    home: DocsScreen(onManageTeams: () {}, onOpen: (_) {}),
   ),
 );
 
