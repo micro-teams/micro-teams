@@ -20,7 +20,7 @@ import 'package:microteams/src/terminal/screen_link.dart';
 
 /// A socket that connects and then says nothing, so a test of the FRAME is not also a test of
 /// whether a machine answers.
-class _FakeSocket implements ScreenSocket {
+class _FakeSocket extends ScreenSocket {
   final _incoming = StreamController<Object?>.broadcast();
 
   @override

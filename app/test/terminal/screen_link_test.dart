@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/terminal/screen_link.dart';
 
 /// A socket that records what was sent and lets a test push bytes back.
-class _FakeSocket implements ScreenSocket {
+class _FakeSocket extends ScreenSocket {
   final _incoming = StreamController<Object?>.broadcast();
   final List<Object?> sent = [];
   bool closed = false;

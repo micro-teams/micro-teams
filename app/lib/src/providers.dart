@@ -107,6 +107,7 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
   if (token == null) return null;
 
   final streams = ref.watch(streamLinesProvider);
+  StreamDial? dial;
   final socket = UpdatesSocket(
     store: ref.watch(updatesStoreProvider),
     // Read the token per dial rather than closing over this one: a reconnect after a refresh must
@@ -117,13 +118,14 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
       final query = live == null || live.isEmpty
           ? ''
           : '?token=${Uri.encodeComponent(live)}';
-      return streams.urlFor('/mt/updates$query');
+      dial = streams.dial('/mt/updates$query');
+      return dial!.url;
     },
   );
   // Told when a dial succeeds and when it ends, so a line that accepts the handshake and drops it
   // is skipped for streams next time rather than retried forever.
-  socket.onOpened = () => streams.opened(DateTime.now());
-  socket.onClosed = () => streams.closed(DateTime.now());
+  socket.onOpened = () => dial?.opened(DateTime.now());
+  socket.onClosed = () => dial?.closed(DateTime.now());
   socket.start();
   ref.onDispose(socket.close);
   return socket;

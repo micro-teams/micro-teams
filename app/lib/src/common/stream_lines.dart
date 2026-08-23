@@ -26,38 +26,55 @@ class StreamLines {
   final StreamSelector selector;
   final Endpoints endpoints;
 
-  Line? _dialled;
-  DateTime? _openedAt;
-
-  /// The websocket URL to dial next, over whichever line is allowed to carry a stream right now.
-  String urlFor(String path) {
+  /// Picks a line and returns everything one connection needs.
+  ///
+  /// Per connection rather than per manager, because the app holds more than one stream at a time —
+  /// the updates socket and any number of live screens. A single "the line I dialled" field shared
+  /// between them credits one socket's success to whichever line another socket happened to dial
+  /// last, which is a wrong answer that looks like a right one.
+  StreamDial dial(String path) {
     final line = selector.next();
-    _dialled = line;
-    _openedAt = null;
     final origin = line == null || line.url.isEmpty
         ? endpoints.origin
         : line.url;
-    return endpoints.socketUrl(origin, path);
+    return StreamDial._(selector, line, endpoints.socketUrl(origin, path));
   }
+}
+
+/// One attempt to hold one stream, and the line it went out over.
+class StreamDial {
+  StreamDial._(this._selector, this.line, this.url);
+
+  final StreamSelector _selector;
+
+  /// The line chosen, or null when there was none to choose and the page's own origin was used.
+  final Line? line;
+
+  final String url;
+
+  DateTime? _openedAt;
+  bool _closed = false;
 
   /// The connection is up. Until this is called the attempt counts as never having opened, which is
   /// what makes a line that accepts and immediately drops earn a penalty.
   void opened(DateTime now) {
     _openedAt = now;
-    final line = _dialled;
-    if (line != null) selector.opened(line);
+    final chosen = line;
+    if (chosen != null) _selector.opened(chosen);
   }
 
-  /// The connection ended, however it ended.
+  /// The connection ended, however it ended. Reporting twice is not counted twice: a socket that
+  /// errors and then completes is one ending, and penalising it twice would take a good line out of
+  /// service for stream traffic.
   void closed(DateTime now) {
-    final line = _dialled;
-    if (line == null) return;
+    if (_closed) return;
+    _closed = true;
+    final chosen = line;
+    if (chosen == null) return;
     final opened = _openedAt;
-    selector.closed(
-      line,
+    _selector.closed(
+      chosen,
       opened == null ? Duration.zero : now.difference(opened),
     );
-    _dialled = null;
-    _openedAt = null;
   }
 }
