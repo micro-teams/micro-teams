@@ -200,6 +200,13 @@ jobs:
         with:
           node-version: "22"
 
+      # The launcher is multipath's, so this job needs the package too — it is doing the last step
+      # of the build, not merely moving files.
+      - run: npm ci
+        working-directory: app
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/download-artifact@v8
         with:
           name: web-raw
