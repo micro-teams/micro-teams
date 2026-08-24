@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's own background, and the ground its icon stands on. A launcher already places the
+         icon against the wallpaper; putting the green tile inside the adaptive circle as well would
+         make a green blob with a green bubble in it. -->
+    <color name="ic_launcher_background">#060606</color>
+    <color name="launch_background">#060606</color>
+</resources>

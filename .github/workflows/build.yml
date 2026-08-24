@@ -184,9 +184,12 @@ jobs:
       # them: the version comes from VERSION and the commit, and the launcher preloads code, engine
       # and fonts. Waiting for the Android build before stamping would put four minutes back into
       # the critical path for no reason.
+      # The icons are generated from branding/logo.svg rather than committed by hand, so a change to
+      # the mark cannot leave a stale favicon behind. Before the build copies web/ into the bundle.
       - name: Check the built app in a real browser
         run: |
           npx playwright install --with-deps chromium
+          node tool/icons.mjs
           node tool/launcher.mjs build/web
           node tool/make-sw.mjs build/web
           bash tool/check-web.sh

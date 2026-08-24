@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The adaptive icon: a background the launcher may mask into whatever shape the device uses, and a
+    foreground that must keep its content inside the middle two thirds, because the outer third can
+    be cropped by that mask.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
