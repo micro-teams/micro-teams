@@ -57,6 +57,10 @@ abstract class CookieHolder {
 
   Future<void> attach(RequestOptions options);
   Future<void> capture(Response<Object?> response);
+
+  /// Forget everything held. Called when a session ends, so that a logout the server did not hear
+  /// about is still a logout here.
+  Future<void> clear();
 }
 
 class BrowserCookies extends CookieHolder {
@@ -67,6 +71,9 @@ class BrowserCookies extends CookieHolder {
 
   @override
   Future<void> capture(Response<Object?> response) async {}
+
+  @override
+  Future<void> clear() async {}
 }
 
 /// The cookie jar for a client that has no browser.
@@ -137,12 +144,18 @@ class StoredCookies extends CookieHolder {
     }
     _store.set(key, jsonEncode(jar));
   }
+
+  @override
+  Future<void> clear() async {
+    _store.set(key, null);
+  }
 }
 
 class AuthApi {
   AuthApi({
     required String baseUrl,
     CookieHolder cookies = const BrowserCookies(),
+    HttpClientAdapter? adapter,
   }) : _cookies = cookies,
        _dio = Dio(
          BaseOptions(
@@ -153,7 +166,10 @@ class AuthApi {
            headers: const {'Content-Type': 'application/json'},
            extra: const {'withCredentials': true},
          ),
-       );
+       ) {
+    // The one seam a test needs: everything else about this class is the wire.
+    if (adapter != null) _dio.httpClientAdapter = adapter;
+  }
 
   final Dio _dio;
   final CookieHolder _cookies;
@@ -209,8 +225,22 @@ class AuthApi {
     return _session(data);
   }
 
-  Future<void> logout() async {
-    await _post<Object?>('/users/auth/logout', const {});
+  /// Ends the session on the server, which needs to know WHOSE session: the endpoint is
+  /// authenticated, and without the token it answers 401 and keeps the refresh cookie alive. That
+  /// looks like a logout locally and undoes itself on the next reload, because boot refreshes with
+  /// a cookie the server never disowned.
+  Future<void> logout(String accessToken) async {
+    try {
+      await _request<Object?>(
+        '/users/auth/logout',
+        method: 'POST',
+        body: const {},
+        accessToken: accessToken,
+      );
+    } finally {
+      // Whatever the server said, this client is done with the cookie.
+      await _cookies.clear();
+    }
   }
 
   Future<AuthUser> me(String accessToken) async {

@@ -13,6 +13,7 @@ import '../common/ui/change_avatar.dart';
 import '../common/ui/theme.dart';
 import '../providers.dart';
 import '../common/ui/client_info.dart';
+import '../common/ui/facts.dart';
 import '../common/ui/app_dialog.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -23,6 +24,16 @@ class ProfileScreen extends ConsumerWidget {
     final user = ref.watch(sessionProvider).valueOrNull?.user;
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
+
+    final details = [
+      Fact(label: 'user id', value: '${user?.id ?? 0}'),
+      Fact(
+        label: 'intro',
+        value: (user?.intro ?? '').isEmpty ? '—' : user!.intro,
+      ),
+    ];
+    final client = [clientInfoFact(context)];
+    final facts = FactColumn([details, client]);
 
     return Scaffold(
       appBar: AppBar(title: const Text('me')),
@@ -70,27 +81,13 @@ class ProfileScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _Card(
-                      padding: EdgeInsets.zero,
-                      child: Column(
-                        children: [
-                          _Row(label: 'user id', value: '${user.id}'),
-                          Divider(height: 1, color: scheme.outlineVariant),
-                          _Row(
-                            label: 'intro',
-                            value: user.intro.isEmpty ? '—' : user.intro,
-                          ),
-                        ],
-                      ),
-                    ),
+                    FactList(rows: details, group: facts),
                     const SizedBox(height: 12),
                     // Its own card, not another row under the person's details: this is about the
                     // APP, and putting it in the same box as somebody's user id and intro says it
-                    // is about them.
-                    const _Card(
-                      padding: EdgeInsets.zero,
-                      child: ClientInfoLine(),
-                    ),
+                    // is about them. Bound to the card above so that the two read as one column of
+                    // facts, which is what they look like.
+                    FactList(rows: client, group: facts),
                     const SizedBox(height: 20),
                     SizedBox(
                       height: 44,
@@ -138,10 +135,10 @@ class ProfileScreen extends ConsumerWidget {
 }
 
 class _Card extends StatelessWidget {
-  const _Card({required this.child, this.padding = const EdgeInsets.all(16)});
+  const _Card({required this.child});
 
   final Widget child;
-  final EdgeInsets padding;
+  static const EdgeInsets padding = EdgeInsets.all(16);
 
   @override
   Widget build(BuildContext context) {
@@ -154,40 +151,6 @@ class _Card extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: child,
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

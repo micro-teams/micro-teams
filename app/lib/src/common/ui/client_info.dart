@@ -19,48 +19,23 @@ import '../clients.dart';
 import '../open_link.dart';
 import '../../providers.dart';
 import 'app_dialog.dart';
+import 'facts.dart';
 
-/// The line in the profile that opens all this. Quiet on purpose: it is the answer to a question
-/// most people never ask.
-class ClientInfoLine extends ConsumerWidget {
-  const ClientInfoLine({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final build = currentBuild();
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-
-    // The same shape as the rows above it — a label on the left, its value on the right — because
-    // it is the same kind of thing: a fact about what you are looking at. It had an icon and the
-    // platform beside the version, which made it look like a control rather than a row.
-    return InkWell(
-      onTap: () => showClientInfo(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              'version',
-              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-            const Spacer(),
-            Flexible(
-              child: Text(
-                build.version.isEmpty ? 'unstamped' : build.version,
-                textAlign: TextAlign.right,
-                style: text.bodyMedium,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
-          ],
-        ),
-      ),
-    );
-  }
+/// The one fact about the app itself that belongs beside the facts about the person: which build
+/// this is. A row rather than a control, in the same list as the rest, and it opens the whole
+/// story when tapped.
+Fact clientInfoFact(BuildContext context) {
+  final build = currentBuild();
+  return Fact(
+    label: 'version',
+    value: build.version.isEmpty ? 'unstamped' : build.version,
+    trailing: Icon(
+      Icons.chevron_right,
+      size: 16,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    ),
+    onTap: () => showClientInfo(context),
+  );
 }
 
 Future<void> showClientInfo(BuildContext context) =>

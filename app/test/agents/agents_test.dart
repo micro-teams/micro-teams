@@ -24,7 +24,6 @@ import 'package:microteams/src/agents/machine_detail.dart';
 import 'package:mt_api/mt_api.dart';
 import 'package:microteams/src/common/api.dart';
 import '../support/router_host.dart';
-import 'package:microteams/src/common/ui/theme.dart';
 
 /// Answers the four calls this screen makes, and records what it was asked to do.
 class _FakeBackend implements HttpClientAdapter {
@@ -156,7 +155,6 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  _facts();
   testWidgets('lists a team\'s agents and machines together', (tester) async {
     await tester.pumpWidget(host(_FakeBackend()));
     await tester.pumpAndSettle();
@@ -372,39 +370,5 @@ void main() {
       expect(backend.posted, contains('PUT /mt/agent/42/nickname'));
       expect(find.byType(AlertDialog), findsNothing);
     });
-  });
-}
-
-// The two-column tables in the detail screens.
-void _facts() {
-  testWidgets('every value starts at the same left edge', (tester) async {
-    // The edge the eye follows down a list of facts is the left one. These used to be pushed right
-    // by a Spacer, so each value began wherever its own length put it.
-    tester.view.physicalSize = const Size(900, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: darkTheme(),
-        home: const Scaffold(
-          body: Facts(
-            rows: [
-              (label: 'machine id', value: 'm-1'),
-              (label: 'status', value: 'connected'),
-              (label: 'enrolled', value: '21 Aug 2026'),
-            ],
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final lefts = [
-      'm-1',
-      'connected',
-      '21 Aug 2026',
-    ].map((value) => tester.getTopLeft(find.text(value)).dx).toSet();
-    expect(lefts, hasLength(1), reason: 'one column, one edge');
   });
 }

@@ -16,6 +16,7 @@ import '../common/ui/editable_name.dart';
 import '../common/ui/online_dot.dart';
 import 'agents_controller.dart';
 import '../common/ui/app_dialog.dart';
+import '../common/ui/facts.dart';
 
 /// What this screen cannot do for itself: leave for another one.
 class AgentActions {
@@ -206,15 +207,15 @@ class AgentDetail extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Center(child: OnlineDot(online: live.online)),
                 const SizedBox(height: 20),
-                Facts(
+                FactList(
                   rows: [
-                    (label: 'user id', value: '${live.userId}'),
+                    Fact(label: 'user id', value: '${live.userId}'),
                     if (live.driver != null)
-                      (label: 'driver', value: live.driver!),
+                      Fact(label: 'driver', value: live.driver!),
                     if (machineName != null)
-                      (label: 'machine', value: machineName!),
+                      Fact(label: 'machine', value: machineName!),
                     if (live.teamId != null)
-                      (label: 'team', value: '${live.teamId}'),
+                      Fact(label: 'team', value: '${live.teamId}'),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -253,61 +254,6 @@ class AgentDetail extends ConsumerWidget {
 }
 
 /// What something IS, as a bordered list of label/value rows — the React `dl`.
-class Facts extends StatelessWidget {
-  const Facts({required this.rows, super.key});
-
-  final List<({String label, String value})> rows;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-
-    // A table, so the values share one left edge.
-    //
-    // They used to be pushed to the right by a Spacer, which means every row's value started
-    // wherever its own length put it — a column of text with a ragged left edge, which is the edge
-    // the eye actually follows down a list of facts. An intrinsic first column makes the labels as
-    // wide as the longest label and no wider, and everything after it lines up by construction
-    // rather than by a number somebody guessed.
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Table(
-        columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
-        border: TableBorder(
-          horizontalInside: BorderSide(color: scheme.outlineVariant),
-        ),
-        defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          for (final row in rows)
-            TableRow(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  child: Text(
-                    row.label,
-                    style: text.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 12, 16, 12),
-                  child: Text(row.value, style: text.bodyMedium),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 /// The cache keepalive switch, and how often it fires.
 ///
 /// What it buys is not liveness — it is the driver's prefix cache not expiring, so an idle agent's

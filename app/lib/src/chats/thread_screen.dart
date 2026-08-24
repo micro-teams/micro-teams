@@ -119,7 +119,18 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     final infoValue = ref.watch(threadInfoProvider(widget.threadId));
     final info = infoValue.valueOrNull ?? const ThreadInfo();
 
+    // The soft keyboard must not move the conversation.
+    //
+    // With the scaffold resizing itself, the list's viewport shrinks by the height of the keyboard,
+    // and because it is anchored at the bottom every bubble slides up — the messages you were
+    // reading jump the moment you tap the field, and jump back when it closes. So the body keeps
+    // the height it had, and the composer alone rides up over the keyboard: the list is where it
+    // was, relative to the title, and the last message or two sit behind the composer where the
+    // keyboard would have covered them anyway.
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         automaticallyImplyLeading: !widget.asPane,
         title: Text(_title(info, me, settled: !infoValue.isLoading)),
@@ -159,7 +170,12 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
               ),
             ),
           ),
-          _Composer(controller: _composer, onSend: _send),
+          // Moved rather than laid out higher: laying it out higher would take the space from the
+          // list above it, which is the thing this is here to keep still.
+          Transform.translate(
+            offset: Offset(0, -keyboard),
+            child: _Composer(controller: _composer, onSend: _send),
+          ),
         ],
       ),
     );

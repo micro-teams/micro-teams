@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The app's own background, and the ground its icon stands on. A launcher already places the
-         icon against the wallpaper; putting the green tile inside the adaptive circle as well would
-         make a green blob with a green bubble in it. -->
-    <color name="ic_launcher_background">#060606</color>
+    <!-- The ground the icon stands on. The mark's own green, so a launcher mask of any shape cuts
+         green rather than a square of the app's near-black: the tile in branding/logo.svg is
+         exactly this colour, and the adaptive icon is that tile with its rounding left to the
+         launcher. -->
+    <color name="ic_launcher_background">#07C160</color>
+    <!-- The window while the process starts, which is the app's own background rather than the
+         icon's: it is followed by the app, not by the icon. -->
     <color name="launch_background">#060606</color>
 </resources>
