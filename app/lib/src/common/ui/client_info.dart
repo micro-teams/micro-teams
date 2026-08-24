@@ -30,24 +30,31 @@ class ClientInfoLine extends ConsumerWidget {
     final build = currentBuild();
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final version = build.version.isEmpty ? 'unstamped' : build.version;
 
+    // The same shape as the rows above it — a label on the left, its value on the right — because
+    // it is the same kind of thing: a fact about what you are looking at. It had an icon and the
+    // platform beside the version, which made it look like a control rather than a row.
     return InkWell(
       onTap: () => showClientInfo(context),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
           children: [
-            Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 8),
-            Expanded(
+            Text(
+              'version',
+              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const Spacer(),
+            Flexible(
               child: Text(
-                '${build.platform} · $version',
-                style: text.bodyMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+                build.version.isEmpty ? 'unstamped' : build.version,
+                textAlign: TextAlign.right,
+                style: text.bodyMedium,
               ),
             ),
+            const SizedBox(width: 8),
             Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
           ],
         ),

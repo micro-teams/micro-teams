@@ -273,8 +273,14 @@ class Facts extends StatelessWidget {
             if (index > 0) Divider(height: 1, color: scheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              // Baselines, and one style for both halves. The value used to ask for a family
+              // called "monospace" at 13 against a label at 14 — a different font, a different
+              // size and a different line height, aligned by their boxes rather than by their
+              // text, so no two rows in the table sat on the same line. The whole app is already
+              // monospace; the two halves differ by colour and nothing else.
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
                 children: [
                   Text(
                     row.label,
@@ -287,10 +293,7 @@ class Facts extends StatelessWidget {
                     child: Text(
                       row.value,
                       textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                      ),
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ),
                 ],
