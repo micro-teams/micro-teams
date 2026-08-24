@@ -1,4 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Without this a release build has no network at all, and the symptom does not say so: every
+        request fails at DNS with "Failed host lookup", which reads as a wrong address or a broken
+        connection rather than as a missing permission. Flutter's template grants it in the debug
+        and profile manifests only — so it works all the way through development and fails the first
+        time somebody installs the real thing, which is exactly what happened here.
+    -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="microteams"
         android:name="${applicationName}"
