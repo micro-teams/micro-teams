@@ -131,12 +131,15 @@ await plain.close();
 // A probe to the registry's other line is the one thing that is SUPPOSED to leave this origin —
 // that is what a second line is. It is exempt by path, not by host, so an asset served from
 // somewhere else still fails this.
-const foreign = fetched.filter(
-  (url) =>
-    !url.startsWith(BASE) &&
-    !url.startsWith("data:") &&
-    new URL(url).pathname !== "/mt/probe",
-);
+// A request to the registry's other line is the one thing that is SUPPOSED to leave this origin —
+// that is what a second line is, and the client picks it whenever it measures faster. Exempt by
+// what it is (an API call or a probe), never by host, so an ASSET served from somewhere else still
+// fails this.
+const foreign = fetched.filter((url) => {
+  if (url.startsWith(BASE) || url.startsWith("data:")) return false;
+  const { pathname } = new URL(url);
+  return !(pathname === "/mt/probe" || pathname.startsWith("/mt/") || pathname.startsWith("/api/"));
+});
 check(
   "every byte comes from this origin",
   foreign.length === 0,
