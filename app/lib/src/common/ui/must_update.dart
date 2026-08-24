@@ -70,11 +70,11 @@ class MustUpdate extends ConsumerWidget {
                         height: 44,
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: () {
+                          onPressed: () async {
                             final url =
                                 '${endpoints.publicOrigin}${client.url}';
-                            if (!openLink(url)) {
-                              Clipboard.setData(ClipboardData(text: url));
+                            if (!await openLink(url)) {
+                              await Clipboard.setData(ClipboardData(text: url));
                             }
                           },
                           child: Text('download ${client.name}'),

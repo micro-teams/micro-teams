@@ -80,13 +80,16 @@ class ProfileScreen extends ConsumerWidget {
                             label: 'intro',
                             value: user.intro.isEmpty ? '—' : user.intro,
                           ),
-                          Divider(height: 1, color: scheme.outlineVariant),
-                          // Which build this is, and where the apps are. Quiet, at the bottom, and
-                          // one tap from the detail — it is the answer to a question most people
-                          // never ask and the first thing anyone needs when something is wrong.
-                          const ClientInfoLine(),
                         ],
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Its own card, not another row under the person's details: this is about the
+                    // APP, and putting it in the same box as somebody's user id and intro says it
+                    // is about them.
+                    const _Card(
+                      padding: EdgeInsets.zero,
+                      child: ClientInfoLine(),
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
