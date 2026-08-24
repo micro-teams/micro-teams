@@ -110,7 +110,6 @@ void main() {
   });
 
   test('and adopts the registry the deployment serves', () async {
-    final backend = _Fake();
     final container = _container(_Fake());
     addTearDown(container.dispose);
     final manager = container.read(linesProvider);
@@ -119,7 +118,6 @@ void main() {
 
     expect(manager.lines.map((l) => l.id), ['origin', 'frp-1']);
     expect(manager.lines.last.url, 'https://frp.example');
-    expect(backend.asked, isEmpty, reason: 'the other fake answered');
   });
 
   test('an empty registry leaves the line it already had', () async {

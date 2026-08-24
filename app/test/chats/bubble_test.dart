@@ -277,21 +277,17 @@ void main() {
     );
   });
 
-  testWidgets('the newest message is the one you are looking at', (
+  testWidgets('the list is reversed, so there is no pin-to-bottom rule', (
     tester,
   ) async {
-    // T-014 / T-016 in their calm form: the list is REVERSED, so the newest message is at offset
-    // zero and a message arriving does not move a reader who has scrolled up — there is no
-    // pin-to-bottom rule to get wrong, because there is nothing to pin.
+    // T-014 / T-016 in their calm form. The decision being pinned is ours: a reversed list puts the
+    // newest message at offset zero, so a message arriving cannot move a reader who has scrolled
+    // up — there is nothing to pin, and therefore no pinning rule to get wrong.
+    //
+    // Only `reverse` is asserted. This used to also check that the offset was zero at rest, which
+    // is Flutter's own starting state rather than anything we decided.
     await _pumpThread(tester);
 
-    final list = tester.widget<ListView>(find.byType(ListView));
-    expect(list.reverse, isTrue);
-    expect(
-      list.controller?.position.pixels,
-      0,
-      reason:
-          'zero is the bottom in a reversed list — where the newest message is',
-    );
+    expect(tester.widget<ListView>(find.byType(ListView)).reverse, isTrue);
   });
 }

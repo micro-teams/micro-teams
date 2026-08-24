@@ -139,9 +139,25 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    // An agent stays tappable even when there is nothing to open, so a tap can explain itself
-    // rather than looking like a dead avatar.
-    expect(find.byType(GestureDetector), findsOneWidget);
+    // Which one, not how many: counting them would pass just as happily with the wiring inverted,
+    // and inverted is the failure worth catching — a human's face is not a door.
+    final agent = find.byWidgetPredicate(
+      (widget) => widget is UserAvatar && widget.userId == 42,
+    );
+    final human = find.byWidgetPredicate(
+      (widget) => widget is UserAvatar && widget.userId == 7,
+    );
+    expect(
+      find.descendant(of: agent, matching: find.byType(GestureDetector)),
+      findsOneWidget,
+      reason:
+          'an agent stays tappable even with nothing to open, so the tap '
+          'can explain itself rather than looking dead',
+    );
+    expect(
+      find.descendant(of: human, matching: find.byType(GestureDetector)),
+      findsNothing,
+    );
   });
 
   testWidgets('every face on screen is one question, not one each', (
