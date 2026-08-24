@@ -127,18 +127,24 @@ jobs:
             --dart-define=MT_VERSION=$MT_VERSION \
             --dart-define=MT_BUILT_AT=$MT_BUILT_AT
 
-      # How it was signed travels with it: the assembling job writes it into clients.json, and a
+      # Collected into one flat directory before upload, so the artifact's shape is something this
+      # workflow decided rather than something it inherits: given two paths, the artifact's root
+      # becomes their common ancestor, and the packages end up several directories deeper than
+      # whoever downloads them expects.
+      #
+      # How it was signed travels with them: the assembling job writes it into clients.json, and a
       # debug-signed package cannot be replaced in place by a properly signed one later.
-      - name: Say how it was signed
-        run: echo "${MT_APK_SIGNED:-debug}" > apk-signed.txt
+      - name: Collect what gets published
+        run: |
+          mkdir -p out
+          cp app/build/app/outputs/flutter-apk/*.apk out/
+          echo "${MT_APK_SIGNED:-debug}" > out/signed.txt
 
       - uses: actions/upload-artifact@v7
         with:
           retention-days: 7
           name: android-apk
-          path: |
-            app/build/app/outputs/flutter-apk/*.apk
-            apk-signed.txt
+          path: out
 
   build-web:
     runs-on: ubuntu-latest
@@ -221,8 +227,8 @@ jobs:
         run: |
           echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           export MT_VERSION="$(cat ../VERSION)-${GITHUB_SHA::7}"
-          export MT_APK_SIGNED="$(cat ../apk/apk-signed.txt 2>/dev/null || echo debug)"
-          node tool/add-clients.mjs build/web ../apk/build/app/outputs/flutter-apk
+          export MT_APK_SIGNED="$(cat ../apk/signed.txt 2>/dev/null || echo debug)"
+          node tool/add-clients.mjs build/web ../apk
           node tool/launcher.mjs build/web
           node tool/make-sw.mjs build/web
 
