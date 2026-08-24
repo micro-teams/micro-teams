@@ -9,9 +9,12 @@
 /// seam is [CookieHolder], and it is the only place the two worlds differ.
 library;
 
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../common/errors.dart';
+import '../common/key_value.dart';
 
 class AuthUser {
   const AuthUser({
@@ -64,6 +67,76 @@ class BrowserCookies extends CookieHolder {
 
   @override
   Future<void> capture(Response<Object?> response) async {}
+}
+
+/// The cookie jar for a client that has no browser.
+///
+/// Small on purpose: the only cookie in this system is the refresh token, and what has to survive
+/// about it is its value. Paths, domains and the rest belong to a jar that serves many origins; a
+/// native client talks to exactly one, chosen at sign-in, and everything it remembers is thrown away
+/// when that changes.
+///
+/// Without this, a native client is signed out the moment its access token ages out: the server
+/// sets the refresh cookie, nothing keeps it, and the silent refresh has nothing to send. On the web
+/// the browser does all of this, and does it better — the cookie is httpOnly there, which is a
+/// property no client-side store can have.
+class StoredCookies extends CookieHolder {
+  StoredCookies(this._store, {this.key = 'cookies'});
+
+  final KeyValueStore _store;
+  final String key;
+
+  Map<String, String> _read() {
+    final raw = _store.get(key);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map
+          ? {
+              for (final entry in decoded.entries)
+                '${entry.key}': '${entry.value}',
+            }
+          : {};
+    } catch (_) {
+      // Unreadable is the same as absent: ask the person to sign in again rather than fail here.
+      return {};
+    }
+  }
+
+  @override
+  Future<void> attach(RequestOptions options) async {
+    final jar = _read();
+    if (jar.isEmpty) return;
+    options.headers['Cookie'] = jar.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; ');
+  }
+
+  @override
+  Future<void> capture(Response<Object?> response) async {
+    final set = response.headers.map['set-cookie'];
+    if (set == null || set.isEmpty) return;
+    final jar = _read();
+    for (final header in set) {
+      final pair = header.split(';').first.trim();
+      final split = pair.indexOf('=');
+      if (split <= 0) continue;
+      final name = pair.substring(0, split);
+      final value = pair.substring(split + 1);
+      // A server deletes a cookie by sending it back empty, or with an age of zero. Storing that as
+      // a value would keep sending a cookie the server has already disowned.
+      final deleted =
+          value.isEmpty ||
+          header.toLowerCase().contains('max-age=0') ||
+          header.toLowerCase().contains('expires=thu, 01 jan 1970');
+      if (deleted) {
+        jar.remove(name);
+      } else {
+        jar[name] = value;
+      }
+    }
+    _store.set(key, jsonEncode(jar));
+  }
 }
 
 class AuthApi {
@@ -225,6 +298,12 @@ class AuthApi {
 
     final Response<Object?> response;
     try {
+      // Attached here rather than by an interceptor, because it has to happen on the way OUT of
+      // this class and nothing above it knows a cookie exists. The browser does this itself; see
+      // BrowserCookies.
+      final request = options.compose(_dio.options, path, data: body);
+      await _cookies.attach(request);
+      options.headers = request.headers;
       response = await _dio.request<Object?>(
         path,
         data: body,

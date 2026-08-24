@@ -5,6 +5,7 @@
 /// construct any of this, which is what keeps a widget from quietly opening its own connection.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth/auth_api.dart';
@@ -92,7 +93,16 @@ final linesProvider = Provider<mp.LineManager>((ref) {
 });
 
 final authApiProvider = Provider<AuthApi>((ref) {
-  return AuthApi(baseUrl: ref.watch(endpointsProvider).auth);
+  return AuthApi(
+    baseUrl: ref.watch(endpointsProvider).auth,
+    // The browser keeps the refresh cookie itself, and keeps it httpOnly, which is a property
+    // nothing on this side of the wire can match. A native client has no browser: without somewhere
+    // to put that cookie it is signed out the moment its access token ages out, which is exactly
+    // what an Android client was doing.
+    cookies: kIsWeb
+        ? const BrowserCookies()
+        : StoredCookies(ref.watch(stateStoreProvider)),
+  );
 });
 
 /// Measures every line, now. The panel's refresh button; the loop runs on its own once started.

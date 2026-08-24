@@ -62,11 +62,27 @@ Future<void> showClientInfo(BuildContext context) =>
 class _ClientInfo extends ConsumerWidget {
   const _ClientInfo();
 
+  /// Everything about this client, as the block somebody pastes into a bug report.
+  ///
+  /// One block with one button, rather than a copy button per line. What has to be handed over is
+  /// all of it — a version with no platform beside it is half an answer — and a button per line
+  /// made the reader choose which halves to send.
+  String _report(BuildInfo build, String server) => [
+    'version  ${_or(build.version)}',
+    'built    ${_or(build.builtAt)}',
+    'platform ${build.platform} (${build.flavour})',
+    'server   ${_or(server)}',
+  ].join('\n');
+
+  static String _or(String value) => value.trim().isEmpty ? '—' : value.trim();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final build = currentBuild();
     final endpoints = ref.watch(endpointsProvider);
     final packages = ref.watch(clientPackagesProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final report = _report(build, endpoints.publicOrigin);
 
     return AlertDialog(
       title: const Text('this client'),
@@ -75,22 +91,37 @@ class _ClientInfo extends ConsumerWidget {
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Fact(label: 'version', value: build.version),
-              _Fact(label: 'built', value: build.builtAt),
-              _Fact(label: 'platform', value: build.platform),
-              _Fact(label: 'build', value: build.flavour),
-              const Divider(height: 24),
-              // The value a native client has to be given, taken from wherever this one is running.
-              // On the web that is the page's own address; on a phone it is what was typed at
-              // sign-in, which is exactly what somebody setting up a second device needs to copy.
-              _Fact(label: 'server', value: endpoints.publicOrigin),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  border: Border.all(color: scheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: SelectableText(
+                  report,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(height: 1.6),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () =>
+                      Clipboard.setData(ClipboardData(text: report)),
+                  icon: const Icon(Icons.copy_outlined, size: 16),
+                  label: const Text('copy'),
+                ),
+              ),
               const Divider(height: 24),
               Text(
                 'apps',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 4),
@@ -117,53 +148,6 @@ class _ClientInfo extends ConsumerWidget {
           child: const Text('close'),
         ),
       ],
-    );
-  }
-}
-
-/// One fact, with the button that puts it on the clipboard.
-class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final shown = value.trim().isEmpty ? '—' : value.trim();
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 72,
-            child: Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ),
-          Expanded(
-            child: SelectableText(
-              shown,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          IconButton(
-            tooltip: 'copy $label',
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: shown == '—'
-                ? null
-                : () => Clipboard.setData(ClipboardData(text: shown)),
-            icon: const Icon(Icons.copy_outlined, size: 16),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -208,9 +192,9 @@ class _Download extends StatelessWidget {
           // Opening a link is the web's job; where nothing can open one, the address is copyable
           // instead, which is the honest fallback rather than a button that does nothing.
           TextButton(
-            onPressed: () {
-              if (!openLink(url)) {
-                Clipboard.setData(ClipboardData(text: url));
+            onPressed: () async {
+              if (!await openLink(url)) {
+                await Clipboard.setData(ClipboardData(text: url));
               }
             },
             child: const Text('download'),

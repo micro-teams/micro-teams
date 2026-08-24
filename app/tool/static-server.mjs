@@ -195,9 +195,34 @@ async function backend(req, res) {
   }
 }
 
+/// What a real line answers with, because a real line is a different ORIGIN to the page.
+///
+/// The registry here advertises a second line on localhost while the page is served from
+/// 127.0.0.1 — deliberately, so the client has to make a genuinely cross-origin request. A
+/// deployment's other lines send exactly these headers (nginx does it for every /mt/ and /api/
+/// there); without them here, the moment the client decided the second line was the faster one, the
+/// browser refused the request and the checks read it as the app being broken.
+function allowCrossOrigin(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Vary", "Origin");
+}
+
 const server = createServer(async (req, res) => {
   const requestPath = (req.url ?? "/").split("?")[0];
   if (requestPath.startsWith("/api/") || requestPath.startsWith("/mt/")) {
+    allowCrossOrigin(req, res);
+    // The preflight. A request carrying an Authorization header is never "simple", so every call
+    // the app makes to another line asks permission first.
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers":
+          req.headers["access-control-request-headers"] ?? "authorization, content-type",
+        "Access-Control-Max-Age": "600",
+      });
+      return res.end();
+    }
     return backend(req, res);
   }
 
