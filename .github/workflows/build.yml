@@ -414,7 +414,18 @@ jobs:
             echo "pinned $ref -> ${ref}@${digest}"
           done
           echo "== pinned images =="; grep -nE '^[[:space:]]*image:' "$COMPOSE"
+          # Three levels deep, which is where the interesting files are — but the web app's own
+          # trees are deeper than that, and a listing that silently stops short reads as "these
+          # files are missing". So the deep ones get a line saying how much is down there.
           echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
+          echo "== and below that =="
+          for deep in frontend/dist/assets frontend/dist/canvaskit frontend/dist/downloads; do
+            [ -d "$STAGE/$deep" ] || continue
+            printf '%s: %s files, %s\n' "$deep" \
+              "$(find "$STAGE/$deep" -type f | wc -l)" \
+              "$(du -sh "$STAGE/$deep" | cut -f1)"
+          done
+          find "$STAGE/frontend/dist/downloads" -type f 2>/dev/null | sort
       # Upload the bundle DIRECTORY, not a pre-made zip: actions/upload-artifact already zips what it
       # receives, so uploading a .zip would nest it (download → microteams-deploy.zip → the real zip).
       # Uploading the dir means the downloaded artifact zip IS the bundle, one layer.
