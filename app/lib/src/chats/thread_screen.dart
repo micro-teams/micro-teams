@@ -527,17 +527,28 @@ class _PendingBubble extends StatelessWidget {
               children: [
                 _BubbleWidth(
                   // Faded by colour rather than wrapped in an Opacity: an opacity layer is a
-                  // saveLayer, and this is the one bubble that is on screen while the list is
-                  // moving — a message you have just sent.
+                  // saveLayer, and this is the one bubble on screen while the list is moving.
+                  //
+                  // BLENDED, not translucent. A bubble is drawn as a rounded box plus a small
+                  // rotated square for its tail, and the two overlap: with a see-through colour
+                  // the overlap composed twice and the tail appeared as a darker square beside the
+                  // message. Blending against the background first gives one solid colour, so the
+                  // seam cannot show.
                   child: _BubbleBody(
                     text: pending.content,
                     mine: true,
                     background: pending.isStuck
                         ? ownBubble
-                        : ownBubble.withValues(alpha: 0.6),
+                        : Color.alphaBlend(
+                            ownBubble.withValues(alpha: 0.6),
+                            scheme.surface,
+                          ),
                     foreground: pending.isStuck
                         ? ownBubbleInk
-                        : ownBubbleInk.withValues(alpha: 0.6),
+                        : Color.alphaBlend(
+                            ownBubbleInk.withValues(alpha: 0.6),
+                            ownBubble,
+                          ),
                   ),
                 ),
                 const SizedBox(height: 2),

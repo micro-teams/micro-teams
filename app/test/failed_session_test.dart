@@ -14,6 +14,9 @@ import 'package:microteams/src/app.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/providers.dart';
+import 'dart:async';
+import 'package:go_router/go_router.dart';
+import 'package:microteams/src/common/ui/app_dialog.dart';
 
 class _Failed extends SessionController {
   @override
@@ -21,6 +24,39 @@ class _Failed extends SessionController {
 }
 
 void main() {
+  testWidgets('settings are reachable from the login screen', (tester) async {
+    // A native client has to be told which server to talk to BEFORE it can sign in, and that is
+    // asked for in a dialog over the login screen. The dialog is a route, so the router's redirect
+    // has to allow it while signed out — it did not, and pressing "settings" opened a second login
+    // screen instead.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionProvider.overrideWith(_Failed.new),
+          endpointsProvider.overrideWithValue(
+            const Endpoints(origin: 'http://backend.test'),
+          ),
+        ],
+        child: const MicroTeamsApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // From a context BELOW the router, which is where a screen lives — MaterialApp itself is above
+    // it and cannot see it.
+    final router = GoRouter.of(tester.element(find.byType(Scaffold).first));
+    unawaited(
+      router.push(
+        appDialogPath,
+        extra: (BuildContext context) =>
+            const AlertDialog(title: Text('settings')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('settings'), findsOneWidget);
+  });
+
   testWidgets('a session that could not be restored still paints a screen', (
     tester,
   ) async {

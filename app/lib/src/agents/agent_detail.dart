@@ -261,42 +261,47 @@ class Facts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    // A table, so the values share one left edge.
+    //
+    // They used to be pushed to the right by a Spacer, which means every row's value started
+    // wherever its own length put it — a column of text with a ragged left edge, which is the edge
+    // the eye actually follows down a list of facts. An intrinsic first column makes the labels as
+    // wide as the longest label and no wider, and everything after it lines up by construction
+    // rather than by a number somebody guessed.
     return Container(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         border: Border.all(color: scheme.outlineVariant),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(
+      child: Table(
+        columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+        border: TableBorder(
+          horizontalInside: BorderSide(color: scheme.outlineVariant),
+        ),
+        defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
         children: [
-          for (final (index, row) in rows.indexed) ...[
-            if (index > 0) Divider(height: 1, color: scheme.outlineVariant),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+          for (final row in rows)
+            TableRow(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: Text(
                     row.label,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    style: text.bodyMedium?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  const Spacer(),
-                  Flexible(
-                    child: Text(
-                      row.value,
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 12, 16, 12),
+                  child: Text(row.value, style: text.bodyMedium),
+                ),
+              ],
             ),
-          ],
         ],
       ),
     );

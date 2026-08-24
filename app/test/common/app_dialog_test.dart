@@ -69,6 +69,7 @@ Future<void> back(WidgetTester tester) async {
 }
 
 void main() {
+  _signedOut();
   testWidgets('back closes the dialog, not the page under it', (tester) async {
     await tester.pumpWidget(_app());
     await tester.tap(find.text('go deeper'));
@@ -170,5 +171,49 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('the page underneath'), findsOneWidget);
+  });
+}
+
+// A dialog opened before anybody is signed in.
+//
+// The settings a native client needs — which server to talk to — are asked for on the login screen,
+// so the dialog route has to be reachable while signed out. It was not: the router's redirect sent
+// every unknown location to /login, so pressing "settings" opened a second login screen.
+void _signedOut() {
+  testWidgets('a dialog is reachable before sign-in', (tester) async {
+    final router = GoRouter(
+      initialLocation: '/login',
+      redirect: (context, state) {
+        const anonymous = {'/login', '/register', appDialogPath};
+        return anonymous.contains(state.matchedLocation) ? null : '/login';
+      },
+      routes: [
+        GoRoute(
+          path: '/login',
+          builder: (context, state) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => showAppDialog<void>(
+                  context,
+                  builder: (context) =>
+                      const AlertDialog(title: Text('settings')),
+                ),
+                child: const Text('settings'),
+              ),
+            ),
+          ),
+        ),
+        GoRoute(
+          path: appDialogPath,
+          pageBuilder: (context, state) => appDialogPage<Object?>(state.extra),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.tap(find.text('settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
   });
 }

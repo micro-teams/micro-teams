@@ -159,7 +159,11 @@ GoRouter _buildRouter(WidgetRef ref) {
       final signedIn = session.valueOrNull != null;
       // Both screens that exist before a session. Bouncing someone off /register back to /login
       // for not being signed in is how registration became unreachable.
-      const anonymous = {'/login', '/register'};
+      // A dialog is a frame over whatever is beneath it, and what is beneath may be the login
+      // screen: the settings a native client needs BEFORE it can sign in are asked for there. It
+      // was not in this set, so pushing one while signed out redirected to /login — which looked
+      // like the settings button opening a second login page.
+      const anonymous = {'/login', '/register', appDialogPath};
       final atAnonymous = anonymous.contains(state.matchedLocation);
       if (!signedIn) return atAnonymous ? null : '/login';
       if (atAnonymous) return '/chats';
@@ -714,19 +718,26 @@ class _Shell extends StatelessWidget {
 
     if (isWide(context)) {
       return Scaffold(
-        body: Row(
-          children: [
-            _Rail(
-              // Team management is a surface over docs, not a section of its own, so the rail
-              // keeps reading "docs" while it is up — the same as the React shell.
-              current: index == _teams ? _docs : index,
-              items: [for (final i in _railItems) (branch: i, d: _branches[i])],
-              onSelected: (i) => _go(context, i),
-              onProfile: () => _go(context, _profile),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(child: shell),
-          ],
+        // SafeArea, because a tablet in landscape puts the status bar across the top of the whole
+        // window: without it the rail's buttons and the divider run underneath the clock.
+        body: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              _Rail(
+                // Team management is a surface over docs, not a section of its own, so the rail
+                // keeps reading "docs" while it is up — the same as the React shell.
+                current: index == _teams ? _docs : index,
+                items: [
+                  for (final i in _railItems) (branch: i, d: _branches[i]),
+                ],
+                onSelected: (i) => _go(context, i),
+                onProfile: () => _go(context, _profile),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(child: shell),
+            ],
+          ),
         ),
       );
     }
