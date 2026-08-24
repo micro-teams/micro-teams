@@ -1,0 +1,60 @@
+name: Set up the Flutter app
+description: >
+  The toolchain and the generated client, restored from caches where they can be. Shared by every
+  job that builds part of this app, so the two of them cannot drift into two slightly different
+  environments — which is a difference that shows up as "it works in the other job".
+
+runs:
+  using: composite
+  steps:
+    # openapi-generator (the codegen step) runs on the JVM, same as the applet's.
+    - uses: actions/setup-java@v5
+      with:
+        java-version: "21"
+        distribution: "temurin"
+    - uses: actions/setup-node@v7
+      with:
+        node-version: "22"
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: "3.47.1"
+        cache: true
+
+    # Packages resolve to the same versions for the same lock file, so downloading them again every
+    # run is paying for an answer we already have.
+    - uses: actions/cache@v4
+      with:
+        path: ~/.pub-cache
+        key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+        restore-keys: pub-${{ runner.os }}-
+
+    # The generated client is a pure function of the contract and the generator's own pinned
+    # version. Caching it turns a 30-second JVM run into a restore — and a cache miss still
+    # generates, so a changed contract can never be served a stale client.
+    - id: client
+      uses: actions/cache@v4
+      with:
+        path: app/packages/mt_api
+        key: mt-api-${{ runner.os }}-${{ hashFiles('MicroTeams-API.yml', 'app/tool/codegen.sh', 'app/openapitools.json') }}
+
+    - if: steps.client.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: app
+      run: bash tool/codegen.sh
+
+    - shell: bash
+      working-directory: app
+      run: flutter pub get
+
+    # One version for the whole bundle: the product version from the repo-root VERSION file plus the
+    # commit that produced it. Every job computes it the same way from the same two inputs, so the
+    # web bundle, the APK and /version agree by construction rather than by being passed around.
+    - shell: bash
+      run: |
+        {
+          echo "MT_VERSION=$(cat VERSION)-${GITHUB_SHA::7}"
+          echo "MT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Android needs a number that only ever goes up, and it has to be a number.
+          echo "MT_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
+        } >> "$GITHUB_ENV"

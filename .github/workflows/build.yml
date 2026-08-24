@@ -73,66 +73,40 @@ jobs:
 
   # The web client. It is the ONLY frontend now — frontend/ (React + Vite) is gone, because one
   # person maintaining two implementations of the same product maintains neither.
-  build-app:
+  # The app is built in three jobs rather than one, and the reason is arithmetic: the Android build
+  # is three and a half minutes of the seven, and it has nothing to do with the web build. Run side
+  # by side they cost the longer of the two; run in sequence they cost the sum.
+  #
+  #   build-android   the installable client
+  #   build-web       the web build, and every check that gates a merge
+  #   assemble-web    the two put together: the clients dropped into the bundle, then stamped
+  #
+  # The stamping happens last, in one place, so what /version says and what is in the bundle cannot
+  # disagree.
+  build-android:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
-    # Lifted to the job because a step's `if` cannot see the secrets context — only env. Empty when
-    # the repository has no key, which is what the signing step tests for.
+    # At the job, not at the step: a step's own `if` cannot see env declared on that same step, and
+    # it can never see the secrets context at all. Empty when this repository has no key.
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
     steps:
       - uses: actions/checkout@v7
-      # openapi-generator (the codegen step) runs on the JVM, same as the applet's.
-      - uses: actions/setup-java@v5
-        with:
-          java-version: "21"
-          distribution: "temurin"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: "3.47.1"
-          cache: true
+      - uses: ./.github/actions/flutter-app
 
-      # The Dart client comes from the same repo-root contract the backend generates its Api
-      # interfaces from. It is gitignored, so this step is not optional — without it nothing below
-      # compiles.
-      # One version for the whole bundle: the product version from the repo-root VERSION file plus
-      # the commit that produced it. The app is built with it, the launcher carries it, the worker
-      # is stamped with it and /version serves it — four things that agree by construction rather
-      # than by four calculations that agree until one of them changes.
-      - name: Decide this bundle's version
-        run: |
-          {
-            echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}"
-            echo "MT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            # Android needs a number that only ever goes up, and it has to be a number: the run
-            # number is the only monotonic thing here that survives a rebuild of the same commit.
-            echo "MT_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
-          } >> "$GITHUB_ENV"
+      # Gradle downloads a great deal on a cold machine and almost nothing on a warm one.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
 
-      - run: bash tool/codegen.sh
-      - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test
-      - run: flutter analyze
-      - run: flutter test
-      - run: |
-          flutter build web --release --no-web-resources-cdn \
-            --dart-define=MT_VERSION=$MT_VERSION \
-            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
-
-      # The installable client, built from the same commit and stamped with the same version as the
-      # web bundle it will be published beside. arm64 only for now: every phone sold in years is
-      # arm64, and the manifest this produces takes another architecture as one more entry rather
-      # than as a change to any code.
       - name: Write the release key, if this repository has one
         if: env.ANDROID_KEYSTORE_BASE64 != ''
+        working-directory: app
         run: |
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/microteams-release.p12
           cat > android/key.properties <<PROPS
@@ -143,37 +117,107 @@ jobs:
           PROPS
           echo "MT_APK_SIGNED=release" >> "$GITHUB_ENV"
 
+      # arm64 only for now: every phone sold in years is arm64, and another architecture is one more
+      # entry in the manifest rather than a change to any code.
       - name: Build the Android client
+        working-directory: app
         run: |
           flutter build apk --release --split-per-abi --target-platform android-arm64 \
             --build-name="${MT_VERSION%%-*}" --build-number="$MT_BUILD_NUMBER" \
             --dart-define=MT_VERSION=$MT_VERSION \
             --dart-define=MT_BUILT_AT=$MT_BUILT_AT
-      # The first request cannot be spread across lines, so it is made small and given one job:
-      # register the worker, carry the registry inline, and start Flutter on whichever line answers
-      # first. Before make-sw, because the launcher IS the document the worker precaches and hashes.
+
+      # How it was signed travels with it: the assembling job writes it into clients.json, and a
+      # debug-signed package cannot be replaced in place by a properly signed one later.
+      - name: Say how it was signed
+        run: echo "${MT_APK_SIGNED:-debug}" > apk-signed.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: android-apk
+          path: |
+            app/build/app/outputs/flutter-apk/*.apk
+            apk-signed.txt
+
+  build-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/flutter-app
+
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+      - run: |
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=MT_VERSION=$MT_VERSION \
+            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
+
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # The clients go into the bundle before it is stamped, so what is deployed and what
-      # clients.json says are the same thing by construction.
-      - run: node tool/add-clients.mjs build/web build/app/outputs/flutter-apk
 
-      - run: node tool/launcher.mjs build/web
-
-      # Stamps the service worker with a hash of the build and removes Flutter's deprecated one.
-      # Part of the build, not a nicety: an unstamped worker serves the first build it ever cached
-      # for as long as the browser lives.
-      - run: node tool/make-sw.mjs build/web
+      # The browsers are a fixed download for a pinned version of Playwright, which is exactly what
+      # a cache is for.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
 
       # The half of this that no unit test can reach: whether the app actually paints, whether the
       # worker registers and stores the engine, whether a second visit works with the network off,
       # and whether the escape hatch clears it all. The React build passed every unit test it had
       # and did not start offline; that is why its check existed, and why this one replaces it.
+      #
+      # Run against the bundle WITHOUT the clients in it: nothing here depends on them, and waiting
+      # for the Android build to finish would put four minutes back into the critical path.
       - name: Check the built app in a real browser
         run: |
           npx playwright install --with-deps chromium
+          node tool/launcher.mjs build/web
+          node tool/make-sw.mjs build/web
           bash tool/check-web.sh
+
+      # Flutter's own output, before the launcher rewrote index.html — assemble-web starts from this
+      # and does the launcher and the stamp itself, so the bundle is assembled exactly once.
+      - name: Upload the web build
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          name: web-raw
+          path: app/build/web
+
+  assemble-web:
+    needs: [build-web, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-raw
+          path: app/build/web
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-apk
+          path: apk
+
+      - name: Put the clients in the bundle and stamp it
+        working-directory: app
+        run: |
+          echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          export MT_VERSION="$(cat ../VERSION)-${GITHUB_SHA::7}"
+          export MT_APK_SIGNED="$(cat ../apk/apk-signed.txt 2>/dev/null || echo debug)"
+          node tool/add-clients.mjs build/web ../apk/build/app/outputs/flutter-apk
+          node tool/launcher.mjs build/web
+          node tool/make-sw.mjs build/web
 
       - name: Upload the web build
         uses: actions/upload-artifact@v7
@@ -181,15 +225,6 @@ jobs:
           retention-days: 1
           name: web-dist
           path: app/build/web
-
-      # Separately as well as inside the bundle: the bundle is what gets deployed, and this is what
-      # somebody downloads from a build that was never deployed.
-      - name: Upload the Android client
-        uses: actions/upload-artifact@v7
-        with:
-          retention-days: 7
-          name: android-apk
-          path: app/build/app/outputs/flutter-apk/*.apk
 
   build-applet:
     runs-on: ubuntu-latest
@@ -316,7 +351,7 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-app, build-applet, build-cli, build-tmux]
+    needs: [build-jar, assemble-web, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -476,7 +511,7 @@ jobs:
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
   ci-success:
     name: CI success
-    needs: [build-jar, build-app, build-applet, build-cli, build-tmux, package-zip, test-e2e]
+    needs: [build-jar, build-web, build-android, assemble-web, build-applet, build-cli, build-tmux, package-zip, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
