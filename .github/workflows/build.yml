@@ -179,74 +179,17 @@ jobs:
       # and whether the escape hatch clears it all. The React build passed every unit test it had
       # and did not start offline; that is why its check existed, and why this one replaces it.
       #
-      # Run against the bundle WITHOUT the clients in it: nothing here depends on them, and waiting
-      # for the Android build to finish would put four minutes back into the critical path.
+      # The bundle is finished here — launcher, stamp and all. The installable clients are dropped
+      # in later, by the job that assembles the deployment, because nothing in the stamping reads
+      # them: the version comes from VERSION and the commit, and the launcher preloads code, engine
+      # and fonts. Waiting for the Android build before stamping would put four minutes back into
+      # the critical path for no reason.
       - name: Check the built app in a real browser
         run: |
           npx playwright install --with-deps chromium
           node tool/launcher.mjs build/web
           node tool/make-sw.mjs build/web
           bash tool/check-web.sh
-
-      # Flutter's own output, before the launcher rewrote index.html — assemble-web starts from this
-      # and does the launcher and the stamp itself, so the bundle is assembled exactly once.
-      - name: Upload the web build
-        uses: actions/upload-artifact@v7
-        with:
-          retention-days: 1
-          name: web-raw
-          path: app/build/web
-
-  assemble-web:
-    needs: [build-web, build-android]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-
-      # The launcher is multipath's, so this job needs the package too — it is doing the last step
-      # of the build, not merely moving files.
-      - run: npm ci
-        working-directory: app
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: web-raw
-          path: app/build/web
-      - uses: actions/download-artifact@v8
-        with:
-          name: android-apk
-          path: apk
-
-      - name: Put the clients in the bundle and stamp it
-        working-directory: app
-        run: |
-          echo "MT_VERSION=$(cat ../VERSION)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          export MT_VERSION="$(cat ../VERSION)-${GITHUB_SHA::7}"
-          export MT_APK_SIGNED="$(cat ../apk/signed.txt 2>/dev/null || echo debug)"
-          node tool/add-clients.mjs build/web ../apk
-          node tool/launcher.mjs build/web
-          node tool/make-sw.mjs build/web
-
-      # The one thing only this job can see: that the bundle about to be deployed really carries the
-      # clients it advertises. The browser checks ran before they were added.
-      - name: The bundle carries what it says it carries
-        working-directory: app
-        run: |
-          node -e '
-            const fs = require("node:fs");
-            const manifest = JSON.parse(fs.readFileSync("build/web/downloads/clients.json", "utf8"));
-            if (!manifest.clients.length) throw new Error("no clients in the bundle");
-            for (const client of manifest.clients) {
-              const size = fs.statSync("build/web" + client.url).size;
-              if (size !== client.bytes) throw new Error(client.url + " is " + size + ", manifest says " + client.bytes);
-              console.log(client.url, size, client.signed + "-signed");
-            }
-          '
 
       - name: Upload the web build
         uses: actions/upload-artifact@v7
@@ -380,10 +323,15 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, assemble-web, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-web, build-android, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # For tool/add-clients.mjs below. It imports nothing outside the repository, so there is no
+      # install step to go with it.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -402,6 +350,25 @@ jobs:
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp -r artifacts/web-dist/. "$STAGE/frontend/dist/"
+          # The installable clients, into the bundle that is actually deployed. Here rather than in
+          # the web job because this is the moment the two halves meet, and it is the only place
+          # that has both.
+          MT_VERSION="$(cat VERSION)-${GITHUB_SHA::7}" \
+          MT_APK_SIGNED="$(cat artifacts/android-apk/signed.txt 2>/dev/null || echo debug)" \
+            node app/tool/add-clients.mjs "$STAGE/frontend/dist" artifacts/android-apk
+          # And that they are really there: a bundle that advertises a client it does not carry is
+          # a download button that 404s.
+          node -e '
+            const fs = require("node:fs");
+            const root = process.argv[1];
+            const manifest = JSON.parse(fs.readFileSync(root + "/downloads/clients.json", "utf8"));
+            if (!manifest.clients.length) throw new Error("no clients in the bundle");
+            for (const client of manifest.clients) {
+              const size = fs.statSync(root + client.url).size;
+              if (size !== client.bytes) throw new Error(client.url + " is " + size + ", manifest says " + client.bytes);
+              console.log(client.url, size, client.signed + "-signed");
+            }
+          ' "$STAGE/frontend/dist"
           cp artifacts/applets/*.js "$STAGE/applets/"
           chmod +x "$STAGE/gen-env.sh"
           # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
@@ -540,7 +507,7 @@ jobs:
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
   ci-success:
     name: CI success
-    needs: [build-jar, build-web, build-android, assemble-web, build-applet, build-cli, build-tmux, package-zip, test-e2e]
+    needs: [build-jar, build-web, build-android, build-applet, build-cli, build-tmux, package-zip, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
