@@ -11,6 +11,8 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import 'build_info.dart';
+
 class Endpoints {
   const Endpoints({required this.origin});
 
@@ -86,16 +88,28 @@ String _pageOriginAsWebSocket() {
   return '$scheme://${page.authority}';
 }
 
-/// The default for the build being run.
+/// Where a native client remembers which server it was told to use.
+const String serverSetting = 'server';
+
+/// The endpoints this run should use.
 ///
-/// Native builds override it with `--dart-define=MT_ORIGIN=https://…`; there is no baked-in
-/// hostname anywhere in this repo, and there should never be one.
-Endpoints defaultEndpoints() {
+/// On the web there is nothing to decide: the page came from somewhere, and that somewhere is the
+/// server. A native client has no such luck — it was installed, not served — so it asks at sign-in
+/// and remembers the answer. [saved] is that answer; [defaultServer] is what the field starts with.
+///
+/// `MT_ORIGIN` still wins where it is set, because a build made for one deployment should not have
+/// to be told at first run which deployment it is for.
+Endpoints endpointsFor({String? saved}) {
   const configured = String.fromEnvironment('MT_ORIGIN');
   if (configured.isNotEmpty) return Endpoints(origin: configured);
   if (kIsWeb) return const Endpoints(origin: '');
-  throw StateError(
-    'A native build has no origin to talk to. Pass --dart-define=MT_ORIGIN=https://your-host '
-    'at build time.',
+  final chosen = (saved ?? '').trim();
+  return Endpoints(
+    origin: chosen.isEmpty ? defaultServer : trimTrailingSlash(chosen),
   );
 }
+
+/// `https://host/` and `https://host` are the same server said two ways, and one of them makes
+/// every URL in the app contain a double slash.
+String trimTrailingSlash(String origin) =>
+    origin.endsWith('/') ? origin.substring(0, origin.length - 1) : origin;

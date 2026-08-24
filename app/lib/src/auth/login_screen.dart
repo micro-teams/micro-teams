@@ -4,10 +4,12 @@
 /// shows a password field.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
+import '../common/build_info.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({this.onRegister, super.key});
@@ -22,6 +24,11 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
+
+  /// Only ever built on a native client — see the field's own comment in build().
+  late final _server = TextEditingController(
+    text: ref.read(serverProvider) ?? defaultServer,
+  );
   final _form = GlobalKey<FormState>();
   bool _busy = false;
   String? _error;
@@ -30,11 +37,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void dispose() {
     _username.dispose();
     _password.dispose();
+    _server.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!(_form.currentState?.validate() ?? false)) return;
+    // Before the request, obviously: it decides where the request goes. Saved rather than passed,
+    // because everything else in the app reads it from the same place afterwards.
+    if (!kIsWeb) ref.read(serverProvider.notifier).use(_server.text);
     setState(() {
       _busy = true;
       _error = null;
@@ -80,6 +91,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   children: [
                     Text('login', style: text.headlineSmall),
                     const SizedBox(height: 24),
+                    // A native client was installed rather than served, so nothing about it says
+                    // which deployment it belongs to. It has to ask, and this is the moment: the
+                    // answer decides where the very next request goes. The web never shows this —
+                    // the page came from the server, and a page that could be pointed elsewhere
+                    // would be a page pointed at a server that never set its cookie.
+                    if (!kIsWeb) ...[
+                      _Label('server'),
+                      TextFormField(
+                        controller: _server,
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        validator: (value) {
+                          final uri = Uri.tryParse((value ?? '').trim());
+                          if (uri == null ||
+                              !uri.hasScheme ||
+                              !uri.hasAuthority) {
+                            return 'a full address, like $defaultServer';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     _Label('username'),
                     TextFormField(
                       controller: _username,

@@ -12,6 +12,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../common/ui/change_avatar.dart';
 import '../common/ui/theme.dart';
 import '../providers.dart';
+import '../common/ui/client_info.dart';
+import '../common/ui/app_dialog.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -78,6 +80,11 @@ class ProfileScreen extends ConsumerWidget {
                             label: 'intro',
                             value: user.intro.isEmpty ? '—' : user.intro,
                           ),
+                          Divider(height: 1, color: scheme.outlineVariant),
+                          // Which build this is, and where the apps are. Quiet, at the bottom, and
+                          // one tap from the detail — it is the answer to a question most people
+                          // never ask and the first thing anyone needs when something is wrong.
+                          const ClientInfoLine(),
                         ],
                       ),
                     ),
@@ -102,8 +109,8 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    final confirmed = await showAppDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: const Text('log out?'),
         content: const Text(
