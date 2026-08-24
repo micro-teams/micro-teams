@@ -97,16 +97,20 @@ void main() {
       'wss://near.example.com/mt/machine/screen/s1',
     );
   });
-  testWidgets('shows what the machine sends', (tester) async {
+  testWidgets('takes what the machine sends without falling over', (
+    tester,
+  ) async {
     final socket = _FakeSocket();
     await tester.pumpWidget(host(socket));
 
     socket.push('hello from the machine');
     await tester.pumpAndSettle();
 
-    // xterm draws its cells on a canvas rather than as Text widgets, so what is asserted here is
-    // that the bytes were accepted and the screen is alive — not the pixels. The pixels were
-    // judged on a real device, which is the only place that judgement means anything.
+    // Named for what it checks. xterm draws its cells on a canvas rather than as Text widgets, so
+    // nothing here can see the characters: what is asserted is that the bytes were accepted and the
+    // screen is still alive. The pixels were judged on a real device, which is the only place that
+    // judgement means anything — and the old name, "shows what the machine sends", claimed a
+    // great deal more than these two lines can know.
     expect(find.byType(TerminalScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

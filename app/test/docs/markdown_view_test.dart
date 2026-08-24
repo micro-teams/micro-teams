@@ -58,17 +58,22 @@ void main() {
     expect(_rendered(tester), contains('docker compose up -d'));
   });
 
-  testWidgets('a mermaid diagram says it is not drawn, and keeps its source', (
+  testWidgets('a mermaid diagram we cannot draw keeps its source', (
     tester,
   ) async {
-    // The compromise, asserted rather than left to be discovered. Dropping the block would lose
-    // content; drawing it wrong would be worse, because a mis-rendered graph looks like a wrong
-    // one. So it is shown as source and labelled.
-    await _pump(tester, '```mermaid\ngraph TD;\n  A-->B;\n```\n');
+    // A diagram this parser understands IS drawn — see docs/mermaid_test.dart. This is the other
+    // half: dropping a block we cannot draw would lose content, and drawing it wrong would be
+    // worse, because a mis-rendered graph looks like a wrong graph rather than a missing feature.
+    // So it is shown as source and labelled.
+    //
+    // A sequence diagram, deliberately: it is a kind this parser does not attempt, rather than a
+    // flowchart with a character it happens to reject — which is what this fixture used to be, and
+    // it made the test pass for a reason nobody intended.
+    await _pump(tester, '```mermaid\nsequenceDiagram\n  A->>B: hello\n```\n');
     final text = _rendered(tester);
     expect(text, contains('mermaid diagram'));
-    expect(text, contains('graph TD;'));
-    expect(text, contains('A-->B;'));
+    expect(text, contains('sequenceDiagram'));
+    expect(text, contains('A->>B: hello'));
   });
 
   testWidgets('a table becomes a table that scrolls rather than squeezing', (

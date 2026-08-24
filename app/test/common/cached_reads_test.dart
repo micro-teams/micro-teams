@@ -59,7 +59,7 @@ void main() {
     // Note the second parameter: the generated client sends `queryIsMemberAgent` whether or
     // not the caller mentions it, and a constant that omitted it would key the cache under a
     // request that is never made. That is precisely what this test caught.
-    expect(wire.paths.single, chatsPath.substring(0));
+    expect(wire.paths.single, chatsPath);
     expect(
       client.cached<Map<String, Object?>>('GET', chatsPath),
       isNotNull,
