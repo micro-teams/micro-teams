@@ -219,6 +219,22 @@ jobs:
           node tool/launcher.mjs build/web
           node tool/make-sw.mjs build/web
 
+      # The one thing only this job can see: that the bundle about to be deployed really carries the
+      # clients it advertises. The browser checks ran before they were added.
+      - name: The bundle carries what it says it carries
+        working-directory: app
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync("build/web/downloads/clients.json", "utf8"));
+            if (!manifest.clients.length) throw new Error("no clients in the bundle");
+            for (const client of manifest.clients) {
+              const size = fs.statSync("build/web" + client.url).size;
+              if (size !== client.bytes) throw new Error(client.url + " is " + size + ", manifest says " + client.bytes);
+              console.log(client.url, size, client.signed + "-signed");
+            }
+          '
+
       - name: Upload the web build
         uses: actions/upload-artifact@v7
         with:

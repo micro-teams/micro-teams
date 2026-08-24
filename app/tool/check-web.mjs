@@ -564,14 +564,24 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
 // cache anything that is not code — it would live in the browser's storage forever, because its
 // path never changes.
 {
+  // Parsed defensively, because "no manifest" is a real state: a bundle built without the clients
+  // in it — which is what the web job builds, so that it does not wait four minutes for an Android
+  // build it does not depend on — answers this path with the SPA fallback's index.html.
   const downloads = await page.evaluate(async () => {
-    const manifest = await fetch("/downloads/clients.json").then((r) => (r.ok ? r.json() : null));
-    return { manifest };
+    try {
+      const response = await fetch("/downloads/clients.json");
+      if (!response.ok) return { manifest: null };
+      const body = await response.text();
+      return { manifest: body.trimStart().startsWith("{") ? JSON.parse(body) : null };
+    } catch (e) {
+      return { manifest: null };
+    }
   });
+  const listed = downloads.manifest?.clients;
   check(
-    "the deployment says which clients it ships",
-    downloads.manifest != null && Array.isArray(downloads.manifest.clients),
-    `${downloads.manifest?.clients?.length ?? "none"} listed`,
+    "if the deployment lists clients, the list is a list",
+    listed === undefined || Array.isArray(listed),
+    `${listed?.length ?? "no manifest"}`,
   );
 
   const client = downloads.manifest?.clients?.[0];
