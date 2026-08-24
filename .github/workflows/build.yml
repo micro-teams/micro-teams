@@ -96,7 +96,7 @@ jobs:
       - uses: ./.github/actions/flutter-app
 
       # Gradle downloads a great deal on a cold machine and almost nothing on a warm one.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -169,7 +169,7 @@ jobs:
 
       # The browsers are a fixed download for a pinned version of Playwright, which is exactly what
       # a cache is for.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
