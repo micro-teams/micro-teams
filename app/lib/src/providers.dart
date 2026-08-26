@@ -235,7 +235,8 @@ class SessionController extends AsyncNotifier<Session?> {
 
   Future<void> logout() async {
     try {
-      await ref.read(authApiProvider).logout();
+      final token = state.valueOrNull?.accessToken;
+      if (token != null) await ref.read(authApiProvider).logout(token);
     } on AuthError {
       // The server refusing to hear about it does not keep us signed in locally.
     }

@@ -16,9 +16,9 @@ import '../common/team_scope.dart';
 import '../common/ui/avatar.dart';
 import '../common/ui/editable_name.dart';
 import '../common/ui/online_dot.dart';
-import 'agent_detail.dart' show Facts;
 import 'agents_controller.dart';
 import '../common/ui/app_dialog.dart';
+import '../common/ui/facts.dart';
 import '../common/ui/section_action.dart';
 import '../common/ui/menu.dart';
 
@@ -217,12 +217,12 @@ class MachineDetail extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Center(child: OnlineDot(online: live.online)),
                 const SizedBox(height: 20),
-                Facts(
+                FactList(
                   rows: [
-                    (label: 'machine id', value: live.id),
+                    Fact(label: 'machine id', value: live.id),
                     if (live.createdAt != null)
-                      (label: 'enrolled', value: _when(live.createdAt!)),
-                    (
+                      Fact(label: 'enrolled', value: _when(live.createdAt!)),
+                    Fact(
                       label: 'status',
                       value: live.online ? 'connected' : 'not connected',
                     ),
