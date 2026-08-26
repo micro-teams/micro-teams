@@ -180,10 +180,23 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    final agentCalls = backend.asked.where((a) => a.contains('/mt/agent'));
-    expect(agentCalls, hasLength(1), reason: agentCalls.join('\n'));
-    expect(agentCalls.first, contains('userId=42'));
-    expect(agentCalls.first, contains('userId=7'));
+    // One question per round, carrying every face — not one question per face. There is a second
+    // round because the team arriving rebuilds the registry, and what is known about one team's
+    // agents says nothing about another's; what matters here is that neither round is per-avatar.
+    final agentCalls = backend.asked
+        .where((a) => a.contains('/mt/agent'))
+        .toList();
+    expect(agentCalls, isNotEmpty);
+    expect(
+      agentCalls.length,
+      lessThan(3),
+      reason:
+          'three faces, fewer questions than faces:\n${agentCalls.join('\n')}',
+    );
+    for (final call in agentCalls) {
+      expect(call, contains('userId=42'));
+      expect(call, contains('userId=7'));
+    }
   });
 
   group("the group tile is WeChat's", () {
