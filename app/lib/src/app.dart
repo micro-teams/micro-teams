@@ -157,13 +157,17 @@ GoRouter _buildRouter(WidgetRef ref) {
       // frame is painted, and the loading screen sits at 100% forever with nothing to press. A
       // session that failed to restore is not a crash; it is somebody who is not signed in.
       final signedIn = session.valueOrNull != null;
+      // A dialog is a frame over whatever is beneath it, so this gate has no opinion about it: it
+      // belongs to the page underneath, signed in or not. Treating it as an ANONYMOUS address —
+      // which is how it was let through while signed out — meant that pushing one while signed IN
+      // was read as "you are on a login page, go to your chats", and every dialog in the app threw
+      // the person to /chats instead of asking its question. Signing out was one of them: the
+      // question never appeared, so nobody was ever signed out.
+      if (state.matchedLocation == appDialogPath) return null;
+
       // Both screens that exist before a session. Bouncing someone off /register back to /login
       // for not being signed in is how registration became unreachable.
-      // A dialog is a frame over whatever is beneath it, and what is beneath may be the login
-      // screen: the settings a native client needs BEFORE it can sign in are asked for there. It
-      // was not in this set, so pushing one while signed out redirected to /login — which looked
-      // like the settings button opening a second login page.
-      const anonymous = {'/login', '/register', appDialogPath};
+      const anonymous = {'/login', '/register'};
       final atAnonymous = anonymous.contains(state.matchedLocation);
       if (!signedIn) return atAnonymous ? null : '/login';
       if (atAnonymous) return '/chats';

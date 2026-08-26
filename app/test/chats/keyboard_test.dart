@@ -30,11 +30,11 @@ class _Fake implements HttpClientAdapter {
         '{"thread":{"id":5,"title":"standup","createdAt":"2026-08-20T00:00:00Z"},'
             '"members":[{"id":1,"threadId":5,"userId":1,"role":"OWNER",'
             '"joinedAt":"2026-08-20T00:00:00Z","nickname":"Me"}]}',
+      // Enough to fill the screen and then some, so there is history to scroll into: a
+      // conversation shorter than the window has nowhere to take the space from.
       'GET /mt/chat/5/messages' =>
-        '{"messages":[{"id":1,"threadId":5,"senderId":1,"content":"the oldest",'
-            '"createdAt":"2026-08-21T00:00:00Z"},'
-            '{"id":2,"threadId":5,"senderId":1,"content":"the newest",'
-            '"createdAt":"2026-08-21T00:01:00Z"}],$page}',
+        '{"messages":[${[for (var i = 1; i <= 30; i++) '{"id":$i,"threadId":5,"senderId":1,"content":"message $i",'
+              '"createdAt":"2026-08-21T00:${i.toString().padLeft(2, '0')}:00Z"}'].join(',')}],$page}',
       'GET /mt/team' => '{"teams":[{"id":1,"name":"Team One"}],$page}',
       'GET /mt/agent' => '{"agents":[],$page}',
       _ => '{}',
@@ -98,6 +98,37 @@ Widget _host(ValueListenable<double> keyboard) => ProviderScope(
 );
 
 void main() {
+  testWidgets('a window that shrinks does not move the messages either', (
+    tester,
+  ) async {
+    // The other way a keyboard arrives: on Android the window itself gets smaller, with no inset to
+    // read. The list is anchored at its bottom, so without help every bubble slides up by the
+    // height of the keyboard — which is exactly what was reported on a phone after the inset-only
+    // fix shipped.
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final keyboard = ValueNotifier<double>(0);
+    addTearDown(keyboard.dispose);
+    await tester.pumpWidget(_host(keyboard));
+    await tester.pumpAndSettle();
+
+    // Somewhere in the middle of the history, so there is room on both sides of it.
+    await tester.drag(find.text('message 30'), const Offset(0, 120));
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.byType(AppBar));
+    double belowTitle() =>
+        tester.getTopLeft(find.text('message 20')).dy - title.bottom;
+    final before = belowTitle();
+
+    tester.view.physicalSize = const Size(400, 500);
+    await tester.pumpAndSettle();
+
+    expect(belowTitle(), closeTo(before, 1.5));
+  });
+
   testWidgets('the keyboard opening does not move the messages', (
     tester,
   ) async {
@@ -112,7 +143,7 @@ void main() {
 
     final title = tester.getRect(find.byType(AppBar));
     double bubbleBelowTitle() =>
-        tester.getTopLeft(find.text('the oldest')).dy - title.bottom;
+        tester.getTopLeft(find.text('message 20')).dy - title.bottom;
     final before = bubbleBelowTitle();
 
     keyboard.value = 300;
