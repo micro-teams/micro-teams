@@ -63,6 +63,13 @@ class AgentPresence extends Notifier<Presence> {
       watchTopic(ref, teamTopic(team.id), onChange: (_) => _refresh());
     }
     ref.onDispose(() => _debounce?.cancel());
+    // A rebuild — which is what the team arriving looks like — cancels whatever was waiting to be
+    // asked. So anything already being watched is asked again here, or a refresh scheduled in the
+    // same instant the team lands is simply lost. That instant is the app's first second, when
+    // every avatar on screen is mounting at once.
+    if (_tracked.isNotEmpty) _schedule();
+    // Empty on purpose: a rebuild means the team changed, and what is known about one team's
+    // agents says nothing about another's. The refresh scheduled above fills it in again.
     return const Presence({});
   }
 
@@ -72,6 +79,10 @@ class AgentPresence extends Notifier<Presence> {
   final Map<int, int> _tracked = {};
   Timer? _debounce;
   bool _inFlight = false;
+
+  /// Something happened while a request was in flight that the request did not cover: more ids were
+  /// tracked, or the request failed. Without this the question was simply DROPPED — see [_refresh].
+  bool _askAgain = false;
 
   void track(int userId) {
     if (userId == 0) return;
@@ -92,14 +103,30 @@ class AgentPresence extends Notifier<Presence> {
 
   /// One frame's worth of coalescing. A list paints thirty avatars in one frame, and each of them
   /// tracking would otherwise be thirty requests for the same answer.
-  void _schedule() {
+  void _schedule([Duration after = const Duration(milliseconds: 16)]) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 16), _refresh);
+    _debounce = Timer(after, _refresh);
   }
 
+  /// How long to wait before asking again after a failed attempt. Long enough not to hammer a
+  /// server that is having a bad moment, short enough that an avatar is clickable before anybody
+  /// has finished reading the row it is in.
+  static const Duration _afterFailure = Duration(seconds: 2);
+
   Future<void> _refresh() async {
-    if (_inFlight || _tracked.isEmpty) return;
+    if (_tracked.isEmpty) return;
+    // A second question while the first is in the air used to be dropped and never asked again,
+    // and this is the app's startup in one sentence: the first few avatars send a request, thirty
+    // more mount while it is out, and every one of those ids is dropped. Nothing tries later —
+    // only a CHANGE in the tracked set schedules a request — so those faces stay "not an agent"
+    // for as long as the screen is open: the ring never appears, and tapping one does nothing at
+    // all, because an avatar that is not known to be an agent has no tap handler.
+    if (_inFlight) {
+      _askAgain = true;
+      return;
+    }
     _inFlight = true;
+    var failed = false;
     try {
       final ids = _tracked.keys.toList();
       final response = await ref
@@ -115,9 +142,15 @@ class AgentPresence extends Notifier<Presence> {
       });
     } catch (_) {
       // Presence is decoration. A failure here means no ring and no live screen for a moment; it
-      // must never be able to take a screen down with it.
+      // must never be able to take a screen down with it — but it must not be the LAST word
+      // either, or one unlucky moment at startup leaves every agent looking like a person.
+      failed = true;
     } finally {
       _inFlight = false;
+    }
+    if (failed || _askAgain) {
+      _askAgain = false;
+      _schedule(failed ? _afterFailure : const Duration(milliseconds: 16));
     }
   }
 }

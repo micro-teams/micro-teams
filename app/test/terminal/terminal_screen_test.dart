@@ -164,4 +164,87 @@ void main() {
     // broken state and the working state look identical.
     expect(find.textContaining('dropped'), findsOneWidget);
   });
+
+  testWidgets('a screen that fails to connect keeps trying, and comes back', (
+    tester,
+  ) async {
+    // The case a person actually hits: the app has only just started, the first dial goes out
+    // before there is anything to answer it, and the screen used to be dead for good — a red
+    // banner, and nothing to do but leave and come back. Re-dialling is also what re-picks the
+    // line, so an attempt over a line that cannot carry a stream is not the end of the screen.
+    final sockets = <_FakeSocket>[];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          endpointsProvider.overrideWithValue(
+            const Endpoints(origin: 'http://machine.test'),
+          ),
+        ],
+        child: MaterialApp(
+          home: TerminalScreen(
+            sessionId: 's1',
+            connect: (_) {
+              final socket = _FakeSocket();
+              sockets.add(socket);
+              // The first two attempts find nothing at the other end.
+              if (sockets.length <= 2) socket.die();
+              return socket;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(find.textContaining('reconnecting'), findsOneWidget);
+
+    // Long enough for the first two waits.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(sockets, hasLength(3), reason: 'it kept asking');
+    expect(find.textContaining('reconnecting'), findsNothing);
+    expect(find.textContaining('dropped'), findsNothing);
+
+    // And the screen that came back is a live one: bytes land in the terminal.
+    sockets.last.push('hello');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('gone'), findsNothing);
+  });
+
+  testWidgets('when it gives up there is still a way to ask again', (
+    tester,
+  ) async {
+    final sockets = <_FakeSocket>[];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          endpointsProvider.overrideWithValue(
+            const Endpoints(origin: 'http://machine.test'),
+          ),
+        ],
+        child: MaterialApp(
+          home: TerminalScreen(
+            sessionId: 's1',
+            connect: (_) {
+              final socket = _FakeSocket();
+              sockets.add(socket);
+              socket.die();
+              return socket;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('try again'), findsOneWidget);
+    final attempts = sockets.length;
+
+    await tester.tap(find.text('try again'));
+    await tester.pumpAndSettle();
+
+    expect(sockets.length, greaterThan(attempts));
+  });
 }

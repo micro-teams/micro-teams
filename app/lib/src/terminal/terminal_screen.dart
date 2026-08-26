@@ -16,6 +16,7 @@
 /// look like it worked and show nothing.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -73,6 +74,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   bool _everOpened = false;
   String? _failure;
 
+  /// Which attempt the next dial is, and the timer that will make it. Reset by a handshake.
+  int _attempt = 0;
+  Timer? _retry;
+  bool _reconnecting = false;
+
   @override
   void initState() {
     super.initState();
@@ -80,6 +86,26 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _terminal.onOutput = (data) => _link?.sendKeys(data);
     _terminal.onResize = (cols, rows, _, _) =>
         _link?.sendSize(cols: cols, rows: rows);
+
+    _dial();
+  }
+
+  /// One attempt to reach the screen, and the reason there is a loop around it.
+  ///
+  /// A live screen used to be dialled exactly once. If that one attempt failed — the app had only
+  /// just started and the session had no token yet, or the line it picked could not carry a stream —
+  /// the screen was simply dead, with a red banner and no way forward but leaving and coming back.
+  /// And a connection that dropped an hour later stayed dropped, which for the app's longest-lived
+  /// stream is the case that actually happens.
+  ///
+  /// Each attempt re-dials, and re-dialling is what re-picks the line: a line that could not hold
+  /// the stream has just earned a penalty and is skipped, and the ranking is read afresh, so the
+  /// second attempt is over the best line MEASURED rather than the one that happened to be first
+  /// before any probe had landed. Backing off, because a screen that is genuinely gone must not be
+  /// asked for forever.
+  void _dial() {
+    _retry?.cancel();
+    _link?.close();
 
     // Over a line, not over the page's origin. A live screen is the app's heaviest stream — every
     // keystroke and every frame of output — and it was the one connection still hard-wired to
@@ -99,7 +125,19 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         );
         return dial!.url;
       },
-      onOpened: () => dial?.opened(DateTime.now()),
+      onOpened: () {
+        dial?.opened(DateTime.now());
+        if (!mounted) return;
+        // Here, not after open(): what makes an attempt a success is the handshake, not the dial.
+        // Set at dial time — as it was — every failure read as "the connection dropped", including
+        // the ones where there was never a connection.
+        setState(() {
+          _everOpened = true;
+          _attempt = 0;
+          _failure = null;
+          _reconnecting = false;
+        });
+      },
       // The terminal takes text; the wire carries bytes. Decoding here rather than in the
       // link keeps the link free of any opinion about what the bytes mean.
       onBytes: (bytes) => _terminal.write(
@@ -111,22 +149,55 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       },
       connect: widget.connect,
     )..open();
-    _everOpened = true;
   }
 
   @override
   void dispose() {
+    _retry?.cancel();
     _link?.close();
     super.dispose();
   }
 
+  /// How long to wait before each attempt. Short enough that a machine that blinked is back before
+  /// the reader gives up on it, long enough that a screen which is genuinely gone stops being asked.
+  static const List<Duration> _waits = [
+    Duration(milliseconds: 400),
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
+
   void _handleClosed() {
     if (!mounted) return;
+    if (_attempt < _waits.length) {
+      final wait = _waits[_attempt];
+      _attempt++;
+      setState(() {
+        _reconnecting = true;
+        _failure = null;
+      });
+      _retry = Timer(wait, () {
+        if (mounted) _dial();
+      });
+      return;
+    }
     setState(() {
+      _reconnecting = false;
       _failure = _everOpened
           ? 'The connection to this screen dropped.'
           : 'This screen is gone, or you are not allowed to watch it.';
     });
+  }
+
+  /// The way back for a person who is looking at the banner and knows better than we do.
+  void _tryAgain() {
+    setState(() {
+      _attempt = 0;
+      _failure = null;
+      _reconnecting = true;
+    });
+    _dial();
   }
 
   void _setMode(ViewMode next) {
@@ -164,16 +235,50 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               onClose: widget.onClose,
             ),
           ),
+          if (_reconnecting)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'reconnecting…',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (failure != null)
             Container(
               width: double.infinity,
               color: Theme.of(context).colorScheme.errorContainer,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Text(
-                failure,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer,
-                ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      failure,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                  // A way forward from the banner. Giving up after a handful of attempts is right;
+                  // leaving somebody with no way to ask again is not.
+                  TextButton(
+                    onPressed: _tryAgain,
+                    child: const Text('try again'),
+                  ),
+                ],
               ),
             ),
           Expanded(
