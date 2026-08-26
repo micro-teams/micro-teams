@@ -87,6 +87,10 @@ function json(res, status, body) {
   res.end(text);
 }
 
+// Whether the fake session is still alive. Ended by a logout, so that a check can ask the question
+// that matters: does signing out survive a reload?
+let signedIn = true;
+
 const page = { page_start: 1, page_size: 50, has_prev: false, has_more: false };
 const me = {
   id: 1,
@@ -109,9 +113,22 @@ async function backend(req, res) {
   // cheese-auth. The app boots by refreshing, so this is the first call of any session.
   if (url.pathname.startsWith("/api/")) {
     if (call === "POST /api/users/auth/refresh-token") {
+      // Once the session has been ended, refreshing fails — which is what makes a logout stick
+      // across a reload, and what a logout the server never heard about does not do.
+      if (!signedIn) return json(res, 401, { message: "session ended" });
       return json(res, 200, { data: { user: me, accessToken: "probe-token" } });
     }
-    if (call === "GET /api/users/me") return json(res, 200, { data: { user: me } });
+    if (call === "POST /api/users/auth/logout") {
+      // Authenticated, exactly as the real one is: without a token it refuses and the session
+      // lives on.
+      if (!req.headers["authorization"]) {
+        return json(res, 401, { message: "Authentication required" });
+      }
+      signedIn = false;
+      return json(res, 200, { data: null });
+    }
+    if (call === "GET /api/users/me")
+      return json(res, 200, { data: { user: me } });
     return json(res, 404, { message: `no fake for ${call}` });
   }
 
@@ -132,7 +149,11 @@ async function backend(req, res) {
       });
     case "GET /mt/chat/5":
       return json(res, 200, {
-        thread: { id: 5, title: "现场 probe", createdAt: "2026-08-21T00:00:00Z" },
+        thread: {
+          id: 5,
+          title: "现场 probe",
+          createdAt: "2026-08-21T00:00:00Z",
+        },
         members: [
           {
             id: 1,
@@ -178,7 +199,12 @@ async function backend(req, res) {
           { id: "origin", url: "", transport: "same-origin", weight: 100 },
           // localhost rather than 127.0.0.1, so it is a genuinely different ORIGIN to the browser
           // — the probe has to be a cross-origin request, which is what a real second line is.
-          { id: "second", url: `http://localhost:${port}`, transport: "direct", weight: 90 },
+          {
+            id: "second",
+            url: `http://localhost:${port}`,
+            transport: "direct",
+            weight: 90,
+          },
         ],
       });
 
@@ -216,9 +242,11 @@ const server = createServer(async (req, res) => {
     // the app makes to another line asks permission first.
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
-        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods":
+          "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
-          req.headers["access-control-request-headers"] ?? "authorization, content-type",
+          req.headers["access-control-request-headers"] ??
+          "authorization, content-type",
         "Access-Control-Max-Age": "600",
       });
       return res.end();
@@ -231,10 +259,16 @@ const server = createServer(async (req, res) => {
   if (requestPath === "/version") {
     try {
       const body = await readFile(path.join(root, "version"), "utf8");
-      res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-store",
+      });
       res.end(body);
     } catch {
-      res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      res.writeHead(404, {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-store",
+      });
       res.end("no version");
     }
     return;

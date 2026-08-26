@@ -268,38 +268,91 @@ class _MessageList extends StatelessWidget {
     // One selection area around the list, so a drag runs across bubbles the way it does on a web
     // page and the system's own copy is what copies. See this file's header for what it costs.
     return _ReadingColumn(
-      child: SelectionArea(
-        child: ListView.builder(
-          controller: scroll,
-          reverse: true,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: rows.length,
-          itemBuilder: (context, index) {
-            final row = rows[index];
-            return switch (row) {
-              _PendingRow(:final pending) => _PendingBubble(
-                pending: pending,
-                onRetry: () => onRetry(pending.clientToken),
-                onDiscard: () => onDiscard(pending.clientToken),
-              ),
-              _MessageRow(:final message, :final separator) => _Bubble(
-                message: message,
-                mine: message.senderId == me,
-                name: info.nameOf(message.senderId),
-                avatarId: info.avatarOf(message.senderId),
-                // A 1:1 does not need the other person's name written above every bubble; there is
-                // only one other person, and their avatar is right there.
-                showName: message.senderId != me && info.members.length > 2,
-                separator: separator,
-              ),
-              _EdgeRow() => _HistoryEdge(
-                loading: state.loadingOlder,
-                hasOlder: state.hasOlder,
-              ),
-            };
-          },
+      child: _HoldsItsPlace(
+        controller: scroll,
+        child: SelectionArea(
+          child: ListView.builder(
+            controller: scroll,
+            reverse: true,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: rows.length,
+            itemBuilder: (context, index) {
+              final row = rows[index];
+              return switch (row) {
+                _PendingRow(:final pending) => _PendingBubble(
+                  pending: pending,
+                  onRetry: () => onRetry(pending.clientToken),
+                  onDiscard: () => onDiscard(pending.clientToken),
+                ),
+                _MessageRow(:final message, :final separator) => _Bubble(
+                  message: message,
+                  mine: message.senderId == me,
+                  name: info.nameOf(message.senderId),
+                  avatarId: info.avatarOf(message.senderId),
+                  // A 1:1 does not need the other person's name written above every bubble; there is
+                  // only one other person, and their avatar is right there.
+                  showName: message.senderId != me && info.members.length > 2,
+                  separator: separator,
+                ),
+                _EdgeRow() => _HistoryEdge(
+                  loading: state.loadingOlder,
+                  hasOlder: state.hasOlder,
+                ),
+              };
+            },
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Keeps the conversation still when the viewport shrinks under it.
+///
+/// A soft keyboard reaches this screen in one of two ways, and only one of them is a MediaQuery
+/// inset. On Android the WINDOW itself shrinks — the app is simply given less room, with no inset to
+/// read — and because the list is anchored at its bottom, every bubble slides up by the height of
+/// the keyboard. What the eye holds still by is the title bar at the top, so the fix is to scroll by
+/// exactly as much as the viewport lost: the same content stays at the same distance from the top,
+/// and what goes out of sight goes out of the bottom, where the keyboard is.
+///
+/// When there is nothing older to scroll into — a conversation shorter than the screen — there is
+/// nowhere to take the distance from and the bubbles do move. Nothing can be drawn where the window
+/// no longer is.
+class _HoldsItsPlace extends StatefulWidget {
+  const _HoldsItsPlace({required this.controller, required this.child});
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  State<_HoldsItsPlace> createState() => _HoldsItsPlaceState();
+}
+
+class _HoldsItsPlaceState extends State<_HoldsItsPlace> {
+  double? _height;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final was = _height;
+        final now = constraints.maxHeight;
+        _height = now;
+        if (was != null && (was - now).abs() > 0.5) {
+          // After the frame: the list has to be laid out at its new size before its scroll extent
+          // means anything.
+          final lost = was - now;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !widget.controller.hasClients) return;
+            final position = widget.controller.position;
+            position.jumpTo(
+              (position.pixels + lost).clamp(0.0, position.maxScrollExtent),
+            );
+          });
+        }
+        return widget.child;
+      },
     );
   }
 }
