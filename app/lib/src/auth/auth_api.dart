@@ -156,6 +156,7 @@ class AuthApi {
     required String baseUrl,
     CookieHolder cookies = const BrowserCookies(),
     HttpClientAdapter? adapter,
+    HttpClientAdapter Function(HttpClientAdapter inner)? route,
   }) : _cookies = cookies,
        _dio = Dio(
          BaseOptions(
@@ -169,6 +170,11 @@ class AuthApi {
        ) {
     // The one seam a test needs: everything else about this class is the wire.
     if (adapter != null) _dio.httpClientAdapter = adapter;
+    // And the one place a line is chosen for the identity service. See providers.dart for why this
+    // is offered on a native client and not in a browser.
+    if (route != null) {
+      _dio.httpClientAdapter = route(_dio.httpClientAdapter);
+    }
   }
 
   final Dio _dio;

@@ -15,6 +15,7 @@ import 'common/config.dart';
 import 'common/errors.dart';
 import 'common/key_value.dart';
 import 'common/lines.dart';
+import 'common/multipath_adapter.dart';
 import 'common/prefs_store.dart';
 import 'common/stream_lines.dart';
 import 'common/api.dart';
@@ -102,6 +103,22 @@ final authApiProvider = Provider<AuthApi>((ref) {
     cookies: kIsWeb
         ? const BrowserCookies()
         : StoredCookies(ref.watch(stateStoreProvider)),
+    // Signing in and staying signed in go over the same lines as everything else — on a native
+    // client only.
+    //
+    // Without this, every other request in the app fails over to a working line and the SESSION
+    // does not: the refresh that keeps it alive goes to the one origin, and when that origin is the
+    // unreachable one the client is signed out while a perfectly good line sits beside it. Which is
+    // the exact situation the lines exist for.
+    //
+    // In a browser this is not ours to do. The refresh token is an httpOnly cookie the page cannot
+    // read, and it is bound to the origin that set it; sending the request to another origin sends
+    // it without the cookie. A native client holds that cookie itself (see StoredCookies), so it
+    // can carry it to whichever line answers.
+    route: kIsWeb
+        ? null
+        : (inner) =>
+              MultiPathAdapter(manager: ref.watch(linesProvider), inner: inner),
   );
 });
 

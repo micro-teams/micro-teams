@@ -17,8 +17,6 @@ import 'package:flutter/foundation.dart';
 import 'package:mt_api/mt_api.dart' as contract;
 import 'package:multipath/multipath.dart';
 
-import 'config.dart';
-
 /// The line the app starts with: wherever it was already talking to.
 ///
 /// Inline rather than fetched, because the registry is what tells the app where the backend is, and
@@ -65,17 +63,6 @@ Future<void> adoptRegistry(
   } catch (_) {
     // Offline, or no such endpoint on this deployment. Both are ordinary.
   }
-}
-
-/// The websocket URL for [path] over whichever line is carrying streams.
-///
-/// A stream cannot be raced — two connections are two conversations — so the most that is possible
-/// is to pick the best line and, when it breaks, pick again. [StreamSelector] holds that memory
-/// separately from request latency, because a proxy that serves requests perfectly may refuse the
-/// Upgrade, and a line that cannot hold a stream is still a perfectly good line for requests.
-String socketUrlOver(Line? line, Endpoints endpoints, String path) {
-  final origin = line == null || line.url.isEmpty ? endpoints.origin : line.url;
-  return endpoints.socketUrl(origin, path);
 }
 
 /// How this app sends one probe.
