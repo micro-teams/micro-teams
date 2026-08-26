@@ -50,21 +50,6 @@ class Endpoints {
     return '$base$path';
   }
 
-  /// The updates socket. ws:// or wss:// derived from the origin — on the web from the page's.
-  String updatesSocket(String? token) {
-    final query = token == null || token.isEmpty
-        ? ''
-        : '?token=${Uri.encodeComponent(token)}';
-    return socketUrl(origin, '/mt/updates$query');
-  }
-
-  /// A viewer connection for one live screen. Same reasoning as [updatesSocket].
-  ///
-  /// The path mirrors MachineWebSocketConfig's `/machine/screen/*` mapping. The screen id is a
-  /// string, not a number: it is the session id the connector chose.
-  String screenSocket(String sessionId, String? token) =>
-      socketUrl(origin, screenPath(sessionId, token));
-
   /// The path alone, for a caller that is choosing the host itself — which is what routing a stream
   /// over a line means.
   String screenPath(String sessionId, String? token) {
