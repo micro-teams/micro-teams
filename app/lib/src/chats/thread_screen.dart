@@ -83,14 +83,26 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   final _composer = TextEditingController();
   final _scroll = ScrollController();
 
+  /// Whether somebody is typing, which is the only reason this screen ever freezes a layout.
+  final _composerFocus = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // Rebuild when the field takes or gives up focus: that is when the list's height is fixed and
+    // released again.
+    _composerFocus.addListener(_onFocus);
+  }
+
+  void _onFocus() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _composerFocus.removeListener(_onFocus);
+    _composerFocus.dispose();
     _scroll.dispose();
     _composer.dispose();
     super.dispose();
@@ -157,6 +169,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
                 me: me,
                 info: info,
                 scroll: _scroll,
+                composerHasFocus: _composerFocus.hasFocus,
                 onRetry: (token) => ref
                     .read(threadProvider(widget.threadId).notifier)
                     .retry(token),
@@ -174,7 +187,11 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
           // list above it, which is the thing this is here to keep still.
           Transform.translate(
             offset: Offset(0, -keyboard),
-            child: _Composer(controller: _composer, onSend: _send),
+            child: _Composer(
+              controller: _composer,
+              onSend: _send,
+              focus: _composerFocus,
+            ),
           ),
         ],
       ),
@@ -228,6 +245,7 @@ class _MessageList extends StatelessWidget {
     required this.scroll,
     required this.onRetry,
     required this.onDiscard,
+    required this.composerHasFocus,
   });
 
   final ThreadState state;
@@ -236,6 +254,9 @@ class _MessageList extends StatelessWidget {
   final ScrollController scroll;
   final void Function(String clientToken) onRetry;
   final void Function(String clientToken) onDiscard;
+
+  /// Somebody is typing, so the height this list is drawn at is held still — see [_KeepsItsHeight].
+  final bool composerHasFocus;
 
   /// Reversed: pending first (they are the newest of all), then messages newest-first, then the
   /// one row that says what is happening at the far end of history.
@@ -268,8 +289,8 @@ class _MessageList extends StatelessWidget {
     // One selection area around the list, so a drag runs across bubbles the way it does on a web
     // page and the system's own copy is what copies. See this file's header for what it costs.
     return _ReadingColumn(
-      child: _HoldsItsPlace(
-        controller: scroll,
+      child: _KeepsItsHeight(
+        frozen: composerHasFocus,
         child: SelectionArea(
           child: ListView.builder(
             controller: scroll,
@@ -310,48 +331,51 @@ class _MessageList extends StatelessWidget {
 /// Keeps the conversation still when the viewport shrinks under it.
 ///
 /// A soft keyboard reaches this screen in one of two ways, and only one of them is a MediaQuery
-/// inset. On Android the WINDOW itself shrinks — the app is simply given less room, with no inset to
-/// read — and because the list is anchored at its bottom, every bubble slides up by the height of
-/// the keyboard. What the eye holds still by is the title bar at the top, so the fix is to scroll by
-/// exactly as much as the viewport lost: the same content stays at the same distance from the top,
-/// and what goes out of sight goes out of the bottom, where the keyboard is.
+/// inset: on Android the WINDOW itself gets smaller, with no inset to read. Either way the list is
+/// anchored at its bottom, so a shorter viewport slides every bubble upward.
 ///
-/// When there is nothing older to scroll into — a conversation shorter than the screen — there is
-/// nowhere to take the distance from and the bubbles do move. Nothing can be drawn where the window
-/// no longer is.
-class _HoldsItsPlace extends StatefulWidget {
-  const _HoldsItsPlace({required this.controller, required this.child});
+/// The cure is not to move anything back afterwards — that is a correction, and a correction is
+/// something the eye can see happening. It is to not re-lay-out at all: while the composer has
+/// focus the list keeps EXACTLY the height it had before, overflowing past the bottom of the
+/// smaller window, where the keyboard is. Nothing moves because nothing was asked to.
+///
+/// Tied to the composer's focus rather than to the height itself, because "the window got shorter"
+/// and "somebody is typing" are different events and only the second one may freeze a layout: a
+/// window somebody drags shorter must still re-flow.
+class _KeepsItsHeight extends StatefulWidget {
+  const _KeepsItsHeight({required this.frozen, required this.child});
 
-  final ScrollController controller;
+  final bool frozen;
   final Widget child;
 
   @override
-  State<_HoldsItsPlace> createState() => _HoldsItsPlaceState();
+  State<_KeepsItsHeight> createState() => _KeepsItsHeightState();
 }
 
-class _HoldsItsPlaceState extends State<_HoldsItsPlace> {
+class _KeepsItsHeightState extends State<_KeepsItsHeight> {
+  /// The height last measured while nothing was frozen — the height the conversation is drawn at.
   double? _height;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final was = _height;
-        final now = constraints.maxHeight;
-        _height = now;
-        if (was != null && (was - now).abs() > 0.5) {
-          // After the frame: the list has to be laid out at its new size before its scroll extent
-          // means anything.
-          final lost = was - now;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || !widget.controller.hasClients) return;
-            final position = widget.controller.position;
-            position.jumpTo(
-              (position.pixels + lost).clamp(0.0, position.maxScrollExtent),
-            );
-          });
+        final available = constraints.maxHeight;
+        if (!widget.frozen || _height == null) {
+          _height = available;
         }
-        return widget.child;
+        // Never shorter than the window: a keyboard that closes while the field still has focus
+        // would otherwise leave a strip of nothing under the last message.
+        final height = _height! > available ? _height! : available;
+
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topCenter,
+            minHeight: height,
+            maxHeight: height,
+            child: widget.child,
+          ),
+        );
       },
     );
   }
@@ -690,10 +714,15 @@ class _InlineAction extends StatelessWidget {
 }
 
 class _Composer extends StatelessWidget {
-  const _Composer({required this.controller, required this.onSend});
+  const _Composer({
+    required this.controller,
+    required this.onSend,
+    required this.focus,
+  });
 
   final TextEditingController controller;
   final VoidCallback onSend;
+  final FocusNode focus;
 
   @override
   Widget build(BuildContext context) {
@@ -720,6 +749,7 @@ class _Composer extends StatelessWidget {
                   Expanded(
                     child: TextField(
                       controller: controller,
+                      focusNode: focus,
                       minLines: 1,
                       maxLines: 6,
                       textInputAction: TextInputAction.newline,

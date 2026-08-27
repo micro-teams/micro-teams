@@ -158,11 +158,13 @@ void main() {
     await tester.pumpAndSettle();
 
     socket.die();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
 
     // A black rectangle and no explanation is the failure this whole project keeps finding: the
-    // broken state and the working state look identical.
-    expect(find.textContaining('dropped'), findsOneWidget);
+    // broken state and the working state look identical. It says "reconnecting" rather than
+    // "dropped" because that is what is actually happening — the loop is running.
+    expect(find.textContaining('reconnecting'), findsOneWidget);
   });
 
   testWidgets('a screen that fails to connect keeps trying, and comes back', (
@@ -213,9 +215,12 @@ void main() {
     expect(find.textContaining('gone'), findsNothing);
   });
 
-  testWidgets('when it gives up there is still a way to ask again', (
+  testWidgets('it keeps trying, and offers a way to skip the wait', (
     tester,
   ) async {
+    // The JS package's rule, which this now follows: never stop. Every line in a MultiPath
+    // deployment is expected to be less reliable than one well-chosen line, and that bet only pays
+    // if recovering is automatic. What the button adds is impatience, not the only way back.
     final sockets = <_FakeSocket>[];
     await tester.pumpWidget(
       ProviderScope(
@@ -237,14 +242,25 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
+    // Four waits: 0.5s, 1s, 2s, 4s.
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 10));
 
+    final tried = sockets.length;
+    expect(tried, greaterThan(3), reason: 'it is still going');
     expect(find.text('try again'), findsOneWidget);
-    final attempts = sockets.length;
 
     await tester.tap(find.text('try again'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
 
-    expect(sockets.length, greaterThan(attempts));
+    expect(sockets.length, greaterThan(tried));
+
+    // And it is still trying afterwards, rather than the button having been the last chance.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 10));
+    expect(sockets.length, greaterThan(tried + 1));
   });
 }

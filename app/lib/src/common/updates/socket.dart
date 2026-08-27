@@ -31,9 +31,22 @@ const Duration _pingEvery = Duration(seconds: 20);
 const Duration _minRetry = Duration(seconds: 1);
 const Duration _maxRetry = Duration(seconds: 20);
 
+/// How long a connection must last before the backoff is forgiven. The JS package's rule and its
+/// number: opening proves the handshake, holding proves the line.
+const Duration _stableAfter = Duration(seconds: 5);
+
 class UpdatesSocket {
-  UpdatesSocket({required UpdatesStore store, required this.url})
-    : _store = store;
+  UpdatesSocket({
+    required UpdatesStore store,
+    required this.url,
+    WebSocketChannel Function(Uri url)? connect,
+  }) : _store = store,
+       _connect = connect ?? WebSocketChannel.connect;
+
+  /// How a socket is made. Injected so the reconnect rules below can be driven without a server —
+  /// they are the rules that decide whether a bad line is retried forever, which is not a thing to
+  /// find out in production.
+  final WebSocketChannel Function(Uri url) _connect;
 
   final UpdatesStore _store;
 
@@ -51,6 +64,9 @@ class UpdatesSocket {
   StreamSubscription<Object?>? _messages;
   Timer? _ping;
   Timer? _retry;
+
+  /// Fires once a connection has lasted long enough to count as working.
+  Timer? _stable;
   DateTime _lastHeard = DateTime.now();
   Duration _backoff = _minRetry;
   bool _closed = false;
@@ -74,6 +90,7 @@ class UpdatesSocket {
     _closed = true;
     _ping?.cancel();
     _retry?.cancel();
+    _stable?.cancel();
     unawaited(_messages?.cancel());
     _store.disconnected();
     _channel?.sink.close();
@@ -83,8 +100,22 @@ class UpdatesSocket {
   void _dial() {
     if (_closed) return;
     try {
-      final channel = WebSocketChannel.connect(Uri.parse(url()));
-      onOpened?.call();
+      final channel = _connect(Uri.parse(url()));
+      // Announced when the HANDSHAKE completes, not when the dial is made. Told at dial time — as
+      // it was — a line that never answered still looked like a line that had carried a connection
+      // for as long as the attempt took, which is the opposite of what the line policy needs.
+      unawaited(
+        channel.ready.then((_) {
+          if (_closed || _channel != channel) return;
+          onOpened?.call();
+          // Forgiven only once it has LASTED. Resetting on the dial — as it was — means a line that
+          // accepts a connection and drops it immediately is retried every second forever.
+          _stable?.cancel();
+          _stable = Timer(_stableAfter, () {
+            if (!_closed && _channel == channel) _backoff = _minRetry;
+          });
+        }, onError: (Object _) {}),
+      );
       _channel = channel;
       _lastHeard = DateTime.now();
       _messages = channel.stream.listen(
@@ -97,7 +128,6 @@ class UpdatesSocket {
         cancelOnError: true,
       );
       _store.connected(_ChannelTransport(channel));
-      _backoff = _minRetry;
     } catch (_) {
       _onClosed();
     }
@@ -112,6 +142,7 @@ class UpdatesSocket {
 
   void _onClosed() {
     if (_closed) return;
+    _stable?.cancel();
     _store.disconnected();
     _channel = null;
     _retry?.cancel();

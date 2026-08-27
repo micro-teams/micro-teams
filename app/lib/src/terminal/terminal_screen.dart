@@ -72,11 +72,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   ViewMode _mode = ViewMode.readonly;
   double _drag = 0;
   bool _everOpened = false;
-  String? _failure;
 
   /// Which attempt the next dial is, and the timer that will make it. Reset by a handshake.
   int _attempt = 0;
   Timer? _retry;
+
+  /// Fires once a connection has lasted long enough to count as working.
+  Timer? _stable;
   bool _reconnecting = false;
 
   @override
@@ -105,6 +107,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// asked for forever.
   void _dial() {
     _retry?.cancel();
+    _stable?.cancel();
     _link?.close();
 
     // Over a line, not over the page's origin. A live screen is the app's heaviest stream — every
@@ -133,9 +136,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         // the ones where there was never a connection.
         setState(() {
           _everOpened = true;
-          _attempt = 0;
-          _failure = null;
           _reconnecting = false;
+        });
+        // The backoff is forgiven only once this connection has LASTED. Opening proves the
+        // handshake; holding proves the line.
+        _stable?.cancel();
+        _stable = Timer(_stableAfter, () {
+          if (mounted) _attempt = 0;
         });
       },
       // The terminal takes text; the wire carries bytes. Decoding here rather than in the
@@ -154,47 +161,54 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   @override
   void dispose() {
     _retry?.cancel();
+    _stable?.cancel();
     _link?.close();
     super.dispose();
   }
 
-  /// How long to wait before each attempt. Short enough that a machine that blinked is back before
-  /// the reader gives up on it, long enough that a screen which is genuinely gone stops being asked.
-  static const List<Duration> _waits = [
-    Duration(milliseconds: 400),
-    Duration(seconds: 1),
-    Duration(seconds: 2),
-    Duration(seconds: 4),
-    Duration(seconds: 8),
-  ];
+  /// The reconnect policy, which is `connectOverLines` from the JS package written out in Dart —
+  /// same numbers, same rules, because a viewer that behaves differently on two clients is two
+  /// products.
+  ///
+  ///   * the first retry waits [_firstWait], and each consecutive failure doubles it up to [_maxWait];
+  ///   * it never stops. Every line in a MultiPath deployment is expected to be less reliable than
+  ///     one well-chosen line, and the whole bet is that several beat one — which only pays if
+  ///     breaking is routine and recovering is automatic. Giving up after five tries, as this did,
+  ///     turns a machine that was away for twenty seconds into a screen somebody has to re-open;
+  ///   * the counter is reset by SURVIVING [_stableAfter], not by the handshake. A line that accepts
+  ///     a connection and drops it immediately otherwise looks like a success every time, and the
+  ///     client reconnects to it in a tight loop forever.
+  static const Duration _firstWait = Duration(milliseconds: 500);
+  static const Duration _maxWait = Duration(seconds: 30);
+  static const Duration _stableAfter = Duration(seconds: 5);
+
+  Duration get _wait {
+    var wait = _firstWait;
+    for (var i = 1; i < _attempt && wait < _maxWait; i++) {
+      wait *= 2;
+    }
+    return wait > _maxWait ? _maxWait : wait;
+  }
 
   void _handleClosed() {
     if (!mounted) return;
-    if (_attempt < _waits.length) {
-      final wait = _waits[_attempt];
-      _attempt++;
-      setState(() {
-        _reconnecting = true;
-        _failure = null;
-      });
-      _retry = Timer(wait, () {
-        if (mounted) _dial();
-      });
-      return;
-    }
+    _stable?.cancel();
+    _attempt++;
     setState(() {
-      _reconnecting = false;
-      _failure = _everOpened
-          ? 'The connection to this screen dropped.'
-          : 'This screen is gone, or you are not allowed to watch it.';
+      _reconnecting = true;
+      // Said once the first attempt has failed, so the reader knows what is being retried rather
+      // than watching a black rectangle with a spinner over it.
+    });
+    _retry = Timer(_wait, () {
+      if (mounted) _dial();
     });
   }
 
-  /// The way back for a person who is looking at the banner and knows better than we do.
+  /// For a person who is not willing to wait out the backoff. It never becomes the only way back —
+  /// the loop is still running underneath — it just skips the wait.
   void _tryAgain() {
     setState(() {
       _attempt = 0;
-      _failure = null;
       _reconnecting = true;
     });
     _dial();
@@ -215,10 +229,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     }
   }
 
+  /// Several attempts, and not one of them has ever connected. Then "reconnecting" alone is a
+  /// hopeful reading of the evidence, and the other possibility is worth saying out loud.
+  bool get _doubtful => !_everOpened && _attempt > 2;
+
   @override
   Widget build(BuildContext context) {
-    final failure = _failure;
-
     return Scaffold(
       backgroundColor: Colors.black,
       // One row of chrome, not two. A terminal is the content; everything around it is a tax on the
@@ -235,10 +251,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               onClose: widget.onClose,
             ),
           ),
+          // One row, never two: what is happening (still trying), and — once it has failed often
+          // enough that "still trying" stops being the whole story — why it might be failing.
           if (_reconnecting)
             Container(
               width: double.infinity,
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              color: _doubtful
+                  ? Theme.of(context).colorScheme.errorContainer
+                  : Theme.of(context).colorScheme.surfaceContainerHigh,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
@@ -248,36 +268,26 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'reconnecting…',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (failure != null)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.errorContainer,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
                   Expanded(
                     child: Text(
-                      failure,
+                      _doubtful
+                          ? 'still trying — this screen may be gone, or not '
+                                'yours to watch'
+                          : 'reconnecting…',
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.onErrorContainer,
+                        color: _doubtful
+                            ? Theme.of(context).colorScheme.onErrorContainer
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  // A way forward from the banner. Giving up after a handful of attempts is right;
-                  // leaving somebody with no way to ask again is not.
-                  TextButton(
-                    onPressed: _tryAgain,
-                    child: const Text('try again'),
-                  ),
+                  // Once the waits have grown, somebody who knows the machine is back should not
+                  // have to sit through the next one.
+                  if (_attempt > 2)
+                    TextButton(
+                      onPressed: _tryAgain,
+                      child: const Text('try again'),
+                    ),
                 ],
               ),
             ),
