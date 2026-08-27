@@ -118,15 +118,33 @@ void main() {
     await tester.drag(find.text('message 30'), const Offset(0, 120));
     await tester.pumpAndSettle();
 
+    // A window gets shorter because somebody tapped the field, so that is how the test gets there:
+    // the list holds its height while the composer has focus, and only then.
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+
     final title = tester.getRect(find.byType(AppBar));
     double belowTitle() =>
         tester.getTopLeft(find.text('message 20')).dy - title.bottom;
     final before = belowTitle();
+    final listHeight = tester.getSize(find.byType(ListView)).height;
 
     tester.view.physicalSize = const Size(400, 500);
     await tester.pumpAndSettle();
 
-    expect(belowTitle(), closeTo(before, 1.5));
+    expect(belowTitle(), closeTo(before, 0.5));
+
+    // And it got there without moving through anywhere else: the list was never re-laid-out, so
+    // there is no correction to see. A frame taken part-way through would show the same number.
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(belowTitle(), closeTo(before, 0.5));
+    expect(
+      tester.getSize(find.byType(ListView)).height,
+      closeTo(listHeight, 0.5),
+      reason:
+          'the list keeps its height and overflows behind the keyboard, rather '
+          'than being re-laid-out and scrolled back',
+    );
   });
 
   testWidgets('the keyboard opening does not move the messages', (
@@ -139,6 +157,9 @@ void main() {
     final keyboard = ValueNotifier<double>(0);
     addTearDown(keyboard.dispose);
     await tester.pumpWidget(_host(keyboard));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
 
     final title = tester.getRect(find.byType(AppBar));
