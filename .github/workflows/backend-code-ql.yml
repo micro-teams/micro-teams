@@ -87,7 +87,7 @@ jobs:
       # the build below stay a plain `./mvnw compile`.
       - if: matrix.build-mode == 'manual'
         name: Set up JDK 21 (with GitHub Packages credentials)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           java-version: "21"
           distribution: "temurin"
