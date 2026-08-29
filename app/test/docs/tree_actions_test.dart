@@ -144,31 +144,9 @@ void main() {
     expect(find.text('delete'), findsOneWidget);
   });
 
-  testWidgets('renaming happens in the row, not in a dialog', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-    await openTree(tester);
-
-    await actionsOn(tester, 'idea.md');
-    await tester.tap(find.text('rename'));
-    await tester.pumpAndSettle();
-
-    // The row itself became the field: no dialog was pushed over it.
-    expect(find.byType(AlertDialog), findsNothing);
-    expect(find.byType(TextField), findsOneWidget);
-
-    await tester.enterText(find.byType(TextField), 'plan.md');
-    await tester.tap(find.byIcon(Icons.check));
-    await settle(tester);
-
-    // Renamed WITHIN its folder: a name is not a path, and typing one must not move the file to the
-    // root.
-    final moved = backend.wrote.single;
-    expect(moved.call, 'PATCH /mt/team/1/document');
-    expect(moved.body, contains('notes/plan.md'));
-  });
-
+  // Renaming in the row — and renaming WITHIN the folder rather than moving the file to the root —
+  // is the machine journey's too: it renames a file it made and then finds it under the same folder.
+  //
   // Where a new file lands — inside the folder you asked, beside the file you asked — is the
   // machine journey's now (integration_test/machine_journey_test.dart). It makes a folder, puts a
   // file in it and another beside that one, and reads the answer off the tree itself rather than

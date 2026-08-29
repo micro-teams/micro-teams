@@ -192,6 +192,41 @@ void main() {
 
     await newInTree(tester, on: 'inside.md', named: 'beside.md');
     await revealIn(tester, folder, treeRowFor('beside.md'), what: 'beside.md');
+
+    // Renaming happens in the row itself, and a name is not a path: typing one must rename the file
+    // where it is, not move it to the root. From out here that is one question — is it still under
+    // the folder afterwards — and the tree answers it.
+    await actionsFor(tester, 'beside.md');
+    await tap(tester, find.text('rename'), what: 'rename');
+    final field = find.descendant(
+      of: find.byType(ListView),
+      matching: find.byType(TextField),
+    );
+    await waitFor(tester, field, what: 'the row, turned into a field');
+    expect(
+      find.byType(AlertDialog),
+      findsNothing,
+      reason: 'renaming happens in the row, not in a dialog over it',
+    );
+    await typeInto(tester, field, 'renamed.md');
+    await tap(tester, find.byIcon(Icons.check), what: 'the tick');
+    await revealIn(tester, folder, treeRowFor('renamed.md'), what: 'renamed.md');
+
+    // And deleting really deletes: the row goes. (Cancelling instead is still a widget test — the
+    // only way to be sure NOTHING was sent is to hold the wire.)
+    await actionsFor(tester, 'renamed.md');
+    await tap(tester, find.text('delete'), what: 'delete');
+    await waitFor(tester, find.text('delete renamed.md?'), what: 'the question');
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'delete'),
+      what: 'confirming it',
+    );
+    await waitUntilGone(
+      tester,
+      treeRowFor('renamed.md'),
+      what: 'the deleted file',
+    );
   }, timeout: const Timeout(Duration(minutes: 12)));
 }
 
@@ -247,14 +282,7 @@ Future<void> newInTree(
   required String named,
   bool folder = false,
 }) async {
-  await tapUntil(
-    tester,
-    treeRowFor(on),
-    find.byTooltip('actions'),
-    what: 'the row for $on',
-    expecting: 'its actions',
-  );
-  await tap(tester, find.byTooltip('actions'), what: "$on's actions");
+  await actionsFor(tester, on);
   await tap(
     tester,
     find.text(folder ? 'new folder' : 'new file').last,
@@ -269,4 +297,30 @@ Future<void> newInTree(
     find.widgetWithText(TextButton, 'create'),
     what: "the dialog's create",
   );
+}
+
+/// Open the "..." belonging to [name] — and to [name], not to whichever row was touched last.
+///
+/// The trap: only one row shows its "..." at a time, so `find.byTooltip('actions')` matches whatever
+/// is currently showing. Wait for one to exist and it may already be there, belonging to the
+/// previous row — and the menu that opens is that row's. (This deleted the wrong file once: the
+/// dialog said "delete inside.md?" while the journey thought it was deleting renamed.md.) Scoping
+/// the finder to this row's own subtree is what makes the question the right one.
+Future<void> actionsFor(WidgetTester tester, String name) async {
+  final row = find.ancestor(
+    of: treeRowFor(name),
+    matching: find.byType(MouseRegion),
+  );
+  final itsActions = find.descendant(
+    of: row.first,
+    matching: find.byTooltip('actions'),
+  );
+  await tapUntil(
+    tester,
+    treeRowFor(name),
+    itsActions,
+    what: 'the row for $name',
+    expecting: "$name's own actions",
+  );
+  await tap(tester, itsActions, what: "$name's actions");
 }
