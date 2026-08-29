@@ -1,0 +1,39 @@
+# One origin in front of both halves of a run: the app being tested, and the deployment it talks to.
+#
+# `flutter drive` serves the app under test from its own port, and the browser would then be on a
+# different origin from the server — which is not a smaller version of production, it is a different
+# system: cross-origin CORS rules, and an httpOnly refresh cookie that a browser will not send. So a
+# gateway goes in front, exactly as a real deployment has one, and the browser only ever sees this
+# origin.
+#
+# ${FLUTTER_PORT} is filled in by the nginx image's own envsubst pass over /etc/nginx/templates.
+
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+server {
+    listen 80;
+
+    # The deployment: the bundle's own nginx, reached by service name on the compose network.
+    location /api { proxy_pass http://nginx; include /etc/nginx/e2e-proxy.inc; }
+    location /mt  { proxy_pass http://nginx; include /etc/nginx/e2e-proxy.inc; }
+
+    # The mail sink, on this origin: the journey reads the sign-up code from /mail/messages, and
+    # putting it here keeps a cross-origin fetch out of a test that is not about cross-origin.
+    location /mail/ {
+        proxy_pass http://host.docker.internal:${MAIL_PORT}/;
+        include /etc/nginx/e2e-proxy.inc;
+    }
+
+    # No service worker in a driven run. index.html registers ours after load, and against
+    # `flutter drive`'s dev server it precaches the shipped shell (index.html, app.html, the
+    # launcher) over the top of the debug bootstrap — the app then never finishes booting and every
+    # finder sits there until it times out. What the worker does belongs to the built bundle, and
+    # tool/check-web.mjs tests it there, in a real browser, against the real files.
+    location = /sw.js { return 404; }
+
+    # The app under test, served by `flutter drive` on the host.
+    location / {
+        proxy_pass http://host.docker.internal:${FLUTTER_PORT};
+        include /etc/nginx/e2e-proxy.inc;
+    }
+}

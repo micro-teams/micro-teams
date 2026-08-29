@@ -179,24 +179,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const SizedBox(height: 24),
 
                   const _Label('username'),
-                  TextField(controller: _username),
+                  TextField(key: const Key('register-username'), controller: _username),
                   if (!usernameOk)
                     const _Hint(usernameRule, bad: true)
                   else
                     const SizedBox(height: 16),
 
                   const _Label('nickname'),
-                  TextField(controller: _nickname),
+                  TextField(key: const Key('register-nickname'), controller: _nickname),
                   const SizedBox(height: 16),
 
                   const _Label('password'),
-                  TextField(controller: _password, obscureText: true),
+                  TextField(key: const Key('register-password'), controller: _password, obscureText: true),
                   const SizedBox(height: 6),
                   _Rules(checks: PasswordChecks.of(_password.text)),
                   const SizedBox(height: 10),
 
                   const _Label('confirm password'),
-                  TextField(controller: _confirm, obscureText: true),
+                  TextField(key: const Key('register-confirm'), controller: _confirm, obscureText: true),
                   if (!match)
                     const _Hint('the two passwords do not match', bad: true)
                   else
@@ -205,7 +205,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const _Label('email'),
                   Row(
                     children: [
-                      Expanded(child: TextField(controller: _email)),
+                      Expanded(child: TextField(key: const Key('register-email'), controller: _email)),
                       const SizedBox(width: 8),
                       SizedBox(
                         height: Metrics.composerHeight,
@@ -224,7 +224,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     const SizedBox(height: 16),
 
                   const _Label('code from the email'),
-                  TextField(controller: _code),
+                  TextField(key: const Key('register-code'), controller: _code),
                   const SizedBox(height: 16),
 
                   if (_error != null) ...[

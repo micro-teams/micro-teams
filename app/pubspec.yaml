@@ -60,6 +60,12 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # The end-to-end suite (integration_test/ + test_driver/). It puts the test INSIDE the running
+  # app, which is what lets one script assert against the widget tree and a real server at the same
+  # time — the thing a browser-driven harness cannot do with a canvas. See todo/microteams/testing-e2e.md.
+  integration_test:
+    sdk: flutter
   flutter_lints: ^5.0.0
 
 flutter:
