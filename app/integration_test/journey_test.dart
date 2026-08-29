@@ -98,5 +98,39 @@ void main() {
     }
     await tap(tester, find.text(title), what: 'the thread in the list');
     await waitFor(tester, find.text(said), what: 'the message, read back');
-  }, timeout: const Timeout(Duration(minutes: 6)));
+
+    // --- the tab you come back to is the tab you left ---------------------------------------------
+    // A rule the shell has had since the React client, and one of the few things about navigation
+    // worth testing: leaving a conversation for another section and coming back should not put you
+    // in front of the list again. (This is test/shell_test.dart's first case, against the real
+    // shell instead of a toy router.)
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-agents')),
+      what: 'the agents tab',
+    );
+    await waitFor(tester, find.text('machines'), what: 'the agents page');
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-chats')),
+      what: 'the chats tab, coming back',
+    );
+    await waitFor(
+      tester,
+      find.text(said),
+      what: 'the conversation that was open, still open',
+    );
+
+    // And tapping the tab you are already on goes back to its root — the way out of a detail view.
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-chats')),
+      what: 'the chats tab again',
+    );
+    await waitUntilGone(
+      tester,
+      find.widgetWithText(TextField, 'message…'),
+      what: 'the composer, on the way back to the list',
+    );
+  }, timeout: const Timeout(Duration(minutes: 8)));
 }
