@@ -166,32 +166,10 @@ void main() {
   });
 
   group('chat with this agent', () {
-    testWidgets('reuses the existing one-to-one', (tester) async {
-      final backend = _FakeBackend(
-        chats:
-            '[{"id":9,"title":"agent3","updatedAt":"2026-08-20T00:00:00Z",'
-            '"members":[{"userId":1,"nickname":"Me"},{"userId":42,"nickname":"agent3"}]}]',
-      );
-      int? opened;
-      await tester.pumpWidget(
-        agentDetail(backend, onChat: (id) => opened = id),
-      );
-      await settle(tester);
-
-      await tester.ensureVisible(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-
-      expect(opened, 9);
-      expect(
-        backend.posted.where((p) => p.startsWith('POST')),
-        isEmpty,
-        reason:
-            'creating another conversation with the same agent is how the chat '
-            'list fills up with duplicates',
-      );
-    });
+    // Asking twice and getting the SAME conversation back is the machine journey's now: it asks a
+    // second time and finds what it already said still in there, which is what "the same one" means
+    // to a person. What is left here is the create path against a fake, where "no chat exists yet"
+    // can be arranged.
 
     testWidgets('creates one when there is none', (tester) async {
       final backend = _FakeBackend();

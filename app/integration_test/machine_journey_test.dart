@@ -22,6 +22,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:microteams/src/common/ui/team_picker.dart';
 import 'package:integration_test/integration_test.dart';
 
 import 'support.dart';
@@ -58,6 +59,15 @@ void main() {
       what: "the dialog's create",
     );
     await waitFor(tester, find.text(teamName), what: 'the new team in the list');
+    // Made and then not selected is a team you have to go and find, so making one is also a
+    // statement about where you intend to work. (test/teams/team_admin_test.dart used to say this
+    // against a fake; here the picker at the top of the next page says it.)
+    await go(tester, '/agents');
+    await waitFor(
+      tester,
+      find.widgetWithText(TeamPickerAction, teamName),
+      what: 'the new team, picked',
+    );
 
     // --- approve the machine ---------------------------------------------------------------------
     // `microteams link auto-connect` prints a link for a person to open; opening it is what this is.
@@ -159,6 +169,32 @@ void main() {
       tester,
       find.byIcon(Icons.schedule),
       what: 'the sending… clock',
+    );
+
+    // Asking for the conversation again has to give back the SAME one. A second one every time is
+    // how a chat list fills up with duplicates of the same agent — and from out here "the same one"
+    // has an honest test: what was said in it is still there.
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-agents')),
+      what: 'the agents tab',
+    );
+    await tapUntil(
+      tester,
+      find.text(agentName),
+      find.text('chat with agent'),
+      what: 'the agent again',
+      expecting: 'its page',
+    );
+    await tap(
+      tester,
+      find.text('chat with agent'),
+      what: 'chat with agent, a second time',
+    );
+    await waitFor(
+      tester,
+      find.text(said),
+      what: 'the same conversation, with what was already said in it',
     );
 
     // --- and a document in the team's own tree -----------------------------------------------------
