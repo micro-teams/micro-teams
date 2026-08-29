@@ -16,6 +16,12 @@ network. Mail is kept in memory and never written anywhere.
     GET /messages            every message, newest first
     GET /messages?to=x@y     only those addressed to x@y
     DELETE /messages         forget everything (between runs)
+    GET /note?text=...       record one line of the journey's own trace
+    GET /notes               that trace, oldest first
+
+The trace exists because a release web build reports a failed expectation as one line — the test's
+name — and nothing else. Without it, a red run says only that the journey failed, not where. The
+journey calls /note as it goes, and the harness prints the trace when something goes wrong.
 
 Each message is {"to": [...], "from": ..., "body": "...", "at": <epoch seconds>}; `body` is the
 raw DATA payload, decoded leniently, because callers here want to regex a code out of it rather
@@ -30,6 +36,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAUGHT = []
+NOTES = []
 LOCK = threading.Lock()
 
 
@@ -101,6 +108,17 @@ def _addr(line):
 
 class Http(BaseHTTPRequestHandler):
     def do_GET(self):
+        # /notes before /note: the shorter one is a prefix of the longer, and getting that backwards
+        # makes reading the trace record a new empty line instead.
+        if self.path.startswith('/notes'):
+            with LOCK:
+                return self._send(200, list(NOTES))
+        if self.path.startswith('/note'):
+            from urllib.parse import unquote
+            m = re.search(r'[?&]text=([^&]*)', self.path)
+            with LOCK:
+                NOTES.append(unquote(m.group(1)).replace('+', ' ') if m else '')
+            return self._send(200, {'ok': True})
         if not self.path.startswith('/messages'):
             return self._send(404, {'error': 'not found'})
         want = None
@@ -116,6 +134,7 @@ class Http(BaseHTTPRequestHandler):
     def do_DELETE(self):
         with LOCK:
             CAUGHT.clear()
+            NOTES.clear()
         self._send(200, {'ok': True})
 
     def _send(self, code, payload):

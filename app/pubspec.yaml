@@ -66,6 +66,11 @@ dev_dependencies:
   # time — the thing a browser-driven harness cannot do with a canvas. See todo/microteams/testing-e2e.md.
   integration_test:
     sdk: flutter
+
+  # Used by test_driver/ only: the machine-side half needs to open the browser at the gateway rather
+  # than at the server `flutter drive` starts, so the app and the deployment share an origin.
+  flutter_driver:
+    sdk: flutter
   flutter_lints: ^5.0.0
 
 flutter:
