@@ -160,6 +160,43 @@ void main() {
       find.byIcon(Icons.schedule),
       what: 'the sending… clock',
     );
+
+    // --- and a document in the team's own tree -----------------------------------------------------
+    // The team has a tree of its own from the moment it exists — a real git repository on the server
+    // — and this is the shortest journey through it: touch the tree's own row, make a file in it,
+    // watch it appear. (test/docs/tree_actions_test.dart makes the same file against a fake tree.)
+    //
+    // Two details that cost a run each, both worth keeping in mind for anything else in this tree:
+    // the team's name is on screen twice (the row AND the team picker above it), so the finder has
+    // to say which one; and a row's "..." is only drawn for the row you last touched, because a
+    // column of them down every row is noise. Tapping the row is what makes it reachable.
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-docs')),
+      what: 'the docs tab',
+    );
+    final docName = 'note-$runId.md';
+    final treeRow = find.descendant(
+      of: find.byType(ListView),
+      matching: find.text(teamName),
+    );
+    await tapUntil(
+      tester,
+      treeRow,
+      find.byTooltip('actions'),
+      what: "the tree's own row",
+      expecting: 'its actions',
+    );
+    await tap(tester, find.byTooltip('actions'), what: "the tree's own actions");
+    await tap(tester, find.text('new file'), what: 'new file');
+    await waitFor(tester, find.text('new file'), what: 'the name dialog');
+    await typeInto(tester, find.byType(TextField).first, docName);
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'create'),
+      what: "the dialog's create",
+    );
+    await waitFor(tester, find.text(docName), what: 'the new file in the tree');
   }, timeout: const Timeout(Duration(minutes: 12)));
 }
 
