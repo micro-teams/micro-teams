@@ -290,19 +290,4 @@ void main() {
     expect(onRail.runtimeType, onPhone.runtimeType);
   });
 
-  testWidgets('your own face opens the profile, without asking first', (
-    tester,
-  ) async {
-    // Logging out already lives inside the profile, so a two-item menu in front of a page holding
-    // one of those two items is a door in front of a door.
-    _wide(tester);
-    await tester.pumpWidget(_app(_Fake()));
-    await tester.pumpAndSettle();
-
-    await tester.tap(_rail('me'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('log out'), findsOneWidget, reason: 'the profile itself');
-    expect(find.byType(PopupMenuButton<int>), findsNothing);
-  });
 }

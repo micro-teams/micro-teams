@@ -132,5 +132,29 @@ void main() {
       find.widgetWithText(TextField, 'message…'),
       what: 'the composer, on the way back to the list',
     );
+
+    // --- and out again ------------------------------------------------------------------------------
+    // Your own face is the way to your own page — no menu in front of it — and logging out lives
+    // there. Ending the journey here is not tidiness: signing out has broken twice in this client,
+    // both times in a way that only showed up against a real server (an unauthenticated request that
+    // left the refresh cookie alive, and a router that sent the confirmation dialog to /login).
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-me')),
+      what: 'your own face',
+    );
+    await waitFor(tester, find.text('log out'), what: 'your own page');
+    await tap(tester, find.text('log out'), what: 'log out');
+    await waitFor(tester, find.text('log out?'), what: 'the confirmation');
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'log out').last,
+      what: 'confirming it',
+    );
+    await waitFor(
+      tester,
+      find.text('no account? register'),
+      what: 'the login page, signed out',
+    );
   }, timeout: const Timeout(Duration(minutes: 8)));
 }
