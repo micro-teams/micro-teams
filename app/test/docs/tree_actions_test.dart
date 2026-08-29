@@ -169,44 +169,10 @@ void main() {
     expect(moved.body, contains('notes/plan.md'));
   });
 
-  testWidgets('a new file under a folder goes inside it', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-    await openTree(tester);
-
-    await actionsOn(tester, 'notes');
-    await tester.tap(find.text('new file'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'second.md');
-    await tester.tap(find.widgetWithText(TextButton, 'create'));
-    await settle(tester);
-
-    expect(backend.wrote.single.call, 'PUT /mt/team/1/document');
-    expect(
-      backend.wrote.single.body,
-      isNot(contains('"path"')),
-      reason: 'the document body is the file itself, not a JSON envelope',
-    );
-  });
-
-  testWidgets('a new file beside a file goes beside it', (tester) async {
-    // Pointing at a file and asking for a new one means "another one here", not "one inside that
-    // file", which is not a thing.
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-    await openTree(tester);
-
-    await actionsOn(tester, 'idea.md');
-    await tester.tap(find.text('new file'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'second.md');
-    await tester.tap(find.widgetWithText(TextButton, 'create'));
-    await settle(tester);
-
-    expect(backend.wrote.single.call, 'PUT /mt/team/1/document');
-  });
+  // Where a new file lands — inside the folder you asked, beside the file you asked — is the
+  // machine journey's now (integration_test/machine_journey_test.dart). It makes a folder, puts a
+  // file in it and another beside that one, and reads the answer off the tree itself rather than
+  // off the shape of the request, which is all a fake backend can show.
 
   testWidgets('deleting asks first', (tester) async {
     final backend = _Fake();

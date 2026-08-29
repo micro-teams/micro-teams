@@ -176,27 +176,22 @@ void main() {
       what: 'the docs tab',
     );
     final docName = 'note-$runId.md';
-    final treeRow = find.descendant(
-      of: find.byType(ListView),
-      matching: find.text(teamName),
-    );
-    await tapUntil(
-      tester,
-      treeRow,
-      find.byTooltip('actions'),
-      what: "the tree's own row",
-      expecting: 'its actions',
-    );
-    await tap(tester, find.byTooltip('actions'), what: "the tree's own actions");
-    await tap(tester, find.text('new file'), what: 'new file');
-    await waitFor(tester, find.text('new file'), what: 'the name dialog');
-    await typeInto(tester, find.byType(TextField).first, docName);
-    await tap(
-      tester,
-      find.widgetWithText(TextButton, 'create'),
-      what: "the dialog's create",
-    );
-    await waitFor(tester, find.text(docName), what: 'the new file in the tree');
+    await newInTree(tester, on: teamName, named: docName);
+    await revealIn(tester, teamName, treeRowFor(docName), what: docName);
+
+    // Where a new file lands is the rule this tree lives by, and it is a rule about paths: asking a
+    // FOLDER for a new file puts it inside, asking a FILE for one puts it beside. The widget tests
+    // that cover this can only see the shape of the request; here the tree itself answers, which is
+    // what a person is actually looking at.
+    final folder = 'notes-$runId';
+    await newInTree(tester, on: teamName, folder: true, named: folder);
+    await revealIn(tester, teamName, treeRowFor(folder), what: folder);
+
+    await newInTree(tester, on: folder, named: 'inside.md');
+    await revealIn(tester, folder, treeRowFor('inside.md'), what: 'inside.md');
+
+    await newInTree(tester, on: 'inside.md', named: 'beside.md');
+    await revealIn(tester, folder, treeRowFor('beside.md'), what: 'beside.md');
   }, timeout: const Timeout(Duration(minutes: 12)));
 }
 
@@ -210,4 +205,68 @@ Future<void> go(WidgetTester tester, String location) async {
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
+}
+
+/// The row for [name] in the tree, and nothing else on screen that says the same word — the team's
+/// name in particular is also on the picker above the tree, and an open document's name is in the
+/// pane beside it.
+Finder treeRowFor(String name) =>
+    find.descendant(of: find.byType(ListView), matching: find.text(name));
+
+/// Open [folder] far enough to see [what], however many taps that takes.
+///
+/// Tapping a row in this tree TOGGLES it, and every folder starts closed — including the team's own
+/// row, which is why a journey that taps it to reach its actions can easily leave it shut. So the
+/// question asked here is not "did I tap" but "can I see it", which is also the question a person
+/// asks. (Two runs were lost to this: the file that seemed to prove the tree was open was the
+/// document open in the pane beside it, not a row.)
+Future<void> revealIn(
+  WidgetTester tester,
+  String folder,
+  Finder row, {
+  required String what,
+}) async {
+  await tapUntil(
+    tester,
+    treeRowFor(folder),
+    row,
+    what: 'the row for $folder',
+    expecting: what,
+  );
+}
+
+/// Make a file (or a folder) from another row's own actions.
+///
+/// A row's "..." is only drawn for the row you last TOUCHED — a column of them down every row would
+/// be noise — so the row is touched again every time rather than once. And "new file"/"new folder"
+/// name both the menu item and the dialog it opens, so the wait afterwards is for the dialog's own
+/// field, which only the dialog has.
+Future<void> newInTree(
+  WidgetTester tester, {
+  required String on,
+  required String named,
+  bool folder = false,
+}) async {
+  await tapUntil(
+    tester,
+    treeRowFor(on),
+    find.byTooltip('actions'),
+    what: 'the row for $on',
+    expecting: 'its actions',
+  );
+  await tap(tester, find.byTooltip('actions'), what: "$on's actions");
+  await tap(
+    tester,
+    find.text(folder ? 'new folder' : 'new file').last,
+    what: folder ? 'new folder' : 'new file',
+  );
+
+  final field = find.widgetWithText(TextField, folder ? 'notes' : 'idea.md');
+  await waitFor(tester, field, what: 'the name field');
+  await typeInto(tester, field, named);
+  await tap(
+    tester,
+    find.widgetWithText(TextButton, 'create'),
+    what: "the dialog's create",
+  );
 }
