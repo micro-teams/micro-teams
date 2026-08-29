@@ -1,7 +1,9 @@
-// Pressing send has to send.
+// The one thing about sending that a journey cannot reach: sending while the decoration is broken.
 //
-// There was no test for this — every test around the outbox drove the queue directly, and the one
-// path nobody covered is the one a person actually uses: type into the composer, press the button.
+// The plain "type and press send" cases that used to be here are gone — the chat journey does that
+// against a real deployment now, and asserts more than they could (the message is stored, not just
+// posted). What is left needs a failure to be injected, which is why it is still a widget test:
+// presence and the roster have to be BROKEN, and then the composer still has to work.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -126,39 +128,5 @@ void main() {
       backend.wrote.map((w) => w.call),
       contains('POST /mt/chat/5/messages'),
     );
-  });
-
-  testWidgets('typing and pressing send posts the message', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField), 'hello');
-    await tester.tap(find.widgetWithText(FilledButton, 'send'));
-    await tester.pumpAndSettle();
-
-    expect(
-      backend.wrote.map((w) => w.call),
-      contains('POST /mt/chat/5/messages'),
-    );
-    expect(find.text('hello'), findsOneWidget);
-  });
-
-  testWidgets('the composer is emptied, and the message is on screen', (
-    tester,
-  ) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField), 'hello');
-    await tester.tap(find.widgetWithText(FilledButton, 'send'));
-    await tester.pumpAndSettle();
-
-    expect(
-      tester.widget<TextField>(find.byType(TextField)).controller?.text,
-      '',
-    );
-    expect(find.text('hello'), findsOneWidget);
   });
 }

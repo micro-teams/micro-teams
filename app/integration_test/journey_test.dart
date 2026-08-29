@@ -67,6 +67,17 @@ void main() {
     // message is on the server is the 'sending…' clock going away — the outbox only drops that
     // when the stored message comes back with an id.
     await waitFor(tester, find.text(said), what: 'the message bubble');
+    // Emptied, so the next message does not start with the last one still in it. (This is what
+    // test/chats/send_test.dart used to assert against a fake; here it is the real composer after a
+    // real send.)
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'message…').first)
+          .controller
+          ?.text,
+      isEmpty,
+      reason: 'the composer should be empty once the message is away',
+    );
     await waitUntilGone(
       tester,
       find.byIcon(Icons.schedule),
