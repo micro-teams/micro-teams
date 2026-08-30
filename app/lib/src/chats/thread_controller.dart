@@ -166,8 +166,16 @@ class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
       // where nothing is awaiting it, so anything that escapes becomes an unhandled async error
       // that kills the zone instead of one conversation's refresh.
       //
-      // Keep showing what we hold. A failed refresh is not a reason to blank a conversation.
-      if (current == null) {
+      // A refusal is not a failed refresh. 401 and 403 mean this conversation is not ours to show —
+      // the session ended, or somebody else is signed in now — and holding on to what we painted
+      // last would leave one person's messages on another person's screen. Everything else keeps
+      // what we hold: a conversation blanked by a dropped connection is worse than a stale one.
+      //
+      // The journey found this: the server refused the stranger twice with a 403, and the first
+      // person's message stayed on the screen through both.
+      if (e is MtError && (e.status == 401 || e.status == 403)) {
+        state = AsyncValue.error(e, StackTrace.current);
+      } else if (current == null) {
         state = AsyncValue.error(e, StackTrace.current);
       } else {
         state = AsyncValue.data(

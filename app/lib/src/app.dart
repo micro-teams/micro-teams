@@ -114,6 +114,16 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     // Reading it here is what opens it, and closing the session closes it.
     ref.watch(updatesSocketProvider);
 
+    // When the account changes, everything the last one fetched goes. Here rather than in the
+    // session notifier itself: these providers watch the session, so invalidating them from inside
+    // it is a cycle. See userScopedProviders.
+    ref.listen(sessionProvider.select((s) => s.valueOrNull?.user.id), (
+      before,
+      after,
+    ) {
+      if (before != after) dropWhatTheLastAccountFetched(ref);
+    });
+
     // A native client that is a generation behind the deployment is stopped here, above the router
     // — not redirected to a route, because a route is somewhere you can navigate away from. On the
     // web this is always null: the launcher deals with a stale client by dropping its caches and

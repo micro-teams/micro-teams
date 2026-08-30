@@ -369,6 +369,12 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   await tap(tester, find.text(title), what: 'the thread in the list');
   await waitFor(tester, find.text(said), what: 'the message, read back');
 
+  // Taken here, with the thread open, because a thread has its own address (/chats/:threadId) and
+  // the list does not. Read it at the end of this function instead and you get /chats — an address
+  // that refuses nobody, and a stranger check that proves nothing. (It did, once: the reverse run
+  // reported "walked into somebody else's conversation at /chats".)
+  final location = whereWeAre(tester);
+
   // --- the tab you come back to is the tab you left ---------------------------------------------
   // A rule the shell has had since the React client, and one of the few things about navigation
   // worth testing: leaving a conversation for another section and coming back should not put you
@@ -403,7 +409,7 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
     what: 'the composer, on the way back to the list',
   );
   // Where this conversation lives, so somebody who is NOT in it can be sent to the same address.
-  return (title: title, said: said, location: whereWeAre(tester));
+  return (title: title, said: said, location: location);
 }
 
 /// The address the app is at, as the browser's own bar would show it.
