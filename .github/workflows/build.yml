@@ -536,10 +536,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/flutter-app
+      # Deliberately NOT in the workspace. A running deployment writes app_data/ as the users inside
+      # its containers, and anything that later walks the workspace — the pub cache's own post-job
+      # step, for one — then trips over directories it may not read. Keeping the bundle in the
+      # runner's temp keeps the checkout exactly as checked out.
       - uses: actions/download-artifact@v8
         with:
           name: microteams-deploy
-          path: microteams-deploy
+          path: ${{ runner.temp }}/microteams-deploy
       # The runner image ships Chrome and a matching ChromeDriver; the fallback is for images that
       # do not, and for anybody running this workflow somewhere else.
       - name: Make sure there is a chromedriver
@@ -549,14 +553,14 @@ jobs:
           sudo apt-get install -y -qq chromium-driver
       - name: "A person's journey through the shipped bundle (${{ matrix.journey }})"
         working-directory: app
-        run: bash tool/e2e/run.sh --bundle "$GITHUB_WORKSPACE/microteams-deploy" --journey ${{ matrix.journey }}
+        run: bash tool/e2e/run.sh --bundle "${{ runner.temp }}/microteams-deploy" --journey ${{ matrix.journey }}
       - name: Dump logs on failure
         if: failure()
-        working-directory: microteams-deploy
+        working-directory: ${{ runner.temp }}/microteams-deploy
         run: docker compose logs --no-color --tail 200
       - name: Tear down
         if: always()
-        working-directory: microteams-deploy
+        working-directory: ${{ runner.temp }}/microteams-deploy
         run: docker compose down -v
 
   # One check to require in branch protection: it succeeds only when every job above did (a job with

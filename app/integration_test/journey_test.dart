@@ -31,6 +31,11 @@ void main() {
     expect(runId, isNotEmpty, reason: 'MT_E2E_RUN was not passed in');
 
     await startApp(tester);
+
+    // (There is no settings gear to press here: where the server is pointed is a native client's
+    // question, and the web build has no such control — the page came from the server. So
+    // "a dialog is reachable before sign-in" stays a widget test; on the web there is nothing to
+    // reach it with.)
     await signUp(tester);
 
     // --- start a conversation -------------------------------------------------------------------
