@@ -47,7 +47,7 @@ void main() {
     // belongs to every journey: a separate journey repeating it would spend a whole run saying the
     // same thing twice, and the matrix below is meant to be max(clients, environments) runs — not
     // clients plus environments.
-    await talkInAChatOfYourOwn(tester);
+    final mine = await talkInAChatOfYourOwn(tester);
 
     // No code means no host was spun for this run (`--journey no-machine`, for iterating locally on
     // the app half). Everything from here needs one, so the journey stops rather than pretending it
@@ -477,7 +477,43 @@ void main() {
       find.text('no account? register'),
       what: 'the login page, signed out',
     );
-  }, timeout: const Timeout(Duration(minutes: 12)));
+
+    // --- and now somebody else ----------------------------------------------------------------------
+    // Everything above is one person's own things going right. The rules that say what happens to
+    // OTHER people — a stranger cannot read your conversation, cannot see your team — never show up
+    // in that, because there is nobody else in the run to be refused. So the journey signs a second
+    // person up and sends them where the first person has just been.
+    //
+    // This is the same check the backend makes with a 403, asked the way a person would ask it: go
+    // to the address and see what the app gives you. If a leak ever appears, it appears here as the
+    // other person's words on the screen — which is the failure worth catching, and the one an
+    // assertion about a status code cannot quite state.
+    final stranger = await signUp(tester, suffix: 'b');
+    await note('signed up a second person ($stranger) to be refused things');
+
+    // Nothing of the first person's is in the second person's own lists.
+    await waitUntilGone(
+      tester,
+      find.text(mine.title),
+      what: "the first person's conversation, absent from the stranger's list",
+    );
+    expect(
+      find.text(teamName),
+      findsNothing,
+      reason: "the stranger's chats list is showing a team they were never in",
+    );
+
+    // And the address itself gives them nothing, even typed in directly.
+    await go(tester, mine.location);
+    expect(
+      find.text(mine.said),
+      findsNothing,
+      reason:
+          'a stranger walked straight into somebody else\'s conversation at ${mine.location} and '
+          'read what was said in it',
+    );
+    await note('the stranger was given nothing at ${mine.location}');
+  }, timeout: const Timeout(Duration(minutes: 14)));
 }
 
 /// The "take this member out" button, found by the prefix of its tooltip.
