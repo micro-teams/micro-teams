@@ -3,7 +3,9 @@
 # The Android journey needs hardware acceleration; without /dev/kvm an emulator is software-rendered
 # and too slow to be a test. This says so in ten seconds instead of after an hour of building one.
 name: probe kvm
-on: workflow_dispatch
+on:
+  push:
+    branches: [test/e2e-first-slice]
 
 jobs:
   probe:
