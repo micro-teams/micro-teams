@@ -42,17 +42,15 @@ jobs:
           server-username: MAVEN_USERNAME
           server-password: MAVEN_TOKEN
 
-      # Our tests are integration tests: they need a real Postgres (with the "microteams" schema) and
-      # the real cheese-auth service. One script brings both up, mirroring the local setup.
-      - name: Start dependencies (Postgres + cheese-auth)
-        run: ./scripts/dependency-start.sh
-
-      - name: Build with Maven (runs the integration tests)
-        run: ./mvnw install
+      # Packaging only. The tests live in test-api below, because they are integration tests that
+      # need a real Postgres and the real cheese-auth service — and there is no reason for the job
+      # that produces the jar to need a database to do it. Splitting them means this job is red only
+      # when the jar itself cannot be built, and the deployment bundle stops waiting on a test suite.
+      - name: Build with Maven (packaging only)
+        run: ./mvnw install -DskipTests
         env:
           MAVEN_USERNAME: ${{ github.actor }}
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
 
       - name: Check uncommitted changes to ensure format applied
         run: |
@@ -70,6 +68,58 @@ jobs:
           retention-days: 1
           name: jar
           path: backend/target/*.jar
+
+  # The backend's own tests. They are integration tests — every one of them talks to a real Postgres
+  # and the real cheese-auth service — so they bring their dependencies up themselves rather than
+  # borrowing the packaging job's runner. What survives here is meant to shrink: the rules that show
+  # up as something a person can do are moving into the journeys, and this suite keeps the ones with
+  # no picture in the product (an ops endpoint that must not appear on the public port, a bare repo
+  # made twice, anything that needs exact timing).
+  test-api:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+          cache-dependency-path: backend/pom.xml
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+
+      - name: Start dependencies (Postgres + cheese-auth)
+        run: ./scripts/dependency-start.sh
+
+      # -Dschema.regenerate.skip=false brings back the step that boots the application to rewrite
+      # CREATE.sql from the entities. It lives here rather than in packaging because it needs a
+      # database, and the check below is what it is for: if the entities moved and CREATE.sql did
+      # not, the file comes back changed and this job says so.
+      - name: Run the tests
+        run: ./mvnw verify -Dschema.regenerate.skip=false
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
+
+      - name: Check CREATE.sql matches the entities
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            git status
+            git diff
+            echo "CREATE.sql (or something else) changed while running the tests. Commit it."
+            exit 1
+          else
+            echo "No uncommitted changes."
+          fi
 
   # The web client. It is the ONLY frontend now — frontend/ (React + Vite) is gone, because one
   # person maintaining two implementations of the same product maintains neither.
@@ -592,6 +642,7 @@ jobs:
     needs:
       [
         build-jar,
+        test-api,
         build-web,
         build-android,
         build-applet,
