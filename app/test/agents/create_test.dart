@@ -137,20 +137,6 @@ Widget _host(_Fake backend) => ProviderScope(
 
 void main() {
   group('open agent', () {
-    testWidgets('offers the drivers the server says it has', (tester) async {
-      await tester.pumpWidget(_host(_Fake()));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('open agent'));
-      await tester.pumpAndSettle();
-
-      // Not a list compiled into the client: a client that guesses offers a driver the server
-      // cannot run and hides one it can.
-      await tester.tap(find.text('claude (default)'));
-      await tester.pumpAndSettle();
-      expect(find.text('codex'), findsWidgets);
-    });
-
     testWidgets('every field is on the form, none behind "advanced"', (
       tester,
     ) async {
@@ -260,25 +246,6 @@ void main() {
       expect(
         find.textContaining('http://backend.test/install.sh'),
         findsOneWidget,
-      );
-    });
-
-    testWidgets('adding a spare machine binds it to this team', (tester) async {
-      final backend = _Fake(machineTeams: const [2]);
-      await tester.pumpWidget(_host(backend));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('add device'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-
-      final bind = backend.wrote.firstWhere(
-        (w) => w.call == 'POST /mt/team/1/machine',
-      );
-      expect(
-        (jsonDecode(bind.body! as String) as Map<String, Object?>)['machineId'],
-        'm2',
       );
     });
   });

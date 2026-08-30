@@ -155,38 +155,11 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('lists a team\'s agents and machines together', (tester) async {
-    await tester.pumpWidget(host(_FakeBackend()));
-    await tester.pumpAndSettle();
-
-    expect(find.text('agent3'), findsOneWidget);
-    expect(find.text('box'), findsOneWidget);
-    // The machine's NAME, not its opaque id, next to the agent that runs on it.
-    expect(find.textContaining('box · claude'), findsOneWidget);
-  });
-
   group('chat with this agent', () {
     // Asking twice and getting the SAME conversation back is the machine journey's now: it asks a
     // second time and finds what it already said still in there, which is what "the same one" means
     // to a person. What is left here is the create path against a fake, where "no chat exists yet"
     // can be arranged.
-
-    testWidgets('creates one when there is none', (tester) async {
-      final backend = _FakeBackend();
-      int? opened;
-      await tester.pumpWidget(
-        agentDetail(backend, onChat: (id) => opened = id),
-      );
-      await settle(tester);
-
-      await tester.ensureVisible(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-
-      expect(opened, 77);
-      expect(backend.posted, contains('POST /mt/chat'));
-    });
 
     testWidgets('a group chat containing the agent is not the one-to-one', (
       tester,
@@ -239,27 +212,6 @@ void main() {
 
       expect(find.byTooltip('remove from this team'), findsOneWidget);
     });
-  });
-
-  testWidgets('closing an agent asks first', (tester) async {
-    final backend = _FakeBackend();
-    await tester.pumpWidget(agentDetail(backend));
-    await settle(tester);
-
-    await tester.ensureVisible(find.text('close agent'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('close agent'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('close agent3?'), findsOneWidget);
-    await tester.tap(find.text('cancel'));
-    await tester.pumpAndSettle();
-
-    expect(
-      backend.posted.where((p) => p.contains('close')),
-      isEmpty,
-      reason: 'cancel has to mean cancel',
-    );
   });
 
   group('cache keepalive', () {

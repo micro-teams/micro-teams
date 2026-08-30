@@ -9,6 +9,7 @@ library;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:microteams/main.dart' as app;
 
 /// Where the mail sink can be reached FROM THE BROWSER. The gateway puts it on this origin, so the
@@ -299,7 +300,9 @@ Future<String> codeFromMail(WidgetTester tester, String email) async {
 /// Kept here rather than in a journey of its own: everything a person does before there is a
 /// machine belongs to every journey, and a second journey that repeated it would cost a whole run
 /// to say the same thing twice. See todo/microteams/testing-e2e.md on the shape of the matrix.
-Future<void> talkInAChatOfYourOwn(WidgetTester tester) async {
+Future<({String title, String said, String location})> talkInAChatOfYourOwn(
+  WidgetTester tester,
+) async {
   // --- start a conversation -------------------------------------------------------------------
   final title = 'journey $runId';
   await tap(
@@ -399,4 +402,12 @@ Future<void> talkInAChatOfYourOwn(WidgetTester tester) async {
     find.widgetWithText(TextField, 'message…'),
     what: 'the composer, on the way back to the list',
   );
+  // Where this conversation lives, so somebody who is NOT in it can be sent to the same address.
+  return (title: title, said: said, location: whereWeAre(tester));
+}
+
+/// The address the app is at, as the browser's own bar would show it.
+String whereWeAre(WidgetTester tester) {
+  final context = tester.element(find.byType(Navigator).first);
+  return GoRouter.of(context).state.uri.toString();
 }
