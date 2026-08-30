@@ -23,7 +23,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:microteams/src/common/ui/avatar.dart';
 import 'package:microteams/src/common/ui/team_picker.dart';
+import 'package:microteams/src/common/ui/theme.dart';
 import 'package:integration_test/integration_test.dart';
 
 import 'support.dart';
@@ -215,6 +217,12 @@ void main() {
       find.text(said),
       what: 'the same conversation, with what was already said in it',
     );
+
+    // --- the shell is still the shell React had ------------------------------------------------
+    // Measured on the real screen, in a real conversation, because every one of these failed
+    // invisibly once: the code was right and the pixels were not. (This is what test/chats/
+    // bubble_test.dart measured against a fake, minus the cases that need two people talking.)
+    await lookRight(tester);
 
     // Who is in this conversation: the person who made it, and the agent it is with. (This is
     // test/chats/thread_info_test.dart's roster case, with a roster the server actually built.)
@@ -619,4 +627,113 @@ Future<void> actionsFor(WidgetTester tester, String name) async {
     expecting: "$name's own actions",
   );
   await tap(tester, itsActions, what: "$name's actions");
+}
+
+/// The shape of a conversation: what is measured rather than reviewed.
+///
+/// Each of these is a rule the React client already had, and each one is invisible in code review —
+/// the numbers in the source agree while the rendered boxes do not. A bubble capped at a flat 560px
+/// is the example that started it: correct-looking code, and every bubble filling its row.
+Future<void> lookRight(WidgetTester tester) async {
+  // The cap only shows itself against text that wants more room than the cap allows. A short
+  // message measures its own words — the first cut of this step asserted on one and failed at 83%
+  // of the row, which was the sentence being long, not the bubble being uncapped.
+  //
+  // Unbreakable is the harder half: CSS would not break inside a word, so on the React side a
+  // pasted URL or a base64 blob ran straight out of the bubble (T-011). Flutter breaks by
+  // character, and this measures that rather than assuming it.
+  const wall =
+      'A123456789B123456789C123456789D123456789E123456789'
+      'F123456789G123456789H123456789I123456789J123456789';
+  await typeInto(tester, find.widgetWithText(TextField, 'message…'), wall);
+  await tap(
+    tester,
+    find.widgetWithText(FilledButton, 'send'),
+    what: 'send, with a wall of unbreakable text',
+  );
+  await waitFor(tester, find.text(wall), what: 'the wall in a bubble');
+
+  // The list the messages are in, found through a message rather than by type. On a wide window
+  // the conversation sits beside the chat list, so `find.byType(ListView).first` is the list of
+  // conversations — 320 wide here — and every measurement taken against it is a measurement of the
+  // wrong pane. (That is what made this step fail twice with numbers that looked like real defects:
+  // a bubble "504 wide in a row of 320".)
+  final list = find
+      .ancestor(of: find.text(wall), matching: find.byType(ListView))
+      .first;
+  final row = tester.getSize(list).width;
+
+  // A bubble leaves the sides of the row visible, or nothing can look aligned.
+  final bubble = tester.getSize(
+    find.ancestor(of: find.text(wall), matching: find.byType(Container)).first,
+  );
+  expect(
+    bubble.width,
+    lessThanOrEqualTo(row * 0.8),
+    reason: 'a bubble ${bubble.width} wide in a row of $row fills it',
+  );
+
+  // Own messages sit on the right. (The other half of this rule — theirs on the left, in the other
+  // green — needs a second person talking, and stays in a unit test until a journey has one.)
+  //
+  // Scoped to the list, like everything else here: the same words are on screen twice, once in the
+  // bubble and once as the conversation's last line in the list beside it, and an unscoped finder
+  // matches both and measures neither.
+  final inList = find.descendant(of: list, matching: find.text(wall));
+  expect(
+    tester.getRect(inList).center.dx,
+    greaterThan(tester.getRect(list).center.dx),
+    reason: 'own message is not on the right',
+  );
+
+  // The green is the one React used. "It went slightly off" is not caught in review.
+  final painted = tester
+      .widgetList<Container>(
+        find.ancestor(of: inList, matching: find.byType(Container)),
+      )
+      .map((c) => (c.decoration as BoxDecoration?)?.color)
+      .whereType<Color>();
+  expect(painted, contains(ownBubble), reason: 'the own-message green moved');
+
+  // One area around the list, so a drag can run across bubbles and the system copies what it took.
+  expect(find.byType(SelectionArea), findsWidgets);
+  expect(
+    find.descendant(of: find.byType(SelectionArea), matching: find.text(wall)),
+    findsWidgets,
+    reason: 'the messages are outside the selection area',
+  );
+
+  // Two avatar sizes in the whole product, both from React: 40 beside a bubble, 48 in a list.
+  expect(Metrics.avatarInBubble, 40);
+  expect(Metrics.avatarInList, 48);
+  for (final avatar in tester.widgetList<UserAvatar>(
+    find.descendant(of: list, matching: find.byType(UserAvatar)),
+  )) {
+    expect(
+      avatar.size,
+      Metrics.avatarInBubble,
+      reason: 'a face beside a bubble is the wrong size',
+    );
+  }
+
+  // Two controls side by side at different heights: invisible in review, impossible to unsee.
+  final field = tester.getSize(find.widgetWithText(TextField, 'message…'));
+  final send = tester.getSize(find.widgetWithText(FilledButton, 'send'));
+  expect(
+    send.height,
+    field.height,
+    reason: 'send is ${send.height}, the field is ${field.height}',
+  );
+
+  // The newest message sits at offset zero, so an arriving message cannot move a reader who has
+  // scrolled up. There is nothing to pin, and therefore no pinning rule to get wrong.
+  expect(tester.widget<ListView>(list).reverse, isTrue);
+
+  // Picking a conversation beside the list is picking, not navigating — Material would add a back
+  // arrow for the history stack, which is a fact about the router and not about this layout.
+  if (find.byType(TeamPickerAction).evaluate().isNotEmpty) {
+    expect(find.byType(BackButton), findsNothing);
+  }
+
+  await note('the conversation still has the shape React gave it');
 }
