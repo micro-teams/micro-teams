@@ -230,6 +230,29 @@ void main() {
       what: 'the person who made it, in the roster',
     );
 
+    // And taking somebody out: asked first, and then they are gone from the roster. (An owner
+    // cannot be removed, and neither can you — those two are still widget tests, because they are
+    // about buttons that are NOT offered.)
+    await tap(tester, removeButton, what: 'the remove button on the agent');
+    await waitFor(
+      tester,
+      find.textContaining('remove '),
+      what: 'the question, before anybody is removed',
+    );
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'remove'),
+      what: 'confirming it',
+    );
+    // Gone from the ROSTER, which is not the same as gone from the screen: a one-to-one conversation
+    // is titled after the agent, so its name is still up there. What disappears is the only thing
+    // that was removable — the button that was on it.
+    await waitUntilGone(
+      tester,
+      removeButton,
+      what: 'the agent, out of the conversation',
+    );
+
     // --- and a document in the team's own tree -----------------------------------------------------
     // The team has a tree of its own from the moment it exists — a real git repository on the server
     // — and this is the shortest journey through it: touch the tree's own row, make a file in it,
@@ -283,6 +306,22 @@ void main() {
       tester,
       find.textContaining('inside.md'),
       what: 'the commit that made the file',
+    );
+    // And the diff behind that commit: a history you cannot open is a list of hashes.
+    await tap(
+      tester,
+      find.textContaining('inside.md').last,
+      what: 'the commit, to see what it changed',
+    );
+    await waitFor(
+      tester,
+      find.textContaining('diff '),
+      what: 'the diff behind it',
+    );
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'close').last,
+      what: 'closing the diff',
     );
     await tap(
       tester,
@@ -440,6 +479,16 @@ void main() {
     );
   }, timeout: const Timeout(Duration(minutes: 12)));
 }
+
+/// The "take this member out" button, found by the prefix of its tooltip.
+///
+/// The tooltip carries the member's id, which the journey never learns — and does not need to: in a
+/// one-to-one conversation the agent is the only member who can be removed at all.
+final removeButton = find.byWidgetPredicate(
+  (widget) =>
+      widget is Tooltip && (widget.message ?? '').startsWith('Remove user '),
+  description: 'a remove button',
+);
 
 /// Follow a link, the way a person following a link does.
 ///
