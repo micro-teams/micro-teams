@@ -200,11 +200,45 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
 
 /// [type] by any finder, not just by key.
 ///
-/// One attempt, and the caller checks. See [fill] for why one attempt is not enough on a device.
+/// Types, then reads back, and says so loudly if the text did not stick. The read-back is not
+/// belt-and-braces: it was briefly removed while [fill] was being written, on the theory that the
+/// caller would check — and the very next CI run failed at a step that types one field and then
+/// presses a button, with nothing to say about why. A field that quietly refuses text is exactly
+/// the failure this suite exists to make loud.
+///
+/// [fill] is still the thing to use for a FORM, because one field's check cannot see the field
+/// that the next one clobbered.
 Future<void> typeInto(WidgetTester tester, Finder finder, String text) async {
   await waitFor(tester, finder, what: 'a field to type "$text" into');
-  await tester.enterText(finder.first, text);
+
+  // The controller is taken BEFORE typing, and the read-back goes through it rather than through
+  // the finder again. Finders can stop matching the thing they just matched: the composer is found
+  // by its placeholder, `find.widgetWithText(TextField, 'message…')`, and a placeholder is exactly
+  // what leaves the tree once the box has text in it. Re-running that finder afterwards therefore
+  // asks about some other box — and it reported an empty one, so a field that had in fact been
+  // filled correctly was declared broken. A controller outlives its widget's rebuilds; a finder
+  // outlives nothing.
+  final controller = tester.widget<TextField>(finder.first).controller;
+
+  // Tap first, then testTextInput — the order that has always been green on the web, restored after
+  // a detour. It was briefly reversed to `enterText` first, on a theory about asynchronous focus
+  // that a controlled experiment later disproved; the reversal then broke the composer, which takes
+  // text this way and not the other. `enterText` stays as the fallback for a widget that will not
+  // take it, which is the case this order cannot serve.
+  await tester.tap(finder.first);
   await tester.pump(const Duration(milliseconds: 100));
+  tester.testTextInput.enterText(text);
+  await tester.pump(const Duration(milliseconds: 100));
+
+  if (controller?.text != text) {
+    await tester.enterText(finder.first, text);
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  final got = controller?.text ?? '';
+  if (got != text) {
+    await note('  typing did not stick: the field holds "$got"');
+    fail('could not type into a field — it holds "$got"');
+  }
 }
 
 /// What a field is holding right now, or null if it is not on screen.
