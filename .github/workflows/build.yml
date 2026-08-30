@@ -637,21 +637,16 @@ jobs:
 
   # One check to require in branch protection: it succeeds only when every job above did (a job with
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
+  # The three leaves, and nothing else: package-zip already needs every build, and both test jobs
+  # already need package-zip, so naming those here would only repeat what the graph says. A job
+  # whose dependency fails is skipped rather than failed, and a skipped need is not a success — so
+  # this still cannot go green over a broken build.
+  #
+  # The one thing to remember when adding a job: if nothing else depends on it, it belongs here, or
+  # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs:
-      [
-        build-jar,
-        test-api,
-        build-web,
-        build-android,
-        build-applet,
-        build-cli,
-        build-tmux,
-        package-zip,
-        test-machinery,
-        test-journeys,
-      ]
+    needs: [test-api, test-machinery, test-journeys]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
