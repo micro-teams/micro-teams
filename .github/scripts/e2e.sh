@@ -47,6 +47,11 @@
 # Usage: e2e.sh [npm:<version>|installer]   (run from an unpacked bundle directory)
 set -euo pipefail
 
+# Installing the agent's program and scripting the model are shared with app/tool/e2e/run.sh — see
+# that file for why there is one copy rather than two.
+# shellcheck source=agent-leg.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-leg.sh"
+
 LEG="${1:-npm:2.1.220}"
 MACHINE_CT=microteams-testmachine
 MOCK_CT=microteams-testmock
@@ -128,51 +133,9 @@ docker exec "$MACHINE_CT" bash -c "chmod +x /home/$MACHINE_USER/.local/bin/micro
 onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
 onmachine '$HOME/.local/bin/microteams --version' || fail "the bundled connector does not run"
 
-case "$LEG" in
-  npm:*|installer)
-    # Real Claude Code, pointed at a mock Anthropic API. API mode (a token + a base URL) is what
-    # keeps this out of the OAuth flow entirely — no browser, no login, nothing to approve.
-    docker rm -f "$MOCK_CT" >/dev/null 2>&1 || true
-    docker run -d --name "$MOCK_CT" --hostname "$MOCK_CT" --network "$NET" \
-      mockserver/mockserver:mockserver-7.5.0 >/dev/null
-    # Retried: these reach the public internet, and a registry blip should not be reported as a
-    # product failure.
-    for attempt in 1 2 3; do
-      docker exec "$MACHINE_CT" bash -c "set -e
-        export DEBIAN_FRONTEND=noninteractive
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
-        apt-get install -y -qq nodejs >/dev/null" && break
-      echo "  (node install attempt $attempt failed, retrying)"; sleep 5
-    done
-    case "$LEG" in
-      npm:*) for attempt in 1 2 3; do
-               docker exec "$MACHINE_CT" npm i -g "@anthropic-ai/claude-code@${LEG#npm:}" >/dev/null 2>&1 && break
-               echo "  (claude install attempt $attempt failed, retrying)"; sleep 5
-             done ;;
-      *)     for attempt in 1 2 3; do
-               onmachine 'curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1' && break
-               echo "  (claude installer attempt $attempt failed, retrying)"; sleep 5
-             done ;;
-    esac
-    # The agent's program is launched through `bash -lc` by our driver, so the login shell is where
-    # its environment has to come from — the same place a real deployment would put a proxy.
-    docker exec "$MACHINE_CT" bash -c "cat > /etc/profile.d/anthropic.sh <<EOF
-export ANTHROPIC_BASE_URL=http://$MOCK_CT:1080
-export ANTHROPIC_AUTH_TOKEN=sk-ant-ci-not-a-real-key
-export ANTHROPIC_MODEL=claude-sonnet-4-5
-export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-EOF"
-    onmachine 'mkdir -p ~/.claude && printf "{\"hasCompletedOnboarding\":true}" > ~/.claude.json'
-    echo -n "claude on the machine: "; onmachine 'claude --version' || fail "Claude Code did not install"
-    ;;
-  *) fail "unknown leg: $LEG" ;;
-esac
+install_agent_program "$LEG"
 docker network connect "$NET" "$MACHINE_CT"
-for _ in $(seq 1 30); do
-  docker exec "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/status" >/dev/null 2>&1 && break
-  sleep 1
-done
+wait_for_mock
 pass "machine container ready"
 
 step "enroll the machine through the real approval flow"
@@ -259,32 +222,7 @@ THREAD_ID="$(curl -fsS -X POST "$MT/chat" -H "$AUTH" -H 'Content-Type: applicati
 round_trip() {
   MARKER="ci-marker-$1-$RANDOM"
   REPLY="pong-$MARKER"
-  # Script the model: when Claude Code sends the conversation request (the one carrying its tool
-  # list), answer with a Bash tool call that posts a reply as the agent. Matching on the tool list
-  # matters — Claude Code also asks this endpoint for a session title, with no tools, and a
-  # once-only expectation would otherwise be spent on that. `streaming` is not optional either: a
-  # non-streamed tool call is silently ignored by Claude Code, which looks exactly like nothing
-  # happening.
-  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
-    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
-{ "httpRequest": { "method": "POST", "path": "/v1/messages",
-                   "body": { "type": "JSON_PATH", "jsonPath": "\$.tools[?(@.name=='Bash')]" } },
-  "times": { "remainingTimes": 1, "unlimited": false },
-  "priority": 10,
-  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
-    "completion": { "text": "Answering the group.", "streaming": true, "stopReason": "tool_use",
-      "toolCalls": [ { "id": "toolu_ci_reply", "name": "Bash",
-        "arguments": "{\"command\":\"microteams api say --thread-id $THREAD_ID --text '$REPLY'\",\"description\":\"reply\"}" } ],
-      "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
-JSON
-  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
-    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<'JSON'
-{ "httpRequest": { "method": "POST", "path": "/v1/messages" },
-  "priority": 1,
-  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
-    "completion": { "text": "done", "streaming": true, "stopReason": "end_turn",
-                    "usage": { "inputTokens": 60, "outputTokens": 3 } } } }
-JSON
+  script_model_reply "$THREAD_ID" "$REPLY"
 
   HEARD=0
   curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
@@ -435,21 +373,6 @@ body = '\\n'.join('line%03d %s' % (i, 'x' * 60) for i in range(400)) + '\\nTAIL-
 open('/tmp/e2e-long.json', 'w').write(json.dumps({'content': body}))"
 curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
   --data-binary @/tmp/e2e-long.json >/dev/null
-#
-# Asked with `verify` rather than by downloading the request log and grepping it: that log is over a
-# megabyte once a 25KB conversation is in it, and pulling it sixty times spends the whole budget on
-# transfers rather than on waiting — which is how the first version of this failed against a machine
-# that had in fact received the message perfectly. `verify` answers 202 when some request matched
-# and 406 when none did, and says nothing else.
-verify_model_saw() {
-  docker exec -i "$MACHINE_CT" curl -s -o /dev/null -w '%{http_code}' \
-    -X PUT "http://$MOCK_CT:1080/mockserver/verify" -H 'Content-Type: application/json' \
-    --data-binary @- <<VERIFY
-{"httpRequest": {"method":"POST","path":"/v1/messages",
-                 "body":{"type":"REGEX","regex":"[\\\\s\\\\S]*$1[\\\\s\\\\S]*"}},
- "times": {"atLeast": 1}}
-VERIFY
-}
 for _ in $(seq 1 90); do
   if [ "$(verify_model_saw TAIL-MARKER-OK)" = "202" ]; then
     LONG_IN=1; break
