@@ -147,9 +147,27 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       },
       // The terminal takes text; the wire carries bytes. Decoding here rather than in the
       // link keeps the link free of any opinion about what the bytes mean.
-      onBytes: (bytes) => _terminal.write(
-        const Utf8Decoder(allowMalformed: true).convert(bytes),
-      ),
+      //
+      // Wrapped, because a terminal emulator parses attacker-shaped input from a program nobody
+      // here controls, and one sequence it mishandles must not take the whole screen with it. The
+      // journey found this the first time it opened a real Claude Code: an "erase to start of line"
+      // sequence sent xterm 4.0.0 into `RangeError: index must not be negative: -1`, out of
+      // Line.eraseRange, and the exception escaped into the zone. A stand-in program that only ever
+      // echoed a line of text could never have produced it.
+      //
+      // Swallowed rather than reported: what is lost is the rendering of one chunk, and there is
+      // nothing a person could do about it. What must not be lost is the session.
+      onBytes: (bytes) {
+        try {
+          _terminal.write(
+            const Utf8Decoder(allowMalformed: true).convert(bytes),
+          );
+        } catch (e) {
+          debugPrint(
+            'terminal: dropped a chunk the emulator could not parse: $e',
+          );
+        }
+      },
       onClosed: () {
         dial?.closed(DateTime.now());
         _handleClosed();

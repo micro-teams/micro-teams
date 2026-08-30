@@ -275,20 +275,23 @@ void main() {
     // itself, so there is no Text widget anywhere in it and `find.textContaining` can only ever
     // find nothing. What the widget does carry is the Terminal, and its buffer is what arrived.
     //
-    // The fake program prints this line when it starts, so seeing it means bytes crossed the
-    // machine's tmux, the connector, the control plane, the socket, and landed in the buffer.
+    // What is looked for is the message this journey itself sent to the agent a few steps up. It
+    // has travelled the whole way — app, backend, connector, pty, tmux, and back through the screen
+    // socket into this buffer — so finding it here is the round trip in one assertion. (It used to
+    // look for a line a stand-in program printed at startup; the agent is the real Claude Code now,
+    // and its banner is a thing Anthropic can change, while our own marker is not.)
     final deadline = DateTime.now().add(const Duration(minutes: 1));
     String screen = '';
     while (DateTime.now().isBefore(deadline)) {
       final view = tester.widget<TerminalView>(find.byType(TerminalView));
       screen = view.terminal.buffer.getText();
-      if (screen.contains('fake-claude')) break;
+      if (screen.contains(said)) break;
       await tester.pump(const Duration(milliseconds: 500));
     }
     expect(
       screen,
-      contains('fake-claude'),
-      reason: 'nothing the machine printed reached the screen',
+      contains(said),
+      reason: 'what was sent to the agent never appeared on its own screen',
     );
     await note(
       'the terminal opened over a real machine and its output arrived',
@@ -599,7 +602,12 @@ void main() {
           'read what was said in it',
     );
     await note('the stranger was given nothing at ${mine.location}');
-  }, timeout: const Timeout(Duration(minutes: 14)));
+    // Twenty-two minutes, and the number is the journey's length rather than a guess: it signs two
+    // people up (two real emails, two codes), approves a machine, waits for the real Claude Code to
+    // finish its first-run gates, and walks the docs tree. When it outgrew fourteen the drive
+    // process was killed mid-wait, which looks like a step that hung rather than a run that ran out
+    // — so if this is ever hit, read it as "the journey got longer", not "the app got slower".
+  }, timeout: const Timeout(Duration(minutes: 22)));
 }
 
 /// The "take this member out" button, found by the prefix of its tooltip.

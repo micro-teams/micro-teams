@@ -7,7 +7,7 @@
 # and the server share one origin, and then starts one self-contained journey inside a real browser.
 # It hands parameters in and collects a result; it never directs the test.
 #
-#   bash tool/e2e/run.sh --bundle <dir> [--journey full|no-machine] [--leg fake] [--keep]
+#   bash tool/e2e/run.sh --bundle <dir> [--journey full|no-machine] [--leg npm:<version>] [--keep]
 #
 # --bundle   an unpacked deployment bundle (the microteams-deploy artifact, or deploy/ with the
 #            build outputs in place). Required: this suite tests what we ship, not a dev server.
@@ -20,7 +20,8 @@
 #            sides against machine environments — max(clients, environments) runs, each doing
 #            everything — not one run per half, which would multiply as clients are added.
 # --leg      what plays the agent's program on that host, same meaning as in .github/scripts/e2e.sh:
-#            `fake` (a shell script that records what it hears) is the deterministic baseline.
+#            `npm:<version>` is the pinned real Claude Code, which is where determinism comes from;
+#            `installer` is its latest, and drifts on purpose.
 # --keep     leave the stack, the gateway and the mail sink running afterwards, to inspect a failure.
 #
 # Ports live in one block (52000–52099) so several agents can share the dev machine; override any of
@@ -28,7 +29,7 @@
 set -euo pipefail
 
 BUNDLE=""
-LEG="fake"
+LEG="npm:2.1.220"
 JOURNEY="full"
 KEEP="${KEEP:-0}"
 while [ $# -gt 0 ]; do
@@ -54,11 +55,17 @@ MAIL_PORT="${MT_E2E_MAIL_PORT:-52027}"
 DRIVER_PORT="${MT_E2E_DRIVER_PORT:-52044}"
 GATEWAY_CT="${PROJECT}-gateway"
 MACHINE_CT="${PROJECT}-machine"
+MOCK_CT="${PROJECT}-mock"
 MACHINE_USER=agent
 RUN_ID="$(date +%s)$$"
 
 step() { printf '\n== %s ==\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; trace; exit 1; }
+
+# Installing the agent's program and scripting what the model says back are shared with the
+# machinery e2e: one copy, because it is the same paragraph either way.
+# shellcheck source=../../../.github/scripts/agent-leg.sh
+. "$APP/../.github/scripts/agent-leg.sh"
 # What the journey itself said, in order. A release web build reports only the test's name when an
 # expectation fails, so this is the only thing that says WHERE it stopped.
 trace() {
@@ -95,7 +102,7 @@ cleanup() {
     echo "(--keep: the stack, the gateway, the mail sink and any machine are still up; app on :$GATEWAY_PORT)"
     return
   fi
-  docker rm -f "$GATEWAY_CT" "$MACHINE_CT" >/dev/null 2>&1 || true
+  docker rm -f "$GATEWAY_CT" "$MACHINE_CT" "$MOCK_CT" >/dev/null 2>&1 || true
   (cd "$BUNDLE" && docker compose -p "$PROJECT" down -v >/dev/null 2>&1) || true
 }
 trap cleanup EXIT
@@ -245,20 +252,11 @@ if [ "$JOURNEY" = "full" ]; then
   docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc '$HOME/.local/bin/microteams --version' \
     >/dev/null || fail "the bundled connector does not run"
 
-  case "$LEG" in
-    fake)
-      # Stand-in for Claude Code: print a prompt, then record every submitted line. The point of
-      # this journey is the machinery around the program, so a program that cannot fail keeps the
-      # signal clean.
-      docker exec "$MACHINE_CT" bash -c 'cat > /usr/local/bin/claude <<EOF
-#!/bin/bash
-echo "fake-claude ready"
-while IFS= read -r line; do echo "\$line" >> /tmp/agent-heard.txt; echo "ok"; done
-EOF
-      chmod +x /usr/local/bin/claude; touch /tmp/agent-heard.txt; chmod 666 /tmp/agent-heard.txt'
-      ;;
-    *) fail "the machine journey only knows the 'fake' leg so far (got: $LEG)" ;;
-  esac
+  # The agent's program: the real Claude Code, in front of a mock Anthropic API. Shared with the
+  # machinery e2e — see .github/scripts/agent-leg.sh for why there is one copy of this.
+  onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
+  install_agent_program "$LEG"
+  wait_for_mock
 
   step "start enrolment on the machine and hand the code to the journey"
   ENROLL="$(docker exec "$MACHINE_CT" curl -fsS -X POST "http://nginx/mt/machine/enroll/start" \
@@ -316,7 +314,7 @@ drive_once() {
   # MT_E2E_APP_URL is read by test_driver/integration_test.dart: it opens the browser at the gateway
   # rather than at flutter's own server, which is what keeps the app and the deployment on one origin.
   ( MT_E2E_APP_URL="http://localhost:$GATEWAY_PORT/" \
-    timeout "${MT_E2E_DRIVE_TIMEOUT:-900}" flutter drive \
+    timeout "${MT_E2E_DRIVE_TIMEOUT:-1500}" flutter drive \
     --no-web-resources-cdn \
     --driver=test_driver/integration_test.dart \
     --target=integration_test/${JOURNEY_TARGET} \
@@ -365,19 +363,21 @@ done
 # The journey ended when the app said the message was stored. Whether it arrived in a program's stdin
 # on another host is not something the app can know, and it is the reason this slice exists.
 if [ "$JOURNEY" = "full" ]; then
-  step "the message reached the program on the machine"
+  # Asked of the mock Anthropic API rather than of the program: the agent is the real Claude Code
+  # now, and a real program cannot be asked what it heard. The mock in front of it can — and what it
+  # answers is stronger, because reaching the MODEL means the text crossed the pty and the TUI too,
+  # not merely the pipe into it.
+  step "the message reached the model on the machine"
   heard=0
-  for _ in $(seq 1 40); do
-    if docker exec "$MACHINE_CT" grep -q "e2e-marker-$RUN_ID" /tmp/agent-heard.txt 2>/dev/null; then
+  for _ in $(seq 1 60); do
+    if [ "$(verify_model_saw "e2e-marker-$RUN_ID")" = "202" ]; then
       heard=1; break
     fi
     sleep 2
   done
   [ "$heard" = "1" ] || {
     echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log 2>/dev/null || true
-    echo "--- what the program heard ---"
-    docker exec "$MACHINE_CT" cat /tmp/agent-heard.txt 2>/dev/null || true
-    fail "what was typed in the interface never reached the program on the machine"
+    fail "what was typed in the interface never reached the model on the machine"
   }
-  echo "PASS: the program on the machine heard it"
+  echo "PASS: the model on the machine was given it"
 fi

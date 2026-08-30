@@ -9,8 +9,8 @@ len(environments)) runs, not len(clients) * len(environments), and certainly not
 So the two lists are paired offset against each other, repeating the shorter one:
 
     clients      = [web, android]
-    environments = [fake, npm:2.1.220, installer]
-    ->  web+fake, android+npm:2.1.220, web+installer          (three runs, everything covered)
+    environments = [npm:2.1.220, installer]
+    ->  web+npm:2.1.220, android+installer                    (two runs, everything covered)
 
 Written as a function rather than typed into the workflow because adding a client or an environment
 should be one line in a list, not a hand-recomputed matrix that quietly stops covering something.
@@ -22,14 +22,13 @@ should be one line in a list, not a hand-recomputed matrix that quietly stops co
 import argparse
 import json
 
-# The client sides this suite can drive today. Android is not here yet: it needs an emulator on the
-# runner, and the journey has to be proven on one before it is claimed in CI.
+# The client sides this suite can drive today.
 CLIENTS = ["web"]
 
-# What plays the agent's program on the machine, same meaning as in .github/scripts/e2e.sh. Only the
-# deterministic one is on by default; the real-Claude legs belong to that script, which was built to
-# tell "we broke something" from "Claude Code changed".
-ENVIRONMENTS = ["fake"]
+# What plays the agent's program on the machine, same meaning as in .github/scripts/e2e.sh. Both are
+# the real Claude Code: the pinned one is where determinism comes from — nothing about it can change
+# without somebody changing the number.
+ENVIRONMENTS = ["npm:2.1.220"]
 
 
 def pairs(clients=None, environments=None):
