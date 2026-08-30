@@ -372,6 +372,31 @@ void main() {
     );
     await waitFor(tester, find.text(newName), what: 'the agent, renamed');
 
+    // How often its cache is kept warm: shown in minutes because that is the unit the hour-long
+    // cache window is thought about in, sent in seconds because that is what the server takes. From
+    // out here the question is simply whether what you typed is what the page then says.
+    //
+    // The interval is only there once the thing is switched on — and "apply" only once the number
+    // has actually changed, because a button that is always there and usually does nothing teaches
+    // people to press it and see.
+    await tap(
+      tester,
+      find.text('Keep its cache warm'),
+      what: 'the keepalive switch',
+    );
+    await waitFor(
+      tester,
+      find.widgetWithText(TextField, 'every'),
+      what: 'the interval field',
+    );
+    await typeInto(tester, find.widgetWithText(TextField, 'every'), '30');
+    await tap(tester, find.text('apply'), what: 'apply');
+    await waitFor(
+      tester,
+      find.textContaining('Every 30 min'),
+      what: 'the new interval, in minutes',
+    );
+
     await tap(tester, find.text('close agent'), what: 'close agent');
     await waitFor(
       tester,

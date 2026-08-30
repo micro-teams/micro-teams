@@ -263,34 +263,10 @@ void main() {
   });
 
   group('cache keepalive', () {
-    testWidgets('says how often it fires, in the unit a human thinks in', (
-      tester,
-    ) async {
-      // Stored in seconds because that is what the server takes; shown in minutes because the
-      // cache TTL it exists to stay inside is about an hour.
-      await tester.pumpWidget(agentDetail(_FakeBackend()));
-      await settle(tester);
-
-      expect(find.textContaining('Every 40 min'), findsOneWidget);
-      expect(find.textContaining('2400'), findsNothing);
-    });
-
-    testWidgets('a changed interval is applied in seconds', (tester) async {
-      final backend = _FakeBackend();
-      await tester.pumpWidget(agentDetail(backend));
-      await settle(tester);
-
-      await tester.enterText(find.widgetWithText(TextField, 'every'), '30');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('apply'));
-      await settle(tester);
-
-      expect(backend.posted, contains('PUT /mt/agent/42/keepalive'));
-      final sent =
-          jsonDecode(backend.bodies.last as String) as Map<String, Object?>;
-      expect(sent['enabled'], isTrue);
-      expect(sent['intervalSeconds'], 1800);
-    });
+    // Switching it on, setting the interval, and seeing the page say it back is the journey's now:
+    // it does that to a real agent, so "applied" means the server took it rather than that a fake
+    // saw the right number of seconds. What is left here is the case a journey cannot make — the
+    // button that ISN'T there until something has changed, which is an assertion about absence.
 
     testWidgets('nothing to apply until something changed', (tester) async {
       // A button that is always there and usually a no-op teaches people to press it and see.
