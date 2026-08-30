@@ -125,16 +125,10 @@ void main() {
   });
 
   group('the roster', () {
-    testWidgets('shows everyone in it', (tester) async {
-      await tester.pumpWidget(
-        _host(_Fake(), ThreadInfoScreen(threadId: 5, onGone: () {})),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Me'), findsOneWidget);
-      expect(find.text('Owner'), findsOneWidget);
-      expect(find.text('Them'), findsOneWidget);
-    });
+    // Who is in a conversation is the machine journey's now: it opens the info on the chat it has
+    // with its agent and finds both of them there, in a roster the server built rather than one a
+    // fake handed over. What is left here is about what you are ALLOWED to change, which needs a
+    // roster arranged around your role.
 
     testWidgets('offers nothing to change while you are only a member', (
       tester,

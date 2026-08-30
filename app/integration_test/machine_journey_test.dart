@@ -44,7 +44,9 @@ void main() {
     );
 
     await startApp(tester);
-    await signUp(tester, suffix: 'm');
+    // The nickname follows the username unless it is edited, and this journey never edits it — so
+    // this is also the name the roster will show further down.
+    final me = await signUp(tester, suffix: 'm');
 
     // --- a team for the machine to serve ---------------------------------------------------------
     // Approval needs one: a machine serves teams, and a person with no team has nothing to offer it.
@@ -195,6 +197,16 @@ void main() {
       tester,
       find.text(said),
       what: 'the same conversation, with what was already said in it',
+    );
+
+    // Who is in this conversation: the person who made it, and the agent it is with. (This is
+    // test/chats/thread_info_test.dart's roster case, with a roster the server actually built.)
+    await tap(tester, find.byIcon(Icons.info_outline), what: 'the info button');
+    await waitFor(tester, find.text(agentName), what: 'the agent, in the roster');
+    await waitFor(
+      tester,
+      find.text(me),
+      what: 'the person who made it, in the roster',
     );
 
     // --- and a document in the team's own tree -----------------------------------------------------
