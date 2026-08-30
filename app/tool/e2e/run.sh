@@ -7,7 +7,8 @@
 # and the server share one origin, and then starts one self-contained journey inside a real browser.
 # It hands parameters in and collects a result; it never directs the test.
 #
-#   bash tool/e2e/run.sh --bundle <dir> [--journey full|no-machine] [--leg npm:<version>] [--keep]
+#   bash tool/e2e/run.sh --bundle <dir> [--journey full|no-machine] [--leg npm:<version>]
+#                         [--client web|android] [--keep]
 #
 # --bundle   an unpacked deployment bundle (the microteams-deploy artifact, or deploy/ with the
 #            build outputs in place). Required: this suite tests what we ship, not a dev server.
@@ -30,12 +31,29 @@ set -euo pipefail
 
 BUNDLE=""
 LEG="npm:2.1.220"
+# Which client side drives the journey. `web` is a browser on this machine; `android` is an emulator
+# that must already be running — starting one is the CI job's business, not this script's, because a
+# developer with a device plugged in wants that device rather than a fresh AVD.
+CLIENT="${MT_E2E_CLIENT:-web}"
+ANDROID_DEVICE="${MT_E2E_ANDROID_DEVICE:-emulator-5554}"
+# What the machine container is built from. A plain Debian by default, and everything the agent
+# needs is installed into it at run time. Point this at an image that already has node and Claude
+# Code when the download is the unreliable part — see agent-leg.sh, which skips the install when the
+# program is already there.
+MACHINE_IMAGE="${MT_E2E_MACHINE_IMAGE:-debian:13}"
+# A test APK built earlier, to run instead of building one here. The APK a journey needs is NOT the
+# product APK: its entry point is the journey itself, with the app loaded by it. Building one takes
+# ten minutes of gradle, and that is ten minutes in front of every attempt — so CI builds it once,
+# in parallel with everything else, and passes the path in.
+APK="${MT_E2E_APK:-}"
 JOURNEY="full"
 KEEP="${KEEP:-0}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --bundle)  BUNDLE="$2"; shift 2 ;;
     --leg)     LEG="$2"; shift 2 ;;
+    --client)  CLIENT="$2"; shift 2 ;;
+    --apk)     APK="$2"; shift 2 ;;
     --journey) JOURNEY="$2"; shift 2 ;;
     --keep)    KEEP=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -197,19 +215,32 @@ docker run -d --name "$GATEWAY_CT" --network "$NET" \
   -v "$APP/tool/e2e/e2e-proxy.inc:/etc/nginx/e2e-proxy.inc:ro" \
   nginx:1.27-alpine >/dev/null
 for _ in $(seq 1 30); do
-  # 502 is the expected answer until flutter's server exists; anything at all means nginx is up.
-  curl -s -o /dev/null "http://localhost:$GATEWAY_PORT/" && break
+  # Probed at /mt/lines rather than at /, because / is proxied to flutter's own server and that
+  # server may not exist: it never does on the android leg, where the client is installed rather
+  # than served. nginx then sits on the connect timeout instead of refusing, so each attempt cost a
+  # full minute and thirty of them cost half an hour of looking like a hang.
+  curl -fsS -o /dev/null "http://localhost:$GATEWAY_PORT/mt/lines" && break
   sleep 1
 done
 curl -fsS "http://localhost:$GATEWAY_PORT/mt/lines" >/dev/null 2>&1 ||
   fail "the gateway cannot reach the deployment"
 
-# --- the browser ---------------------------------------------------------------------------------
-step "start chromedriver"
-command -v chromedriver >/dev/null || fail "chromedriver is not installed"
-chromedriver --port="$DRIVER_PORT" >/tmp/mte2e-chromedriver.log 2>&1 &
-CHROMEDRIVER_PID=$!
-sleep 2
+# --- the client ----------------------------------------------------------------------------------
+if [ "$CLIENT" = "android" ]; then
+  step "check the emulator is there"
+  command -v adb >/dev/null || fail "adb is not installed"
+  adb devices | grep -q "^${ANDROID_DEVICE}\s*device$" ||
+    fail "no emulator called $ANDROID_DEVICE is running (start one, or set MT_E2E_ANDROID_DEVICE)"
+  # The emulator reaches the host at 10.0.2.2, but only if the host is listening on all interfaces
+  # rather than on loopback alone — which is what the gateway and the mail sink already do.
+  CHROMEDRIVER_PID=""
+else
+  step "start chromedriver"
+  command -v chromedriver >/dev/null || fail "chromedriver is not installed"
+  chromedriver --port="$DRIVER_PORT" >/tmp/mte2e-chromedriver.log 2>&1 &
+  CHROMEDRIVER_PID=$!
+  sleep 2
+fi
 
 # --- the journey ---------------------------------------------------------------------------------
 # The browser is pointed at the gateway, not at flutter's own server, so the app is same-origin with
@@ -236,8 +267,14 @@ TARGET_DEFINES=""
 if [ "$JOURNEY" = "full" ]; then
   step "spin a host and install the connector from the bundle (leg: $LEG)"
   docker rm -f "$MACHINE_CT" >/dev/null 2>&1 || true
-  docker run -d --name "$MACHINE_CT" --hostname "$MACHINE_CT" --network "$NET" \
-    debian:13 sleep infinity >/dev/null
+  # Started on docker's default network, NOT on the deployment's — and only joined to that one once
+  # everything is installed. The compose network is where the machine has to LIVE, but reaching the
+  # public internet from it is not something a deployment's network owes anybody: on two different
+  # hosts, `apt-get update` there produced no package lists and the install then failed with
+  # "Unable to locate package python3", which reads like a broken image rather than a closed door.
+  # (.github/scripts/e2e.sh has always done it this way. run.sh did not, and that was the bug.)
+  docker run -d --name "$MACHINE_CT" --hostname "$MACHINE_CT" \
+    "$MACHINE_IMAGE" sleep infinity >/dev/null
   docker exec "$MACHINE_CT" bash -c "set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq ca-certificates curl procps python3 >/dev/null
@@ -256,6 +293,7 @@ if [ "$JOURNEY" = "full" ]; then
   # machinery e2e — see .github/scripts/agent-leg.sh for why there is one copy of this.
   onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
   install_agent_program "$LEG"
+  docker network connect "$NET" "$MACHINE_CT"
   wait_for_mock
 
   step "start enrolment on the machine and hand the code to the journey"
@@ -310,7 +348,67 @@ said_something() {
 # shipped build uses and for the same reason. Without it a machine that cannot reach the CDN gets a
 # page where every asset returns 200 and no frame is ever painted — which looks exactly like the
 # tooling hanging.
+# Watch a drive that is already running: give it long enough to say its first word, then get out of
+# the way. Shared by both clients — what differs between a browser and an emulator is how the drive
+# is started, not how it is waited on.
+_watch_drive() {
+  local drive_pid="$1"
+  # Long enough for the client to be built and started, and no longer. Everything before the first
+  # note is build output and start-up; after it, the journey's own limits take over and this one
+  # steps out of the way.
+  #
+  # The two numbers are not a preference. A debug web build is served in seconds, so 150 catches a
+  # browser that never arrived while costing nothing. An Android build is gradle from cold — a
+  # gigabyte of dependencies and ten minutes before the app is even installed — and 150 killed every
+  # attempt mid-build, three times, each one reported as "the browser never reached the test".
+  local first_note="${MT_E2E_FIRST_NOTE_TIMEOUT:-150}"
+  # Building is what makes android slow; installing a built APK is not. So the budget follows what
+  # this run is actually about to do.
+  [ "$CLIENT" = "android" ] && [ -z "$APK" ] && first_note="${MT_E2E_FIRST_NOTE_TIMEOUT:-1200}"
+  [ "$CLIENT" = "android" ] && [ -n "$APK" ] && first_note="${MT_E2E_FIRST_NOTE_TIMEOUT:-300}"
+  local waited=0
+  while [ "$waited" -lt "$first_note" ]; do
+    kill -0 "$drive_pid" 2>/dev/null || { wait "$drive_pid"; return $?; }
+    said_something && break
+    sleep 5
+    waited=$((waited + 5))
+  done
+  if ! said_something; then
+    kill "$drive_pid" 2>/dev/null || true
+    wait "$drive_pid" 2>/dev/null || true
+    return 1
+  fi
+  wait "$drive_pid"
+}
+
 drive_once() {
+  if [ "$CLIENT" = "android" ]; then
+    # An installed client, not a served one. Three things follow from that, and each one is a way
+    # the web version's arrangement does not carry over:
+    #
+    #   * There is no origin to inherit, so the server is named with MT_ORIGIN (see config.dart).
+    #   * 10.0.2.2 is the emulator's name for the host's loopback. localhost inside the emulator is
+    #     the emulated device itself, which serves nothing.
+    #   * The mail sink is reached by absolute URL rather than the /mail path on a shared origin —
+    #     there is no shared origin here.
+    #
+    # And none of the web flags apply: no CDN flag, no browser, no driver/web ports.
+    # --use-application-binary skips the build entirely and installs what it is given. The old
+    # --no-build flag is deprecated in favour of it.
+    local prebuilt=()
+    [ -n "$APK" ] && prebuilt=(--use-application-binary "$APK")
+    ( timeout "${MT_E2E_DRIVE_TIMEOUT:-1500}" flutter drive \
+      --driver=test_driver/integration_test.dart \
+      --target=integration_test/${JOURNEY_TARGET} \
+      -d "$ANDROID_DEVICE" "${prebuilt[@]}" \
+      --dart-define=MT_ORIGIN="http://10.0.2.2:$GATEWAY_PORT" \
+      --dart-define=MT_E2E_MAIL="http://10.0.2.2:$MAIL_PORT" \
+      --dart-define=MT_E2E_RUN="$RUN_ID" $TARGET_DEFINES ${MT_E2E_EXTRA_DEFINES:-} ) &
+    local drive_pid=$!
+    _watch_drive "$drive_pid"
+    return $?
+  fi
+
   # MT_E2E_APP_URL is read by test_driver/integration_test.dart: it opens the browser at the gateway
   # rather than at flutter's own server, which is what keeps the app and the deployment on one origin.
   ( MT_E2E_APP_URL="http://localhost:$GATEWAY_PORT/" \
@@ -327,21 +425,7 @@ drive_once() {
     --headless ) &
   local drive_pid=$!
 
-  # Two minutes for the browser to start the test. Everything before the first note is build output
-  # and page load; after it, the journey's own limits take over and this one steps out of the way.
-  local waited=0
-  while [ "$waited" -lt "${MT_E2E_FIRST_NOTE_TIMEOUT:-150}" ]; do
-    kill -0 "$drive_pid" 2>/dev/null || { wait "$drive_pid"; return $?; }
-    said_something && break
-    sleep 5
-    waited=$((waited + 5))
-  done
-  if ! said_something; then
-    kill "$drive_pid" 2>/dev/null || true
-    wait "$drive_pid" 2>/dev/null || true
-    return 1
-  fi
-  wait "$drive_pid"
+  _watch_drive "$drive_pid"
 }
 attempt=1
 while : ; do

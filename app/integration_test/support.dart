@@ -195,14 +195,28 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
 }
 
 /// [type] by any finder, not just by key.
+///
+/// `tester.enterText` first, and that order is the whole point: it names the widget it is typing
+/// into. `testTextInput.enterText` names nothing — it sends text to whichever input client is
+/// currently CONNECTED, and connecting is what a tap starts rather than finishes.
+///
+/// On the web the two amount to the same thing. On Android they do not, and the difference is a
+/// field's worth of lag: the registration form came out with the confirm-password box holding the
+/// email address. Every field had passed its own read-back on the way past, because each one held
+/// the right text at the moment it was checked — the next field's typing is what overwrote it. The
+/// form then refused to submit ("the two passwords do not match"), no request was ever sent, and
+/// the screen showed a stale HTTP 504 from something else entirely. Three misleading symptoms, one
+/// cause, and none of them was the one that pointed at typing.
+///
+/// testTextInput stays as the fallback: it is what works when a widget refuses focus.
 Future<void> typeInto(WidgetTester tester, Finder finder, String text) async {
   await waitFor(tester, finder, what: 'a field to type "$text" into');
   await tester.tap(finder.first);
   await tester.pump(const Duration(milliseconds: 100));
-  tester.testTextInput.enterText(text);
+  await tester.enterText(finder.first, text);
   await tester.pump(const Duration(milliseconds: 100));
   if (tester.widget<TextField>(finder.first).controller?.text != text) {
-    await tester.enterText(finder.first, text);
+    tester.testTextInput.enterText(text);
     await tester.pump(const Duration(milliseconds: 100));
   }
   final got = tester.widget<TextField>(finder.first).controller?.text ?? '';

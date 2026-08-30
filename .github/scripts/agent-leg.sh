@@ -28,6 +28,21 @@ install_agent_program() {
   docker run -d --name "$MOCK_CT" --hostname "$MOCK_CT" --network "$NET" \
     mockserver/mockserver:mockserver-7.5.0 >/dev/null
 
+  # Already there? Then this machine was started from an image that has it, and installing again is
+  # a download for nothing. That is the whole reason for this branch — it makes a pre-built machine
+  # image usable (see MT_E2E_MACHINE_IMAGE), which is worth having when many runs happen in a row.
+  #
+  # It was first written with a different justification: node and Claude had failed all three
+  # attempts on one host, and the comment here blamed that host's route to the registry. It was not
+  # the host — the network was wobbling everywhere that afternoon, and the same install worked first
+  # try once it settled. The change is still right; the reason it was given was invented, and an
+  # invented cause in a comment is the same failure as a test that lies.
+  if docker exec "$MACHINE_CT" bash -lc 'command -v claude' >/dev/null 2>&1; then
+    echo -n "claude already on the machine: "; onmachine 'claude --version'
+    _write_anthropic_env
+    return 0
+  fi
+
   # Retried: these reach the public internet, and a registry blip should not be reported as a
   # product failure.
   local attempt
@@ -50,8 +65,14 @@ install_agent_program() {
            done ;;
   esac
 
-  # The agent's program is launched through `bash -lc` by our driver, so the login shell is where its
-  # environment has to come from — the same place a real deployment would put a proxy.
+  _write_anthropic_env
+  echo -n "claude on the machine: "; onmachine 'claude --version' || fail "Claude Code did not install"
+}
+
+# The agent's program is launched through `bash -lc` by our driver, so the login shell is where its
+# environment has to come from — the same place a real deployment would put a proxy. Written every
+# time, including when the program came pre-installed, because the mock's address is this run's.
+_write_anthropic_env() {
   docker exec "$MACHINE_CT" bash -c "cat > /etc/profile.d/anthropic.sh <<EOF
 export ANTHROPIC_BASE_URL=http://$MOCK_CT:1080
 export ANTHROPIC_AUTH_TOKEN=sk-ant-ci-not-a-real-key
@@ -60,8 +81,6 @@ export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 EOF"
   onmachine 'mkdir -p ~/.claude && printf "{\"hasCompletedOnboarding\":true}" > ~/.claude.json'
-  echo -n "claude on the machine: "; onmachine 'claude --version' || fail "Claude Code did not install"
-
 }
 
 # Called AFTER the machine has joined the network the mock is on — not at the end of the install,
