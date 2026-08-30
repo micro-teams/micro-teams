@@ -71,7 +71,14 @@ class ThreadState {
 }
 
 class ThreadController extends FamilyAsyncNotifier<ThreadState, int> {
-  late final int _threadId;
+  // Not `late final`, and that is not a style choice. Riverpod keeps the notifier and runs build()
+  // again when the provider is invalidated, so a `late final` assigned in build() throws
+  // "already been initialized" the second time. It was safe only for as long as nothing ever
+  // invalidated this provider — and something does now: signing in or out drops everything the
+  // last account fetched (see userScopedProviders). What that looked like from outside was a
+  // conversation that would not open, in the release build only, with a LateInitializationError
+  // in the console and no other clue.
+  int _threadId = 0;
   Outbox? _outbox;
 
   /// Cursor for the next OLDER page, and whether one exists. While no older page has been loaded
