@@ -262,6 +262,34 @@ void main() {
     await newInTree(tester, on: 'inside.md', named: 'beside.md');
     await revealIn(tester, folder, treeRowFor('beside.md'), what: 'beside.md');
 
+    // The tree is a git repository, and a document's history is the commits behind it. Opening the
+    // file we just made and asking for its history has to show the one that created it, with who
+    // did it — this journey's own account, which is the only name in this repository.
+    await tap(
+      tester,
+      treeRowFor('inside.md'),
+      what: 'the document, to open it',
+    );
+    await tap(tester, find.byTooltip('history'), what: 'its history');
+    await waitFor(
+      tester,
+      find.text('history of inside.md'),
+      what: 'the history',
+    );
+    // The commit that made this file, named by what it did. (Not by WHO: the repository's author is
+    // the account id — `user-37` — not the nickname, which is worth knowing before anybody writes a
+    // test expecting a name here.)
+    await waitFor(
+      tester,
+      find.textContaining('inside.md'),
+      what: 'the commit that made the file',
+    );
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'close'),
+      what: 'closing the history',
+    );
+
     // Renaming happens in the row itself, and a name is not a path: typing one must rename the file
     // where it is, not move it to the root. From out here that is one question — is it still under
     // the folder afterwards — and the tree answers it.

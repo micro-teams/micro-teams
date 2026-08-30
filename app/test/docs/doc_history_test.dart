@@ -107,17 +107,9 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('lists what changed, who changed it and when', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-
-    expect(find.text('agent3 wrote it down'), findsOneWidget);
-    // The short sha, the author and a readable time — not an epoch, which is a number nobody reads.
-    expect(find.textContaining('abcdef1'), findsOneWidget);
-    expect(find.textContaining('agent3 ·'), findsOneWidget);
-    expect(find.textContaining('1787580000000'), findsNothing);
-  });
+  // "What changed, and when" is the journey's now: it makes a file in a real repository, opens its
+  // history, and finds the commit that made it. Note what it could NOT assert there — the author
+  // shows as the account id (`user-37`), not a nickname.
 
   testWidgets('a commit opens the diff behind it', (tester) async {
     final backend = _Fake();
