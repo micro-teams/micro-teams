@@ -23,6 +23,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:xterm/xterm.dart';
 import 'package:microteams/src/common/ui/avatar.dart';
 import 'package:microteams/src/common/ui/team_picker.dart';
 import 'package:microteams/src/common/ui/theme.dart';
@@ -236,6 +237,83 @@ void main() {
       tester,
       find.text(me),
       what: 'the person who made it, in the roster',
+    );
+
+    // --- the terminal, over a real machine ------------------------------------------------------
+    // The fleet has had a real host in it this whole journey and the journey had never once opened
+    // its terminal — so everything about live screens was tested against a fake socket, which is
+    // exactly the thing that never makes the mistakes a real machine makes.
+    //
+    // A face is how you ask for a screen: an avatar has no business knowing how this app shows a
+    // terminal, so it calls a handler the app sets once at the top (common/ui/avatar.dart). It has
+    // to be the AGENT's face — every other one answers "no live screen for them" — and it has to be
+    // a face with nothing competing for the tap. Not the fleet row: there the terminal opens and
+    // the row's own tap fires too, landing on the agent's page with the terminal behind it. The
+    // roster here is a plain grid of faces, so the only gesture is the one being tested.
+    await tap(
+      tester,
+      find
+          .descendant(
+            of: find.ancestor(
+              of: find.text(agentName),
+              matching: find.byType(SizedBox),
+            ),
+            matching: find.byType(UserAvatar),
+          )
+          .first,
+      what: "the agent's face in the roster",
+    );
+    await waitFor(
+      tester,
+      find.byTooltip('watching'),
+      what: 'the terminal, open and in watching mode',
+    );
+
+    // What the machine is actually printing, read out of the screen buffer.
+    //
+    // Not with a text finder: a terminal is painted, not laid out — TerminalView draws its grid
+    // itself, so there is no Text widget anywhere in it and `find.textContaining` can only ever
+    // find nothing. What the widget does carry is the Terminal, and its buffer is what arrived.
+    //
+    // The fake program prints this line when it starts, so seeing it means bytes crossed the
+    // machine's tmux, the connector, the control plane, the socket, and landed in the buffer.
+    final deadline = DateTime.now().add(const Duration(minutes: 1));
+    String screen = '';
+    while (DateTime.now().isBefore(deadline)) {
+      final view = tester.widget<TerminalView>(find.byType(TerminalView));
+      screen = view.terminal.buffer.getText();
+      if (screen.contains('fake-claude')) break;
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+    expect(
+      screen,
+      contains('fake-claude'),
+      reason: 'nothing the machine printed reached the screen',
+    );
+    await note(
+      'the terminal opened over a real machine and its output arrived',
+    );
+
+    // Watching never types; typing is a mode you choose, and choosing it tells the machine. Only a
+    // machine can fail to be told, which is why this is here and not in a widget test.
+    await tap(tester, find.byTooltip('typing'), what: 'the typing mode');
+    await waitFor(
+      tester,
+      find.text('the agent is not driving'),
+      what: 'the warning that comes with taking the keyboard',
+    );
+
+    // And closing puts the terminal away without taking what was underneath with it.
+    await tap(tester, find.byTooltip('close'), what: 'closing the terminal');
+    await waitUntilGone(
+      tester,
+      find.byTooltip('watching'),
+      what: 'the terminal, put away',
+    );
+    await waitFor(
+      tester,
+      find.text(me),
+      what: 'the roster underneath, still where it was',
     );
 
     // And taking somebody out: asked first, and then they are gone from the roster. (An owner
@@ -703,9 +781,11 @@ Future<void> lookRight(WidgetTester tester) async {
     reason: 'the messages are outside the selection area',
   );
 
-  // Two avatar sizes in the whole product, both from React: 40 beside a bubble, 48 in a list.
-  expect(Metrics.avatarInBubble, 40);
-  expect(Metrics.avatarInList, 48);
+  // A face beside a bubble is the bubble size, not the list size — the two drifted apart once.
+  //
+  // Only what was PAINTED is asserted. Checking that the constant equals 40 would be reading the
+  // constant and comparing it to itself: it cannot fail unless somebody edits both lines together,
+  // and a test that cannot fail costs a run and a read and returns nothing.
   for (final avatar in tester.widgetList<UserAvatar>(
     find.descendant(of: list, matching: find.byType(UserAvatar)),
   )) {

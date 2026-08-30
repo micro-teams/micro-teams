@@ -52,7 +52,6 @@ class ThreadScreen extends ConsumerStatefulWidget {
     required this.threadId,
     this.title,
     this.asPane = false,
-    this.onOpenScreen,
     this.onOpenInfo,
     super.key,
   });
@@ -67,10 +66,6 @@ class ThreadScreen extends ConsumerStatefulWidget {
   /// this way, and the first cut got a back arrow purely because Material adds one whenever the
   /// router could pop — which says something about the history stack, not about the layout.
   final bool asPane;
-
-  /// Opens an agent's live screen. Supplied by the router, because a screen does not navigate — it
-  /// says what happened and the shell decides where that goes.
-  final void Function(String sessionId)? onOpenScreen;
 
   /// Open this conversation's members and settings. Null in a context that has nowhere to open it.
   final VoidCallback? onOpenInfo;

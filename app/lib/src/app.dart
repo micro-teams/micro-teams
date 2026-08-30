@@ -404,7 +404,6 @@ class _ChatsPane extends ConsumerWidget {
       if (open != null) {
         return ThreadScreen(
           threadId: open,
-          onOpenScreen: (sid) => openScene(context, sid: sid),
           onOpenInfo: () => context.go('/chats/$open/info'),
         );
       }
@@ -448,7 +447,6 @@ class _ChatsPane extends ConsumerWidget {
                       key: ValueKey(open),
                       threadId: open,
                       asPane: true,
-                      onOpenScreen: (sid) => openScene(context, sid: sid),
                       onOpenInfo: () => context.go('/chats/$open/info'),
                     ),
             ),
