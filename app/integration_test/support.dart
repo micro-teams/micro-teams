@@ -57,8 +57,11 @@ Future<void> noteScreen() async {
       .byType(ButtonStyleButton)
       .evaluate()
       .map((element) => element.widget as ButtonStyleButton)
-      .map((button) => '${button.child is Text ? (button.child! as Text).data : button.child.runtimeType}'
-          '${button.onPressed == null ? ' (disabled)' : ''}')
+      .map(
+        (button) =>
+            '${button.child is Text ? (button.child! as Text).data : button.child.runtimeType}'
+            '${button.onPressed == null ? ' (disabled)' : ''}',
+      )
       .toList();
   await note('  the buttons are: ${buttons.join(' | ')}');
 }
@@ -89,7 +92,11 @@ Future<String> signUp(WidgetTester tester, {String suffix = ''}) async {
   final username = 'e2e$runId$suffix';
   final email = '$username@example.com';
 
-  await tap(tester, find.text('no account? register'), what: 'the register link');
+  await tap(
+    tester,
+    find.text('no account? register'),
+    what: 'the register link',
+  );
   await waitFor(
     tester,
     find.byKey(const Key('register-username')),
@@ -107,8 +114,16 @@ Future<String> signUp(WidgetTester tester, {String suffix = ''}) async {
     find.text('a code is on its way to that address'),
     what: 'confirmation that the code was sent',
   );
-  await type(tester, const Key('register-code'), await codeFromMail(tester, email));
-  await tap(tester, find.text('create account'), what: 'the create-account button');
+  await type(
+    tester,
+    const Key('register-code'),
+    await codeFromMail(tester, email),
+  );
+  await tap(
+    tester,
+    find.text('create account'),
+    what: 'the create-account button',
+  );
 
   // Landing on the chats list is how the app says the session is real: the router only lets a
   // signed-in tree exist.
@@ -145,7 +160,9 @@ Future<void> waitFor(
   }
   await note('  GAVE UP on ${what ?? finder}');
   await noteScreen();
-  fail('waited ${limit.inSeconds}s for ${what ?? finder} and it never appeared');
+  fail(
+    'waited ${limit.inSeconds}s for ${what ?? finder} and it never appeared',
+  );
 }
 
 /// The other half of [waitFor]: pump until [finder] stops matching.
@@ -223,8 +240,10 @@ Future<void> tapUntil(
       await tester.pump(const Duration(milliseconds: 100));
       if (until.evaluate().isNotEmpty) return;
     }
-    await note('  tap $attempt on ${what ?? finder} did not bring up '
-        '${expecting ?? until} — trying again');
+    await note(
+      '  tap $attempt on ${what ?? finder} did not bring up '
+      '${expecting ?? until} — trying again',
+    );
   }
   await waitFor(tester, until, what: expecting);
 }
@@ -241,7 +260,8 @@ Future<void> type(WidgetTester tester, Key key, String text) async {
     // One more way, in case a field is not the one holding focus.
     await tester.enterText(find.byKey(key), text);
     await tester.pump(const Duration(milliseconds: 100));
-    final second = tester.widget<TextField>(find.byKey(key)).controller?.text ?? '';
+    final second =
+        tester.widget<TextField>(find.byKey(key)).controller?.text ?? '';
     if (second != text) {
       await note('  typing into $key did not stick: field holds "$second"');
       fail('could not type into $key — the field holds "$second"');

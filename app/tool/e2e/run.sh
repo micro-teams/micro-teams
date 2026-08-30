@@ -286,7 +286,9 @@ fi
 step "run the journey ($JOURNEY)"
 silence_service_worker
 cd "$APP"
-export PATH="$HOME/tools/flutter/bin:$PATH"
+# On a machine where flutter was unpacked by hand (this project's dev box), rather than installed.
+# On CI it is already on PATH and this changes nothing.
+[ -d "$HOME/tools/flutter/bin" ] && export PATH="$HOME/tools/flutter/bin:$PATH"
 # Retried, but only for one specific failure, and the difference matters. `flutter drive` sometimes
 # never hands the browser over to the test at all: the app is served, the browser starts, and then
 # nothing — no first frame, no note, no error, until something outside kills it. That is the tooling,

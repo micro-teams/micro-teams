@@ -326,6 +326,5 @@ void main() {
     // name on the page. Closing is split on purpose — the journey CONFIRMS (and watches the agent
     // leave the fleet, which only means something against a real connector), while the case above
     // CANCELS, and the only way to be sure a cancel sent nothing is to hold the wire.
-
   });
 }

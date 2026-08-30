@@ -289,5 +289,4 @@ void main() {
     expect(onRail.destination.label, onPhone.destination.label);
     expect(onRail.runtimeType, onPhone.runtimeType);
   });
-
 }

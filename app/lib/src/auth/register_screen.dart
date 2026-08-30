@@ -179,24 +179,38 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const SizedBox(height: 24),
 
                   const _Label('username'),
-                  TextField(key: const Key('register-username'), controller: _username),
+                  TextField(
+                    key: const Key('register-username'),
+                    controller: _username,
+                  ),
                   if (!usernameOk)
                     const _Hint(usernameRule, bad: true)
                   else
                     const SizedBox(height: 16),
 
                   const _Label('nickname'),
-                  TextField(key: const Key('register-nickname'), controller: _nickname),
+                  TextField(
+                    key: const Key('register-nickname'),
+                    controller: _nickname,
+                  ),
                   const SizedBox(height: 16),
 
                   const _Label('password'),
-                  TextField(key: const Key('register-password'), controller: _password, obscureText: true),
+                  TextField(
+                    key: const Key('register-password'),
+                    controller: _password,
+                    obscureText: true,
+                  ),
                   const SizedBox(height: 6),
                   _Rules(checks: PasswordChecks.of(_password.text)),
                   const SizedBox(height: 10),
 
                   const _Label('confirm password'),
-                  TextField(key: const Key('register-confirm'), controller: _confirm, obscureText: true),
+                  TextField(
+                    key: const Key('register-confirm'),
+                    controller: _confirm,
+                    obscureText: true,
+                  ),
                   if (!match)
                     const _Hint('the two passwords do not match', bad: true)
                   else
@@ -205,7 +219,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const _Label('email'),
                   Row(
                     children: [
-                      Expanded(child: TextField(key: const Key('register-email'), controller: _email)),
+                      Expanded(
+                        child: TextField(
+                          key: const Key('register-email'),
+                          controller: _email,
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       SizedBox(
                         height: Metrics.composerHeight,

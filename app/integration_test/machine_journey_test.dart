@@ -39,7 +39,8 @@ void main() {
     expect(
       _enrollCode,
       isNotEmpty,
-      reason: 'MT_E2E_ENROLL_CODE was not passed in — the harness starts the '
+      reason:
+          'MT_E2E_ENROLL_CODE was not passed in — the harness starts the '
           'enrolment on the machine and hands the code over',
     );
 
@@ -60,7 +61,11 @@ void main() {
       find.widgetWithText(TextButton, 'create'),
       what: "the dialog's create",
     );
-    await waitFor(tester, find.text(teamName), what: 'the new team in the list');
+    await waitFor(
+      tester,
+      find.text(teamName),
+      what: 'the new team in the list',
+    );
     // Made and then not selected is a team you have to go and find, so making one is also a
     // statement about where you intend to work. (test/teams/team_admin_test.dart used to say this
     // against a fake; here the picker at the top of the next page says it.)
@@ -119,7 +124,11 @@ void main() {
     // --- open an agent on it -----------------------------------------------------------------------
     final agentName = 'agent$runId';
     await tap(tester, find.text('open agent'), what: 'the open-agent button');
-    await waitFor(tester, find.text('Open agent'), what: 'the open-agent dialog');
+    await waitFor(
+      tester,
+      find.text('Open agent'),
+      what: 'the open-agent dialog',
+    );
     await typeInto(
       tester,
       find.widgetWithText(TextField, 'the server names it if you do not'),
@@ -202,7 +211,11 @@ void main() {
     // Who is in this conversation: the person who made it, and the agent it is with. (This is
     // test/chats/thread_info_test.dart's roster case, with a roster the server actually built.)
     await tap(tester, find.byIcon(Icons.info_outline), what: 'the info button');
-    await waitFor(tester, find.text(agentName), what: 'the agent, in the roster');
+    await waitFor(
+      tester,
+      find.text(agentName),
+      what: 'the agent, in the roster',
+    );
     await waitFor(
       tester,
       find.text(me),
@@ -258,13 +271,22 @@ void main() {
     );
     await typeInto(tester, field, 'renamed.md');
     await tap(tester, find.byIcon(Icons.check), what: 'the tick');
-    await revealIn(tester, folder, treeRowFor('renamed.md'), what: 'renamed.md');
+    await revealIn(
+      tester,
+      folder,
+      treeRowFor('renamed.md'),
+      what: 'renamed.md',
+    );
 
     // And deleting really deletes: the row goes. (Cancelling instead is still a widget test — the
     // only way to be sure NOTHING was sent is to hold the wire.)
     await actionsFor(tester, 'renamed.md');
     await tap(tester, find.text('delete'), what: 'delete');
-    await waitFor(tester, find.text('delete renamed.md?'), what: 'the question');
+    await waitFor(
+      tester,
+      find.text('delete renamed.md?'),
+      what: 'the question',
+    );
     await tap(
       tester,
       find.widgetWithText(TextButton, 'delete'),
