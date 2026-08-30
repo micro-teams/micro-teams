@@ -494,13 +494,15 @@ jobs:
   # private tmux, the applet driving a terminal, and the path a chat message takes into a program.
   # Every incident so far has lived exactly there, so that is what this boots and asserts.
   #
-  # The matrix is what plays the agent's program. `fake` is the deterministic baseline — no node, no
-  # npm, no network — so a red run can be read at a glance: if `fake` is red WE broke something; if
-  # only a real-Claude leg is red, Claude Code changed.
+  # The matrix is what plays the agent's program, and both entries are the real Claude Code.
   #
-  # `npm:2.1.220` runs the real Claude Code at a PINNED version, so it is deterministic in the same
-  # way `fake` is — nothing about it can change without us changing it — and it is therefore required.
-  # It is the only leg that proves the applet actually drives Claude Code: through the first-run
+  # `npm:2.1.220` is PINNED, which is where the determinism comes from: nothing about it can change
+  # without us changing the number, so a red run means we broke something. It used to share that job
+  # with a `fake` stand-in — a shell script pretending to be Claude — and the stand-in is gone,
+  # because pinning already buys what it was there for, while it cost a second implementation of
+  # every leg and proved nothing about driving the real program.
+  #
+  # It is also the leg that proves the applet drives Claude Code at all: through the first-run
   # wizard, the bypass-permissions gate, and back out through `microteams api say`.
   #
   # The `installer` leg tracks Claude Code's latest and stays advisory (continue-on-error): a UI
@@ -518,8 +520,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - leg: fake
-            experimental: false
           - leg: npm:2.1.220
             experimental: false
           - leg: installer
@@ -540,17 +540,19 @@ jobs:
         run: |
           bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
-      # Only the `fake` leg exercises `microteams update`: it needs a distinctly-versioned connector
+      # Only the pinned leg exercises `microteams update`: it needs a distinctly-versioned connector
       # binary so the e2e can PROVE the running service re-execed into the freshly downloaded one
-      # (not merely that a file on disk changed). `setup-go` here matches build-cli's toolchain, and
-      # the two env vars below persist to the "End-to-end" step in the same job/leg.
+      # (not merely that a file on disk changed). It moved here when the `fake` leg was deleted —
+      # this coverage was never about which program plays the agent, only about needing exactly one
+      # leg to carry it. `setup-go` matches build-cli's toolchain, and the two env vars below persist
+      # to the "End-to-end" step in the same job/leg.
       - uses: actions/setup-go@v7
-        if: matrix.leg == 'fake'
+        if: matrix.leg == 'npm:2.1.220'
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
       - name: Build a marker-versioned connector (to prove `microteams update` swaps and re-execs)
-        if: matrix.leg == 'fake'
+        if: matrix.leg == 'npm:2.1.220'
         run: |
           MARKER="update-e2e-${GITHUB_SHA::12}"
           ( cd cli && go build -trimpath -ldflags "-X main.version=$MARKER" -o "$GITHUB_WORKSPACE/updated-microteams" . )
