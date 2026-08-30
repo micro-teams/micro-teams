@@ -322,31 +322,10 @@ void main() {
       expect(sitsIn('agents', 'open agent'), isTrue);
     });
 
-    testWidgets('a name is changed in a dialog, and the dialog is a frame', (
-      tester,
-    ) async {
-      // In a dialog again — but a dialog that is a route, so back closes the question rather than
-      // the screen it was asked about. See common/ui/app_dialog.dart.
-      final backend = _FakeBackend();
-      await tester.pumpWidget(agentDetail(backend));
-      await settle(tester);
+    // Renaming an agent is the machine journey's now: it renames the one it opened and finds the new
+    // name on the page. Closing is split on purpose — the journey CONFIRMS (and watches the agent
+    // leave the fleet, which only means something against a real connector), while the case above
+    // CANCELS, and the only way to be sure a cancel sent nothing is to hold the wire.
 
-      await tester.tap(find.byTooltip('rename'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
-
-      await tester.enterText(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byType(TextField),
-        ),
-        'renamed',
-      );
-      await tester.tap(find.widgetWithText(TextButton, 'rename'));
-      await settle(tester);
-
-      expect(backend.posted, contains('PUT /mt/agent/42/nickname'));
-      expect(find.byType(AlertDialog), findsNothing);
-    });
   });
 }

@@ -275,6 +275,62 @@ void main() {
       treeRowFor('renamed.md'),
       what: 'the deleted file',
     );
+
+    // --- and finally, the agent's own two buttons ---------------------------------------------------
+    // Renaming happens in a dialog that is a ROUTE, so it can be backed out of rather than taking the
+    // page with it; closing asks first, because a session that stops takes whatever it was doing with
+    // it. Both are done last: closing really does end the agent.
+    await tap(
+      tester,
+      find.byKey(const ValueKey('destination-agents')),
+      what: 'the agents tab',
+    );
+    await tapUntil(
+      tester,
+      find.text(agentName),
+      find.byTooltip('rename'),
+      what: 'the agent',
+      expecting: 'its page',
+    );
+    await tap(tester, find.byTooltip('rename'), what: 'rename');
+    await waitFor(
+      tester,
+      find.text('rename $agentName'),
+      what: 'the rename dialog',
+    );
+    final newName = '$agentName-renamed';
+    await typeInto(
+      tester,
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      newName,
+    );
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'rename'),
+      what: "the dialog's rename",
+    );
+    await waitFor(tester, find.text(newName), what: 'the agent, renamed');
+
+    await tap(tester, find.text('close agent'), what: 'close agent');
+    await waitFor(
+      tester,
+      find.text('close $newName?'),
+      what: 'the question, before anything is closed',
+    );
+    await tap(
+      tester,
+      find.widgetWithText(TextButton, 'close it'),
+      what: 'confirming it',
+    );
+    await waitUntilGone(
+      tester,
+      find.text(newName),
+      what: 'the agent, closed and gone from the fleet',
+      limit: const Duration(minutes: 2),
+    );
   }, timeout: const Timeout(Duration(minutes: 12)));
 }
 
