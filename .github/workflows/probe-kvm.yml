@@ -1,0 +1,21 @@
+# Temporary: can a GitHub runner run an Android emulator at all?
+#
+# The Android journey needs hardware acceleration; without /dev/kvm an emulator is software-rendered
+# and too slow to be a test. This says so in ten seconds instead of after an hour of building one.
+name: probe kvm
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: What this runner has
+        run: |
+          echo "--- /dev/kvm ---"
+          ls -l /dev/kvm || echo "NO /dev/kvm"
+          echo "--- can this user open it? ---"
+          test -r /dev/kvm -a -w /dev/kvm && echo "readable and writable" || echo "NOT accessible"
+          echo "--- cpu flags ---"
+          grep -oE 'vmx|svm' /proc/cpuinfo | sort -u || echo "no virtualisation flags"
+          echo "--- nested ---"
+          cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo "n/a"
