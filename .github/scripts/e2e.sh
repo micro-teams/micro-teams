@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Full-stack smoke test: the shipped bundle, a real machine, a real agent, one real message.
+# The machinery under the product: the shipped bundle, a real machine, a real agent, one real
+# message — driven by curl, with no client in the picture.
+#
+# It used to be called the full-stack test, and it is not: nothing here touches the interface a
+# person uses, so it cannot tell you whether they can reach any of it. That is what the journeys do
+# (app/integration_test/, run by app/tool/e2e/run.sh). This script is the layer underneath, and the
+# division is worth keeping: when this is red the plumbing broke; when a journey is red the product
+# did.
 #
 # What this covers that nothing else does. The unit and integration tests exercise the backend with a
 # FAKE machine (a WebSocket client in the test JVM), and `test-compose` only proved the containers

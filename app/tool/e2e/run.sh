@@ -7,13 +7,18 @@
 # and the server share one origin, and then starts one self-contained journey inside a real browser.
 # It hands parameters in and collects a result; it never directs the test.
 #
-#   bash tool/e2e/run.sh --bundle <dir> [--journey chat|machine] [--leg fake] [--keep]
+#   bash tool/e2e/run.sh --bundle <dir> [--journey full|no-machine] [--leg fake] [--keep]
 #
 # --bundle   an unpacked deployment bundle (the microteams-deploy artifact, or deploy/ with the
 #            build outputs in place). Required: this suite tests what we ship, not a dev server.
-# --journey  which script to run. `chat` needs nothing outside the browser; `machine` also spins a
-#            host, installs the connector from the bundle, and afterwards asserts that what was said
-#            in the interface reached the program running there.
+# --journey  `full` (the default, and what CI runs) is the whole thing: sign up, work in the app,
+#            bring a host in, put an agent on it, and afterwards assert that what was said in the
+#            interface reached the program running there. `no-machine` runs the same script without
+#            spinning a host — for iterating locally, never as a substitute for a real run.
+#
+#            There is deliberately no second journey. Coverage is meant to be a pairing of client
+#            sides against machine environments — max(clients, environments) runs, each doing
+#            everything — not one run per half, which would multiply as clients are added.
 # --leg      what plays the agent's program on that host, same meaning as in .github/scripts/e2e.sh:
 #            `fake` (a shell script that records what it hears) is the deterministic baseline.
 # --keep     leave the stack, the gateway and the mail sink running afterwards, to inspect a failure.
@@ -24,7 +29,7 @@ set -euo pipefail
 
 BUNDLE=""
 LEG="fake"
-JOURNEY="chat"
+JOURNEY="full"
 KEEP="${KEEP:-0}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -100,10 +105,11 @@ trap cleanup EXIT
 # next run then talks to the WRONG one: the driver waits for a connection from an app that a stale
 # server is serving, and the whole thing hangs with no error. Fail loudly instead, and clear what is
 # ours to clear.
+JOURNEY_TARGET=journey_test.dart
 case "$JOURNEY" in
-  chat)    JOURNEY_TARGET=journey_test.dart ;;
-  machine) JOURNEY_TARGET=machine_journey_test.dart ;;
-  *) echo "unknown journey: $JOURNEY (want chat or machine)" >&2; exit 2 ;;
+  full) ;;                    # the whole thing, machine and all — what CI runs
+  no-machine) ;;              # the same script, minus the host: for iterating locally
+  *) echo "unknown journey: $JOURNEY (want full or no-machine)" >&2; exit 2 ;;
 esac
 
 step "check the ports are free"
@@ -220,7 +226,7 @@ sleep 2
 # and the CODE is handed to the journey, which approves it through the interface the way a person
 # reading it off their own terminal would.
 TARGET_DEFINES=""
-if [ "$JOURNEY" = "machine" ]; then
+if [ "$JOURNEY" = "full" ]; then
   step "spin a host and install the connector from the bundle (leg: $LEG)"
   docker rm -f "$MACHINE_CT" >/dev/null 2>&1 || true
   docker run -d --name "$MACHINE_CT" --hostname "$MACHINE_CT" --network "$NET" \
@@ -358,7 +364,7 @@ done
 # --- what only the machine can answer ---------------------------------------------------------------
 # The journey ended when the app said the message was stored. Whether it arrived in a program's stdin
 # on another host is not something the app can know, and it is the reason this slice exists.
-if [ "$JOURNEY" = "machine" ]; then
+if [ "$JOURNEY" = "full" ]; then
   step "the message reached the program on the machine"
   heard=0
   for _ in $(seq 1 40); do

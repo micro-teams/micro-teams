@@ -293,3 +293,110 @@ Future<String> codeFromMail(WidgetTester tester, String email) async {
   }
   fail('no sign-up code was mailed to $email within 60s');
 }
+
+/// Start a conversation of one's own, say something in it, and come back to find it still there.
+///
+/// Kept here rather than in a journey of its own: everything a person does before there is a
+/// machine belongs to every journey, and a second journey that repeated it would cost a whole run
+/// to say the same thing twice. See todo/microteams/testing-e2e.md on the shape of the matrix.
+Future<void> talkInAChatOfYourOwn(WidgetTester tester) async {
+  // --- start a conversation -------------------------------------------------------------------
+  final title = 'journey $runId';
+  await tap(
+    tester,
+    find.byIcon(Icons.add_comment_outlined),
+    what: 'the new-chat button',
+  );
+  await waitFor(tester, find.text('New chat'), what: 'the New chat dialog');
+  await typeInto(tester, find.widgetWithText(TextField, 'Title'), title);
+  await tap(
+    tester,
+    find.widgetWithText(FilledButton, 'Create'),
+    what: "the New chat dialog's Create",
+  );
+
+  // --- say something ---------------------------------------------------------------------------
+  await waitFor(
+    tester,
+    find.widgetWithText(TextField, 'message…'),
+    what: 'the composer',
+  );
+  final said = 'hello from $runId';
+  await typeInto(tester, find.widgetWithText(TextField, 'message…'), said);
+  await tap(
+    tester,
+    find.widgetWithText(FilledButton, 'send'),
+    what: 'the send button',
+  );
+
+  // The bubble alone proves nothing: it is painted optimistically the instant the send button is
+  // pressed, and it would look exactly the same if the request never left. What proves the
+  // message is on the server is the 'sending…' clock going away — the outbox only drops that
+  // when the stored message comes back with an id.
+  await waitFor(tester, find.text(said), what: 'the message bubble');
+  // Emptied, so the next message does not start with the last one still in it. (This is what
+  // test/chats/send_test.dart used to assert against a fake; here it is the real composer after a
+  // real send.)
+  expect(
+    tester
+        .widget<TextField>(find.widgetWithText(TextField, 'message…').first)
+        .controller
+        ?.text,
+    isEmpty,
+    reason: 'the composer should be empty once the message is away',
+  );
+  await waitUntilGone(
+    tester,
+    find.byIcon(Icons.schedule),
+    what: 'the sending… clock',
+  );
+
+  // Then leave the thread and come back, so the messages are read again rather than remembered.
+  // How you leave depends on the shape of the window: a phone stacks the thread over the list and
+  // offers a back button, a desktop shows both at once and has none. The journey has to work on
+  // whatever client it was handed, so it asks rather than assumes.
+  if (find.byTooltip('Back').evaluate().isNotEmpty) {
+    await tap(tester, find.byTooltip('Back'), what: 'the back button');
+    await waitFor(
+      tester,
+      find.text(title),
+      what: 'the thread back in the list',
+    );
+  }
+  await tap(tester, find.text(title), what: 'the thread in the list');
+  await waitFor(tester, find.text(said), what: 'the message, read back');
+
+  // --- the tab you come back to is the tab you left ---------------------------------------------
+  // A rule the shell has had since the React client, and one of the few things about navigation
+  // worth testing: leaving a conversation for another section and coming back should not put you
+  // in front of the list again. (This is test/shell_test.dart's first case, against the real
+  // shell instead of a toy router.)
+  await tap(
+    tester,
+    find.byKey(const ValueKey('destination-agents')),
+    what: 'the agents tab',
+  );
+  await waitFor(tester, find.text('machines'), what: 'the agents page');
+  await tap(
+    tester,
+    find.byKey(const ValueKey('destination-chats')),
+    what: 'the chats tab, coming back',
+  );
+  await waitFor(
+    tester,
+    find.text(said),
+    what: 'the conversation that was open, still open',
+  );
+
+  // And tapping the tab you are already on goes back to its root — the way out of a detail view.
+  await tap(
+    tester,
+    find.byKey(const ValueKey('destination-chats')),
+    what: 'the chats tab again',
+  );
+  await waitUntilGone(
+    tester,
+    find.widgetWithText(TextField, 'message…'),
+    what: 'the composer, on the way back to the list',
+  );
+}

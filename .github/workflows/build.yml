@@ -456,7 +456,12 @@ jobs:
   # The `installer` leg tracks Claude Code's latest and stays advisory (continue-on-error): a UI
   # change upstream is intelligence worth having, not a reason to block someone else's merge. When it
   # goes red, the fix belongs in the applet, and the pinned leg is what says whether we broke it.
-  test-e2e:
+  # The machinery, without anybody using it: the connector, its private tmux, the applet, and the
+  # path a message takes into a program's stdin — driven by curl, with no client in the picture.
+  # It is NOT the whole product end to end; test-journeys is, and this one is deliberately the layer
+  # underneath, where a failure means the plumbing broke rather than the interface.
+  test-machinery:
+    name: machinery (connector, tmux, a message into stdin)
     needs: [package-zip]
     runs-on: ubuntu-latest
     strategy:
@@ -517,22 +522,36 @@ jobs:
         working-directory: microteams-deploy
         run: docker compose down
 
-  # The journeys: the same bundle, driven through the interface a person uses.
+  # How many journey runs, and which: a pairing of client sides against machine environments, so that
+  # everything is covered in max(clients, environments) runs. The function lives in the repo
+  # (app/tool/e2e/pairs.py) rather than in this file, because adding a client should be one line in a
+  # list — not a matrix somebody has to recompute by hand and can quietly get wrong.
+  plan-journeys:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pairs.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pairs
+        run: echo "matrix=$(python3 app/tool/e2e/pairs.py --json)" >> "$GITHUB_OUTPUT"
+      - run: python3 app/tool/e2e/pairs.py
+
+  # The journey: the same bundle, driven through the interface a person uses.
   #
-  # This is the other half of test-e2e. That one proves the machinery works by driving the API with
-  # curl; this one proves a PERSON can reach it — every step goes through the real client, in a real
-  # browser, against the deployment we ship. See todo/microteams/testing-e2e.md for what it replaced
-  # and what it deliberately did not.
+  # This is the other half of test-machinery. That one proves the plumbing works by driving the API
+  # with curl; this one proves a PERSON can reach it — every step goes through the real client, in a real
+  # browser, against the deployment we ship. See todo/microteams/testing-e2e.md.
   #
-  # The two journeys are a matrix rather than one long script so a failure says which half broke, and
-  # so they run side by side: each makes its own account and its own team, and shares nothing.
+  # One journey, not one per half: each run signs up, works in the app, brings a machine in and puts
+  # an agent on it. Splitting the halves into separate jobs would cost clients + environments runs
+  # where the pairing above costs max(clients, environments). When a run fails, which step broke is
+  # answered by the trace the journey prints, not by the name of the job.
   test-journeys:
-    needs: [package-zip]
+    needs: [package-zip, plan-journeys]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        journey: [chat, machine]
+      matrix: ${{ fromJSON(needs.plan-journeys.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/flutter-app
@@ -551,9 +570,12 @@ jobs:
           command -v chromedriver && exit 0
           sudo apt-get update -qq
           sudo apt-get install -y -qq chromium-driver
-      - name: "A person's journey through the shipped bundle (${{ matrix.journey }})"
+      - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
         working-directory: app
-        run: bash tool/e2e/run.sh --bundle "${{ runner.temp }}/microteams-deploy" --journey ${{ matrix.journey }}
+        run: |
+          bash tool/e2e/run.sh \
+            --bundle "${{ runner.temp }}/microteams-deploy" \
+            --leg "${{ matrix.leg }}"
       - name: Dump logs on failure
         if: failure()
         working-directory: ${{ runner.temp }}/microteams-deploy
@@ -567,7 +589,18 @@ jobs:
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
   ci-success:
     name: CI success
-    needs: [build-jar, build-web, build-android, build-applet, build-cli, build-tmux, package-zip, test-e2e, test-journeys]
+    needs:
+      [
+        build-jar,
+        build-web,
+        build-android,
+        build-applet,
+        build-cli,
+        build-tmux,
+        package-zip,
+        test-machinery,
+        test-journeys,
+      ]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
