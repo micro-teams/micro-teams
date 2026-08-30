@@ -11,6 +11,15 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      # The device is there; the runner user is simply not in the kvm group. This is the rule the
+      # android-emulator-runner action documents for exactly this.
+      - name: Let this user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: What this runner has
         run: |
           echo "--- /dev/kvm ---"
@@ -21,3 +30,12 @@ jobs:
           grep -oE 'vmx|svm' /proc/cpuinfo | sort -u || echo "no virtualisation flags"
           echo "--- nested ---"
           cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo "n/a"
+
+      - name: Boot an emulator and see it come up
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          script: adb shell getprop ro.build.version.sdk && echo "EMULATOR IS ALIVE"
