@@ -104,10 +104,14 @@ Future<String> signUp(WidgetTester tester, {String suffix = ''}) async {
     what: 'the register form',
   );
 
-  await type(tester, const Key('register-username'), username);
-  await type(tester, const Key('register-password'), password);
-  await type(tester, const Key('register-confirm'), password);
-  await type(tester, const Key('register-email'), email);
+  // All four together, and not believed until they all read back — see [fill]. Typed one at a time
+  // with a check each, this form came out shifted by a field on Android.
+  await fill(tester, {
+    const Key('register-username'): username,
+    const Key('register-password'): password,
+    const Key('register-confirm'): password,
+    const Key('register-email'): email,
+  });
 
   await tap(tester, find.text('send code'), what: 'the send-code button');
   await waitFor(
@@ -196,34 +200,71 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
 
 /// [type] by any finder, not just by key.
 ///
-/// `tester.enterText` first, and that order is the whole point: it names the widget it is typing
-/// into. `testTextInput.enterText` names nothing — it sends text to whichever input client is
-/// currently CONNECTED, and connecting is what a tap starts rather than finishes.
-///
-/// On the web the two amount to the same thing. On Android they do not, and the difference is a
-/// field's worth of lag: the registration form came out with the confirm-password box holding the
-/// email address. Every field had passed its own read-back on the way past, because each one held
-/// the right text at the moment it was checked — the next field's typing is what overwrote it. The
-/// form then refused to submit ("the two passwords do not match"), no request was ever sent, and
-/// the screen showed a stale HTTP 504 from something else entirely. Three misleading symptoms, one
-/// cause, and none of them was the one that pointed at typing.
-///
-/// testTextInput stays as the fallback: it is what works when a widget refuses focus.
+/// One attempt, and the caller checks. See [fill] for why one attempt is not enough on a device.
 Future<void> typeInto(WidgetTester tester, Finder finder, String text) async {
   await waitFor(tester, finder, what: 'a field to type "$text" into');
-  await tester.tap(finder.first);
-  await tester.pump(const Duration(milliseconds: 100));
   await tester.enterText(finder.first, text);
   await tester.pump(const Duration(milliseconds: 100));
-  if (tester.widget<TextField>(finder.first).controller?.text != text) {
-    tester.testTextInput.enterText(text);
-    await tester.pump(const Duration(milliseconds: 100));
+}
+
+/// What a field is holding right now, or null if it is not on screen.
+String? _held(WidgetTester tester, Key key) {
+  final f = find.byKey(key);
+  if (f.evaluate().isEmpty) return null;
+  return tester.widget<TextField>(f.first).controller?.text;
+}
+
+/// Fill a form and do not believe it until every field reads back.
+///
+/// Typing into a named field is not the simple thing it looks like. `tester.enterText` is
+/// `showKeyboard` followed by `testTextInput.enterText`, and showKeyboard only sets
+/// `binding.focusedEditable` — which, as its own comment says, "eventually calls TextInput.attach to
+/// establish the connection". On the web that attach is a synchronous fake and the single `pump()`
+/// inside showKeyboard is plenty. On a real device it is a genuine platform round trip, so the text
+/// can be delivered to the client that was attached BEFORE this one.
+///
+/// The result on Android was a form shifted by exactly one field: the confirm-password box held the
+/// email address, and the email box was therefore empty. That disabled the send-code button, so
+/// tapping it did nothing and the journey waited a minute for a message that was never requested —
+/// while the screen showed "the two passwords do not match", which gates a different button
+/// entirely and had never blocked anything. Two symptoms, both pointing away from typing.
+///
+/// So: fill everything, read everything back, re-fill whatever is wrong, and repeat. That needs no
+/// guess about how many frames an attach takes, and it repairs the field that the NEXT one landed
+/// in — which a per-field check cannot do, because at the moment it looks, the field is still right.
+///
+/// What is established and what is not, so nobody reads more into this than it earned: the shift is
+/// measured — a diagnostic run printed the confirm box holding the email address — and the cause is
+/// read off flutter_test's own source, quoted above. That the repeat CONVERGES on a device is not
+/// yet demonstrated; the machine borrowed to prove it could not finish a build. If it ever does not
+/// converge, this fails loudly with every field's contents rather than quietly moving on, which is
+/// the failure worth having.
+Future<void> fill(WidgetTester tester, Map<Key, String> fields) async {
+  for (final entry in fields.entries) {
+    await typeInto(tester, find.byKey(entry.key), entry.value);
   }
-  final got = tester.widget<TextField>(finder.first).controller?.text ?? '';
-  if (got != text) {
-    await note('  typing "$text" did not stick: the field holds "$got"');
-    fail('could not type "$text" — the field holds "$got"');
+
+  for (var round = 1; round <= 5; round++) {
+    final wrong = <Key, String>{
+      for (final e in fields.entries)
+        if (_held(tester, e.key) != e.value) e.key: e.value,
+    };
+    if (wrong.isEmpty) return;
+
+    await note(
+      '  ${wrong.length} field(s) did not hold what was typed — round $round',
+    );
+    for (final entry in wrong.entries) {
+      await typeInto(tester, find.byKey(entry.key), entry.value);
+      await tester.pump(const Duration(milliseconds: 200));
+    }
   }
+
+  final held = {
+    for (final e in fields.entries) '${e.key}': _held(tester, e.key),
+  };
+  await note('  giving up on the form: $held');
+  fail('a form would not hold what was typed into it: $held');
 }
 
 /// Type into a field the way a person does: focus it, then send the text.
