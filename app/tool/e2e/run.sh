@@ -74,6 +74,7 @@ DRIVER_PORT="${MT_E2E_DRIVER_PORT:-52044}"
 GATEWAY_CT="${PROJECT}-gateway"
 MACHINE_CT="${PROJECT}-machine"
 MOCK_CT="${PROJECT}-mock"
+MAIL_CT="${PROJECT}-mail"
 MACHINE_USER=agent
 RUN_ID="$(date +%s)$$"
 
@@ -110,17 +111,15 @@ restore_service_worker() {
   [ -f "$INDEX_BACKUP" ] && mv "$INDEX_BACKUP" "$INDEX" || true
 }
 
-MAILSINK_PID=""
 CHROMEDRIVER_PID=""
 cleanup() {
   restore_service_worker
-  [ -n "$MAILSINK_PID" ] && kill "$MAILSINK_PID" 2>/dev/null || true
   [ -n "$CHROMEDRIVER_PID" ] && kill "$CHROMEDRIVER_PID" 2>/dev/null || true
   if [ "$KEEP" = "1" ]; then
     echo "(--keep: the stack, the gateway, the mail sink and any machine are still up; app on :$GATEWAY_PORT)"
     return
   fi
-  docker rm -f "$GATEWAY_CT" "$MACHINE_CT" "$MOCK_CT" >/dev/null 2>&1 || true
+  docker rm -f "$GATEWAY_CT" "$MACHINE_CT" "$MOCK_CT" "$MAIL_CT" >/dev/null 2>&1 || true
   (cd "$BUNDLE" && docker compose -p "$PROJECT" down -v >/dev/null 2>&1) || true
 }
 trap cleanup EXIT
@@ -182,34 +181,42 @@ docker compose -p "$PROJECT" up -d --wait || fail "the bundle did not come up he
 NET="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' \
   "$(docker compose -p "$PROJECT" ps -q nginx)")"
 
-# The relay address has to be one the CONTAINERS can reach, and that is this network's own gateway —
-# not the host's LAN address, which a container may have no route to (and which silently turns every
-# sign-up into a 500 with "failed to send email"). The network only exists once compose has created
-# it, so this is a second pass: write the address, then restart the one service that reads it.
-SMTP_HOST="${MT_E2E_SMTP_HOST:-$(docker network inspect "$NET" \
-  -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')}"
-[ -n "$SMTP_HOST" ] || fail "could not work out an address the containers can reach us on"
-sed -i "s/^EMAIL_SMTP_HOST=.*/EMAIL_SMTP_HOST=$SMTP_HOST/" .env
-docker compose -p "$PROJECT" up -d --wait cheese-auth ||
-  fail "cheese-auth did not come back up with the mail relay set"
-
 # --- the mail sink -------------------------------------------------------------------------------
+# In the deployment's own network rather than on the host, and that is the whole point: a container
+# reaching BACK to a host port is a thing a host may simply refuse. On one machine here every such
+# connection was dropped — not refused, dropped — so cheese-auth sat on its SMTP connect until nginx
+# gave up and sign-up died as a 504, with nothing in any log to say why. Inside the network there is
+# no host in the path at all: cheese-auth relays to a service name. The HTTP side is still published,
+# because the harness and an emulated device read it from outside.
 step "start the mail sink"
-python3 "$APP/tool/e2e/mailsink.py" --smtp-port "$SMTP_PORT" --http-port "$MAIL_PORT" \
-  >/tmp/mte2e-mailsink.log 2>&1 &
-MAILSINK_PID=$!
+docker rm -f "$MAIL_CT" >/dev/null 2>&1 || true
+docker run -d --name "$MAIL_CT" --network "$NET" \
+  -v "$APP/tool/e2e/mailsink.py:/mailsink.py:ro" \
+  -p "$MAIL_PORT:$MAIL_PORT" \
+  python:3.12-slim python /mailsink.py --smtp-port "$SMTP_PORT" --http-port "$MAIL_PORT" \
+  >/dev/null || fail "the mail sink did not start"
 for _ in $(seq 1 20); do
   curl -fsS "http://localhost:$MAIL_PORT/messages" >/dev/null 2>&1 && break
   sleep 0.5
 done
 curl -fsS -X DELETE "http://localhost:$MAIL_PORT/messages" >/dev/null
 
+# The relay address has to be one the CONTAINERS can reach. It used to be this network's gateway,
+# because the sink ran on the host; now the sink is a container on this same network, so it is just
+# a name — nothing to work out, and nothing for a host firewall to have an opinion about. The
+# network only exists once compose has created it, so this is still a second pass: write the
+# address, then restart the one service that reads it.
+SMTP_HOST="${MT_E2E_SMTP_HOST:-$MAIL_CT}"
+sed -i "s/^EMAIL_SMTP_HOST=.*/EMAIL_SMTP_HOST=$SMTP_HOST/" .env
+docker compose -p "$PROJECT" up -d --wait cheese-auth ||
+  fail "cheese-auth did not come back up with the mail relay set"
+
 # --- one origin ----------------------------------------------------------------------------------
 step "put a gateway in front"
 docker rm -f "$GATEWAY_CT" >/dev/null 2>&1 || true
 docker run -d --name "$GATEWAY_CT" --network "$NET" \
   --add-host host.docker.internal:host-gateway \
-  -e "FLUTTER_PORT=$FLUTTER_PORT" -e "MAIL_PORT=$MAIL_PORT" \
+  -e "FLUTTER_PORT=$FLUTTER_PORT" -e "MAIL_PORT=$MAIL_PORT" -e "MAIL_HOST=$MAIL_CT" \
   -p "$GATEWAY_PORT:80" \
   -v "$APP/tool/e2e/gateway.conf.template:/etc/nginx/templates/default.conf.template:ro" \
   -v "$APP/tool/e2e/e2e-proxy.inc:/etc/nginx/e2e-proxy.inc:ro" \
@@ -263,7 +270,13 @@ fi
 # What is different is who approves it. There, curl did; here the enrolment is started on the machine
 # and the CODE is handed to the journey, which approves it through the interface the way a person
 # reading it off their own terminal would.
-TARGET_DEFINES=""
+# What a prebuilt APK was compiled to expect. An installed client has no origin to inherit, so the
+# gateway and the mail sink have to be NAMED in the binary — and a binary built before the run
+# started can only name a port that was decided in advance. Hence pinned, not chosen: these two are
+# the defaults above, and an APK is refused below if this run moved them.
+PINNED_GATEWAY_PORT=52081
+PINNED_MAIL_PORT=52027
+
 if [ "$JOURNEY" = "full" ]; then
   step "spin a host and install the connector from the bundle (leg: $LEG)"
   docker rm -f "$MACHINE_CT" >/dev/null 2>&1 || true
@@ -301,7 +314,8 @@ if [ "$JOURNEY" = "full" ]; then
     -H 'Content-Type: application/json' -d '{"name":"e2e-machine"}')"
   CODE="$(printf '%s' "$ENROLL" | python3 -c 'import sys,json;print(json.load(sys.stdin)["code"])')"
   [ -n "$CODE" ] || fail "enrolment start returned no code: $ENROLL"
-  TARGET_DEFINES="--dart-define=MT_E2E_ENROLL_CODE=$CODE"
+  # Handed over at runtime, not compiled in: this code did not exist when a prebuilt APK was built.
+  RUN_PARAMS="{\"runId\":\"$RUN_ID\",\"enrollCode\":\"$CODE\"}"
 
   # The machine's own half of enrolment, waiting for the human to approve in the interface: poll
   # until a token comes back, write the config, and run the connector the way its boot service would
@@ -395,15 +409,26 @@ drive_once() {
     # And none of the web flags apply: no CDN flag, no browser, no driver/web ports.
     # --use-application-binary skips the build entirely and installs what it is given. The old
     # --no-build flag is deprecated in favour of it.
-    local prebuilt=()
-    [ -n "$APK" ] && prebuilt=(--use-application-binary "$APK")
+    local prebuilt=() defines=()
+    if [ -n "$APK" ]; then
+      # Nothing passed here reaches an APK that is already built — the values are compiled in — so
+      # rather than pass them and have the app quietly use the ones it was built with, say plainly
+      # that this run has to stand where the build expected it.
+      [ "$GATEWAY_PORT" = "$PINNED_GATEWAY_PORT" ] && [ "$MAIL_PORT" = "$PINNED_MAIL_PORT" ] || fail \
+        "a prebuilt APK names ports $PINNED_GATEWAY_PORT/$PINNED_MAIL_PORT, and this run is on \
+$GATEWAY_PORT/$MAIL_PORT — build the APK for these ports, or let this run use the pinned ones"
+      prebuilt=(--use-application-binary "$APK")
+    else
+      defines=(
+        --dart-define=MT_ORIGIN="http://10.0.2.2:$GATEWAY_PORT"
+        --dart-define=MT_E2E_MAIL="http://10.0.2.2:$MAIL_PORT"
+      )
+    fi
     ( timeout "${MT_E2E_DRIVE_TIMEOUT:-1500}" flutter drive \
       --driver=test_driver/integration_test.dart \
       --target=integration_test/${JOURNEY_TARGET} \
-      -d "$ANDROID_DEVICE" "${prebuilt[@]}" \
-      --dart-define=MT_ORIGIN="http://10.0.2.2:$GATEWAY_PORT" \
-      --dart-define=MT_E2E_MAIL="http://10.0.2.2:$MAIL_PORT" \
-      --dart-define=MT_E2E_RUN="$RUN_ID" $TARGET_DEFINES ${MT_E2E_EXTRA_DEFINES:-} ) &
+      -d "$ANDROID_DEVICE" "${prebuilt[@]}" "${defines[@]}" \
+      ${MT_E2E_EXTRA_DEFINES:-} ) &
     local drive_pid=$!
     _watch_drive "$drive_pid"
     return $?
@@ -420,13 +445,18 @@ drive_once() {
     --browser-name=chrome \
     --driver-port="$DRIVER_PORT" \
     --web-port="$FLUTTER_PORT" \
-    --dart-define=MT_E2E_MAIL=/mail \
-    --dart-define=MT_E2E_RUN="$RUN_ID" $TARGET_DEFINES ${MT_E2E_EXTRA_DEFINES:-} \
+    --dart-define=MT_E2E_MAIL=/mail ${MT_E2E_EXTRA_DEFINES:-} \
     --headless ) &
   local drive_pid=$!
 
   _watch_drive "$drive_pid"
 }
+# The journey reads this on its way up, in place of the defines that used to carry it.
+: "${RUN_PARAMS:={\"runId\":\"$RUN_ID\"}}"
+curl -fsS -X POST "http://localhost:$MAIL_PORT/run" \
+  -H 'Content-Type: application/json' -d "$RUN_PARAMS" >/dev/null \
+  || fail "could not tell the mail sink what this run is"
+
 attempt=1
 while : ; do
   curl -fsS -X DELETE "http://localhost:$MAIL_PORT/messages" >/dev/null 2>&1 || true

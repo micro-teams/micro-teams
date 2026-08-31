@@ -9,7 +9,9 @@
 # bundle's own nginx, and `/mail` to the sink this run reads its sign-up code from. The browser is
 # pointed here rather than at flutter's server by test_driver/integration_test.dart.
 #
-# ${FLUTTER_PORT} and ${MAIL_PORT} are filled in by the nginx image's own envsubst pass.
+# ${FLUTTER_PORT}, ${MAIL_HOST} and ${MAIL_PORT} are filled in by the nginx image's own envsubst
+# pass. The sink is named rather than reached through host.docker.internal: it is a container on
+# this same network now, because a host may drop connections coming back at it from a bridge.
 
 # The usual WebSocket map, with one deliberate difference: a request with no Upgrade header gets NO
 # Connection header at all, rather than `close`. Both live channels ride WebSocket, and a long-lived
@@ -26,7 +28,7 @@ server {
 
     # The mail sink, on this origin, so reading the sign-up code needs no permission from anybody.
     location /mail/ {
-        proxy_pass http://host.docker.internal:${MAIL_PORT}/;
+        proxy_pass http://${MAIL_HOST}:${MAIL_PORT}/;
         include /etc/nginx/e2e-proxy.inc;
     }
 

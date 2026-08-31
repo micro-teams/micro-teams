@@ -15,9 +15,17 @@ network. Mail is kept in memory and never written anywhere.
 
     GET /messages            every message, newest first
     GET /messages?to=x@y     only those addressed to x@y
-    DELETE /messages         forget everything (between runs)
+    DELETE /messages         forget the mail and the trace (between attempts; /run survives, since
+                             the run's parameters outlive an attempt that has to be tried again)
     GET /note?text=...       record one line of the journey's own trace
     GET /notes               that trace, oldest first
+    POST /run  {...}         what this run's parameters are (the harness says)
+    GET /run                 those parameters (the journey asks)
+
+/run is how a value that differs every run reaches an app that was compiled once. A --dart-define is
+baked in at build time, so an APK built ahead of CI cannot carry this run's ports, its run id, or an
+enrolment code that did not exist when it was built. Handing them over here costs one request at
+startup and lets the same binary serve every run.
 
 The trace exists because a release web build reports a failed expectation as one line — the test's
 name — and nothing else. Without it, a red run says only that the journey failed, not where. The
@@ -37,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAUGHT = []
 NOTES = []
+PARAMS = {}
 LOCK = threading.Lock()
 
 
@@ -110,6 +119,9 @@ class Http(BaseHTTPRequestHandler):
     def do_GET(self):
         # /notes before /note: the shorter one is a prefix of the longer, and getting that backwards
         # makes reading the trace record a new empty line instead.
+        if self.path.startswith('/run'):
+            with LOCK:
+                return self._send(200, dict(PARAMS))
         if self.path.startswith('/notes'):
             with LOCK:
                 return self._send(200, list(NOTES))
@@ -130,6 +142,19 @@ class Http(BaseHTTPRequestHandler):
             msgs = [m for m in reversed(CAUGHT)
                     if want is None or any(a.lower() == want for a in m['to'])]
         self._send(200, msgs)
+
+    def do_POST(self):
+        if not self.path.startswith('/run'):
+            return self._send(404, {'error': 'not found'})
+        raw = self.rfile.read(int(self.headers.get('Content-Length') or 0))
+        try:
+            given = json.loads(raw or b'{}')
+        except ValueError:
+            return self._send(400, {'error': 'not json'})
+        with LOCK:
+            PARAMS.clear()
+            PARAMS.update({str(k): str(v) for k, v in given.items()})
+        self._send(200, {'ok': True})
 
     def do_DELETE(self):
         with LOCK:
