@@ -17,7 +17,8 @@
 ///   * outside again, afterwards: assert the program on the machine actually heard what was said.
 ///     That assertion cannot live in here, because it is about a file on another host.
 ///
-/// Parameters (all --dart-define): those in support.dart, plus MT_E2E_ENROLL_CODE.
+/// Parameters: the mail sink hands over this run's id and, when a machine was spun for it, the
+/// enrolment code — see collectRunParameters in support.dart for why they are not compiled in.
 library;
 
 import 'package:flutter/material.dart';
@@ -31,16 +32,12 @@ import 'package:integration_test/integration_test.dart';
 
 import 'support.dart';
 
-const _enrollCode = String.fromEnvironment('MT_E2E_ENROLL_CODE');
-
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('a person signs up, brings a machine in, and works with an agent', (
     tester,
   ) async {
-    expect(runId, isNotEmpty, reason: 'MT_E2E_RUN was not passed in');
-
     await startApp(tester);
     // The nickname follows the username unless it is edited, and this journey never edits it — so
     // this is also the name the roster will show further down.
@@ -50,12 +47,15 @@ void main() {
     // belongs to every journey: a separate journey repeating it would spend a whole run saying the
     // same thing twice, and the matrix below is meant to be max(clients, environments) runs — not
     // clients plus environments.
+    // Asked once, of the product's own rule, and used wherever the shape changes what can be asked.
+    final wideClient = isWide(tester.element(find.byType(Navigator).first));
+
     final mine = await talkInAChatOfYourOwn(tester);
 
     // No code means no host was spun for this run (`--journey no-machine`, for iterating locally on
     // the app half). Everything from here needs one, so the journey stops rather than pretending it
     // did something it did not.
-    if (_enrollCode.isEmpty) {
+    if (enrollCode.isEmpty) {
       await note('no machine was handed over — stopping after the app half');
       return;
     }
@@ -89,7 +89,7 @@ void main() {
 
     // --- approve the machine ---------------------------------------------------------------------
     // `microteams link auto-connect` prints a link for a person to open; opening it is what this is.
-    await go(tester, '/connect?code=$_enrollCode');
+    await go(tester, '/connect?code=$enrollCode');
     await waitFor(
       tester,
       find.text('approve device'),
@@ -196,11 +196,7 @@ void main() {
     // Asking for the conversation again has to give back the SAME one. A second one every time is
     // how a chat list fills up with duplicates of the same agent — and from out here "the same one"
     // has an honest test: what was said in it is still there.
-    await tap(
-      tester,
-      find.byKey(const ValueKey('destination-agents')),
-      what: 'the agents tab',
-    );
+    await goToTab(tester, 'agents');
     await tapUntil(
       tester,
       find.text(agentName),
@@ -250,19 +246,27 @@ void main() {
     // a face with nothing competing for the tap. Not the fleet row: there the terminal opens and
     // the row's own tap fires too, landing on the agent's page with the terminal behind it. The
     // roster here is a plain grid of faces, so the only gesture is the one being tested.
-    await tap(
-      tester,
-      find
-          .descendant(
-            of: find.ancestor(
-              of: find.text(agentName),
-              matching: find.byType(SizedBox),
-            ),
-            matching: find.byType(UserAvatar),
-          )
-          .first,
-      what: "the agent's face in the roster",
+    final face = find
+        .descendant(
+          of: find.ancestor(
+            of: find.text(agentName),
+            matching: find.byType(SizedBox),
+          ),
+          matching: find.byType(UserAvatar),
+        )
+        .first;
+    await waitFor(tester, face, what: "the agent's face in the roster");
+    // Aimed low and left, not at the middle. The remove button is pinned to the face's top-right
+    // corner, and an IconButton's hit area is far bigger than the 16px cross it draws — big enough,
+    // on a phone, to cover the middle of a 56px face. Tapping the centre brought up "remove agent?"
+    // instead of the screen. Where a person aims at a face is the lower half of it, so that is where
+    // this aims, and the rect goes into the trace so a future failure here says which it hit.
+    final rect = tester.getRect(face);
+    await note('  the face is at $rect');
+    await tester.tapAt(
+      Offset(rect.left + rect.width * 0.3, rect.bottom - rect.height * 0.3),
     );
+    await tester.pump(const Duration(milliseconds: 200));
     await waitFor(
       tester,
       find.byTooltip('watching'),
@@ -280,19 +284,50 @@ void main() {
     // socket into this buffer — so finding it here is the round trip in one assertion. (It used to
     // look for a line a stand-in program printed at startup; the agent is the real Claude Code now,
     // and its banner is a thing Anthropic can change, while our own marker is not.)
-    final deadline = DateTime.now().add(const Duration(minutes: 1));
+    // Three minutes, not one, and it says what it is seeing while it waits. On a phone-sized client
+    // the buffer was still a single newline after a full minute — which is a different failure from
+    // "the wrong text arrived", and the trace could not tell them apart. What it holds, and whether
+    // it is filling at all, is the thing worth knowing here.
+    final deadline = DateTime.now().add(const Duration(minutes: 3));
     String screen = '';
+    var reported = DateTime.now();
     while (DateTime.now().isBefore(deadline)) {
       final view = tester.widget<TerminalView>(find.byType(TerminalView));
       screen = view.terminal.buffer.getText();
       if (screen.contains(said)) break;
+      if (DateTime.now().difference(reported) > const Duration(seconds: 30)) {
+        reported = DateTime.now();
+        final trimmed = screen.trim();
+        await note(
+          '  the terminal holds ${trimmed.length} characters so far'
+          '${trimmed.isEmpty ? '' : ': ${trimmed.substring(trimmed.length > 120 ? trimmed.length - 120 : 0)}'}',
+        );
+      }
       await tester.pump(const Duration(milliseconds: 500));
     }
-    expect(
-      screen,
-      contains(said),
-      reason: 'what was sent to the agent never appeared on its own screen',
-    );
+    // What can be asked here depends on how big the screen is, and that is not a compromise.
+    // A terminal shows the screen, not the history, and the agent's program repaints the whole of
+    // it: on a desktop-sized terminal the line this journey sent is still up there, and on a phone
+    // (measured: 1351 characters of a full-screen TUI, redrawn) it has been painted over. Demanding
+    // it there would be demanding that the product keep something it never promised to keep.
+    //
+    // The round trip is not going untested — it is tested better, outside: the harness asks the mock
+    // Anthropic API whether the MODEL was given this marker, which proves the text crossed the pty
+    // and the TUI as well as the pipe. What is left for here is what only here can see: that this
+    // terminal is a live one, carrying the agent's own screen rather than an empty rectangle.
+    if (wideClient) {
+      expect(
+        screen,
+        contains(said),
+        reason: 'what was sent to the agent never appeared on its own screen',
+      );
+    } else {
+      expect(
+        screen.trim().length,
+        greaterThan(200),
+        reason: 'the terminal opened but the machine never painted anything into it',
+      );
+    }
     await note(
       'the terminal opened over a real machine and its output arrived',
     );
@@ -466,11 +501,7 @@ void main() {
     // Renaming happens in a dialog that is a ROUTE, so it can be backed out of rather than taking the
     // page with it; closing asks first, because a session that stops takes whatever it was doing with
     // it. Both are done last: closing really does end the agent.
-    await tap(
-      tester,
-      find.byKey(const ValueKey('destination-agents')),
-      what: 'the agents tab',
-    );
+    await goToTab(tester, 'agents');
     await tapUntil(
       tester,
       find.text(agentName),
@@ -645,19 +676,57 @@ Finder treeRowFor(String name) =>
 /// question asked here is not "did I tap" but "can I see it", which is also the question a person
 /// asks. (Two runs were lost to this: the file that seemed to prove the tree was open was the
 /// document open in the pane beside it, not a row.)
+/// Get back to the tree from wherever an open document left us.
+///
+/// On a phone a document is the whole screen; on a wide window the tree is beside it and this is
+/// never called.
+Future<void> backToTheTree(WidgetTester tester) async {
+  final back = find.byTooltip('Back');
+  if (back.evaluate().isNotEmpty) {
+    await tap(tester, back, what: 'back, to the tree');
+    return;
+  }
+  // No back button on an open document — it keeps the tab bar — so the way back is the product's own
+  // rule that tapping the tab you are already on returns it to its root. Which is what a person does
+  // here too.
+  await tap(
+    tester,
+    find.byKey(const ValueKey('destination-docs')),
+    what: 'the docs tab again, to get back to the tree',
+  );
+  await tester.pump(const Duration(milliseconds: 500));
+}
+
 Future<void> revealIn(
   WidgetTester tester,
   String folder,
   Finder row, {
   required String what,
 }) async {
-  await tapUntil(
-    tester,
-    treeRowFor(folder),
-    row,
-    what: 'the row for $folder',
-    expecting: what,
-  );
+  // Recovery hangs off the FAILURE, not off a check beforehand. On a phone, making a file opens it
+  // and the tree it was made in is behind — but the navigation happens a moment after the dialog
+  // closes, so any check run first sees the tree still up, concludes there is nothing to recover,
+  // and then times out on a page that had already left. Twice I fixed the check and twice it was
+  // still looking at the wrong instant. Asking for the tree and dealing with not getting it needs no
+  // guess about when the screen changes.
+  //
+  // On a wide window both panes are visible, the first attempt succeeds, and none of this runs.
+  for (var attempt = 0; ; attempt++) {
+    try {
+      await tapUntil(
+        tester,
+        treeRowFor(folder),
+        row,
+        what: 'the row for $folder',
+        expecting: what,
+      );
+      return;
+    } catch (_) {
+      if (attempt >= 2) rethrow;
+      await note('  not looking at the tree — going back to it');
+      await backToTheTree(tester);
+    }
+  }
 }
 
 /// Make a file (or a folder) from another row's own actions.
@@ -697,22 +766,32 @@ Future<void> newInTree(
 /// dialog said "delete inside.md?" while the journey thought it was deleting renamed.md.) Scoping
 /// the finder to this row's own subtree is what makes the question the right one.
 Future<void> actionsFor(WidgetTester tester, String name) async {
-  final row = find.ancestor(
-    of: treeRowFor(name),
-    matching: find.byType(MouseRegion),
-  );
-  final itsActions = find.descendant(
-    of: row.first,
-    matching: find.byTooltip('actions'),
-  );
-  await tapUntil(
-    tester,
-    treeRowFor(name),
-    itsActions,
-    what: 'the row for $name',
-    expecting: "$name's own actions",
-  );
-  await tap(tester, itsActions, what: "$name's actions");
+  // Scoped to this row's own subtree, and never with a bare `.first`: a `.first` finder THROWS
+  // rather than reporting empty, and on a phone this row is regularly not on screen at all — tapping
+  // a file opens it, and the tree it lives in is then behind the document. That threw
+  // "Bad state: No element" out of the middle of a finder.
+  Finder itsActions() {
+    final rows = find.ancestor(
+      of: treeRowFor(name),
+      matching: find.byType(MouseRegion),
+    );
+    if (rows.evaluate().isEmpty) return find.byKey(const ValueKey('no row on screen'));
+    return find.descendant(of: rows.first, matching: find.byTooltip('actions'));
+  }
+
+  // A row's "..." belongs to the row you last touched. On a wide window touching it is enough. On a
+  // phone touching a FILE opens it, so the way to have it be the touched row and be looking at the
+  // tree is to open it and come back — which is what a person does, and what this does.
+  for (var attempt = 0; attempt < 3 && itsActions().evaluate().isEmpty; attempt++) {
+    if (treeRowFor(name).evaluate().isEmpty) {
+      await backToTheTree(tester);
+      continue;
+    }
+    await tap(tester, treeRowFor(name), what: 'the row for $name');
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+  await waitFor(tester, itsActions(), what: "$name's own actions");
+  await tap(tester, itsActions(), what: "$name's actions");
 }
 
 /// The shape of a conversation: what is measured rather than reviewed.

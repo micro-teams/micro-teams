@@ -43,25 +43,28 @@ install_agent_program() {
     return 0
   fi
 
-  # Retried: these reach the public internet, and a registry blip should not be reported as a
-  # product failure.
+  # Retried, and with a widening gap: these reach the public internet, and a registry blip should
+  # not be reported as a product failure. Three tries five seconds apart span fifteen seconds, and
+  # the wobbles actually seen here last minutes — all three land inside the same one and the run
+  # dies for a reason that has nothing to do with the product. Backing off covers a real outage
+  # without making a genuinely broken install slow to report.
   local attempt
   for attempt in 1 2 3; do
     docker exec "$MACHINE_CT" bash -c "set -e
       export DEBIAN_FRONTEND=noninteractive
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
       apt-get install -y -qq nodejs >/dev/null" && break
-    echo "  (node install attempt $attempt failed, retrying)"; sleep 5
+    echo "  (node install attempt $attempt failed, retrying)"; sleep $((attempt * 15))
   done
 
   case "$leg" in
     npm:*) for attempt in 1 2 3; do
              docker exec "$MACHINE_CT" npm i -g "@anthropic-ai/claude-code@${leg#npm:}" >/dev/null 2>&1 && break
-             echo "  (claude install attempt $attempt failed, retrying)"; sleep 5
+             echo "  (claude install attempt $attempt failed, retrying)"; sleep $((attempt * 15))
            done ;;
     *)     for attempt in 1 2 3; do
              onmachine 'curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1' && break
-             echo "  (claude installer attempt $attempt failed, retrying)"; sleep 5
+             echo "  (claude installer attempt $attempt failed, retrying)"; sleep $((attempt * 15))
            done ;;
   esac
 
