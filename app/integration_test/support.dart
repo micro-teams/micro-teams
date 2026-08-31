@@ -11,18 +11,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:microteams/main.dart' as app;
+import 'package:microteams/src/common/ui/theme.dart';
 
 /// Where the mail sink can be reached FROM THE BROWSER. The gateway puts it on this origin, so the
 /// test asks nobody for permission: a cross-origin fetch would drag CORS into a test about
 /// something else entirely.
 const mailBase = String.fromEnvironment('MT_E2E_MAIL', defaultValue: '/mail');
 
+/// What differs from one run to the next, fetched rather than compiled in.
+///
+/// A `--dart-define` is baked into the binary at build time. That is fine for a build made for this
+/// run, and impossible for one built ahead of it: an APK built once and installed for every run
+/// cannot carry this run's id, and certainly cannot carry an enrolment code that did not exist when
+/// it was built. The mail sink is already the run's side channel in both directions, so the harness
+/// leaves them there and the journey collects them on the way up — see [collectRunParameters].
+var _given = <String, String>{};
+
 /// A token unique to this run. Every name a journey invents contains it, which is what lets any
 /// number of journeys share one deployment.
-const runId = String.fromEnvironment('MT_E2E_RUN');
+String get runId => _given['runId'] ?? '';
+
+/// The code the machine printed when it started enrolling, empty when this run spun no machine.
+String get enrollCode => _given['enrollCode'] ?? '';
+
+/// Ask the mail sink what this run is.
+///
+/// Failing here is fatal on purpose, unlike [note]: a journey that ran on the previous run's id
+/// would collide with names that already exist and fail somewhere far less legible.
+Future<void> collectRunParameters() async {
+  Object? last;
+  for (var attempt = 0; attempt < 10; attempt++) {
+    try {
+      final got = await Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      ).get<Map<String, dynamic>>('$mailBase/run');
+      final params = got.data ?? const {};
+      if (params['runId'] is String && (params['runId'] as String).isNotEmpty) {
+        _given = params.map((key, value) => MapEntry(key, '$value'));
+        return;
+      }
+      last = 'the harness has not said yet: $params';
+    } catch (error) {
+      last = error;
+    }
+    await Future<void>.delayed(const Duration(seconds: 1));
+  }
+  fail('could not read this run\'s parameters from $mailBase/run — $last');
+}
 
 /// Meets the four rules the register form checks, and never needs to change with them.
 const password = 'E2e-passw0rd!';
+
+/// The step being waited on, for anything that has to report from somewhere it cannot ask.
+String _step = 'starting up';
+
+/// Overflows seen since the last time they were reported. Drained from [waitFor], because inside the
+/// error handler there is nothing safe to await.
+final _overflows = <String>[];
 
 /// Say where the journey has got to.
 ///
@@ -65,6 +113,16 @@ Future<void> noteScreen() async {
       )
       .toList();
   await note('  the buttons are: ${buttons.join(' | ')}');
+  // What every field is actually holding. A form that looks right and submits wrong is the failure
+  // this answers: on Android the fields have come back shifted by one, and the labels on screen say
+  // nothing about which value landed where.
+  final fields = find
+      .byType(TextField)
+      .evaluate()
+      .map((element) => element.widget as TextField)
+      .map((field) => '${field.key}="${field.controller?.text ?? ''}"')
+      .toList();
+  await note('  the fields hold: ${fields.join(' | ')}');
 }
 
 /// Boot the app, with a deadline.
@@ -72,7 +130,34 @@ Future<void> noteScreen() async {
 /// An unbounded await here is the one failure this harness cannot report: the run just sits there
 /// until something outside kills it, and the log says nothing at all.
 Future<void> startApp(WidgetTester tester) async {
+  await collectRunParameters();
   await note('booting the app');
+  // Say WHERE an overflow happened, in terms of the step that was running.
+  //
+  // Flutter reports "a RenderFlex overflowed" at the end of the run, by which time the widget is
+  // disposed and its creator chain reads DEFUNCT — enough to know something is clipped, not enough
+  // to know what. Guessing from that cost a run: the field picked as the only candidate that fits
+  // turned out not to be it (widened, the overflow was still exactly 55 pixels).
+  //
+  // The handler itself touches NOTHING but a string. Asking the tester where we are from in here is
+  // a call into a guarded API from the middle of paint, and it fails the run with "Guarded function
+  // conflict" — which cost another run. The last step's own name is already recorded, and it says
+  // which screen was up just as well.
+  final wasReporting = FlutterError.onError;
+  FlutterError.onError = (details) {
+    final what = details.exception.toString();
+    if (what.contains('overflowed')) {
+      // The whole report, not just the first line. Taken HERE, the creator chain still names live
+      // widgets; the copy Flutter prints at the end of the run has been through disposal and every
+      // entry reads DEFUNCT. Two runs were spent guessing from that, and both guesses were wrong.
+      final full = details.toString().replaceAll('\n', ' ');
+      _overflows.add(
+        '${what.split('\n').first} — while: $_step — '
+        '${full.substring(0, full.length > 1600 ? 1600 : full.length)}',
+      );
+    }
+    wasReporting?.call(details);
+  };
   await app.main().timeout(
     const Duration(seconds: 60),
     onTimeout: () => fail('the app did not finish booting within 60s'),
@@ -93,16 +178,8 @@ Future<String> signUp(WidgetTester tester, {String suffix = ''}) async {
   final username = 'e2e$runId$suffix';
   final email = '$username@example.com';
 
-  await tap(
-    tester,
-    find.text('no account? register'),
-    what: 'the register link',
-  );
-  await waitFor(
-    tester,
-    find.byKey(const Key('register-username')),
-    what: 'the register form',
-  );
+  await tap(tester, find.text('no account? register'), what: 'the register link');
+  await waitFor(tester, find.byKey(const Key('register-username')), what: 'the register form');
 
   // All four together, and not believed until they all read back — see [fill]. Typed one at a time
   // with a check each, this form came out shifted by a field on Android.
@@ -119,16 +196,18 @@ Future<String> signUp(WidgetTester tester, {String suffix = ''}) async {
     find.text('a code is on its way to that address'),
     what: 'confirmation that the code was sent',
   );
-  await type(
-    tester,
-    const Key('register-code'),
-    await codeFromMail(tester, email),
-  );
-  await tap(
-    tester,
-    find.text('create account'),
-    what: 'the create-account button',
-  );
+  await type(tester, const Key('register-code'), await codeFromMail(tester, email));
+  // The code went in last, so nothing else reads the email field back — and text that misses its
+  // field lands in the one focused before it, which is exactly this one. Left unchecked it submits
+  // a different address from the one that was mailed, and the form simply refuses with nothing on
+  // screen to say why.
+  final emailNow =
+      tester.widget<TextField>(find.byKey(const Key('register-email'))).controller?.text ?? '';
+  if (emailNow != email) {
+    await note('  the code overwrote the email field, which now holds "$emailNow"');
+    fail('typing the code landed in the email field — it holds "$emailNow"');
+  }
+  await tap(tester, find.text('create account'), what: 'the create-account button');
 
   // Landing on the chats list is how the app says the session is real: the router only lets a
   // signed-in tree exist.
@@ -154,6 +233,12 @@ Future<void> waitFor(
   String? what,
   Duration limit = const Duration(seconds: 60),
 }) async {
+  // Whatever overflowed during the step before this one, reported now — out here it is safe to
+  // await, and the name it carries is the step it happened under.
+  while (_overflows.isNotEmpty) {
+    await note('  OVERFLOW: ${_overflows.removeAt(0)}');
+  }
+  _step = what ?? finder.toString();
   await note('waiting for ${what ?? finder}');
   final deadline = DateTime.now().add(limit);
   while (DateTime.now().isBefore(deadline)) {
@@ -165,9 +250,7 @@ Future<void> waitFor(
   }
   await note('  GAVE UP on ${what ?? finder}');
   await noteScreen();
-  fail(
-    'waited ${limit.inSeconds}s for ${what ?? finder} and it never appeared',
-  );
+  fail('waited ${limit.inSeconds}s for ${what ?? finder} and it never appeared');
 }
 
 /// The other half of [waitFor]: pump until [finder] stops matching.
@@ -193,6 +276,15 @@ Future<void> waitUntilGone(
 
 Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
   await waitFor(tester, finder, what: what);
+  // Scroll it into view first. A wide window has room for everything and this changes nothing there;
+  // a phone does not, and with the soft keyboard up the thing being tapped can be off the bottom of
+  // the window — where the tap goes nowhere and the run reports only that what should have followed
+  // never happened. Swallowed on purpose: plenty of what this taps is not inside a scrollable at
+  // all, and that is not an error.
+  try {
+    await tester.ensureVisible(finder.first);
+    await tester.pump(const Duration(milliseconds: 100));
+  } catch (_) {}
   await tester.tap(finder.first);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
@@ -208,6 +300,47 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
 ///
 /// [fill] is still the thing to use for a FORM, because one field's check cannot see the field
 /// that the next one clobbered.
+/// Tap a field and wait until it is really the one listening.
+///
+/// `testTextInput.enterText` does not address a widget: it delivers to whatever input connection is
+/// attached at that moment. Attaching happens a frame or more after the tap, so text sent too early
+/// lands in the field that was focused BEFORE — and lands there silently. On Android that is how the
+/// register form came out "shifted by one": the code typed into the code field also overwrote the
+/// email field, sign-up was then attempted against an address nobody had mailed, and the only sign
+/// was a form that would not submit.
+///
+/// A single fixed pump is not enough, because how long the attach takes is not ours to know. So
+/// this waits for the thing itself — the field's own EditableText holding focus — and then gives the
+/// framework a few frames to finish wiring the connection up.
+Future<void> takeFocus(WidgetTester tester, Finder field) async {
+  // `showKeyboard`, not `tap`. A tap has to hit the widget, and on a phone-sized screen this form
+  // does not fit: the field can be under the soft keyboard or off the bottom, and then the tap
+  // focuses nothing at all — measured, on the register form, where the field never took focus in
+  // five seconds of pumping. `showKeyboard` asks the field for focus directly and attaches the
+  // input connection to it, which is the thing the typing actually needs.
+  await tester.ensureVisible(field);
+  await tester.pump(const Duration(milliseconds: 100));
+  await tester.showKeyboard(field);
+  final editable = find.descendant(of: field, matching: find.byType(EditableText));
+  for (
+    var waited = Duration.zero;
+    waited < const Duration(seconds: 5);
+    waited += const Duration(milliseconds: 100)
+  ) {
+    await tester.pump(const Duration(milliseconds: 100));
+    final found = editable.evaluate();
+    if (found.isNotEmpty && (found.first.widget as EditableText).focusNode.hasFocus) {
+      // Focus is not the connection. Both arrive in the same handful of frames, and these are what
+      // the connection needs after focus has landed.
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      return;
+    }
+  }
+  await note('  a field never took focus');
+}
+
 Future<void> typeInto(WidgetTester tester, Finder finder, String text) async {
   await waitFor(tester, finder, what: 'a field to type "$text" into');
 
@@ -220,13 +353,11 @@ Future<void> typeInto(WidgetTester tester, Finder finder, String text) async {
   // outlives nothing.
   final controller = tester.widget<TextField>(finder.first).controller;
 
-  // Tap first, then testTextInput — the order that has always been green on the web, restored after
-  // a detour. It was briefly reversed to `enterText` first, on a theory about asynchronous focus
-  // that a controlled experiment later disproved; the reversal then broke the composer, which takes
-  // text this way and not the other. `enterText` stays as the fallback for a widget that will not
-  // take it, which is the case this order cannot serve.
-  await tester.tap(finder.first);
-  await tester.pump(const Duration(milliseconds: 100));
+  // Tap first, then testTextInput — the order that has always been green on the web. What changed is
+  // that the wait between them is no longer a fixed pump but [takeFocus], which waits for the field
+  // to actually be the one listening. `enterText` stays as the fallback for a widget that will not
+  // take text this way.
+  await takeFocus(tester, finder.first);
   tester.testTextInput.enterText(text);
   await tester.pump(const Duration(milliseconds: 100));
 
@@ -285,18 +416,14 @@ Future<void> fill(WidgetTester tester, Map<Key, String> fields) async {
     };
     if (wrong.isEmpty) return;
 
-    await note(
-      '  ${wrong.length} field(s) did not hold what was typed — round $round',
-    );
+    await note('  ${wrong.length} field(s) did not hold what was typed — round $round');
     for (final entry in wrong.entries) {
       await typeInto(tester, find.byKey(entry.key), entry.value);
       await tester.pump(const Duration(milliseconds: 200));
     }
   }
 
-  final held = {
-    for (final e in fields.entries) '${e.key}': _held(tester, e.key),
-  };
+  final held = {for (final e in fields.entries) '${e.key}': _held(tester, e.key)};
   await note('  giving up on the form: $held');
   fail('a form would not hold what was typed into it: $held');
 }
@@ -339,9 +466,10 @@ Future<void> tapUntil(
 }
 
 Future<void> type(WidgetTester tester, Key key, String text) async {
-  await waitFor(tester, find.byKey(key));
-  await tester.tap(find.byKey(key));
-  await tester.pump(const Duration(milliseconds: 100));
+  // Named, because without it the trace prints the whole widget description — pages of it — instead
+  // of saying which field it is waiting for.
+  await waitFor(tester, find.byKey(key), what: 'the $key field');
+  await takeFocus(tester, find.byKey(key));
   tester.testTextInput.enterText(text);
   await tester.pump(const Duration(milliseconds: 100));
 
@@ -350,8 +478,7 @@ Future<void> type(WidgetTester tester, Key key, String text) async {
     // One more way, in case a field is not the one holding focus.
     await tester.enterText(find.byKey(key), text);
     await tester.pump(const Duration(milliseconds: 100));
-    final second =
-        tester.widget<TextField>(find.byKey(key)).controller?.text ?? '';
+    final second = tester.widget<TextField>(find.byKey(key)).controller?.text ?? '';
     if (second != text) {
       await note('  typing into $key did not stick: field holds "$second"');
       fail('could not type into $key — the field holds "$second"');
@@ -394,11 +521,7 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
 ) async {
   // --- start a conversation -------------------------------------------------------------------
   final title = 'journey $runId';
-  await tap(
-    tester,
-    find.byIcon(Icons.add_comment_outlined),
-    what: 'the new-chat button',
-  );
+  await tap(tester, find.byIcon(Icons.add_comment_outlined), what: 'the new-chat button');
   await waitFor(tester, find.text('New chat'), what: 'the New chat dialog');
   await typeInto(tester, find.widgetWithText(TextField, 'Title'), title);
   await tap(
@@ -408,18 +531,10 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   );
 
   // --- say something ---------------------------------------------------------------------------
-  await waitFor(
-    tester,
-    find.widgetWithText(TextField, 'message…'),
-    what: 'the composer',
-  );
+  await waitFor(tester, find.widgetWithText(TextField, 'message…'), what: 'the composer');
   final said = 'hello from $runId';
   await typeInto(tester, find.widgetWithText(TextField, 'message…'), said);
-  await tap(
-    tester,
-    find.widgetWithText(FilledButton, 'send'),
-    what: 'the send button',
-  );
+  await tap(tester, find.widgetWithText(FilledButton, 'send'), what: 'the send button');
 
   // The bubble alone proves nothing: it is painted optimistically the instant the send button is
   // pressed, and it would look exactly the same if the request never left. What proves the
@@ -430,18 +545,11 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   // test/chats/send_test.dart used to assert against a fake; here it is the real composer after a
   // real send.)
   expect(
-    tester
-        .widget<TextField>(find.widgetWithText(TextField, 'message…').first)
-        .controller
-        ?.text,
+    tester.widget<TextField>(find.widgetWithText(TextField, 'message…').first).controller?.text,
     isEmpty,
     reason: 'the composer should be empty once the message is away',
   );
-  await waitUntilGone(
-    tester,
-    find.byIcon(Icons.schedule),
-    what: 'the sending… clock',
-  );
+  await waitUntilGone(tester, find.byIcon(Icons.schedule), what: 'the sending… clock');
 
   // Then leave the thread and come back, so the messages are read again rather than remembered.
   // How you leave depends on the shape of the window: a phone stacks the thread over the list and
@@ -449,11 +557,7 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   // whatever client it was handed, so it asks rather than assumes.
   if (find.byTooltip('Back').evaluate().isNotEmpty) {
     await tap(tester, find.byTooltip('Back'), what: 'the back button');
-    await waitFor(
-      tester,
-      find.text(title),
-      what: 'the thread back in the list',
-    );
+    await waitFor(tester, find.text(title), what: 'the thread back in the list');
   }
   await tap(tester, find.text(title), what: 'the thread in the list');
   await waitFor(tester, find.text(said), what: 'the message, read back');
@@ -469,11 +573,23 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   // worth testing: leaving a conversation for another section and coming back should not put you
   // in front of the list again. (This is test/shell_test.dart's first case, against the real
   // shell instead of a toy router.)
-  await tap(
-    tester,
-    find.byKey(const ValueKey('destination-agents')),
-    what: 'the agents tab',
-  );
+  //
+  // Where you leave FROM depends on the shape of the window, and the difference is deliberate: on a
+  // phone, inside a conversation, there is no tab bar at all — the conversation wants those pixels,
+  // and WeChat does not show one there either. So the phone leaves the conversation first, and on
+  // the way asserts the bar really is gone; asserting the wide behaviour here would be asserting
+  // something this product deliberately does not do.
+  final wide = isWide(tester.element(find.byType(Navigator).first));
+  if (!wide) {
+    expect(
+      find.byKey(const ValueKey('destination-agents')),
+      findsNothing,
+      reason: 'a phone shows no tab bar inside a conversation',
+    );
+    await tap(tester, find.byTooltip('Back'), what: 'the back button, out of the conversation');
+    await waitFor(tester, find.text(title), what: 'the list, with the tab bar back');
+  }
+  await tap(tester, find.byKey(const ValueKey('destination-agents')), what: 'the agents tab');
   await waitFor(tester, find.text('machines'), what: 'the agents page');
   await tap(
     tester,
@@ -482,23 +598,42 @@ Future<({String title, String said, String location})> talkInAChatOfYourOwn(
   );
   await waitFor(
     tester,
-    find.text(said),
-    what: 'the conversation that was open, still open',
+    // What "where you left off" means differs with the shape, and both are the same rule: the
+    // conversation on a desktop, which never left the screen; the list on a phone, which is where
+    // this branch was when it was last seen.
+    wide ? find.text(said) : find.text(title),
+    what: 'the chats branch, where it was left',
   );
 
-  // And tapping the tab you are already on goes back to its root — the way out of a detail view.
-  await tap(
-    tester,
-    find.byKey(const ValueKey('destination-chats')),
-    what: 'the chats tab again',
-  );
-  await waitUntilGone(
-    tester,
-    find.widgetWithText(TextField, 'message…'),
-    what: 'the composer, on the way back to the list',
-  );
+  if (wide) {
+    // And tapping the tab you are already on goes back to its root — the way out of a detail view.
+    // Only where there is a detail view to be in: a phone is already at the root here.
+    await tap(tester, find.byKey(const ValueKey('destination-chats')), what: 'the chats tab again');
+    await waitUntilGone(
+      tester,
+      find.widgetWithText(TextField, 'message…'),
+      what: 'the composer, on the way back to the list',
+    );
+  }
   // Where this conversation lives, so somebody who is NOT in it can be sent to the same address.
   return (title: title, said: said, location: location);
+}
+
+/// Reach a tab, from wherever the journey happens to be.
+///
+/// On a phone the tab bar is deliberately absent inside a conversation (see the shell: the
+/// conversation wants those pixels), so a journey that simply taps the tab works on a desktop and
+/// times out on a device — twice over, in two different places, before this existed. Coming out of
+/// the conversation first is what a person does there, and on a wide window there is nothing to come
+/// out of, so the loop does nothing.
+Future<void> goToTab(WidgetTester tester, String label) async {
+  final tab = find.byKey(ValueKey('destination-$label'));
+  for (var i = 0; i < 3 && tab.evaluate().isEmpty; i++) {
+    final back = find.byTooltip('Back');
+    if (back.evaluate().isEmpty) break;
+    await tap(tester, back, what: 'back, on the way to the $label tab');
+  }
+  await tap(tester, tab, what: 'the $label tab');
 }
 
 /// The address the app is at, as the browser's own bar would show it.
