@@ -325,7 +325,8 @@ void main() {
       expect(
         screen.trim().length,
         greaterThan(200),
-        reason: 'the terminal opened but the machine never painted anything into it',
+        reason:
+            'the terminal opened but the machine never painted anything into it',
       );
     }
     await note(
@@ -775,14 +776,20 @@ Future<void> actionsFor(WidgetTester tester, String name) async {
       of: treeRowFor(name),
       matching: find.byType(MouseRegion),
     );
-    if (rows.evaluate().isEmpty) return find.byKey(const ValueKey('no row on screen'));
+    if (rows.evaluate().isEmpty) {
+      return find.byKey(const ValueKey('no row on screen'));
+    }
     return find.descendant(of: rows.first, matching: find.byTooltip('actions'));
   }
 
   // A row's "..." belongs to the row you last touched. On a wide window touching it is enough. On a
   // phone touching a FILE opens it, so the way to have it be the touched row and be looking at the
   // tree is to open it and come back — which is what a person does, and what this does.
-  for (var attempt = 0; attempt < 3 && itsActions().evaluate().isEmpty; attempt++) {
+  for (
+    var attempt = 0;
+    attempt < 3 && itsActions().evaluate().isEmpty;
+    attempt++
+  ) {
     if (treeRowFor(name).evaluate().isEmpty) {
       await backToTheTree(tester);
       continue;
