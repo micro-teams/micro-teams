@@ -321,8 +321,16 @@ if [ "$JOURNEY" = "full" ]; then
   # until a token comes back, write the config, and run the connector the way its boot service would
   # (a container has no init to install one into). This is the only thing that happens in parallel
   # with the journey, and it is the machine's own behaviour, not direction from outside.
+  #
+  # The window is forty minutes, not four. It has to outlast everything between here and the moment
+  # a person approves, and on android that includes gradle building the app from cold: measured in
+  # CI, enrolment started at 19:02:57 and the test had not even reached the app by 19:07 — the old
+  # 120 × 2s had already run out. The machine then never got a token, stayed offline, and the
+  # journey failed at "open an agent" with the machine shown as not connected, which looks like a
+  # product fault and is a stopwatch. The loop exits the moment a token arrives, so a long window
+  # costs a container's sleep and nothing else.
   docker exec -d "$MACHINE_CT" bash -c "
-    for _ in \$(seq 1 120); do
+    for _ in \$(seq 1 1200); do
       OUT=\$(curl -fsS -X POST http://nginx/mt/machine/enroll/poll -H 'Content-Type: application/json' \
         -d '{\"code\":\"$CODE\"}' || true)
       TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\",\"\"))' 2>/dev/null || true)
