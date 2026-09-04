@@ -825,19 +825,38 @@ Future<void> lookRight(WidgetTester tester) async {
   );
   await waitFor(tester, find.text(wall), what: 'the wall in a bubble');
 
-  // The list the messages are in, found through a message rather than by type. On a wide window
-  // the conversation sits beside the chat list, so `find.byType(ListView).first` is the list of
-  // conversations — 320 wide here — and every measurement taken against it is a measurement of the
-  // wrong pane. (That is what made this step fail twice with numbers that looked like real defects:
-  // a bubble "504 wide in a row of 320".)
-  final list = find
+  // The list the messages are in, found through a message rather than by type — and then the WIDEST
+  // of the ones that come back. On a wide window this text is on screen twice: once in the bubble,
+  // and once as the conversation's last line in the list beside it. Both are inside a ListView, so
+  // `.first` picks whichever the tree happens to reach first, and when that is the 320-wide list of
+  // conversations every measurement below is a measurement of the wrong pane — reported as "a
+  // bubble 504 wide in a row of 320", which reads exactly like a real defect and is not one. It
+  // failed that way three times, twice against `.first` and once against a comment saying `.first`
+  // was enough. The conversation is the wider pane, always, and asking for that is asking for the
+  // thing itself rather than for a position in a traversal.
+  final lists = find
       .ancestor(of: find.text(wall), matching: find.byType(ListView))
-      .first;
-  final row = tester.getSize(list).width;
+      .evaluate()
+      .map((element) => element.renderObject! as RenderBox)
+      .toList();
+  final widest = lists.reduce((a, b) => a.size.width >= b.size.width ? a : b);
+  final list = find.byElementPredicate(
+    (element) => element.renderObject == widest,
+  );
+  final row = widest.size.width;
 
-  // A bubble leaves the sides of the row visible, or nothing can look aligned.
+  // A bubble leaves the sides of the row visible, or nothing can look aligned. Scoped to that same
+  // pane, for the same reason.
   final bubble = tester.getSize(
-    find.ancestor(of: find.text(wall), matching: find.byType(Container)).first,
+    find
+        .descendant(
+          of: list,
+          matching: find.ancestor(
+            of: find.text(wall),
+            matching: find.byType(Container),
+          ),
+        )
+        .first,
   );
   expect(
     bubble.width,
