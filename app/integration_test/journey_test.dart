@@ -825,39 +825,46 @@ Future<void> lookRight(WidgetTester tester) async {
   );
   await waitFor(tester, find.text(wall), what: 'the wall in a bubble');
 
-  // The list the messages are in, found through a message rather than by type — and then the WIDEST
-  // of the ones that come back. On a wide window this text is on screen twice: once in the bubble,
-  // and once as the conversation's last line in the list beside it. Both are inside a ListView, so
-  // `.first` picks whichever the tree happens to reach first, and when that is the 320-wide list of
-  // conversations every measurement below is a measurement of the wrong pane — reported as "a
-  // bubble 504 wide in a row of 320", which reads exactly like a real defect and is not one. It
-  // failed that way three times, twice against `.first` and once against a comment saying `.first`
-  // was enough. The conversation is the wider pane, always, and asking for that is asking for the
-  // thing itself rather than for a position in a traversal.
-  final lists = find
+  // Everything below is measured on the conversation's own pane, and the pane is picked by SIZE
+  // rather than by position in the tree.
+  //
+  // On a wide window this text is on screen twice: once in the bubble, and once as the
+  // conversation's last line in the list beside it. Both sit inside a ListView, so `.first` takes
+  // whichever the tree reaches first, and when that is the 320-wide list of conversations every
+  // number below describes the wrong pane — reported as "a bubble 504 wide in a row of 320", which
+  // reads exactly like a real defect and is not one. That happened three times: twice against
+  // `.first`, and once against a comment of mine claiming `.first` was enough.
+  //
+  // Rects come from the render tree rather than from finders. A finder built from a render object
+  // matches every widget that shares it — thirteen of them here, Scrollable and RepaintBoundary and
+  // the rest — and `getRect` then refuses to answer at all. The render object IS the box being
+  // measured; going back through a finder to reach it only adds a way to be wrong.
+  Rect rectOf(Element element) {
+    final box = element.renderObject! as RenderBox;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  final panes = find
       .ancestor(of: find.text(wall), matching: find.byType(ListView))
       .evaluate()
-      .map((element) => element.renderObject! as RenderBox)
+      .map(rectOf)
       .toList();
-  final widest = lists.reduce((a, b) => a.size.width >= b.size.width ? a : b);
-  final list = find.byElementPredicate(
-    (element) => element.renderObject == widest,
-  );
-  final row = widest.size.width;
+  final pane = panes.reduce((a, b) => a.width >= b.width ? a : b);
+  final row = pane.width;
 
-  // A bubble leaves the sides of the row visible, or nothing can look aligned. Scoped to that same
-  // pane, for the same reason.
-  final bubble = tester.getSize(
-    find
-        .descendant(
-          of: list,
-          matching: find.ancestor(
-            of: find.text(wall),
-            matching: find.byType(Container),
-          ),
-        )
-        .first,
-  );
+  // The bubble in THAT pane: of the containers wrapped around this text, the one whose box is
+  // inside the conversation.
+  final bubble = find
+      .ancestor(of: find.text(wall), matching: find.byType(Container))
+      .evaluate()
+      .map(rectOf)
+      .firstWhere(
+        (r) => pane.contains(r.center),
+        orElse: () =>
+            fail('no bubble for the wall inside the conversation pane'),
+      );
+
+  // A bubble leaves the sides of the row visible, or nothing can look aligned.
   expect(
     bubble.width,
     lessThanOrEqualTo(row * 0.8),
@@ -866,16 +873,26 @@ Future<void> lookRight(WidgetTester tester) async {
 
   // Own messages sit on the right. (The other half of this rule — theirs on the left, in the other
   // green — needs a second person talking, and stays in a unit test until a journey has one.)
-  //
-  // Scoped to the list, like everything else here: the same words are on screen twice, once in the
-  // bubble and once as the conversation's last line in the list beside it, and an unscoped finder
-  // matches both and measures neither.
-  final inList = find.descendant(of: list, matching: find.text(wall));
   expect(
-    tester.getRect(inList).center.dx,
-    greaterThan(tester.getRect(list).center.dx),
+    bubble.center.dx,
+    greaterThan(pane.center.dx),
     reason: 'own message is not on the right',
   );
+
+  // The conversation's own half of the screen, named by the one thing only it has: the composer.
+  // Everything below is scoped to it, for the same reason the pane above was picked by size.
+  final conversation = find
+      .ancestor(
+        of: find.widgetWithText(TextField, 'message…'),
+        matching: find.byType(Scaffold),
+      )
+      .first;
+  final inList = find
+      .descendant(of: conversation, matching: find.text(wall))
+      .first;
+  final list = find
+      .descendant(of: conversation, matching: find.byType(ListView))
+      .first;
 
   // The green is the one React used. "It went slightly off" is not caught in review.
   final painted = tester
