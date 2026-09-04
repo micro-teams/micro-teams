@@ -658,8 +658,15 @@ jobs:
         if: matrix.client == 'android'
         env:
           ANDROID_HOME: ${{ github.workspace }}/android-sdk
+          # Named, not left to the default. `avdmanager` and `emulator` each work out where AVDs
+          # live from their own list of environment variables, and on this runner they disagreed:
+          # the AVD was created and the emulator then said `Unknown AVD name [mt-e2e]`, having
+          # looked in $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd and $HOME/.android/avd. Saying it
+          # once, for both, is what makes that impossible.
+          ANDROID_AVD_HOME: ${{ github.workspace }}/avd
         run: |
           set -e
+          mkdir -p "$ANDROID_AVD_HOME"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
           curl -fsSL -o /tmp/cmdtools.zip \
             https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
@@ -671,6 +678,15 @@ jobs:
             "platforms;android-36" "build-tools;36.0.0" >/dev/null
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
             -n mt-e2e -k "system-images;android-30;default;x86_64" -d pixel_5
+          # And check it is really there before booting anything: `create avd` exiting 0 is not the
+          # same as an AVD the emulator can find, and the difference cost a run.
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx mt-e2e || {
+            echo "the AVD was created but the emulator cannot see it:"
+            "$ANDROID_HOME/emulator/emulator" -list-avds
+            ls -la "$ANDROID_AVD_HOME"
+            exit 1
+          }
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
