@@ -337,35 +337,61 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
 /// this waits for the thing itself — the field's own EditableText holding focus — and then gives the
 /// framework a few frames to finish wiring the connection up.
 Future<void> takeFocus(WidgetTester tester, Finder field) async {
-  // `showKeyboard`, not `tap`. A tap has to hit the widget, and on a phone-sized screen this form
-  // does not fit: the field can be under the soft keyboard or off the bottom, and then the tap
-  // focuses nothing at all — measured, on the register form, where the field never took focus in
-  // five seconds of pumping. `showKeyboard` asks the field for focus directly and attaches the
-  // input connection to it, which is the thing the typing actually needs.
-  await tester.ensureVisible(field);
-  await tester.pump(const Duration(milliseconds: 100));
-  await tester.showKeyboard(field);
-  final editable = find.descendant(
-    of: field,
-    matching: find.byType(EditableText),
-  );
-  for (
-    var waited = Duration.zero;
-    waited < const Duration(seconds: 5);
-    waited += const Duration(milliseconds: 100)
-  ) {
-    await tester.pump(const Duration(milliseconds: 100));
-    final found = editable.evaluate();
-    if (found.isNotEmpty &&
-        (found.first.widget as EditableText).focusNode.hasFocus) {
-      // Focus is not the connection. Both arrive in the same handful of frames, and these are what
-      // the connection needs after focus has landed.
-      for (var i = 0; i < 3; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
+  // Two ways in, and both are needed — one client each.
+  //
+  // A tap is what has always worked on the web, and it must stay first: `showKeyboard` addresses
+  // the widget the finder names, and on a wide window the list and the conversation are BOTH in the
+  // tree, so the first match is not always the one on screen. Insisting that it take focus made the
+  // composer untypeable on the web while fixing nothing — a regression this suite caught only
+  // because the matrix runs a web leg beside the android one.
+  //
+  // A tap has to HIT, though, and on a phone this app does not always fit: a field can be under the
+  // soft keyboard or below the fold, and then the tap focuses nothing at all — measured, on the
+  // register form, where five seconds of pumping never produced a focused field. That is what
+  // `showKeyboard` is for, and it is the fallback rather than the rule.
+  //
+  // Neither is trusted to have worked. Waiting matters because `testTextInput.enterText` does not
+  // address a widget at all: it delivers to whatever input connection is attached at that moment,
+  // and the attach lands a frame or more after focus does. Text sent too early goes to the field
+  // that was focused BEFORE, silently — on Android the verification code overwrote the email field
+  // that way, and sign-up then failed against an address nobody had mailed.
+  Future<bool> focused() async {
+    final editable = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    for (
+      var waited = Duration.zero;
+      waited < const Duration(seconds: 2);
+      waited += const Duration(milliseconds: 100)
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+      final found = editable.evaluate();
+      if (found.isNotEmpty &&
+          (found.first.widget as EditableText).focusNode.hasFocus) {
+        // Focus is not the connection. Both arrive in the same handful of frames, and these are
+        // what the connection needs after focus has landed.
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        return true;
       }
-      return;
     }
+    return false;
   }
+
+  // Swallowed on purpose: plenty of what this types into is not inside a scrollable at all, and
+  // that is not an error.
+  try {
+    await tester.ensureVisible(field);
+    await tester.pump(const Duration(milliseconds: 100));
+  } catch (_) {}
+  await tester.tap(field);
+  if (await focused()) return;
+  await tester.showKeyboard(field);
+  if (await focused()) return;
+  // Not fatal here. What was typed is read back by the caller, and a field that refuses text is
+  // reported there with the value it actually holds — which says more than this can.
   await note('  a field never took focus');
 }
 

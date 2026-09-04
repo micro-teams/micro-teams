@@ -601,6 +601,10 @@ jobs:
   test-journeys:
     needs: [package-zip, plan-journeys]
     runs-on: ubuntu-latest
+    # A leg that hangs is a leg that never reports. Without this the first android run sat in
+    # `adb wait-for-device` for an hour and three quarters and would have gone on to six, which is
+    # the default — and a job nobody can wait for is one people learn to ignore.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan-journeys.outputs.matrix) }}
@@ -674,12 +678,25 @@ jobs:
           nohup "$ANDROID_HOME/emulator/emulator" -avd mt-e2e -no-window -no-audio \
             -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data \
             > /tmp/emulator.log 2>&1 &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
-          for _ in $(seq 1 120); do
+          # Bounded, all of it. `adb wait-for-device` blocks FOREVER when no device ever appears,
+          # which is exactly what a broken boot looks like, and the job then hangs with nothing on
+          # screen to say why. Every wait here has an end, and the end prints the emulator's own log.
+          if ! timeout 300 "$ANDROID_HOME/platform-tools/adb" wait-for-device; then
+            echo "no device appeared in five minutes — the emulator's own log:"
+            tail -80 /tmp/emulator.log
+            exit 1
+          fi
+          booted=
+          for _ in $(seq 1 60); do
             [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed \
-                 2>/dev/null | tr -d '\r')" = "1" ] && break
+                 2>/dev/null | tr -d '\r')" = "1" ] && { booted=1; break; }
             sleep 5
           done
+          if [ -z "$booted" ]; then
+            echo "the device is there but never finished booting — the emulator's own log:"
+            tail -80 /tmp/emulator.log
+            exit 1
+          fi
           "$ANDROID_HOME/platform-tools/adb" devices
 
       - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
