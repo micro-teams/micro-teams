@@ -618,20 +618,84 @@ jobs:
       # The runner image ships Chrome and a matching ChromeDriver; the fallback is for images that
       # do not, and for anybody running this workflow somewhere else.
       - name: Make sure there is a chromedriver
+        if: matrix.client == 'web'
         run: |
           command -v chromedriver && exit 0
           sudo apt-get update -qq
           sudo apt-get install -y -qq chromium-driver
+
+      # --- the android leg -------------------------------------------------------------------
+      # Written out rather than taken from an action, because every line of it was established by
+      # running it: this is the same sequence that took the journey from red to green on a real
+      # machine, and an action would be a dependency between us and a thing we already know.
+      #
+      # The udev rule is not optional. /dev/kvm exists on this runner and is owned by root, so the
+      # emulator falls back to software rendering and takes long enough that the journey's own
+      # timeout kills it — reported as "the app never reached the test", which is a sentence about
+      # nothing.
+      - name: Let the emulator use KVM
+        if: matrix.client == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # Gradle is the whole cost of this leg from cold. The key is the lockfile and the wrapper,
+      # so a run that changes neither downloads nothing.
+      - uses: actions/cache@v4
+        if: matrix.client == 'android'
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-journey-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: gradle-journey-${{ runner.os }}-
+      - name: An emulator, booted
+        if: matrix.client == 'android'
+        env:
+          ANDROID_HOME: ${{ github.workspace }}/android-sdk
+        run: |
+          set -e
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q -o /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            platform-tools emulator "system-images;android-30;default;x86_64" \
+            "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n mt-e2e -k "system-images;android-30;default;x86_64" -d pixel_5
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          nohup "$ANDROID_HOME/emulator/emulator" -avd mt-e2e -no-window -no-audio \
+            -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data \
+            > /tmp/emulator.log 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          for _ in $(seq 1 120); do
+            [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed \
+                 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 5
+          done
+          "$ANDROID_HOME/platform-tools/adb" devices
+
       - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
         working-directory: app
         run: |
           bash tool/e2e/run.sh \
             --bundle "${{ runner.temp }}/microteams-deploy" \
+            --client "${{ matrix.client }}" \
             --leg "${{ matrix.leg }}"
       - name: Dump logs on failure
         if: failure()
         working-directory: ${{ runner.temp }}/microteams-deploy
         run: docker compose logs --no-color --tail 200
+      - name: What the emulator said, on failure
+        if: failure() && matrix.client == 'android'
+        run: tail -100 /tmp/emulator.log || true
       - name: Tear down
         if: always()
         working-directory: ${{ runner.temp }}/microteams-deploy

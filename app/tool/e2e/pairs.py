@@ -23,12 +23,15 @@ import argparse
 import json
 
 # The client sides this suite can drive today.
-CLIENTS = ["web"]
+# `android` is the installed client, driven on an emulator: the same journey, on a device where
+# the tab bar is hidden inside a conversation and a document is the whole screen. It found three
+# assumptions the web leg could not, because a wide window makes all three true.
+CLIENTS = ["web", "android"]
 
 # What plays the agent's program on the machine, same meaning as in .github/scripts/e2e.sh. Both are
 # the real Claude Code: the pinned one is where determinism comes from — nothing about it can change
 # without somebody changing the number.
-ENVIRONMENTS = ["npm:2.1.220"]
+ENVIRONMENTS = ["npm:2.1.220", "installer"]
 
 
 def pairs(clients=None, environments=None):
