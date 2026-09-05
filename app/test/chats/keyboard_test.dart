@@ -177,4 +177,111 @@ void main() {
       reason: 'and the composer is above the keyboard, not behind it',
     );
   });
+
+  // Holding the list still has a cost, and this is where it falls due: the newest messages are now
+  // behind the keyboard, and the list has no more room to give, so no amount of dragging brings
+  // them out. Reported from a phone as "the messages do not move any more, but I cannot scroll
+  // down either" — and the second half is the bug.
+  testWidgets('what the keyboard covers can still be scrolled into view', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final keyboard = ValueNotifier<double>(0);
+    addTearDown(keyboard.dispose);
+    await tester.pumpWidget(_host(keyboard));
+    await tester.pumpAndSettle();
+
+    keyboard.value = 300;
+    await tester.pumpAndSettle();
+
+    // Drag towards the newest and then look for the last message somewhere a person could see it.
+    // A reversed list counts its offset away from the newest, so that is an upward drag here.
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getRect(find.text('message 30')).bottom,
+      lessThanOrEqualTo(800 - 300 + 0.5),
+      reason:
+          'the newest message cannot be brought out from behind the keyboard',
+    );
+  });
+
+  // The other half of the report — "sometimes", and this is the sometimes. Two things happen when a
+  // keyboard goes away, and nothing says which comes first: the field loses focus, and the window
+  // grows back. Arriving in that order, the height is unfrozen while the window is still short, so
+  // the list is re-laid-out at the short height and every bubble moves — and then moves again when
+  // the window grows. Arriving the other way round, nothing is visible. That is the whole of "it
+  // only happens sometimes".
+  testWidgets('losing focus before the window grows back moves nothing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final keyboard = ValueNotifier<double>(0);
+    addTearDown(keyboard.dispose);
+    await tester.pumpWidget(_host(keyboard));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = const Size(400, 500);
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.byType(AppBar));
+    double belowTitle() =>
+        tester.getTopLeft(find.text('message 20')).dy - title.bottom;
+    final before = belowTitle();
+
+    // The keyboard goes away: focus first, window second — the order that shows the bug.
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(
+      belowTitle(),
+      closeTo(before, 0.5),
+      reason: 'the messages moved while the window was still short',
+    );
+
+    tester.view.physicalSize = const Size(400, 800);
+    await tester.pumpAndSettle();
+    expect(belowTitle(), closeTo(before, 0.5));
+  });
+
+  testWidgets('the keyboard closing does not move the messages either', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final keyboard = ValueNotifier<double>(0);
+    addTearDown(keyboard.dispose);
+    await tester.pumpWidget(_host(keyboard));
+    await tester.pumpAndSettle();
+
+    keyboard.value = 300;
+    await tester.pumpAndSettle();
+    // A reader who has scrolled up into the history, which is when a jump is most obvious — and
+    // upwards is a POSITIVE drag here, because a reversed list counts its offset away from the
+    // newest. (Scrolled the other way, down into the strip the keyboard is covering, something has
+    // to move when that strip stops existing: the list is anchored at its bottom, so the newest
+    // message follows the bottom edge down. That is the layout being honest, not a jump.)
+    await tester.drag(find.byType(ListView), const Offset(0, 400));
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.byType(AppBar));
+    double bubbleBelowTitle() =>
+        tester.getTopLeft(find.text('message 20')).dy - title.bottom;
+    final before = bubbleBelowTitle();
+
+    keyboard.value = 0;
+    await tester.pumpAndSettle();
+
+    expect(bubbleBelowTitle(), closeTo(before, 0.5));
+  });
 }
