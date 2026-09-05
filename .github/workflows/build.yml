@@ -42,17 +42,15 @@ jobs:
           server-username: MAVEN_USERNAME
           server-password: MAVEN_TOKEN
 
-      # Our tests are integration tests: they need a real Postgres (with the "microteams" schema) and
-      # the real cheese-auth service. One script brings both up, mirroring the local setup.
-      - name: Start dependencies (Postgres + cheese-auth)
-        run: ./scripts/dependency-start.sh
-
-      - name: Build with Maven (runs the integration tests)
-        run: ./mvnw install
+      # Packaging only. The tests live in test-api below, because they are integration tests that
+      # need a real Postgres and the real cheese-auth service — and there is no reason for the job
+      # that produces the jar to need a database to do it. Splitting them means this job is red only
+      # when the jar itself cannot be built, and the deployment bundle stops waiting on a test suite.
+      - name: Build with Maven (packaging only)
+        run: ./mvnw install -DskipTests
         env:
           MAVEN_USERNAME: ${{ github.actor }}
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
 
       - name: Check uncommitted changes to ensure format applied
         run: |
@@ -70,6 +68,58 @@ jobs:
           retention-days: 1
           name: jar
           path: backend/target/*.jar
+
+  # The backend's own tests. They are integration tests — every one of them talks to a real Postgres
+  # and the real cheese-auth service — so they bring their dependencies up themselves rather than
+  # borrowing the packaging job's runner. What survives here is meant to shrink: the rules that show
+  # up as something a person can do are moving into the journeys, and this suite keeps the ones with
+  # no picture in the product (an ops endpoint that must not appear on the public port, a bare repo
+  # made twice, anything that needs exact timing).
+  test-api:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+          cache-dependency-path: backend/pom.xml
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+
+      - name: Start dependencies (Postgres + cheese-auth)
+        run: ./scripts/dependency-start.sh
+
+      # -Dschema.regenerate.skip=false brings back the step that boots the application to rewrite
+      # CREATE.sql from the entities. It lives here rather than in packaging because it needs a
+      # database, and the check below is what it is for: if the entities moved and CREATE.sql did
+      # not, the file comes back changed and this job says so.
+      - name: Run the tests
+        run: ./mvnw verify -Dschema.regenerate.skip=false
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
+
+      - name: Check CREATE.sql matches the entities
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            git status
+            git diff
+            echo "CREATE.sql (or something else) changed while running the tests. Commit it."
+            exit 1
+          else
+            echo "No uncommitted changes."
+          fi
 
   # The web client. It is the ONLY frontend now — frontend/ (React + Vite) is gone, because one
   # person maintaining two implementations of the same product maintains neither.
@@ -155,7 +205,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/flutter-app
 
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver
       - run: flutter analyze
       - run: flutter test
       - run: |
@@ -444,27 +494,32 @@ jobs:
   # private tmux, the applet driving a terminal, and the path a chat message takes into a program.
   # Every incident so far has lived exactly there, so that is what this boots and asserts.
   #
-  # The matrix is what plays the agent's program. `fake` is the deterministic baseline — no node, no
-  # npm, no network — so a red run can be read at a glance: if `fake` is red WE broke something; if
-  # only a real-Claude leg is red, Claude Code changed.
+  # The matrix is what plays the agent's program, and both entries are the real Claude Code.
   #
-  # `npm:2.1.220` runs the real Claude Code at a PINNED version, so it is deterministic in the same
-  # way `fake` is — nothing about it can change without us changing it — and it is therefore required.
-  # It is the only leg that proves the applet actually drives Claude Code: through the first-run
+  # `npm:2.1.220` is PINNED, which is where the determinism comes from: nothing about it can change
+  # without us changing the number, so a red run means we broke something. It used to share that job
+  # with a `fake` stand-in — a shell script pretending to be Claude — and the stand-in is gone,
+  # because pinning already buys what it was there for, while it cost a second implementation of
+  # every leg and proved nothing about driving the real program.
+  #
+  # It is also the leg that proves the applet drives Claude Code at all: through the first-run
   # wizard, the bypass-permissions gate, and back out through `microteams api say`.
   #
   # The `installer` leg tracks Claude Code's latest and stays advisory (continue-on-error): a UI
   # change upstream is intelligence worth having, not a reason to block someone else's merge. When it
   # goes red, the fix belongs in the applet, and the pinned leg is what says whether we broke it.
-  test-e2e:
+  # The machinery, without anybody using it: the connector, its private tmux, the applet, and the
+  # path a message takes into a program's stdin — driven by curl, with no client in the picture.
+  # It is NOT the whole product end to end; test-journeys is, and this one is deliberately the layer
+  # underneath, where a failure means the plumbing broke rather than the interface.
+  test-machinery:
+    name: machinery (connector, tmux, a message into stdin)
     needs: [package-zip]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - leg: fake
-            experimental: false
           - leg: npm:2.1.220
             experimental: false
           - leg: installer
@@ -485,17 +540,19 @@ jobs:
         run: |
           bash gen-env.sh
           docker compose up -d --wait --wait-timeout 360
-      # Only the `fake` leg exercises `microteams update`: it needs a distinctly-versioned connector
+      # Only the pinned leg exercises `microteams update`: it needs a distinctly-versioned connector
       # binary so the e2e can PROVE the running service re-execed into the freshly downloaded one
-      # (not merely that a file on disk changed). `setup-go` here matches build-cli's toolchain, and
-      # the two env vars below persist to the "End-to-end" step in the same job/leg.
+      # (not merely that a file on disk changed). It moved here when the `fake` leg was deleted —
+      # this coverage was never about which program plays the agent, only about needing exactly one
+      # leg to carry it. `setup-go` matches build-cli's toolchain, and the two env vars below persist
+      # to the "End-to-end" step in the same job/leg.
       - uses: actions/setup-go@v7
-        if: matrix.leg == 'fake'
+        if: matrix.leg == 'npm:2.1.220'
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
       - name: Build a marker-versioned connector (to prove `microteams update` swaps and re-execs)
-        if: matrix.leg == 'fake'
+        if: matrix.leg == 'npm:2.1.220'
         run: |
           MARKER="update-e2e-${GITHUB_SHA::12}"
           ( cd cli && go build -trimpath -ldflags "-X main.version=$MARKER" -o "$GITHUB_WORKSPACE/updated-microteams" . )
@@ -517,11 +574,178 @@ jobs:
         working-directory: microteams-deploy
         run: docker compose down
 
+  # How many journey runs, and which: a pairing of client sides against machine environments, so that
+  # everything is covered in max(clients, environments) runs. The function lives in the repo
+  # (app/tool/e2e/pairs.py) rather than in this file, because adding a client should be one line in a
+  # list — not a matrix somebody has to recompute by hand and can quietly get wrong.
+  plan-journeys:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pairs.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pairs
+        run: echo "matrix=$(python3 app/tool/e2e/pairs.py --json)" >> "$GITHUB_OUTPUT"
+      - run: python3 app/tool/e2e/pairs.py
+
+  # The journey: the same bundle, driven through the interface a person uses.
+  #
+  # This is the other half of test-machinery. That one proves the plumbing works by driving the API
+  # with curl; this one proves a PERSON can reach it — every step goes through the real client, in a real
+  # browser, against the deployment we ship. See todo/microteams/testing-e2e.md.
+  #
+  # One journey, not one per half: each run signs up, works in the app, brings a machine in and puts
+  # an agent on it. Splitting the halves into separate jobs would cost clients + environments runs
+  # where the pairing above costs max(clients, environments). When a run fails, which step broke is
+  # answered by the trace the journey prints, not by the name of the job.
+  test-journeys:
+    needs: [package-zip, plan-journeys]
+    runs-on: ubuntu-latest
+    # A leg that hangs is a leg that never reports. Without this the first android run sat in
+    # `adb wait-for-device` for an hour and three quarters and would have gone on to six, which is
+    # the default — and a job nobody can wait for is one people learn to ignore.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan-journeys.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/flutter-app
+      # Deliberately NOT in the workspace. A running deployment writes app_data/ as the users inside
+      # its containers, and anything that later walks the workspace — the pub cache's own post-job
+      # step, for one — then trips over directories it may not read. Keeping the bundle in the
+      # runner's temp keeps the checkout exactly as checked out.
+      - uses: actions/download-artifact@v8
+        with:
+          name: microteams-deploy
+          path: ${{ runner.temp }}/microteams-deploy
+      # The runner image ships Chrome and a matching ChromeDriver; the fallback is for images that
+      # do not, and for anybody running this workflow somewhere else.
+      - name: Make sure there is a chromedriver
+        if: matrix.client == 'web'
+        run: |
+          command -v chromedriver && exit 0
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-driver
+
+      # --- the android leg -------------------------------------------------------------------
+      # Written out rather than taken from an action, because every line of it was established by
+      # running it: this is the same sequence that took the journey from red to green on a real
+      # machine, and an action would be a dependency between us and a thing we already know.
+      #
+      # The udev rule is not optional. /dev/kvm exists on this runner and is owned by root, so the
+      # emulator falls back to software rendering and takes long enough that the journey's own
+      # timeout kills it — reported as "the app never reached the test", which is a sentence about
+      # nothing.
+      - name: Let the emulator use KVM
+        if: matrix.client == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # Gradle is the whole cost of this leg from cold. The key is the lockfile and the wrapper,
+      # so a run that changes neither downloads nothing.
+      - uses: actions/cache@v4
+        if: matrix.client == 'android'
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-journey-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: gradle-journey-${{ runner.os }}-
+      - name: An emulator, booted
+        if: matrix.client == 'android'
+        env:
+          ANDROID_HOME: ${{ github.workspace }}/android-sdk
+          # Named, not left to the default. `avdmanager` and `emulator` each work out where AVDs
+          # live from their own list of environment variables, and on this runner they disagreed:
+          # the AVD was created and the emulator then said `Unknown AVD name [mt-e2e]`, having
+          # looked in $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd and $HOME/.android/avd. Saying it
+          # once, for both, is what makes that impossible.
+          ANDROID_AVD_HOME: ${{ github.workspace }}/avd
+        run: |
+          set -e
+          mkdir -p "$ANDROID_AVD_HOME"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q -o /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            platform-tools emulator "system-images;android-30;default;x86_64" \
+            "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n mt-e2e -k "system-images;android-30;default;x86_64" -d pixel_5
+          # And check it is really there before booting anything: `create avd` exiting 0 is not the
+          # same as an AVD the emulator can find, and the difference cost a run.
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx mt-e2e || {
+            echo "the AVD was created but the emulator cannot see it:"
+            "$ANDROID_HOME/emulator/emulator" -list-avds
+            ls -la "$ANDROID_AVD_HOME"
+            exit 1
+          }
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          nohup "$ANDROID_HOME/emulator/emulator" -avd mt-e2e -no-window -no-audio \
+            -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data \
+            > /tmp/emulator.log 2>&1 &
+          # Bounded, all of it. `adb wait-for-device` blocks FOREVER when no device ever appears,
+          # which is exactly what a broken boot looks like, and the job then hangs with nothing on
+          # screen to say why. Every wait here has an end, and the end prints the emulator's own log.
+          if ! timeout 300 "$ANDROID_HOME/platform-tools/adb" wait-for-device; then
+            echo "no device appeared in five minutes — the emulator's own log:"
+            tail -80 /tmp/emulator.log
+            exit 1
+          fi
+          booted=
+          for _ in $(seq 1 60); do
+            [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed \
+                 2>/dev/null | tr -d '\r')" = "1" ] && { booted=1; break; }
+            sleep 5
+          done
+          if [ -z "$booted" ]; then
+            echo "the device is there but never finished booting — the emulator's own log:"
+            tail -80 /tmp/emulator.log
+            exit 1
+          fi
+          "$ANDROID_HOME/platform-tools/adb" devices
+
+      - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
+        working-directory: app
+        run: |
+          bash tool/e2e/run.sh \
+            --bundle "${{ runner.temp }}/microteams-deploy" \
+            --client "${{ matrix.client }}" \
+            --leg "${{ matrix.leg }}"
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: ${{ runner.temp }}/microteams-deploy
+        run: docker compose logs --no-color --tail 200
+      - name: What the emulator said, on failure
+        if: failure() && matrix.client == 'android'
+        run: tail -100 /tmp/emulator.log || true
+      - name: Tear down
+        if: always()
+        working-directory: ${{ runner.temp }}/microteams-deploy
+        run: docker compose down -v
+
   # One check to require in branch protection: it succeeds only when every job above did (a job with
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
+  # The three leaves, and nothing else: package-zip already needs every build, and both test jobs
+  # already need package-zip, so naming those here would only repeat what the graph says. A job
+  # whose dependency fails is skipped rather than failed, and a skipped need is not a success — so
+  # this still cannot go green over a broken build.
+  #
+  # The one thing to remember when adding a job: if nothing else depends on it, it belongs here, or
+  # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs: [build-jar, build-web, build-android, build-applet, build-cli, build-tmux, package-zip, test-e2e]
+    needs: [test-api, test-machinery, test-journeys]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."

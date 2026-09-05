@@ -30,6 +30,7 @@
         <url/>
     </scm>
     <properties>
+        <schema.regenerate.skip>true</schema.regenerate.skip>
         <java.version>21</java.version>
         <kotlin.version>2.4.10</kotlin.version>
     </properties>
@@ -336,6 +337,13 @@
                         </goals>
                         <phase>package</phase>
                         <configuration>
+                            <!-- Regenerating this file means booting the application, and booting it
+                                 means a database — so packaging a jar would need Postgres running.
+                                 It is a check that the entities still match the committed CREATE.sql,
+                                 not a step in making the jar, so it is off unless asked for. CI turns
+                                 it on in the job that has a database (test-api); locally, run
+                                 ./mvnw package -Dschema.regenerate.skip=false to get it. -->
+                            <skip>${schema.regenerate.skip}</skip>
                             <target>
                                 <!-- Delete the old CREATE.sql file and create a new one. -->
                                 <delete file="CREATE.sql"/>

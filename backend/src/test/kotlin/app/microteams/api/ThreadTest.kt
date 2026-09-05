@@ -111,13 +111,10 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
             .andExpect(jsonPath("$.page.has_more").value(false))
     }
 
-    @Test
-    @Order(30)
-    fun strangerCannotReadThread() {
-        mockMvc
-            .perform(get("/chat/$threadId").header("Authorization", "Bearer $strangerToken"))
-            .andExpect(status().isForbidden)
-    }
+    // strangerCannotReadThread lived here. The journey asks it the way a person would: a second
+    // person signs up, goes to the first person's conversation by its address, and is given
+    // nothing. That covers more than this did — it caught the app painting the previous account's
+    // messages while the server was correctly refusing every request behind them with a 403.
 
     @Test
     @Order(31)

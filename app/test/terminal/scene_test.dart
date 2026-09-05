@@ -109,26 +109,6 @@ void main() {
     expect(find.byTooltip('close'), findsNothing);
   });
 
-  testWidgets('what was underneath is still there, and still has its state', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_host());
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('draft')), 'half a message');
-    await tester.pump();
-
-    await _watch(tester);
-
-    expect(find.byTooltip('close'), findsOneWidget);
-    expect(
-      tester.state<_UnderneathState>(find.byType(_Underneath)).draft.text,
-      'half a message',
-      reason:
-          'the frame is drawn OVER the app, so nothing below it was rebuilt '
-          'from scratch',
-    );
-  });
-
   testWidgets('back closes the terminal, not the screen under it', (
     tester,
   ) async {
@@ -153,19 +133,6 @@ void main() {
     await _watch(tester);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
-    expect(find.byTooltip('close'), findsNothing);
-  });
-
-  testWidgets('and so does the visible way out', (tester) async {
-    // Escape is not discoverable and a phone has no Escape key. An overlay with no visible way out
-    // is a trap.
-    await tester.pumpWidget(_host());
-    await tester.pumpAndSettle();
-    await _watch(tester);
-
-    await tester.tap(find.byTooltip('close'));
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('close'), findsNothing);

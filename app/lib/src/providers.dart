@@ -8,10 +8,18 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'agents/agents_controller.dart';
 import 'auth/auth_api.dart';
+import 'chats/chats_controller.dart';
+import 'chats/thread_controller.dart';
+import 'chats/thread_info_controller.dart';
+import 'docs/docs_controller.dart';
+import 'teams/team_admin_controller.dart';
 import 'package:multipath/multipath.dart' as mp;
 
 import 'common/config.dart';
+import 'common/presence_controller.dart';
+import 'common/team_scope.dart';
 import 'common/errors.dart';
 import 'common/key_value.dart';
 import 'common/lines.dart';
@@ -340,5 +348,48 @@ void _scopeTo(Ref ref, int? userId) {
   ref.read(requestCacheProvider).setScope(userId == null ? '' : '$userId');
   if (userId == null) {
     ref.read(stateStoreProvider).clear(keep: const {serverSetting});
+  }
+}
+
+/// Everything holding one account's answers, dropped whenever the account changes.
+///
+/// Dropped by `dropWhatTheLastAccountFetched`, called from a listener at the root rather than from
+/// _scopeTo: invalidating these from inside the session notifier is a cycle, because they are the
+/// providers that watch it. (Riverpod says so with a CircularDependencyError, and what a person
+/// sees is a registration that never finishes.)
+///
+/// Clearing the two shelves above is not enough on its own: a controller that already fetched is a
+/// third place the data lives, and it outlives a sign-out because none of these are autoDispose.
+/// The journey found the shape of that: a second person signed in, walked to the first person's
+/// conversation, and read it off a controller still holding what it fetched in the previous
+/// session — while the server refused every request behind it with a 403.
+///
+/// A list is a thing that rots, so `test/architecture_test.dart` fails when a provider is added to
+/// a feature directory and not named here or exempted there.
+final userScopedProviders = <ProviderOrFamily>[
+  chatsProvider,
+  threadProvider,
+  threadInfoProvider,
+  agentsProvider,
+  driversProvider,
+  allMachinesProvider,
+  agentPresenceProvider,
+  docsTreeProvider,
+  docProvider,
+  docHistoryProvider,
+  docDiffProvider,
+  docsAdminProvider,
+  // Not an answer from the server, but the paths it holds are the previous account's folder names.
+  docsTreeViewProvider,
+  teamsProvider,
+  currentTeamProvider,
+  teamAdminProvider,
+  teamRosterProvider,
+];
+
+/// Drop them. Call this when the signed-in account changes — see MicroTeamsApp.
+void dropWhatTheLastAccountFetched(WidgetRef ref) {
+  for (final provider in userScopedProviders) {
+    ref.invalidate(provider);
   }
 }

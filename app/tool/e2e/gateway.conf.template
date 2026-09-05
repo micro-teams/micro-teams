@@ -1,0 +1,45 @@
+# One origin in front of both halves of a run: the app being tested, and the deployment it talks to.
+#
+# It has to be one origin, and that is not a preference. A browser treats a different port as a
+# different site, and this product is built on the opposite: the backend refuses a cross-origin
+# `/mt/lines` outright, and the httpOnly refresh cookie is never sent. A run split across two origins
+# is not a smaller version of production; it is a system we do not ship.
+#
+# So `/` goes to the server `flutter drive` starts for the build under test, `/api` and `/mt` to the
+# bundle's own nginx, and `/mail` to the sink this run reads its sign-up code from. The browser is
+# pointed here rather than at flutter's server by test_driver/integration_test.dart.
+#
+# ${FLUTTER_PORT}, ${MAIL_HOST} and ${MAIL_PORT} are filled in by the nginx image's own envsubst
+# pass. The sink is named rather than reached through host.docker.internal: it is a container on
+# this same network now, because a host may drop connections coming back at it from a bridge.
+
+# The usual WebSocket map, with one deliberate difference: a request with no Upgrade header gets NO
+# Connection header at all, rather than `close`. Both live channels ride WebSocket, and a long-lived
+# response that the proxy tells the upstream to close after the first message is a whole class of
+# silent failure.
+map $http_upgrade $connection_upgrade { default upgrade; '' ''; }
+
+server {
+    listen 80;
+
+    # The deployment: the bundle's own nginx, reached by service name on the compose network.
+    location /api { proxy_pass http://nginx; include /etc/nginx/e2e-proxy.inc; }
+    location /mt  { proxy_pass http://nginx; include /etc/nginx/e2e-proxy.inc; }
+
+    # The mail sink, on this origin, so reading the sign-up code needs no permission from anybody.
+    location /mail/ {
+        proxy_pass http://${MAIL_HOST}:${MAIL_PORT}/;
+        include /etc/nginx/e2e-proxy.inc;
+    }
+
+    # No service worker in a driven run: it precaches the shipped shell over the build under test and
+    # the app never starts. What the worker does belongs to the real build, and tool/check-web.mjs
+    # tests it there. (run.sh also takes it out of the page, so this is the second lock on the door.)
+    location = /sw.js { return 404; }
+
+    # The app under test, served by `flutter drive` on the host.
+    location / {
+        proxy_pass http://host.docker.internal:${FLUTTER_PORT};
+        include /etc/nginx/e2e-proxy.inc;
+    }
+}

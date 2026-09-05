@@ -1,10 +1,11 @@
-// Approving a new machine — the only way one can join from this client at all.
+// Approving a new machine, in the two states a journey cannot reach.
 //
-// "Add a device" can re-use a machine that is already enrolled; a brand new host is enrolled on the
-// machine itself, and the CLI prints a link ending here. Without this page that half of the flow
-// simply did not exist in the Flutter client.
+// The happy path — pick a team, approve, the code and the teams go up — is the machine journey's
+// now (integration_test/machine_journey_test.dart), where a real host really does come online
+// afterwards. What is left here are the two refusals: no team picked, and a link with no code in
+// it. Both are about NOT sending a request, and the only way to be sure nothing was sent is to
+// hold the wire, which is what this fake does.
 
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -93,25 +94,6 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('approving sends the code and the teams that were picked', (
-    tester,
-  ) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-
-    await tester.tap(find.text('Two'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('approve this machine'));
-    await tester.pumpAndSettle();
-
-    final approve = backend.wrote.single;
-    final sent = jsonDecode(approve.body! as String) as Map<String, Object?>;
-    expect(sent['code'], 'abc123');
-    expect(sent['teamIds'], [2]);
-    expect(find.text('machine approved'), findsOneWidget);
-  });
-
   testWidgets('a machine with no team to serve is not approved', (
     tester,
   ) async {

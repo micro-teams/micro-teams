@@ -155,60 +155,11 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('lists a team\'s agents and machines together', (tester) async {
-    await tester.pumpWidget(host(_FakeBackend()));
-    await tester.pumpAndSettle();
-
-    expect(find.text('agent3'), findsOneWidget);
-    expect(find.text('box'), findsOneWidget);
-    // The machine's NAME, not its opaque id, next to the agent that runs on it.
-    expect(find.textContaining('box · claude'), findsOneWidget);
-  });
-
   group('chat with this agent', () {
-    testWidgets('reuses the existing one-to-one', (tester) async {
-      final backend = _FakeBackend(
-        chats:
-            '[{"id":9,"title":"agent3","updatedAt":"2026-08-20T00:00:00Z",'
-            '"members":[{"userId":1,"nickname":"Me"},{"userId":42,"nickname":"agent3"}]}]',
-      );
-      int? opened;
-      await tester.pumpWidget(
-        agentDetail(backend, onChat: (id) => opened = id),
-      );
-      await settle(tester);
-
-      await tester.ensureVisible(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-
-      expect(opened, 9);
-      expect(
-        backend.posted.where((p) => p.startsWith('POST')),
-        isEmpty,
-        reason:
-            'creating another conversation with the same agent is how the chat '
-            'list fills up with duplicates',
-      );
-    });
-
-    testWidgets('creates one when there is none', (tester) async {
-      final backend = _FakeBackend();
-      int? opened;
-      await tester.pumpWidget(
-        agentDetail(backend, onChat: (id) => opened = id),
-      );
-      await settle(tester);
-
-      await tester.ensureVisible(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('chat with agent'));
-      await tester.pumpAndSettle();
-
-      expect(opened, 77);
-      expect(backend.posted, contains('POST /mt/chat'));
-    });
+    // Asking twice and getting the SAME conversation back is the machine journey's now: it asks a
+    // second time and finds what it already said still in there, which is what "the same one" means
+    // to a person. What is left here is the create path against a fake, where "no chat exists yet"
+    // can be arranged.
 
     testWidgets('a group chat containing the agent is not the one-to-one', (
       tester,
@@ -263,56 +214,11 @@ void main() {
     });
   });
 
-  testWidgets('closing an agent asks first', (tester) async {
-    final backend = _FakeBackend();
-    await tester.pumpWidget(agentDetail(backend));
-    await settle(tester);
-
-    await tester.ensureVisible(find.text('close agent'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('close agent'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('close agent3?'), findsOneWidget);
-    await tester.tap(find.text('cancel'));
-    await tester.pumpAndSettle();
-
-    expect(
-      backend.posted.where((p) => p.contains('close')),
-      isEmpty,
-      reason: 'cancel has to mean cancel',
-    );
-  });
-
   group('cache keepalive', () {
-    testWidgets('says how often it fires, in the unit a human thinks in', (
-      tester,
-    ) async {
-      // Stored in seconds because that is what the server takes; shown in minutes because the
-      // cache TTL it exists to stay inside is about an hour.
-      await tester.pumpWidget(agentDetail(_FakeBackend()));
-      await settle(tester);
-
-      expect(find.textContaining('Every 40 min'), findsOneWidget);
-      expect(find.textContaining('2400'), findsNothing);
-    });
-
-    testWidgets('a changed interval is applied in seconds', (tester) async {
-      final backend = _FakeBackend();
-      await tester.pumpWidget(agentDetail(backend));
-      await settle(tester);
-
-      await tester.enterText(find.widgetWithText(TextField, 'every'), '30');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('apply'));
-      await settle(tester);
-
-      expect(backend.posted, contains('PUT /mt/agent/42/keepalive'));
-      final sent =
-          jsonDecode(backend.bodies.last as String) as Map<String, Object?>;
-      expect(sent['enabled'], isTrue);
-      expect(sent['intervalSeconds'], 1800);
-    });
+    // Switching it on, setting the interval, and seeing the page say it back is the journey's now:
+    // it does that to a real agent, so "applied" means the server took it rather than that a fake
+    // saw the right number of seconds. What is left here is the case a journey cannot make — the
+    // button that ISN'T there until something has changed, which is an assertion about absence.
 
     testWidgets('nothing to apply until something changed', (tester) async {
       // A button that is always there and usually a no-op teaches people to press it and see.
@@ -344,31 +250,9 @@ void main() {
       expect(sitsIn('agents', 'open agent'), isTrue);
     });
 
-    testWidgets('a name is changed in a dialog, and the dialog is a frame', (
-      tester,
-    ) async {
-      // In a dialog again — but a dialog that is a route, so back closes the question rather than
-      // the screen it was asked about. See common/ui/app_dialog.dart.
-      final backend = _FakeBackend();
-      await tester.pumpWidget(agentDetail(backend));
-      await settle(tester);
-
-      await tester.tap(find.byTooltip('rename'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
-
-      await tester.enterText(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byType(TextField),
-        ),
-        'renamed',
-      );
-      await tester.tap(find.widgetWithText(TextButton, 'rename'));
-      await settle(tester);
-
-      expect(backend.posted, contains('PUT /mt/agent/42/nickname'));
-      expect(find.byType(AlertDialog), findsNothing);
-    });
+    // Renaming an agent is the machine journey's now: it renames the one it opened and finds the new
+    // name on the page. Closing is split on purpose — the journey CONFIRMS (and watches the agent
+    // leave the fleet, which only means something against a real connector), while the case above
+    // CANCELS, and the only way to be sure a cancel sent nothing is to hold the wire.
   });
 }

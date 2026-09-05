@@ -189,4 +189,52 @@ void main() {
           'the repo-root contract, and a committed copy is one that can drift from it',
     );
   });
+  test('every provider holding one account\'s answers is dropped on sign-out', () {
+    // The rule: a controller that has fetched is a place the previous account's data lives, and it
+    // outlives a sign-out because none of these are autoDispose. Clearing the request cache and the
+    // outbox is not enough — the journey caught a second person reading the first person's
+    // conversation off a controller that was still holding it, while the server refused every
+    // request behind it with a 403.
+    //
+    // So the list in providers.dart has to stay complete. This test is what stops it rotting: add a
+    // provider to a feature or to common/, and either name it there or exempt it here, with why.
+    const exempt = {
+      // Nothing to do with an account: what this deployment is, and what the server can do.
+      'clientPackagesProvider',
+      'deployedVersionProvider',
+      'mustUpdateToProvider',
+      'endpointsProvider',
+      'serverProvider',
+      'requestCacheProvider',
+      'stateStoreProvider',
+      'linesProvider',
+      'authApiProvider',
+      'probeLinesProvider',
+      'mtClientProvider',
+      'updatesStoreProvider', 'streamLinesProvider', 'updatesSocketProvider',
+      // The session itself, and the team you picked. Both are set by the sign-in that follows.
+      'sessionProvider', 'selectedTeamProvider',
+    };
+
+    final listed = RegExp(r'^\s{2}(\w+Provider),\s*$', multiLine: true)
+        .allMatches(File('lib/src/providers.dart').readAsStringSync())
+        .map((m) => m.group(1)!)
+        .toSet();
+
+    final missing = <String>[];
+    for (final file in _dartFiles('lib/src')) {
+      for (final m in RegExp(
+        r'^final (\w+Provider)\s*=',
+        multiLine: true,
+      ).allMatches(file.readAsStringSync())) {
+        final name = m.group(1)!;
+        if (listed.contains(name) || exempt.contains(name)) continue;
+        missing.add(
+          '${file.path}: $name is neither dropped on sign-out nor exempt',
+        );
+      }
+    }
+
+    expect(missing, isEmpty, reason: missing.join('\n'));
+  });
 }

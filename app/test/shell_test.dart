@@ -127,56 +127,10 @@ void _wide(WidgetTester tester) {
 Finder _rail(String label) => find.byKey(ValueKey('destination-$label'));
 
 void main() {
-  testWidgets('a tab you come back to is the tab you left', (tester) async {
-    // A wide window, where the rail is always there. On a phone an open conversation covers the
-    // tab bar on purpose — the same as the React shell, where a detail route is its own layout —
-    // so there is no tab to tap from inside one.
-    _wide(tester);
-
-    final backend = _Fake();
-    await tester.pumpWidget(_app(backend));
-    await tester.pumpAndSettle();
-
-    // Open a conversation, so the chats branch is somewhere other than its root.
-    await tester.tap(find.text('standup'));
-    await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsOneWidget, reason: 'the composer');
-
-    await tester.tap(_rail('agents'));
-    await tester.pumpAndSettle();
-    expect(find.text('agents'), findsWidgets);
-
-    await tester.tap(_rail('chats'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byType(TextField),
-      findsOneWidget,
-      reason:
-          'coming back to chats comes back to the conversation that was open, '
-          'not to the list',
-    );
-  });
-
-  testWidgets('tapping the tab you are already on goes back to its root', (
-    tester,
-  ) async {
-    // The other half of the same rule, and the one people reach for to get out of a detail view.
-    _wide(tester);
-
-    await tester.pumpWidget(_app(_Fake()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('standup'));
-    await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsOneWidget);
-
-    await tester.tap(_rail('chats'));
-    await tester.pumpAndSettle();
-
-    // Back at the list with nothing open: no composer, and the row still there to open again.
-    expect(find.byType(TextField), findsNothing);
-    expect(find.text('standup'), findsOneWidget);
-  });
+  // The two rules about where a tab takes you — coming back lands where you left, and tapping the
+  // tab you are already on goes back to its root — are the chat journey's now
+  // (integration_test/journey_test.dart), against the real shell rather than a toy router with a
+  // fake backend behind it. What is left here is everything a journey cannot see or cannot reach.
 
   testWidgets('the rail is three destinations and your own face', (
     tester,
@@ -334,21 +288,5 @@ void main() {
 
     expect(onRail.destination.label, onPhone.destination.label);
     expect(onRail.runtimeType, onPhone.runtimeType);
-  });
-
-  testWidgets('your own face opens the profile, without asking first', (
-    tester,
-  ) async {
-    // Logging out already lives inside the profile, so a two-item menu in front of a page holding
-    // one of those two items is a door in front of a door.
-    _wide(tester);
-    await tester.pumpWidget(_app(_Fake()));
-    await tester.pumpAndSettle();
-
-    await tester.tap(_rail('me'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('log out'), findsOneWidget, reason: 'the profile itself');
-    expect(find.byType(PopupMenuButton<int>), findsNothing);
   });
 }

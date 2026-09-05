@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Full-stack smoke test: the shipped bundle, a real machine, a real agent, one real message.
+# The machinery under the product: the shipped bundle, a real machine, a real agent, one real
+# message — driven by curl, with no client in the picture.
+#
+# It used to be called the full-stack test, and it is not: nothing here touches the interface a
+# person uses, so it cannot tell you whether they can reach any of it. That is what the journeys do
+# (app/integration_test/, run by app/tool/e2e/run.sh). This script is the layer underneath, and the
+# division is worth keeping: when this is red the plumbing broke; when a journey is red the product
+# did.
 #
 # What this covers that nothing else does. The unit and integration tests exercise the backend with a
 # FAKE machine (a WebSocket client in the test JVM), and `test-compose` only proved the containers
@@ -13,29 +20,39 @@
 # So this boots the bundle a customer would deploy, spins a plain Debian container as a machine (the
 # closest thing to a VM that CI can afford), installs the connector FROM THAT BUNDLE, enrolls it
 # through the real approval flow, opens an agent on it, and asserts the message actually arrives in
-# the program's terminal. The "agent program" is a fake `claude` — a shell script that appends what it
-# is told to a file — because the point is to test our machinery, not Anthropic's, and a fake makes
-# the assertion exact: the text is either in that file or it is not.
+# the program's terminal. The agent's program is the real Claude Code, in front of a mock Anthropic
+# API — so there is no AI anywhere in the loop, and nothing here depends on what a model decides to
+# say.
 #
-# One argument selects what plays the agent's program, which is also what the CI matrix varies:
+# One argument selects which Claude Code, which is also what the CI matrix varies:
 #
-#   fake            a shell script that records what it is told. No node, no npm, no network —
-#                   the deterministic baseline, so a red run can be read: if this leg is red, WE
-#                   broke something; if only a real-Claude leg is red, Claude Code changed.
-#   npm:<version>   real Claude Code at a pinned version, driven by a mock Anthropic API.
+#   npm:<version>   real Claude Code at a PINNED version. This is where determinism comes from:
+#                   nothing about it can change without somebody changing the number, so when this
+#                   leg is red, WE broke something.
 #   installer       real Claude Code, latest. Advisory in CI: when Anthropic ships a UI change this
 #                   is the leg that tells us, and that is intelligence rather than a reason to block
 #                   a merge.
 #
-# The real-Claude legs additionally assert the thing only they can: that the agent ANSWERS. A mock
-# model (MockServer, whose Anthropic emulation streams a proper SSE response) hands Claude Code a
-# scripted Bash tool call that runs `microteams api say`, so the reply travels the whole way back
-# into the thread — applet, pty, tmux, connector, backend — with no AI anywhere in the loop.
+# There used to be a third, `fake`: a shell script pretending to be Claude, kept as "the
+# deterministic baseline". It is gone. Pinning already buys determinism, and the stand-in cost a
+# second implementation of every leg while proving nothing about driving the real program. The one
+# thing it uniquely carried — reading back the exact bytes the agent was handed (T-058) — moved to
+# the mock's own request log, which is a stronger place to read it from.
 #
-# Usage: e2e.sh [fake|npm:<version>|installer]   (run from an unpacked bundle directory)
+# Both legs assert the thing that matters most: that the agent ANSWERS. MockServer's Anthropic
+# emulation streams a proper SSE response handing Claude Code a scripted Bash tool call that runs
+# `microteams api say`, so the reply travels the whole way back into the thread — applet, pty, tmux,
+# connector, backend.
+#
+# Usage: e2e.sh [npm:<version>|installer]   (run from an unpacked bundle directory)
 set -euo pipefail
 
-LEG="${1:-fake}"
+# Installing the agent's program and scripting the model are shared with app/tool/e2e/run.sh — see
+# that file for why there is one copy rather than two.
+# shellcheck source=agent-leg.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-leg.sh"
+
+LEG="${1:-npm:2.1.220}"
 MACHINE_CT=microteams-testmachine
 MOCK_CT=microteams-testmock
 # Claude Code refuses --dangerously-skip-permissions as root, and our own driver omits the flag
@@ -116,63 +133,9 @@ docker exec "$MACHINE_CT" bash -c "chmod +x /home/$MACHINE_USER/.local/bin/micro
 onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
 onmachine '$HOME/.local/bin/microteams --version' || fail "the bundled connector does not run"
 
-case "$LEG" in
-  fake)
-    # Stand-in for Claude Code: print a prompt, then record every submitted line. The point of this
-    # leg is the machinery around the program, so a program that cannot fail keeps the signal clean.
-    docker exec "$MACHINE_CT" bash -c 'cat > /usr/local/bin/claude <<EOF
-#!/bin/bash
-echo "fake-claude ready"
-while IFS= read -r line; do echo "\$line" >> /tmp/agent-heard.txt; echo "ok"; done
-EOF
-    chmod +x /usr/local/bin/claude; touch /tmp/agent-heard.txt; chmod 666 /tmp/agent-heard.txt'
-    ;;
-  npm:*|installer)
-    # Real Claude Code, pointed at a mock Anthropic API. API mode (a token + a base URL) is what
-    # keeps this out of the OAuth flow entirely — no browser, no login, nothing to approve.
-    docker rm -f "$MOCK_CT" >/dev/null 2>&1 || true
-    docker run -d --name "$MOCK_CT" --hostname "$MOCK_CT" --network "$NET" \
-      mockserver/mockserver:mockserver-7.5.0 >/dev/null
-    # Retried: these reach the public internet, and a registry blip should not be reported as a
-    # product failure.
-    for attempt in 1 2 3; do
-      docker exec "$MACHINE_CT" bash -c "set -e
-        export DEBIAN_FRONTEND=noninteractive
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
-        apt-get install -y -qq nodejs >/dev/null" && break
-      echo "  (node install attempt $attempt failed, retrying)"; sleep 5
-    done
-    case "$LEG" in
-      npm:*) for attempt in 1 2 3; do
-               docker exec "$MACHINE_CT" npm i -g "@anthropic-ai/claude-code@${LEG#npm:}" >/dev/null 2>&1 && break
-               echo "  (claude install attempt $attempt failed, retrying)"; sleep 5
-             done ;;
-      *)     for attempt in 1 2 3; do
-               onmachine 'curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1' && break
-               echo "  (claude installer attempt $attempt failed, retrying)"; sleep 5
-             done ;;
-    esac
-    # The agent's program is launched through `bash -lc` by our driver, so the login shell is where
-    # its environment has to come from — the same place a real deployment would put a proxy.
-    docker exec "$MACHINE_CT" bash -c "cat > /etc/profile.d/anthropic.sh <<EOF
-export ANTHROPIC_BASE_URL=http://$MOCK_CT:1080
-export ANTHROPIC_AUTH_TOKEN=sk-ant-ci-not-a-real-key
-export ANTHROPIC_MODEL=claude-sonnet-4-5
-export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-EOF"
-    onmachine 'mkdir -p ~/.claude && printf "{\"hasCompletedOnboarding\":true}" > ~/.claude.json'
-    echo -n "claude on the machine: "; onmachine 'claude --version' || fail "Claude Code did not install"
-    ;;
-  *) fail "unknown leg: $LEG" ;;
-esac
+install_agent_program "$LEG"
 docker network connect "$NET" "$MACHINE_CT"
-if [ "$LEG" != "fake" ]; then
-  for _ in $(seq 1 30); do
-    docker exec "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/status" >/dev/null 2>&1 && break
-    sleep 1
-  done
-fi
+wait_for_mock
 pass "machine container ready"
 
 step "enroll the machine through the real approval flow"
@@ -234,10 +197,10 @@ pass "tmux session $SID is live"
 # inside a program running in a terminal on another host. It crosses the backend, the control
 # channel, the screen applet, the pty and tmux — the exact path that no other test covers.
 # Wait for the program to be ready to be talked to, read from the terminal itself rather than from
-# the applet's mirrored status: the fake program has no Claude UI to report, and on the real legs
-# what matters here is that Claude Code has finished its gates and is showing its prompt. Typing
-# into a terminal that is still painting is a real way to lose a message (see T-064), so this waits.
-if [ "$LEG" != "fake" ]; then
+# the applet's mirrored status: what matters is that Claude Code has finished its gates and is
+# showing its prompt. Typing into a terminal that is still painting is a real way to lose a message
+# (see T-064), so this waits.
+{
   step "Claude Code reaches its prompt"
   for _ in $(seq 1 60); do
     PANE="$(mtmux capture-pane -p -t "$SID" 2>/dev/null || true)"
@@ -247,7 +210,7 @@ if [ "$LEG" != "fake" ]; then
   done
   [ "${READY:-0}" = "1" ] || { mtmux capture-pane -p -t "$SID" || true; fail "Claude Code never reached its prompt"; }
   pass "Claude Code is at its prompt"
-fi
+}
 
 step "a chat message reaches the agent"
 THREAD_ID="$(curl -fsS -X POST "$MT/chat" -H "$AUTH" -H 'Content-Type: application/json' \
@@ -259,68 +222,30 @@ THREAD_ID="$(curl -fsS -X POST "$MT/chat" -H "$AUTH" -H 'Content-Type: applicati
 round_trip() {
   MARKER="ci-marker-$1-$RANDOM"
   REPLY="pong-$MARKER"
-  if [ "$LEG" != "fake" ]; then
-  # Script the model: when Claude Code sends the conversation request (the one carrying its tool
-  # list), answer with a Bash tool call that posts a reply as the agent. Matching on the tool list
-  # matters — Claude Code also asks this endpoint for a session title, with no tools, and a
-  # once-only expectation would otherwise be spent on that. `streaming` is not optional either: a
-  # non-streamed tool call is silently ignored by Claude Code, which looks exactly like nothing
-  # happening.
-  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
-    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
-{ "httpRequest": { "method": "POST", "path": "/v1/messages",
-                   "body": { "type": "JSON_PATH", "jsonPath": "\$.tools[?(@.name=='Bash')]" } },
-  "times": { "remainingTimes": 1, "unlimited": false },
-  "priority": 10,
-  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
-    "completion": { "text": "Answering the group.", "streaming": true, "stopReason": "tool_use",
-      "toolCalls": [ { "id": "toolu_ci_reply", "name": "Bash",
-        "arguments": "{\"command\":\"microteams api say --thread-id $THREAD_ID --text '$REPLY'\",\"description\":\"reply\"}" } ],
-      "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
-JSON
-  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
-    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<'JSON'
-{ "httpRequest": { "method": "POST", "path": "/v1/messages" },
-  "priority": 1,
-  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
-    "completion": { "text": "done", "streaming": true, "stopReason": "end_turn",
-                    "usage": { "inputTokens": 60, "outputTokens": 3 } } } }
-JSON
-  fi
+  script_model_reply "$THREAD_ID" "$REPLY"
 
   HEARD=0
   curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
     -d "{\"content\":\"$MARKER\"}" >/dev/null
 
-  if [ "$LEG" = "fake" ]; then
-    # The message crossed the backend, the control channel, the applet, the pty and tmux if — and
-    # only if — the program on the far end can show it back to us.
-    for _ in $(seq 1 40); do
-      if docker exec "$MACHINE_CT" grep -q "$MARKER" /tmp/agent-heard.txt 2>/dev/null; then
-        pass "the agent's program received the message ($1)"; HEARD=1; break
-      fi
-      sleep 2
-    done
-  else
-    # The stronger assertion, and the only one a real Claude Code can make: the agent ANSWERS. The
-    # reply has to come back through `microteams api say`, so seeing it in the thread means the whole
-    # round trip worked — including the tool door the agent authenticates through. It also means the
-    # Enter after the paste actually landed: text sitting un-submitted in the input box looks fine on
-    # the pane and produces no reply at all (T-064).
-    for _ in $(seq 1 60); do
-      if curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" | grep -q "$REPLY"; then
-        pass "the agent replied in the thread ($1)"; HEARD=1; break
-      fi
-      sleep 3
-    done
-  fi
+  # The stronger assertion, and the only one a real Claude Code can make: the agent ANSWERS. The
+  # reply has to come back through `microteams api say`, so seeing it in the thread means the whole
+  # round trip worked — including the tool door the agent authenticates through. It also means the
+  # Enter after the paste actually landed: text sitting un-submitted in the input box looks fine on
+  # the pane and produces no reply at all (T-064).
+  for _ in $(seq 1 60); do
+    if curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" | grep -q "$REPLY"; then
+      pass "the agent replied in the thread ($1)"; HEARD=1; break
+    fi
+    sleep 3
+  done
 
   [ "$HEARD" = "1" ] || {
     echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
     echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
-    [ "$LEG" != "fake" ] && { echo "--- what the model was asked ---"
-      docker exec "$MACHINE_CT" curl -s -X PUT "http://$MOCK_CT:1080/mockserver/retrieve?type=REQUESTS&format=JSON" \
-        -d '{"path":"/v1/messages"}' | head -c 2000; }
+    echo "--- what the model was asked ---"
+    docker exec "$MACHINE_CT" curl -s -X PUT "http://$MOCK_CT:1080/mockserver/retrieve?type=REQUESTS&format=JSON" \
+      -d '{"path":"/v1/messages"}' | head -c 2000
     fail "the message never completed its round trip ($1)"
   }
 }
@@ -334,7 +259,7 @@ round_trip "agent already running"
 # the running agent) stay ALIVE — the new binary RE-ATTACHES to the surviving session. This is the
 # OPPOSITE branch from the kill-server test below (tmux death → respawn), and it was untested.
 #
-# Guarded on UPDATE_MARKER_BIN, which the CI `fake` leg sets to a DISTINCTLY-versioned connector
+# Guarded on UPDATE_MARKER_BIN, which the CI pinned leg sets to a DISTINCTLY-versioned connector
 # build; other legs (and standalone bundle runs) have no marker binary and SKIP this gracefully.
 # connector/linux-amd64/microteams is bind-mounted into the backend as what it serves at
 # /connector/latest/linux-amd64/microteams (deploy/docker-compose.yml), so overwriting it here
@@ -426,74 +351,80 @@ round_trip "woken by the message"
 #          agent — `tmux send-keys` refused the over-long command and the error went to a log file.
 #   T-057  a long message an AGENT sends comes out truncated.
 #
-# Silent loss is the worst failure this system has, because the sender is told nothing. Each leg
-# asserts the direction it can actually see: the fake program can be compared byte for byte, and only
-# a real Claude Code can send anything back.
+# Silent loss is the worst failure this system has, because the sender is told nothing. Both
+# directions are asserted here, each where it can actually be seen.
 step "a long message survives, in both directions (T-057 / T-058)"
-if [ "$LEG" = "fake" ]; then
-  # Inbound. Many lines rather than one enormous one on purpose: the tty line discipline has its own
-  # ~4KB limit per line in canonical mode, which would be mistaken for the bug under test. The tail
-  # marker is what the assertion turns on — a write truncated anywhere loses it.
-  # Built as a file and posted with curl like every other request here: python's urllib would honour
-  # a proxy from the environment, which on a developer machine quietly breaks a localhost call.
-  python3 -c "
+
+# Inbound (T-058). Many lines rather than one enormous one on purpose: the tty line discipline has
+# its own ~4KB limit per line in canonical mode, which would be mistaken for the bug under test. The
+# tail marker is what the assertion turns on — a write truncated anywhere loses it.
+#
+# Read out of what the MODEL was asked, not out of the program's stdin. That is where this moved to
+# when the `fake` leg was deleted: the stand-in wrote everything it heard to a file that could be
+# compared byte for byte, and real Claude Code cannot be inspected that way. The mock Anthropic API
+# in front of it records every request, so the question becomes "did the whole message reach the
+# model" — which is a stronger thing to know than "did it reach the program's standard input".
+#
+# Built as a file and posted with curl like every other request here: python's urllib would honour
+# a proxy from the environment, which on a developer machine quietly breaks a localhost call.
+python3 -c "
 import json
 body = '\\n'.join('line%03d %s' % (i, 'x' * 60) for i in range(400)) + '\\nTAIL-MARKER-OK'
 open('/tmp/e2e-long.json', 'w').write(json.dumps({'content': body}))"
-  curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
-    --data-binary @/tmp/e2e-long.json >/dev/null
-  for _ in $(seq 1 40); do
-    if docker exec "$MACHINE_CT" grep -q "TAIL-MARKER-OK" /tmp/agent-heard.txt 2>/dev/null; then
-      LONG_IN=1; break
-    fi
-    sleep 2
-  done
-  [ "${LONG_IN:-0}" = "1" ] || {
-    echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
-    fail "a ~25KB message never reached the agent's program (T-058)"
-  }
-  pass "a ~25KB message reached the agent's program whole"
-else
-  # Outbound. The model is told to post a 20,000-character message; the assertion is on what the
-  # backend stored, so anything that truncates on the way — the CLI applet, the request, the column —
-  # fails here.
-  # The 20,000 characters are composed by a script on the machine rather than inside the tool call:
-  # a JSON string, inside a mock expectation, inside a shell heredoc is three levels of quoting, and
-  # what is being tested is message length, not anyone's escaping.
-  docker exec "$MACHINE_CT" bash -c "cat > /usr/local/bin/longsay <<'EOS'
+curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
+  --data-binary @/tmp/e2e-long.json >/dev/null
+for _ in $(seq 1 90); do
+  if [ "$(verify_model_saw TAIL-MARKER-OK)" = "202" ]; then
+    LONG_IN=1; break
+  fi
+  sleep 2
+done
+[ "${LONG_IN:-0}" = "1" ] || {
+  echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
+  echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
+  fail "a ~25KB message never reached the model (T-058)"
+}
+pass "a ~25KB message reached the model whole"
+
+# Outbound (T-057). The model is told to post a 20,000-character message; the assertion is on what the
+# backend stored, so anything that truncates on the way — the CLI applet, the request, the column —
+# fails here.
+# The 20,000 characters are composed by a script on the machine rather than inside the tool call:
+# a JSON string, inside a mock expectation, inside a shell heredoc is three levels of quoting, and
+# what is being tested is message length, not anyone's escaping.
+docker exec "$MACHINE_CT" bash -c "cat > /usr/local/bin/longsay <<'EOS'
 #!/bin/bash
 microteams api say --thread-id \$1 --text \"LONGREPLY-\$(python3 -c 'print(\"y\"*20000)')-END\"
 EOS
-    chmod +x /usr/local/bin/longsay"
-  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
-    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
+  chmod +x /usr/local/bin/longsay"
+docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
+  -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
 { "httpRequest": { "method": "POST", "path": "/v1/messages",
-                   "body": { "type": "JSON_PATH", "jsonPath": "\$.tools[?(@.name=='Bash')]" } },
-  "times": { "remainingTimes": 1, "unlimited": false },
-  "priority": 20,
-  "httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
-    "completion": { "text": "Answering at length.", "streaming": true, "stopReason": "tool_use",
-      "toolCalls": [ { "id": "toolu_ci_long", "name": "Bash",
-        "arguments": "{\"command\":\"longsay $THREAD_ID\",\"description\":\"long reply\"}" } ],
-      "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
+                 "body": { "type": "JSON_PATH", "jsonPath": "\$.tools[?(@.name=='Bash')]" } },
+"times": { "remainingTimes": 1, "unlimited": false },
+"priority": 20,
+"httpLlmResponse": { "provider": "ANTHROPIC", "model": "claude-sonnet-4-5",
+  "completion": { "text": "Answering at length.", "streaming": true, "stopReason": "tool_use",
+    "toolCalls": [ { "id": "toolu_ci_long", "name": "Bash",
+      "arguments": "{\"command\":\"longsay $THREAD_ID\",\"description\":\"long reply\"}" } ],
+    "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
 JSON
-  curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d '{"content":"say something long"}' >/dev/null
-  for _ in $(seq 1 60); do
-    LEN="$(curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" |
-      python3 -c "
+curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"content":"say something long"}' >/dev/null
+for _ in $(seq 1 60); do
+  LEN="$(curl -fsS "$MT/chat/$THREAD_ID/messages?page_size=50" -H "$AUTH" |
+    python3 -c "
 import json,sys
 ms = json.load(sys.stdin)['messages']
 print(max([len(m.get('content') or '') for m in ms if 'LONGREPLY-' in (m.get('content') or '')] or [0]))")"
-    [ "${LEN:-0}" -ge 20000 ] && { LONG_OUT=1; break; }
-    sleep 3
-  done
-  [ "${LONG_OUT:-0}" = "1" ] || {
-    echo "--- longest LONGREPLY message stored: ${LEN:-0} chars (want >= 20000) ---"
-    echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
-    fail "the agent's long message was truncated or never arrived (T-057)"
-  }
-  pass "the agent's 20,000-character message was stored whole ($LEN chars)"
-fi
+  [ "${LEN:-0}" -ge 20000 ] && { LONG_OUT=1; break; }
+  sleep 3
+done
+[ "${LONG_OUT:-0}" = "1" ] || {
+  echo "--- longest LONGREPLY message stored: ${LEN:-0} chars (want >= 20000) ---"
+  echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
+  fail "the agent's long message was truncated or never arrived (T-057)"
+}
+pass "the agent's 20,000-character message was stored whole ($LEN chars)"
 
 step "everything asserted"

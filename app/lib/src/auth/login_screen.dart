@@ -111,6 +111,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const SizedBox(height: 24),
                       _Label('username'),
                       TextFormField(
+                        key: const Key('login-username'),
                         controller: _username,
                         autofillHints: const [AutofillHints.username],
                         validator: (value) => (value ?? '').trim().isEmpty
@@ -120,6 +121,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const SizedBox(height: 16),
                       _Label('password'),
                       TextFormField(
+                        key: const Key('login-password'),
                         controller: _password,
                         obscureText: true,
                         autofillHints: const [AutofillHints.password],

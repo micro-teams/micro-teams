@@ -107,34 +107,12 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('lists what changed, who changed it and when', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
+  // "What changed, and when" is the journey's now: it makes a file in a real repository, opens its
+  // history, and finds the commit that made it. Note what it could NOT assert there — the author
+  // shows as the account id (`user-37`), not a nickname.
 
-    expect(find.text('agent3 wrote it down'), findsOneWidget);
-    // The short sha, the author and a readable time — not an epoch, which is a number nobody reads.
-    expect(find.textContaining('abcdef1'), findsOneWidget);
-    expect(find.textContaining('agent3 ·'), findsOneWidget);
-    expect(find.textContaining('1787580000000'), findsNothing);
-  });
-
-  testWidgets('a commit opens the diff behind it', (tester) async {
-    final backend = _Fake();
-    await tester.pumpWidget(_host(backend));
-    await settle(tester);
-
-    await tester.tap(find.text('agent3 wrote it down'));
-    await settle(tester);
-
-    expect(find.textContaining('diff abcdef1'), findsOneWidget);
-    expect(find.text('+new'), findsOneWidget);
-    expect(find.text('-old'), findsOneWidget);
-    expect(
-      backend.asked.where((a) => a.contains('diff=abcdef1234567890')),
-      isNotEmpty,
-    );
-  });
+  // Opening the diff behind a commit is the journey's now — a real commit in a real repository.
+  // The colouring of what it shows is still here: that is a picture, not a path.
 
   testWidgets('the file headers are not coloured as changes', (tester) async {
     // `+++` and `---` are which file this is, not an added and a removed line. Colouring them as

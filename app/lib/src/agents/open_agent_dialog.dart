@@ -136,6 +136,11 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
               else
                 DropdownButtonFormField<String>(
                   initialValue: _machineId,
+                  // The item is as wide as its text unless it is told otherwise, and one long name
+                  // pushes past the dialog: measured, on a phone, as 55 pixels of a machine's name
+                  // that cannot be seen. It shows up only when the machine is offline, because that
+                  // is when the item carries " (not connected)" as well.
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Machine'),
                   items: [
                     for (final machine in widget.machines)
@@ -164,6 +169,9 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
               if (drivers != null)
                 DropdownButtonFormField<String>(
                   initialValue: driver,
+                  // The same: a driver's name plus " (default)" is one item that can outgrow the
+                  // dialog, and the row above is the one that proved it.
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Driver'),
                   items: [
                     for (final name in drivers.drivers)

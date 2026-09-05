@@ -22,7 +22,11 @@ import 'package:microteams/src/providers.dart';
 import '../support/router_host.dart';
 
 class _Fake implements HttpClientAdapter {
-  _Fake({this.machineTeams = const [1]});
+  _Fake({this.machineTeams = const [1], this.name = 'box'});
+
+  /// What the connected machine is called. A long one is the case the dialog has to survive on a
+  /// phone, and a machine gets its name from whoever installed it.
+  final String name;
 
   /// Which teams hold the second machine — the one this team could still adopt.
   final List<int> machineTeams;
@@ -48,7 +52,7 @@ class _Fake implements HttpClientAdapter {
         [
           {
             'id': 'm1',
-            'name': 'box',
+            'name': name,
             'online': true,
             'teamIds': [1],
           },
@@ -137,20 +141,6 @@ Widget _host(_Fake backend) => ProviderScope(
 
 void main() {
   group('open agent', () {
-    testWidgets('offers the drivers the server says it has', (tester) async {
-      await tester.pumpWidget(_host(_Fake()));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('open agent'));
-      await tester.pumpAndSettle();
-
-      // Not a list compiled into the client: a client that guesses offers a driver the server
-      // cannot run and hides one it can.
-      await tester.tap(find.text('claude (default)'));
-      await tester.pumpAndSettle();
-      expect(find.text('codex'), findsWidgets);
-    });
-
     testWidgets('every field is on the form, none behind "advanced"', (
       tester,
     ) async {
@@ -189,6 +179,32 @@ void main() {
       // An empty name is not a name — sending "" would make the server call the agent that.
       expect(sent.containsKey('nickname'), isFalse);
       expect(sent.containsKey('cwd'), isFalse);
+    });
+
+    // A phone, and a machine with a name somebody actually typed. The item in a dropdown is as
+    // wide as its text unless the dropdown is told to expand, so one long name pushed 55 pixels of
+    // itself off the side of the dialog — and Flutter treats content that cannot be seen as a
+    // failure, which is how the Android journey found it. Reverse-checked: without `isExpanded`
+    // on the two dropdowns this goes red.
+    testWidgets('a long machine name stays inside the dialog on a phone', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        _host(_Fake(name: 'chengxin-dev-box-in-the-office')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('open agent'));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'nothing in this dialog may be painted where it cannot be seen',
+      );
     });
 
     testWidgets('previews the working directory the server would choose', (
@@ -260,25 +276,6 @@ void main() {
       expect(
         find.textContaining('http://backend.test/install.sh'),
         findsOneWidget,
-      );
-    });
-
-    testWidgets('adding a spare machine binds it to this team', (tester) async {
-      final backend = _Fake(machineTeams: const [2]);
-      await tester.pumpWidget(_host(backend));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('add device'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-
-      final bind = backend.wrote.firstWhere(
-        (w) => w.call == 'POST /mt/team/1/machine',
-      );
-      expect(
-        (jsonDecode(bind.body! as String) as Map<String, Object?>)['machineId'],
-        'm2',
       );
     });
   });

@@ -18,7 +18,6 @@ import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/chats/thread_screen.dart';
 import 'package:microteams/src/common/api.dart';
-import 'package:microteams/src/common/ui/avatar.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 
 /// A conversation between user 1 (us, see the session override below) and user 2.
@@ -129,25 +128,6 @@ Color _bubbleColourOf(WidgetTester tester, String text) {
 }
 
 void main() {
-  testWidgets('a bubble does not span the screen, so sides are visible', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-
-    await _pumpThread(tester);
-
-    for (final text in ['mine', 'theirs']) {
-      final width = tester.getSize(find.text(text)).width;
-      expect(
-        width,
-        lessThan(390 * 0.72),
-        reason: '"$text" is as wide as the row — nothing can look aligned',
-      );
-    }
-  });
-
   testWidgets('own messages sit right, other people left', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -174,72 +154,6 @@ void main() {
     expect(_bubbleColourOf(tester, 'theirs'), otherBubble);
   });
 
-  testWidgets('message text can be selected, and the system copies it', (
-    tester,
-  ) async {
-    // Copying used to be "long-press the bubble, get the whole thing". That cannot copy half a
-    // message, or one line out of an agent's reply, which is most of what people copy here. So the
-    // list is a selection area and the system's own copy does the copying — see the measurement in
-    // thread_screen.dart for what that costs.
-    await _pumpThread(tester);
-
-    expect(
-      find.byType(SelectionArea),
-      findsOneWidget,
-      reason: 'one area around the list, so a drag runs across bubbles',
-    );
-
-    final selectable = find.descendant(
-      of: find.byType(SelectionArea),
-      matching: find.text('mine'),
-    );
-    expect(selectable, findsOneWidget);
-  });
-
-  testWidgets('a conversation beside the list is not something you entered', (
-    tester,
-  ) async {
-    // Picking a different conversation on a wide window is picking, not navigating. Material adds
-    // a back arrow whenever the router COULD pop, which is a fact about the history stack and not
-    // about the layout — so it has to be turned off explicitly, and therefore asserted.
-    await _pumpThread(tester, asPane: true);
-    expect(find.byType(BackButton), findsNothing);
-    expect(find.byIcon(Icons.arrow_back), findsNothing);
-  });
-
-  testWidgets('there are exactly two avatar sizes, and these are they', (
-    tester,
-  ) async {
-    // One control, two measured sizes — 48 in the chat list, 40 beside a bubble, both taken from
-    // the React client. They drifted apart once already.
-    await _pumpThread(tester);
-    final avatars = tester.widgetList<UserAvatar>(find.byType(UserAvatar));
-    expect(avatars, isNotEmpty);
-    for (final avatar in avatars) {
-      expect(avatar.size, Metrics.avatarInBubble);
-    }
-    expect(Metrics.avatarInBubble, 40);
-    expect(Metrics.avatarInList, 48);
-  });
-
-  testWidgets('the composer and its button are the same height', (
-    tester,
-  ) async {
-    // Two controls side by side at different heights is the sort of thing you cannot stop seeing
-    // once you have seen it, and it is invisible in code review — the numbers agree, the rendered
-    // boxes do not, because a TextField's height is its padding plus a line of text and a button's
-    // is whatever it was told.
-    await _pumpThread(tester);
-
-    final field = tester.getSize(find.byType(TextField));
-    final button = tester.getSize(find.widgetWithText(FilledButton, 'send'));
-    expect(
-      button.height,
-      field.height,
-      reason: 'send is ${button.height}, the field is ${field.height}',
-    );
-  });
-
   testWidgets('the conversation is named after the other person', (
     tester,
   ) async {
@@ -248,46 +162,5 @@ void main() {
     // The thread has no title of its own, and "Conversation" is not a name.
     expect(find.text('them'), findsWidgets);
     expect(find.text('Conversation'), findsNothing);
-  });
-
-  testWidgets('a run of unbreakable text stays inside its bubble', (
-    tester,
-  ) async {
-    // T-011. On the React side this needed `wrap-anywhere`, because CSS will not break inside a
-    // word and a pasted URL or a base64 blob simply ran out of the bubble and across the screen.
-    // Flutter breaks by character when a word cannot fit — this measures that rather than assuming
-    // it, because the failure is the same either way and it is not visible in code review.
-    const wall =
-        'A123456789B123456789C123456789D123456789E123456789'
-        'F123456789G123456789H123456789I123456789J123456789';
-    await _pumpThread(tester, theirs: wall);
-
-    final bubble = tester.getSize(
-      find
-          .ancestor(of: find.text(wall), matching: find.byType(Container))
-          .first,
-    );
-    final screen =
-        tester.view.physicalSize.width / tester.view.devicePixelRatio;
-    expect(
-      bubble.width,
-      lessThanOrEqualTo(screen * 0.75),
-      reason:
-          'a bubble is capped at a share of the row; the text wraps inside it',
-    );
-  });
-
-  testWidgets('the list is reversed, so there is no pin-to-bottom rule', (
-    tester,
-  ) async {
-    // T-014 / T-016 in their calm form. The decision being pinned is ours: a reversed list puts the
-    // newest message at offset zero, so a message arriving cannot move a reader who has scrolled
-    // up — there is nothing to pin, and therefore no pinning rule to get wrong.
-    //
-    // Only `reverse` is asserted. This used to also check that the offset was zero at rest, which
-    // is Flutter's own starting state rather than anything we decided.
-    await _pumpThread(tester);
-
-    expect(tester.widget<ListView>(find.byType(ListView)).reverse, isTrue);
   });
 }

@@ -13,11 +13,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/api.dart';
-import 'package:microteams/src/common/team_scope.dart';
 import 'package:microteams/src/common/ui/theme.dart';
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/teams/team_screen.dart';
-import 'package:microteams/src/teams/teams_screen.dart';
 import '../support/router_host.dart';
 import 'package:microteams/src/common/ui/menu.dart';
 
@@ -193,31 +191,6 @@ void main() {
     expect(gone, isTrue);
   });
 
-  testWidgets('a new team becomes the selected one', (tester) async {
-    // Made and then not selected is a team you have to go and find; making one is a statement of
-    // where you intend to work.
-    final backend = _Fake();
-    late WidgetRef ref;
-    await tester.pumpWidget(
-      _host(
-        backend,
-        Consumer(
-          builder: (context, r, _) {
-            ref = r;
-            return TeamsScreen(onOpen: (_) {});
-          },
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'new');
-    await tester.tap(find.widgetWithText(TextButton, 'create'));
-    await tester.pumpAndSettle();
-
-    expect(backend.asked, contains('POST /mt/team'));
-    expect(ref.read(selectedTeamProvider), 9);
-  });
+  // Making a team and finding it picked afterwards is the machine journey's now — it makes one and
+  // the next page opens with that team in the picker, against a real server.
 }

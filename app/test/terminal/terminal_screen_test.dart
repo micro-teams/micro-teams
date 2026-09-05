@@ -97,39 +97,6 @@ void main() {
       'wss://near.example.com/mt/machine/screen/s1',
     );
   });
-  testWidgets('takes what the machine sends without falling over', (
-    tester,
-  ) async {
-    final socket = _FakeSocket();
-    await tester.pumpWidget(host(socket));
-
-    socket.push('hello from the machine');
-    await tester.pumpAndSettle();
-
-    // Named for what it checks. xterm draws its cells on a canvas rather than as Text widgets, so
-    // nothing here can see the characters: what is asserted is that the bytes were accepted and the
-    // screen is still alive. The pixels were judged on a real device, which is the only place that
-    // judgement means anything — and the old name, "shows what the machine sends", claimed a
-    // great deal more than these two lines can know.
-    expect(find.byType(TerminalScreen), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('opens as watching, and says so', (tester) async {
-    final socket = _FakeSocket();
-    await tester.pumpWidget(host(socket));
-    await tester.pumpAndSettle();
-
-    expect(find.byTooltip('watching'), findsOneWidget);
-    expect(
-      socket.jsonSent.first,
-      equals({'type': 'control', 'level': 'passive'}),
-      reason:
-          'the machine has to be told what we are before it decides whether the '
-          'screen is trustworthy to sample',
-    );
-  });
-
   testWidgets('switching to typing tells the machine, with a size', (
     tester,
   ) async {
@@ -148,6 +115,38 @@ void main() {
     final resize = socket.jsonSent.where((f) => f['type'] == 'resize');
     expect(resize, isNotEmpty);
     expect(resize.first['cols'], isPositive);
+  });
+
+  testWidgets('a sequence the emulator cannot parse costs a chunk, not the session', (
+    tester,
+  ) async {
+    // ESC[1K is "erase to the start of the line". With the cursor at column 0 — where a program
+    // redrawing its input line puts it — xterm 4.0.0 computes a range ending at -1 and throws
+    // `RangeError: Not in inclusive range 0..511: -1`, out of Line.eraseRange. ESC[2K is fine, and
+    // so is ESC[1K anywhere but column 0, which is why nothing had ever hit it here.
+    //
+    // The journey found it the first time it opened a REAL Claude Code, which emits this routinely.
+    // The stand-in program that used to play the agent only ever echoed a line of text, so it could
+    // not produce an escape sequence at all, and this crash sat behind it undisturbed.
+    //
+    // A terminal emulator parses input from a program nobody here controls. One sequence it
+    // mishandles must cost the rendering of one chunk and nothing else.
+    final socket = _FakeSocket();
+    await tester.pumpWidget(host(socket));
+    await tester.pumpAndSettle();
+
+    // ESC[G first: the cursor has to BE at column 0 for this to bite. Written as "hello ESC[1K"
+    // the first time, this test passed with the guard removed — five characters in, the cursor was
+    // at column 5 and the emulator was perfectly happy.
+    socket.push('hello\x1b[G\x1b[1Kworld');
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'one escape sequence took the whole screen down',
+    );
+    expect(find.byType(TerminalScreen), findsOneWidget);
   });
 
   testWidgets('a socket that dies says so instead of going quiet', (

@@ -125,16 +125,10 @@ void main() {
   });
 
   group('the roster', () {
-    testWidgets('shows everyone in it', (tester) async {
-      await tester.pumpWidget(
-        _host(_Fake(), ThreadInfoScreen(threadId: 5, onGone: () {})),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Me'), findsOneWidget);
-      expect(find.text('Owner'), findsOneWidget);
-      expect(find.text('Them'), findsOneWidget);
-    });
+    // Who is in a conversation is the machine journey's now: it opens the info on the chat it has
+    // with its agent and finds both of them there, in a roster the server built rather than one a
+    // fake handed over. What is left here is about what you are ALLOWED to change, which needs a
+    // roster arranged around your role.
 
     testWidgets('offers nothing to change while you are only a member', (
       tester,
@@ -168,36 +162,9 @@ void main() {
       expect(find.byTooltip('Remove user 2'), findsNothing);
     });
 
-    testWidgets('removing somebody asks first, then asks the server', (
-      tester,
-    ) async {
-      // A cross at the corner of a face is the easiest thing on this screen to press by accident,
-      // and the person taken out will have seen it happen.
-      final backend = _Fake();
-      await tester.pumpWidget(
-        _host(backend, ThreadInfoScreen(threadId: 5, onGone: () {})),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byTooltip('Remove user 3'));
-      await tester.pumpAndSettle();
-      expect(backend.wrote, isNot(contains('DELETE /mt/chat/5/members/3')));
-
-      await tester.tap(find.widgetWithText(TextButton, 'cancel'));
-      await tester.pumpAndSettle();
-      expect(
-        backend.wrote,
-        isNot(contains('DELETE /mt/chat/5/members/3')),
-        reason: 'cancel means cancel',
-      );
-
-      await tester.tap(find.byTooltip('Remove user 3'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'remove'));
-      await tester.pumpAndSettle();
-
-      expect(backend.wrote, contains('DELETE /mt/chat/5/members/3'));
-    });
+    // Asking first and then actually removing somebody is the journey's now: it takes the agent out
+    // of its own conversation and watches the button go. What stays here is who you are ALLOWED to
+    // remove — the owner, and yourself — which needs a roster arranged around a role.
 
     testWidgets('deleting the whole conversation needs confirming', (
       tester,
