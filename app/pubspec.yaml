@@ -1,7 +1,7 @@
 name: microteams
 description: The MicroTeams client — one codebase for web, Android, iOS, and the desktops.
 publish_to: none
-version: 0.1.16
+version: 0.1.18
 
 environment:
   sdk: ^3.9.0

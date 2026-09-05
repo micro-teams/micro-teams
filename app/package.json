@@ -1,7 +1,7 @@
 {
   "name": "microteams-app-checks",
   "private": true,
-  "version": "0.1.16",
+  "version": "0.1.18",
   "description": "The browser checks for the built web app, and the launcher that starts it. Flutter builds the app itself; this is the multipath launcher that loads it, and the Playwright checks — service workers, offline start and the escape hatch need a real browser.",
   "type": "module",
   "scripts": {
