@@ -114,9 +114,34 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
     }
   }
 
+  /// Run the ring's animation only while there is a ring.
+  ///
+  /// The controller is `late final`, so an avatar that has never been working never creates one —
+  /// that part was always right. What was missing is the other edge: an agent that STOPS working
+  /// left the controller running for the life of the widget, and a live Ticker keeps the engine
+  /// producing frames at the display's rate with nothing new to paint. On a chat list where one
+  /// agent worked once, that is every frame, forever.
+  ///
+  /// Nothing about what is on screen changes: the ring is not built when [working] is false, so
+  /// stopping the thing that drives it is invisible.
+  void _pulseWhile(bool working) {
+    if (working) {
+      if (!_started || !_pulse.isAnimating) {
+        _started = true;
+        _pulse.repeat(reverse: true);
+      }
+    } else if (_started && _pulse.isAnimating) {
+      _pulse.stop();
+    }
+  }
+
+  /// Whether the controller has ever been reached for. Asking `_pulse.isAnimating` on its own would
+  /// CREATE it, which is the cost this is here to avoid.
+  bool _started = false;
+
   @override
   void dispose() {
-    _pulse.dispose();
+    if (_started) _pulse.dispose();
     _registry.untrack(widget.userId);
     super.dispose();
   }
@@ -140,6 +165,7 @@ class _UserAvatarState extends ConsumerState<UserAvatar>
     final agent = presence[widget.userId];
     final isAgent = agent != null;
     final working = isWorking(agent);
+    _pulseWhile(working);
     final avatarId = widget.avatarId ?? agent?.avatarId;
     final name = (widget.nickname ?? agent?.nickname ?? '${widget.userId}')
         .trim();

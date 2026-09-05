@@ -524,7 +524,13 @@ class _AgentsPane extends ConsumerWidget {
     return Scaffold(
       body: Row(
         children: [
-          SizedBox(width: Metrics.listPaneWidth, child: list),
+          // A boundary per pane. Each list already gives its rows one — that is `ListView`'s own
+          // default — but nothing separates the two panes from each other, so scrolling on the left
+          // marks the whole window's layer dirty and the right-hand side is re-rasterised along
+          // with it, every frame of the drag.
+          RepaintBoundary(
+            child: SizedBox(width: Metrics.listPaneWidth, child: list),
+          ),
           const VerticalDivider(width: 1),
           Expanded(
             child: switch ((openAgentId, openMachineId)) {
@@ -601,7 +607,13 @@ class _TeamsPane extends StatelessWidget {
     return Scaffold(
       body: Row(
         children: [
-          SizedBox(width: Metrics.listPaneWidth, child: list),
+          // A boundary per pane. Each list already gives its rows one — that is `ListView`'s own
+          // default — but nothing separates the two panes from each other, so scrolling on the left
+          // marks the whole window's layer dirty and the right-hand side is re-rasterised along
+          // with it, every frame of the drag.
+          RepaintBoundary(
+            child: SizedBox(width: Metrics.listPaneWidth, child: list),
+          ),
           const VerticalDivider(width: 1),
           Expanded(
             child: open == null

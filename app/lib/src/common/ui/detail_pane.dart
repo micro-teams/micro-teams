@@ -43,6 +43,8 @@ class DetailPane extends StatelessWidget {
     // times an afternoon, is an irritation rather than an effect.
     transitionBuilder: (child, animation) =>
         FadeTransition(opacity: animation, child: child),
-    child: child,
+    // The detail side of a two-pane window, in its own layer: it does not change while somebody is
+    // scrolling the list beside it, and a boundary is what lets the compositor know that.
+    child: RepaintBoundary(child: child),
   );
 }
