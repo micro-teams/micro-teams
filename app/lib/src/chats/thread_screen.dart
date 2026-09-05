@@ -286,11 +286,19 @@ class _MessageList extends StatelessWidget {
     return _ReadingColumn(
       child: _KeepsItsHeight(
         frozen: composerHasFocus,
-        child: SelectionArea(
+        scroll: scroll,
+        builder: (context, hidden) => SelectionArea(
           child: ListView.builder(
             controller: scroll,
             reverse: true,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            // The keyboard's bite, given back as room to scroll into. Holding the list still puts
+            // the newest messages behind the keyboard, and without this there is nowhere for them
+            // to come from: the list has exactly as much content as before and no more room, so
+            // dragging does nothing. Reported from a phone as "the messages no longer move, but I
+            // cannot scroll down either". The offset is corrected by the same amount as this
+            // appears (see [_KeepsItsHeight]), so adding it moves nothing on screen — it only makes
+            // what the keyboard covers reachable.
+            padding: EdgeInsets.only(top: 8, bottom: 8 + hidden),
             itemCount: rows.length,
             itemBuilder: (context, index) {
               final row = rows[index];
@@ -338,10 +346,20 @@ class _MessageList extends StatelessWidget {
 /// and "somebody is typing" are different events and only the second one may freeze a layout: a
 /// window somebody drags shorter must still re-flow.
 class _KeepsItsHeight extends StatefulWidget {
-  const _KeepsItsHeight({required this.frozen, required this.child});
+  const _KeepsItsHeight({
+    required this.frozen,
+    required this.scroll,
+    required this.builder,
+  });
 
   final bool frozen;
-  final Widget child;
+
+  /// The list's own controller. Held here because this is where the hidden strip is measured, and
+  /// the correction has to happen in the same frame that the strip changes.
+  final ScrollController scroll;
+
+  /// Built with how much of the list is currently hidden past the bottom of the window.
+  final Widget Function(BuildContext context, double hidden) builder;
 
   @override
   State<_KeepsItsHeight> createState() => _KeepsItsHeightState();
@@ -351,24 +369,62 @@ class _KeepsItsHeightState extends State<_KeepsItsHeight> {
   /// The height last measured while nothing was frozen — the height the conversation is drawn at.
   double? _height;
 
+  /// How much of the list was hidden past the bottom last time, so a change can be corrected for.
+  double _hidden = 0;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final available = constraints.maxHeight;
-        if (!widget.frozen || _height == null) {
+        // Unfrozen is not enough on its own: the field must have let go AND the window must have
+        // come back. Two things happen when a keyboard goes away — focus is lost, and the window
+        // grows — and nothing says which lands first. Taking the new height on the focus alone
+        // re-lays-out the list at the SHORT height for however many frames the window takes to
+        // return, and every bubble moves and then moves back. That is the "sometimes" in "closing
+        // the keyboard sometimes moves the messages": it depends on an order nobody controls.
+        if (_height == null || (!widget.frozen && available >= _height!)) {
           _height = available;
         }
         // Never shorter than the window: a keyboard that closes while the field still has focus
         // would otherwise leave a strip of nothing under the last message.
         final height = _height! > available ? _height! : available;
 
+        // What the keyboard is covering, by whichever of the two routes it arrived.
+        //
+        // On Android the window itself gets shorter, and the freeze above turns that into a strip
+        // of list laid out past the bottom edge — `height - available`. Everywhere else the window
+        // keeps its size and the keyboard simply sits on top of it, reported as a view inset; with
+        // `resizeToAvoidBottomInset: false` nothing shrinks and that subtraction is zero. Both are
+        // the same thing seen from two sides, so the strip is the larger of them.
+        //
+        // The child turns it into padding, and the correction below turns the padding back into no
+        // movement — the list is scrolled by exactly what the padding added, so every bubble stays
+        // where it was and the only difference is that there is now somewhere to scroll to.
+        final inset = MediaQuery.viewInsetsOf(context).bottom;
+        final overflow = height - available;
+        final hidden = overflow > inset ? overflow : inset;
+        if (hidden != _hidden) {
+          final added = hidden - _hidden;
+          _hidden = hidden;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !widget.scroll.hasClients) return;
+            final position = widget.scroll.position;
+            widget.scroll.jumpTo(
+              (position.pixels + added).clamp(
+                position.minScrollExtent,
+                position.maxScrollExtent,
+              ),
+            );
+          });
+        }
+
         return ClipRect(
           child: OverflowBox(
             alignment: Alignment.topCenter,
             minHeight: height,
             maxHeight: height,
-            child: widget.child,
+            child: widget.builder(context, hidden),
           ),
         );
       },

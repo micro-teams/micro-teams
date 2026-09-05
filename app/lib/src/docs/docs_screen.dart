@@ -72,7 +72,11 @@ class _DocsScreenState extends ConsumerState<DocsScreen> {
     return Scaffold(
       body: Row(
         children: [
-          SizedBox(width: Metrics.listPaneWidth, child: tree),
+          // The tree and the document are two scrollers side by side; without a boundary between
+          // them, dragging one re-rasterises the other.
+          RepaintBoundary(
+            child: SizedBox(width: Metrics.listPaneWidth, child: tree),
+          ),
           const VerticalDivider(width: 1),
           Expanded(
             child: DetailPane(
@@ -620,10 +624,19 @@ class _DocPaneState extends ConsumerState<_DocPane> {
                   )
                 : SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                    child: SelectionArea(
-                      // One selection area, over a page that does not scroll while you drag in it —
-                      // unlike the message list, where the same widget cost 125 frames in 274.
-                      child: MarkdownView(source: content),
+                    // A boundary, because a document is the one thing here that does NOT get one
+                    // for free. Every list in this app is a ListView, and a ListView already wraps
+                    // each row in a RepaintBoundary of its own — that is the framework's default.
+                    // A SingleChildScrollView wraps nothing: without this, scrolling a long
+                    // document re-rasterises all of it on every frame, when the only thing that
+                    // changed is where it sits.
+                    child: RepaintBoundary(
+                      child: SelectionArea(
+                        // One selection area, over a page that does not scroll while you drag in
+                        // it — unlike the message list, where the same widget cost 125 frames in
+                        // 274.
+                        child: MarkdownView(source: content),
+                      ),
                     ),
                   ),
           ),

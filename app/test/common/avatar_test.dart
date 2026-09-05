@@ -89,6 +89,27 @@ Widget _host(_Fake backend, Widget child) => ProviderScope(
 );
 
 void main() {
+  // An avatar that is not working draws no ring — and must therefore ask for no frames. A running
+  // AnimationController keeps a Ticker alive, and a live Ticker makes the engine produce frames at
+  // the display's rate for as long as the avatar is on screen: every chat list, every roster, every
+  // fleet page, forever, painting nothing new. It costs battery on any device and shows up as
+  // scrolling that is never quite smooth on one that manages its clocks aggressively.
+  testWidgets('an idle agent asks for no frames', (tester) async {
+    await tester.pumpWidget(
+      _host(_Fake(status: 'idle'), const UserAvatar(userId: 42)),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(const ValueKey('working-ring')), findsNothing);
+    expect(
+      tester.binding.transientCallbackCount,
+      0,
+      reason:
+          'something is still scheduling frames for an avatar that is not animating',
+    );
+  });
+
   group('a working agent', () {
     testWidgets('wears the ring', (tester) async {
       await tester.pumpWidget(

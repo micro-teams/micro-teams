@@ -125,20 +125,25 @@ class _Diff extends ConsumerWidget {
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final line in lines)
-                  Text(
-                    line.isEmpty ? ' ' : line,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      height: 1.4,
-                      color: _colourOf(line, scheme),
+            // Same reason as the document body: nothing wraps the child of a
+            // SingleChildScrollView, so a diff of any length is re-rasterised on every frame of a
+            // scroll without this.
+            child: RepaintBoundary(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final line in lines)
+                    Text(
+                      line.isEmpty ? ' ' : line,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.4,
+                        color: _colourOf(line, scheme),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         );
