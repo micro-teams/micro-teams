@@ -646,7 +646,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       # Gradle is the whole cost of this leg from cold. The key is the lockfile and the wrapper,
       # so a run that changes neither downloads nothing.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         if: matrix.client == 'android'
         with:
           path: |
