@@ -96,6 +96,19 @@ trace() {
     docker exec "$MACHINE_CT" tail -25 /tmp/connector.log 2>/dev/null ||
       echo '(no connector log — it never started)'
   fi
+  # The two halves of the token, side by side. "unknown machine token" can mean the machine kept a
+  # token nobody stored, or that the row it belongs to is gone; from either side alone the two look
+  # the same. Only the first characters, because this is a log.
+  if docker ps --format '{{.Names}}' | grep -qx "$MACHINE_CT"; then
+    printf '\n--- the token, from both ends ---\n'
+    printf 'the machine holds: %s\n' "$(docker exec "$MACHINE_CT" \
+      python3 -c 'import json;print(json.load(open("/home/'"$MACHINE_USER"'/.config/microteams/config.json"))["token"][:14])' \
+      2>/dev/null || echo '(no config)')"
+    printf 'the database has:  %s\n' "$(docker exec "${PROJECT}-postgres-1" bash -c \
+      'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "select machine_id, left(token,14) from machine;"' \
+      2>/dev/null | tr -d ' ' | tr '\n' ' ' || echo '(could not ask)')"
+  fi
+
   # And the deployment's own. The workflow has a "dump logs on failure" step, and it prints nothing
   # useful: this script's own trap tears the stack down on the way out, so by the time that step
   # runs there is no container left to ask. Whatever the backend said has to be taken here.
