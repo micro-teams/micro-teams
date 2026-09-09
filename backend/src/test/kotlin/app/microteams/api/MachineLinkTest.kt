@@ -17,7 +17,6 @@ package app.microteams.api
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
-import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URI
 import java.util.UUID
 import java.util.concurrent.ExecutionException
@@ -37,6 +36,7 @@ import org.springframework.web.socket.WebSocketHttpHeaders
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.client.standard.StandardWebSocketClient
 import org.springframework.web.socket.handler.TextWebSocketHandler
+import tools.jackson.databind.ObjectMapper
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

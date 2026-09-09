@@ -18,7 +18,6 @@
 package app.microteams.machine.link
 
 import app.microteams.machine.MachineConnectedEvent
-import com.fasterxml.jackson.databind.ObjectMapper
 import java.util.concurrent.ConcurrentHashMap
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
@@ -26,6 +25,7 @@ import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.handler.TextWebSocketHandler
+import tools.jackson.databind.ObjectMapper
 
 class LinkHandler(
     private val hub: MachineHub,

@@ -18,7 +18,7 @@ import app.microteams.machine.enrollment.MachineService
 import app.microteams.model.*
 import app.microteams.team.documents.DocumentService
 import app.microteams.team.membership.*
-import javax.annotation.PostConstruct
+import jakarta.annotation.PostConstruct
 import javax.validation.Valid
 import org.rucca.cheese.auth.AuthenticationService
 import org.rucca.cheese.auth.AuthorizationService

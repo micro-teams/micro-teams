@@ -33,7 +33,7 @@ import app.microteams.model.*
 import app.microteams.team.machine.TeamMachineService
 import app.microteams.team.membership.TeamService
 import app.microteams.user.UserProfileRepository
-import javax.annotation.PostConstruct
+import jakarta.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthenticationService
 import org.rucca.cheese.auth.AuthorizationService
 import org.rucca.cheese.auth.AuthorizedAction

@@ -22,7 +22,6 @@ import app.microteams.machine.link.MachineHub
 import app.microteams.team.machine.TeamMachine
 import app.microteams.team.machine.TeamMachineRepository
 import app.microteams.team.membership.TeamService
-import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URI
 import java.util.UUID
 import java.util.concurrent.LinkedBlockingQueue
@@ -36,9 +35,9 @@ import org.junit.jupiter.api.TestInstance
 import org.rucca.cheese.common.persistent.IdType
 import org.rucca.cheese.utils.UserCreatorService
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
@@ -47,6 +46,7 @@ import org.springframework.web.socket.WebSocketHttpHeaders
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.client.standard.StandardWebSocketClient
 import org.springframework.web.socket.handler.TextWebSocketHandler
+import tools.jackson.databind.ObjectMapper
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc

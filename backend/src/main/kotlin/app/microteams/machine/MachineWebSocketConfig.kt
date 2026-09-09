@@ -25,7 +25,6 @@ import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.LinkHandler
 import app.microteams.machine.link.MachineHub
 import app.microteams.machine.screen.ViewerHandler
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.rucca.cheese.auth.AuthorizationService
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -37,6 +36,7 @@ import org.springframework.web.servlet.handler.SimpleUrlHandlerMapping
 import org.springframework.web.socket.WebSocketHandler
 import org.springframework.web.socket.server.HandshakeInterceptor
 import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler
+import tools.jackson.databind.ObjectMapper
 
 @Configuration
 class ConnectorWebSocketConfig {

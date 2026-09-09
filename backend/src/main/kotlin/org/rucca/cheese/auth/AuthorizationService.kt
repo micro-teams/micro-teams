@@ -14,9 +14,7 @@ import com.auth0.jwt.JWTVerifier
 import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.exceptions.JWTVerificationException
 import com.auth0.jwt.exceptions.TokenExpiredException
-import com.fasterxml.jackson.core.JacksonException
-import com.fasterxml.jackson.databind.ObjectMapper
-import javax.annotation.PostConstruct
+import jakarta.annotation.PostConstruct
 import org.rucca.cheese.auth.error.AuthenticationRequiredError
 import org.rucca.cheese.auth.error.InvalidTokenError
 import org.rucca.cheese.auth.error.PermissionDeniedError
@@ -28,6 +26,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.context.request.ServletRequestAttributes
+import tools.jackson.core.JacksonException
+import tools.jackson.databind.ObjectMapper
 
 @Service
 class AuthorizationService(

@@ -9,7 +9,7 @@
 
 package app.microteams.user
 
-import javax.annotation.PostConstruct
+import jakarta.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthorizationService
 import org.rucca.cheese.auth.AuthorizedAction
 import org.rucca.cheese.auth.error.PermissionDeniedError

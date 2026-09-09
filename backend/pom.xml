@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.2</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -59,6 +59,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!--
+          Boot 4 no longer brings Jackson in through the web starter: auto-configuration was broken
+          up into per-technology modules, and an ObjectMapper is now something you ask for. Without
+          this, the context fails to start with "No qualifying bean of type ObjectMapper" — 26 of
+          73 tests, all of them the ones that build a real context.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-reflect</artifactId>
@@ -70,6 +80,17 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+          Boot 4 split the test slices out of spring-boot-test-autoconfigure into one module per
+          technology: `@AutoConfigureMockMvc` and everything around MockMvc now live in
+          org.springframework.boot.webmvc.test.autoconfigure and have to be asked for by name.
+          Without this, every @SpringBootTest that uses MockMvc fails to compile.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -143,7 +164,7 @@
         <dependency>
             <groupId>com.ninja-squad</groupId>
             <artifactId>springmockk</artifactId>
-            <version>4.0.2</version>
+            <version>5.0.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -159,7 +180,7 @@
         <dependency>
             <groupId>org.glassfish.jersey.core</groupId>
             <artifactId>jersey-client</artifactId>
-            <version>3.1.10</version>
+            <version>4.0.2</version>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.media</groupId>
@@ -167,22 +188,24 @@
             <version>4.0.2</version>
         </dependency>
         <!--
-          Pinned to 3.1.10 to match jersey-client / jersey-hk2 / jersey-media-json-jackson above.
-          A dependabot bump to 4.0.2 dragged in jersey-common 4.x, whose
-          org.glassfish.jersey.innate.spi.MessageBodyWorkersSettable does not exist in the 3.1.10
-          client — every request then died with NoClassDefFoundError. Keep all Jersey artifacts on
-          one version.
+          All Jersey artifacts on ONE version, and that rule is the whole comment.
+          Mixed once before: a bump of json-jackson alone to 4.0.2 dragged in jersey-common 4.x,
+          whose org.glassfish.jersey.innate.spi.MessageBodyWorkersSettable the 3.1.10 client does
+          not have, and every request died with NoClassDefFoundError. It happened again from the
+          other side during the Boot 4 move: client on 4.0.2 with hk2 left at 3.1.10 gave
+          "Hk2InjectionManagerFactory does not define or inherit ... createInjectionManager" and
+          took out seventeen tests. 4.x is the EE11 line, which is what Boot 4 requires.
         -->
         <dependency>
             <groupId>org.glassfish.jersey.media</groupId>
             <artifactId>jersey-media-multipart</artifactId>
-            <version>3.1.10</version>
+            <version>4.0.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.inject</groupId>
             <artifactId>jersey-hk2</artifactId>
-            <version>3.1.10</version>
+            <version>4.0.2</version>
         </dependency>
         <dependency>
             <groupId>org.parboiled</groupId>
