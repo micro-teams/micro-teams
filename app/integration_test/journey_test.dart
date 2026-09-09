@@ -125,6 +125,18 @@ void main() {
       find.textContaining('machines'),
       what: 'the agents page',
     );
+    // The machine has to be ON THE PAGE before "(not connected)" going away means anything.
+    // Waiting only for that string to leave passes the instant it was never there — which is
+    // exactly what an empty list looks like while it is still loading. The journey then walked on
+    // with a machine that had not dialled in, opened an agent that could not start, and reported it
+    // as "the agent's own page never appeared": a true sentence about the wrong thing. It went
+    // unnoticed until a slower backend moved the list's arrival a second later.
+    await waitFor(
+      tester,
+      find.text('e2e-machine'),
+      what: 'the machine, in the fleet',
+      limit: const Duration(minutes: 2),
+    );
     await waitUntilGone(
       tester,
       find.textContaining('(not connected)'),
