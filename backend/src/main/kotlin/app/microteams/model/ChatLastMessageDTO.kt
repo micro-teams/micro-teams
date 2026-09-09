@@ -10,15 +10,15 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class ChatLastMessageDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("content")
+    @param:JsonProperty("content", required = true)
     @get:JsonProperty("content", required = true)
     val content: kotlin.String,
     @Schema(required = true, description = "")
-    @param:JsonProperty("senderId")
+    @param:JsonProperty("senderId", required = true)
     @get:JsonProperty("senderId", required = true)
     val senderId: kotlin.Long,
     @Schema(required = true, description = "")
-    @param:JsonProperty("createdAt")
+    @param:JsonProperty("createdAt", required = true)
     @get:JsonProperty("createdAt", required = true)
     val createdAt: java.time.OffsetDateTime,
 ) {}

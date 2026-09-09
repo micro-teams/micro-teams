@@ -8,7 +8,7 @@ import javax.validation.Valid
 data class LineRegistryDTO(
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("lines")
+    @param:JsonProperty("lines", required = true)
     @get:JsonProperty("lines", required = true)
     val lines: kotlin.collections.List<LineDTO>
 ) {}

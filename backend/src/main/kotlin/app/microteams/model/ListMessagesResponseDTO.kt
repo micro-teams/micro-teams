@@ -11,12 +11,12 @@ import javax.validation.Valid
 data class ListMessagesResponseDTO(
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("messages")
+    @param:JsonProperty("messages", required = true)
     @get:JsonProperty("messages", required = true)
     val messages: kotlin.collections.List<MessageDTO>,
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("page")
+    @param:JsonProperty("page", required = true)
     @get:JsonProperty("page", required = true)
     val page: PageDTO,
 ) {}

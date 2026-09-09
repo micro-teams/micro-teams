@@ -11,12 +11,12 @@ import javax.validation.Valid
 data class TeamDetailDTO(
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("team")
+    @param:JsonProperty("team", required = true)
     @get:JsonProperty("team", required = true)
     val team: TeamDTO,
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("members")
+    @param:JsonProperty("members", required = true)
     @get:JsonProperty("members", required = true)
     val members: kotlin.collections.List<TeamMemberDTO>,
 ) {}

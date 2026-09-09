@@ -11,19 +11,19 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class DocCommitDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("sha")
+    @param:JsonProperty("sha", required = true)
     @get:JsonProperty("sha", required = true)
     val sha: kotlin.String,
     @Schema(required = true, description = "")
-    @param:JsonProperty("message")
+    @param:JsonProperty("message", required = true)
     @get:JsonProperty("message", required = true)
     val message: kotlin.String,
     @Schema(required = true, description = "")
-    @param:JsonProperty("author")
+    @param:JsonProperty("author", required = true)
     @get:JsonProperty("author", required = true)
     val author: kotlin.String,
     @Schema(required = true, description = "")
-    @param:JsonProperty("timestamp")
+    @param:JsonProperty("timestamp", required = true)
     @get:JsonProperty("timestamp", required = true)
     val timestamp: kotlin.Long,
 ) {}

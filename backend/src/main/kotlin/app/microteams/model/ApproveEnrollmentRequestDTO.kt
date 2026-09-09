@@ -9,11 +9,11 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class ApproveEnrollmentRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("code")
+    @param:JsonProperty("code", required = true)
     @get:JsonProperty("code", required = true)
     val code: kotlin.String,
     @Schema(required = true, description = "")
-    @param:JsonProperty("teamIds")
+    @param:JsonProperty("teamIds", required = true)
     @get:JsonProperty("teamIds", required = true)
     val teamIds: kotlin.collections.List<kotlin.Long>,
 ) {}

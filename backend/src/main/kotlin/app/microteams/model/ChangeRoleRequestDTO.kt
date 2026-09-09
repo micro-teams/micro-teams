@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** @param role */
 data class ChangeRoleRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("role")
+    @param:JsonProperty("role", required = true)
     @get:JsonProperty("role", required = true)
     val role: ChangeRoleRequestDTO.Role
 ) {
