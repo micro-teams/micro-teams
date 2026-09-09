@@ -88,6 +88,14 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; trace; exit 1; }
 # What the journey itself said, in order. A release web build reports only the test's name when an
 # expectation fails, so this is the only thing that says WHERE it stopped.
 trace() {
+  # The machine's own side of the story. Printed with the trace rather than only at the very last
+  # assertion, because "the machine never came online" and "the app could not see it" look identical
+  # from the app and are one line apart in this log.
+  if docker ps --format '{{.Names}}' | grep -qx "$MACHINE_CT"; then
+    printf '\n--- what the connector on the machine said ---\n'
+    docker exec "$MACHINE_CT" tail -25 /tmp/connector.log 2>/dev/null ||
+      echo '(no connector log — it never started)'
+  fi
   printf '\n--- what the journey was doing ---\n'
   curl -fsS "http://localhost:${MAIL_PORT:-52027}/notes" 2>/dev/null |
     python3 -c 'import sys,json;[print(" ",n) for n in json.load(sys.stdin)]' 2>/dev/null || true

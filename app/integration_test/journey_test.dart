@@ -125,21 +125,23 @@ void main() {
       find.textContaining('machines'),
       what: 'the agents page',
     );
-    // The machine has to be ON THE PAGE before "(not connected)" going away means anything.
-    // Waiting only for that string to leave passes the instant it was never there — which is
-    // exactly what an empty list looks like while it is still loading. The journey then walked on
-    // with a machine that had not dialled in, opened an agent that could not start, and reported it
-    // as "the agent's own page never appeared": a true sentence about the wrong thing. It went
-    // unnoticed until a slower backend moved the list's arrival a second later.
+    // Wait for the word the page ACTUALLY shows.
+    //
+    // This waited for "(not connected)" to go away, and that string is not on this page at all — it
+    // belongs to the open-agent dialog, which is not open yet. So the wait passed the instant it
+    // was reached, every time, and the journey walked on with a machine that had not dialled in;
+    // the failure then landed several steps later as "the agent's own page never appeared", which
+    // is a true sentence about the wrong thing. The fleet says `online` or `offline`, so that is
+    // what is waited for — and the machine's own name first, or an empty list would pass as well.
     await waitFor(
       tester,
       find.text('e2e-machine'),
       what: 'the machine, in the fleet',
       limit: const Duration(minutes: 2),
     );
-    await waitUntilGone(
+    await waitFor(
       tester,
-      find.textContaining('(not connected)'),
+      find.text('online'),
       what: 'the machine to come online',
       limit: const Duration(minutes: 2),
     );
