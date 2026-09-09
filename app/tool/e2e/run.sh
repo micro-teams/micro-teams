@@ -96,6 +96,14 @@ trace() {
     docker exec "$MACHINE_CT" tail -25 /tmp/connector.log 2>/dev/null ||
       echo '(no connector log — it never started)'
   fi
+  # And the deployment's own. The workflow has a "dump logs on failure" step, and it prints nothing
+  # useful: this script's own trap tears the stack down on the way out, so by the time that step
+  # runs there is no container left to ask. Whatever the backend said has to be taken here.
+  if docker ps --format '{{.Names}}' | grep -q "^${PROJECT}-backend"; then
+    printf '\n--- what the backend said ---\n'
+    (cd "$BUNDLE" && docker compose -p "$PROJECT" logs --no-color --tail 60 backend 2>/dev/null) ||
+      true
+  fi
   printf '\n--- what the journey was doing ---\n'
   curl -fsS "http://localhost:${MAIL_PORT:-52027}/notes" 2>/dev/null |
     python3 -c 'import sys,json;[print(" ",n) for n in json.load(sys.stdin)]' 2>/dev/null || true
