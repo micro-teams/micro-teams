@@ -9,7 +9,7 @@
     "check:web": "bash tool/check-web.sh"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "playwright": "1.63.0"
   },
   "dependencies": {
     "@micro-teams/multipath": "0.1.6"
