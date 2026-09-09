@@ -346,6 +346,16 @@ if [ "$JOURNEY" = "full" ]; then
   # Handed over at runtime, not compiled in: this code did not exist when a prebuilt APK was built.
   RUN_PARAMS="{\"runId\":\"$RUN_ID\",\"enrollCode\":\"$CODE\"}"
 
+  # `or ""`, not `.get(key, "")`. The default only applies when the key is ABSENT, and a poll that
+  # is still pending answers `{"status":"pending","machineId":null,"token":null}` — the key is
+  # there, holding null, so Python's get returns None and prints the four characters N-o-n-e. That
+  # is a non-empty string to the shell, so the loop concluded it had a token, wrote "None" into the
+  # machine's config and started the connector against it. The backend then said, correctly and
+  # forever, "unknown machine token".
+  #
+  # It only surfaced when the backend began including nulls in that response. Nothing about this was
+  # ever right; a null was simply never sent before.
+  #
   # The machine's own half of enrolment, waiting for the human to approve in the interface: poll
   # until a token comes back, write the config, and run the connector the way its boot service would
   # (a container has no init to install one into). This is the only thing that happens in parallel
@@ -362,8 +372,8 @@ if [ "$JOURNEY" = "full" ]; then
     for _ in \$(seq 1 1200); do
       OUT=\$(curl -fsS -X POST http://nginx/mt/machine/enroll/poll -H 'Content-Type: application/json' \
         -d '{\"code\":\"$CODE\"}' || true)
-      TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\",\"\"))' 2>/dev/null || true)
-      MID=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"machineId\",\"\"))' 2>/dev/null || true)
+      TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\") or \"\")' 2>/dev/null || true)
+      MID=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"machineId\") or \"\")' 2>/dev/null || true)
       if [ -n \"\$TOKEN\" ]; then
         printf '{\"base\":\"http://nginx/mt\",\"token\":\"%s\",\"machine_id\":\"%s\"}' \"\$TOKEN\" \"\$MID\" \
           > /home/$MACHINE_USER/.config/microteams/config.json
