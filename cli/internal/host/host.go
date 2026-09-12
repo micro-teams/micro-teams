@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -113,7 +114,13 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 		mpLines: lines.For(cfgPath, cfg.APIBase()),
 		apiBase: cfg.APIBase(),
 	}
-	conn := ws.NewWithOptions(ctrlURL, cfg.Token, cfg.APIBase(), ws.Options{
+	// See substrateDialURL: the URL given to package ws must not ask gorilla to dial its own TLS on
+	// top of the substrate connection dialSubstrate hands it below.
+	dialURL, err := substrateDialURL(ctrlURL)
+	if err != nil {
+		return nil, err
+	}
+	conn := ws.NewWithOptions(dialURL, cfg.Token, cfg.APIBase(), ws.Options{
 		NetDial: host.dialSubstrate,
 		Report:  host.reportLink,
 	})
@@ -122,6 +129,33 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 		return nil, err
 	}
 	return host, nil
+}
+
+// substrateDialURL turns ctrlURL into the URL package ws should actually dial: a "wss" downgraded
+// to "ws", everything else unchanged.
+//
+// The scheme on that URL is not a description of this connection, it is an instruction to gorilla:
+// negotiate TLS on top of whatever NetDial returns, or don't. dialSubstrate's net.Conn is a mux
+// stream on the substrate — already carried end to end inside the TLS of the lines it rides, with
+// origin terminating that TLS and splicing the exchange back into nginx as plain bytes, the same as
+// a request that arrived over ordinary HTTP. Left as "wss", gorilla dialled a SECOND TLS handshake
+// on top of that already-secure stream: a ClientHello written into the mux stream, answered by the
+// backend's WebSocket handler with an ordinary plain upgrade response (it was never expecting a
+// second TLS layer inside a stream origin had already unwrapped), which gorilla then read back and
+// rejected — `tls: first record does not look like a TLS handshake`, on every attempt, forever: not
+// a network hiccup the reconnect loop above would ever recover from. A short command's HTTP
+// requests never hit this — RoundTrip writes the request's bytes straight onto its own mux stream
+// and never asks gorilla to dial anything. The control link is the one path in this client that
+// hands a substrate connection to code that also knows how to dial TLS itself.
+func substrateDialURL(ctrlURL string) (string, error) {
+	u, err := url.Parse(ctrlURL)
+	if err != nil {
+		return "", fmt.Errorf("host: bad control URL %q: %w", ctrlURL, err)
+	}
+	if u.Scheme == "wss" {
+		u.Scheme = "ws"
+	}
+	return u.String(), nil
 }
 
 // dialSubstrate hands the WebSocket dialler a stream on the redundant transport, bringing that
