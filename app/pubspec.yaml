@@ -33,15 +33,20 @@ dependencies:
 
   dio: ^5.7.0
 
-  # Transport resilience: the line registry, hedged reads, idempotent write failover, the stream
-  # line policy, and the request cache. Pinned to the release rather than to a branch: a git ref
-  # that moves means two people building the same commit can get different code.
+  # The substrate: one redundant stream to the origin carried over every line at once, with each
+  # exchange a mux stream on top. Pinned to an exact commit rather than a branch — a ref that moves
+  # means two people building the same commit can get different code.
+  #
   multipath:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      ref: v0.1.6
+      ref: v0.2.0-rc.3
   web_socket_channel: ^3.0.1
+  # A WebSocket over the substrate is StreamChannel-shaped (multipath's own MultipathWebSocket is
+  # callback-based, not Stream/StreamSink) — this is the adapter's own dependency, made direct
+  # since we now implement StreamChannelMixin ourselves.
+  stream_channel: ^2.1.0
 
   # The live terminal. Proven against a real device before any of this was written — see
   # flutter-term-probe in the agent workdir and todo/microteams/backlog.md T-088.

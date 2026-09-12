@@ -21,16 +21,12 @@ import (
 // quietHost builds a Host whose narration goes to a buffer and whose clock a test can move.
 func quietHost(t *testing.T) (*Host, *bytes.Buffer, *time.Time) {
 	t.Helper()
-	client := multipath.New(multipath.Options{Registry: multipath.Registry{
-		Lines: []multipath.Line{{ID: "origin", URL: "", Weight: 100}},
-	}})
 	var buf bytes.Buffer
 	clock := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
 	h := &Host{
-		lines:     client,
-		linkLines: multipath.NewStreamSelector(client.Ranked, 5*time.Second, time.Minute, nil),
-		logw:      &buf,
-		now:       func() time.Time { return clock },
+		mpLines: []multipath.Line{{ID: "origin", URL: "https://control.example", Transport: "wss"}},
+		logw:    &buf,
+		now:     func() time.Time { return clock },
 	}
 	return h, &buf, &clock
 }

@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'agents/agents_controller.dart';
 import 'auth/auth_api.dart';
@@ -15,17 +16,15 @@ import 'chats/thread_controller.dart';
 import 'chats/thread_info_controller.dart';
 import 'docs/docs_controller.dart';
 import 'teams/team_admin_controller.dart';
-import 'package:multipath/multipath.dart' as mp;
 
 import 'common/config.dart';
 import 'common/presence_controller.dart';
 import 'common/team_scope.dart';
 import 'common/errors.dart';
 import 'common/key_value.dart';
-import 'common/lines.dart';
 import 'common/multipath_adapter.dart';
-import 'common/prefs_store.dart';
-import 'common/stream_lines.dart';
+import 'common/request_cache.dart';
+import 'common/substrate_socket.dart';
 import 'common/api.dart';
 import 'common/updates/socket.dart';
 import 'common/updates/store.dart';
@@ -62,15 +61,13 @@ final serverProvider = NotifierProvider<ServerSetting, String?>(
   ServerSetting.new,
 );
 
-/// What the same request returned last time. MultiPath's, so the keys, the scoping, the eviction
-/// and the expiry are the rules every client in the org shares — and so nothing in this app has to
-/// invent a cache key ever again.
+/// What the same request returned last time, keyed by the request itself — so nothing in this app
+/// has to invent a cache key ever again. It lived in the MultiPath package until 0.2.0 and now lives
+/// here, because deciding what a screen paints while it waits was never a transport's business.
 ///
 /// Overridden at startup with a disk-backed one — see main.dart. The in-memory default keeps tests
 /// and any early read honest rather than null.
-final requestCacheProvider = Provider<mp.RequestCache>(
-  (ref) => mp.RequestCache(),
-);
+final requestCacheProvider = Provider<RequestCache>((ref) => RequestCache());
 
 /// The app's own small state — the outbox, and anything else that must survive being killed but is
 /// not an answer to a request. See common/key_value.dart for why the two are not the same shelf.
@@ -78,27 +75,29 @@ final stateStoreProvider = Provider<KeyValueStore>(
   (ref) => KeyValueStore.inMemory(),
 );
 
-/// Which network paths this app may reach the backend over. One manager for the whole app: two
-/// would be two opinions about which line is fastest, each blind to what the other measured.
-/// The lines this app may reach the backend over.
+/// The transport every request leaves by: one redundant stream to the origin, carried over all of
+/// this deployment's lines at once.
 ///
-/// It starts with the one line every client already has — the origin the page came from. The
-/// deployment's real registry is adopted at startup by the composition root (see app.dart), which
-/// is where it has to happen: the client that asks `/mt/lines` is built FROM this manager, so this
-/// provider cannot ask for it without asking for itself.
-final linesProvider = Provider<mp.LineManager>((ref) {
-  final manager = mp.LineManager(
-    registry: sameOriginOnly(),
-    // How a probe is sent. Without it the manager measures nothing and ranks on configured weight —
-    // which is what this client did until now, and why every line but the one real traffic happened
-    // to use sat at "never measured" forever.
-    send: probeSender(origin: ref.watch(endpointsProvider).origin),
-    // What the last visit measured, so the ranking does not start from the registry's fixed order
-    // every time. start() seeds from it in the background; stop() writes it back.
-    storage: const PrefsHealthStore(),
-  );
-  ref.onDispose(manager.stop);
-  return manager;
+/// One for the whole app, and now for a stronger reason than before. It used to be "two managers
+/// would be two opinions about which line is fastest"; it is now "two would be two transports", each
+/// opening its own link to every line and each costing the origin a client it did not need.
+///
+/// It starts with NO line, and that is deliberate rather than lazy. The deployment's real registry
+/// is adopted at startup by the composition root (see app.dart), and until it arrives every request
+/// goes out the ordinary way — direct to the origin this app was already talking to. Which is the
+/// only thing that can happen anyway: the request that ASKS for the registry cannot be carried over
+/// the lines the registry is about.
+///
+/// Seeding it with the origin instead would mean dialling a redundant transport, over one line, to
+/// carry the one request whose answer decides which lines to use — paying a WebSocket handshake to
+/// learn that there was nothing to gain. It also made every widget test open a real connection.
+///
+/// Not dialled here either. Dialling is what the first request over it does; a provider that opened
+/// a connection when it was first read would make starting the app depend on the network being up.
+final substrateProvider = Provider<Substrate>((ref) {
+  final substrate = Substrate(lines: const []);
+  ref.onDispose(substrate.reset);
+  return substrate;
 });
 
 final authApiProvider = Provider<AuthApi>((ref) {
@@ -125,21 +124,17 @@ final authApiProvider = Provider<AuthApi>((ref) {
     // can carry it to whichever line answers.
     route: kIsWeb
         ? null
-        : (inner) =>
-              MultiPathAdapter(manager: ref.watch(linesProvider), inner: inner),
+        : (inner) => MultiPathAdapter(
+            substrate: ref.watch(substrateProvider),
+            inner: inner,
+          ),
   );
-});
-
-/// Measures every line, now. The panel's refresh button; the loop runs on its own once started.
-final probeLinesProvider = Provider<Future<void> Function()>((ref) {
-  final manager = ref.watch(linesProvider);
-  return manager.probeNow;
 });
 
 final mtClientProvider = Provider<MtClient>((ref) {
   final client = MtClient(
     baseUrl: ref.watch(endpointsProvider).mt,
-    lines: ref.watch(linesProvider),
+    substrate: ref.watch(substrateProvider),
     cache: ref.watch(requestCacheProvider),
     // On a 401, ask the session to refresh silently through the cookie and hand back a fresh
     // token for a one-shot retry. Returning null means the session is genuinely over.
@@ -150,20 +145,6 @@ final mtClientProvider = Provider<MtClient>((ref) {
 
 final updatesStoreProvider = Provider<UpdatesStore>((ref) => UpdatesStore());
 
-/// Which line the app's long-lived connections leave by.
-///
-/// Its own policy, separate from the request ranking, because holding a stream and answering a
-/// request quickly are different abilities — see common/stream_lines.dart. Ranked lines are read
-/// afresh on every dial, so a line that has since been measured faster is used on the next
-/// reconnect rather than at the next restart.
-final streamLinesProvider = Provider<StreamLines>((ref) {
-  final manager = ref.watch(linesProvider);
-  return StreamLines(
-    selector: mp.StreamSelector(lines: () => manager.ranked),
-    endpoints: ref.watch(endpointsProvider),
-  );
-});
-
 /// The socket lives as long as there is a signed-in session, and not a moment longer: dialling it
 /// without a token gets a refusal that looks exactly like a server gone quiet.
 final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
@@ -171,26 +152,30 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
   final token = session.valueOrNull?.accessToken;
   if (token == null) return null;
 
-  final streams = ref.watch(streamLinesProvider);
-  StreamDial? dial;
+  final endpoints = ref.watch(endpointsProvider);
+  final substrate = ref.watch(substrateProvider);
   final socket = UpdatesSocket(
     store: ref.watch(updatesStoreProvider),
+    // Over the substrate where there is one, and beside it where there is not. This is the traffic
+    // redundancy is most worth having: a request that fails can be sent again, while a socket that
+    // drops takes what it was carrying with it — and on a mux stream a line dying underneath is not
+    // a disconnection at all.
+    connect: (url) =>
+        socketOverSubstrate(substrate, url) ?? WebSocketChannel.connect(url),
     // Read the token per dial rather than closing over this one: a reconnect after a refresh must
-    // carry the new token — and pick the line per dial too, so a line that cannot hold a stream is
-    // dropped on the next attempt rather than retried forever.
+    // carry the new token.
+    //
+    // One origin rather than a line chosen per attempt: there is nothing to choose any more. The
+    // socket rides the substrate as a mux stream (see connect above), so the URL names where the
+    // deployment is and the transport decides how the bytes get there.
     url: () {
       final live = ref.read(sessionProvider).valueOrNull?.accessToken;
       final query = live == null || live.isEmpty
           ? ''
           : '?token=${Uri.encodeComponent(live)}';
-      dial = streams.dial('/mt/updates$query');
-      return dial!.url;
+      return endpoints.socketUrl(endpoints.publicOrigin, '/mt/updates$query');
     },
   );
-  // Told when a dial succeeds and when it ends, so a line that accepts the handshake and drops it
-  // is skipped for streams next time rather than retried forever.
-  socket.onOpened = () => dial?.opened(DateTime.now());
-  socket.onClosed = () => dial?.closed(DateTime.now());
   socket.start();
   ref.onDispose(socket.close);
   return socket;

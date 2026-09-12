@@ -69,6 +69,16 @@ data class LineRegistryProperties(val lines: List<Line> = emptyList()) {
          * Absolute origin, no path, no trailing slash; empty means "wherever the client came from".
          */
         val url: String = "",
+        /**
+         * How a client opens a link over this line: "wss" (a WebSocket upgrade through the proxy —
+         * the answer for every real deployment), "ws" for a plaintext testbed, or "tls"/"tcp" for a
+         * port that speaks the substrate directly with nothing in front of it.
+         *
+         * Load-bearing since MultiPath 0.2.0. It used to be a free-form label that nothing read,
+         * and a value outside that vocabulary now means clients cannot dial this line at all — with
+         * no error anywhere, because a line that cannot be dialled is simply one a client does not
+         * have.
+         */
         val transport: String? = null,
         val weight: Int? = null,
         val foreignOrigin: Boolean? = null,

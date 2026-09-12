@@ -79,12 +79,19 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     // was never once in effect. Nothing looked wrong either, because one working line is
     // indistinguishable from a routing layer with nothing to route between. The panel at /__lines
     // showing a single line is what finally said so.
-    final lines = ref.read(linesProvider);
+    final substrate = ref.read(substrateProvider);
+    final endpoints = ref.read(endpointsProvider);
     unawaited(
-      adoptRegistry(lines, ref.read(mtClientProvider).transport).then((_) {
-        // Measuring starts after the registry arrives, because measuring one line and then being
-        // handed three more is a table that is wrong for as long as the first interval lasts.
-        lines.start();
+      fetchLines(
+        ref.read(mtClientProvider).transport,
+        fallback: endpoints.publicOrigin,
+      ).then((lines) {
+        // Adopted by dropping the transport rather than by editing it: a redundant stream's links
+        // are fixed when it is dialled, so a new list of lines means a new dial. Nothing is
+        // disconnected by this — there is usually no transport yet at startup, and if there is, the
+        // next request brings one up over the new list.
+        substrate.lines = lines;
+        substrate.reset();
       }),
     );
   }

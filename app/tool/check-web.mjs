@@ -32,17 +32,26 @@ const browser = await chromium.launch();
 const context = await browser.newContext();
 const page = await context.newPage();
 
+// A failed WebSocket connection is logged by the BROWSER itself, not by any script, so nothing
+// server-side or client-side can suppress it — only avoid attempting the connection at all. The
+// app dials MultiPath's `/mt/link` from inside the page now (0.2.0-rc.3), and this fixture's fake
+// backend does not speak that protocol, so the dial fails and the browser logs it, exactly as it
+// would against any real deployment with no MultiPath support at the origin. That is expected
+// noise, not a bug this check exists to catch — see static-server.mjs's `/mt/link` handling.
+const isExpectedLinkNoise = (text) =>
+  text.includes("WebSocket connection") && text.includes("/mt/link");
+
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => {
-  if (m.type() === "error") errors.push(m.text());
+  if (m.type() === "error" && !isExpectedLinkNoise(m.text())) errors.push(m.text());
 });
 
 // Recorded from before the first byte of the document runs, because the thing being measured
 // happens during the load: by the time a test could attach a listener, the launcher is done.
 await page.addInitScript(() => {
   window.__mpProgress = [];
-  window.addEventListener("multipath:progress", (e) => window.__mpProgress.push(e.detail.percent));
+  window.addEventListener("mt:progress", (e) => window.__mpProgress.push(e.detail.percent));
 });
 
 // Every request this page makes, so the check below can say where the bytes came from.
@@ -55,8 +64,8 @@ await page.goto(BASE + "/", { waitUntil: "load" });
 // cannot be spread across lines, so it is small and does one job. Flutter's document is kept as
 // /app.html.
 const launcher = await page.evaluate(() => ({
-  splash: Boolean(document.querySelector("[data-multipath-progress]")),
-  config: Boolean(window.__multipath__ && window.__multipath__.registry),
+  splash: Boolean(document.querySelector("[data-mt-progress]")),
+  config: Boolean(window.__mt__ && window.__mt__.registry),
 }));
 check("the launcher is what the browser was served", launcher.splash && launcher.config);
 
@@ -191,7 +200,9 @@ const stamped = await page.evaluate(async () => {
     fetch("/index.html").then((r) => r.text()),
   ]);
   return {
-    worker: /const VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
+    // `const` or `var`: the worker is bundled now (it imports the transport it routes over), and
+    // which keyword the bundler emits is its business rather than a fact about this build.
+    worker: /(?:const|var) VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
     served: served.trim(),
     launcher: /const __version = "([^"]+)"/.exec(launcher)?.[1] ?? null,
   };
@@ -319,7 +330,9 @@ const chat = await context.newPage();
 const chatErrors = [];
 chat.on("pageerror", (e) => chatErrors.push(`pageerror: ${e.message ?? e}`));
 chat.on("console", (m) => {
-  if (m.type() === "error") chatErrors.push(`console: ${m.text()}`);
+  if (m.type() === "error" && !isExpectedLinkNoise(m.text())) {
+    chatErrors.push(`console: ${m.text()}`);
+  }
 });
 const sent = [];
 chat.on("request", (r) => {
@@ -341,7 +354,15 @@ await chat.mouse.click(size.width * 0.6, size.height - 32);
 await chat.keyboard.type("probe message");
 await chat.waitForTimeout(300);
 await chat.mouse.click(size.width - 100, size.height - 32);
-await chat.waitForTimeout(1500);
+// A fixed 1.5s wait used to be enough because every web request went out as an ordinary fetch —
+// there was nothing to dial. Now the page dials the substrate itself (MultiPath 0.2.0-rc.3's
+// browser-native link layer), and the request this click sends may be the first one to actually
+// wait on that dial settling, which a busy CI runner can push past a flat deadline even though the
+// request always does eventually go out. Polled for the same reason the journey's own assertion
+// of this is polled rather than slept for.
+for (let waited = 0; waited < 8000 && sent.length === 0; waited += 200) {
+  await chat.waitForTimeout(200);
+}
 
 check(
   "a message typed into a conversation is posted",
@@ -396,30 +417,11 @@ check(
 );
 await revisit.close();
 
-// Measuring, not just routing. Every line but the one real traffic happened to use sat at "never
-// measured" in production for weeks, and nothing here could see it: the fake registry had a single
-// line, and with one line a client that measures and a client that does not look identical.
-{
-  const probes = new Set();
-  const probePage = await context.newPage();
-  probePage.on("request", (r) => {
-    const url = new URL(r.url());
-    if (url.pathname === "/mt/probe") probes.add(url.origin);
-  });
-  await probePage.goto(BASE + "/", { waitUntil: "load" });
-  await probePage.waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
-    timeout: 30000,
-  });
-  // The registry has to arrive before measuring starts, so this is a wait, not an instant.
-  await probePage
-    .waitForRequest((r) => new URL(r.url()).pathname === "/mt/probe", { timeout: 20000 })
-    .catch(() => {});
-  await probePage.waitForTimeout(2000);
-  // Both lines, not just the near one: the registry's second line is a different origin, so a
-  // client that only ever measured the one it was served from would show exactly one here.
-  check("every line in the registry is actually probed", probes.size >= 2, [...probes].join(" "));
-  await probePage.close();
-}
+// What this file used to check here, and why it no longer can: that every line in the registry was
+// PROBED. MultiPath 0.2.0 removed probing along with line-picking — the transport writes every byte
+// to every line and delivers whichever copy arrives first, so there is no measurement to take and no
+// ranking to verify. The question that replaced it, "is each line alive?", is asked of the transport
+// itself and answered in the journey, at /__lines.
 
 // A deploy, on top of a browser that is already running the build before it.
 //
@@ -464,7 +466,7 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
 
   // Not a detail: the caches that were filled by the previous build are gone, rather than being
   // mixed with the new code.
-  const held = await deployPage.evaluate(() => localStorage.getItem("multipath:version"));
+  const held = await deployPage.evaluate(() => localStorage.getItem("mt:version"));
   const servedNow = await deployPage.evaluate(() =>
     fetch("/version").then((r) => r.text()).then((t) => t.trim()),
   );

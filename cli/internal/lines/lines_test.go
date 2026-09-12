@@ -1,9 +1,9 @@
 // The connector's half of multi-line, tested at the two places it can go quietly wrong: what a
-// short command reads when nothing has been cached, and whether the cached document actually
-// produces requests that race.
+// short command gets when nothing has been cached, and whether the cached document actually
+// produces a transport that carries a request.
 //
 // Both failures are silent by nature. A connector that fell back to one line would keep working, so
-// nothing would report it; a cache that round-tripped into something the client cannot use would
+// nothing would report it; a cache that round-tripped into something the transport cannot dial would
 // leave every machine on a single path while the deployment believed otherwise.
 
 package lines
@@ -11,13 +11,14 @@ package lines
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	multipath "github.com/micro-teams/multipath/go"
 )
@@ -28,34 +29,67 @@ func cfgPath(t *testing.T) string {
 }
 
 func TestNoCacheMeansOneSameOriginLine(t *testing.T) {
-	client := New(cfgPath(t), "https://control.example/mt")
+	got := For(cfgPath(t), "https://control.example/mt")
 
-	got := client.Lines()
-	if len(got) != 1 || got[0].URL != "" {
-		t.Fatalf("expected a single same-origin line, got %+v", got)
+	// Resolved, not left empty. A link is dialled at a URL, so "wherever this machine already
+	// reaches the control plane" has to become that URL here or it is not a line at all — the
+	// browser has an origin to fall back on and a connector has none.
+	if len(got) != 1 || got[0].URL != "https://control.example" {
+		t.Fatalf("expected a single resolved same-origin line, got %+v", got)
+	}
+	// And a WebSocket through the proxy, at the scheme this machine actually reaches the server on.
+	// Not raw TLS (the port is answered by nginx, which speaks HTTP there), and not a fixed "wss"
+	// either: a plaintext deployment handed wss has every client fail to dial with "first record
+	// does not look like a TLS handshake" — which is how this was found, on the connector e2e.
+	if got[0].Transport != "wss" {
+		t.Errorf("an https server must be reached over wss, got %q", got[0].Transport)
+	}
+
+	plain := For(cfgPath(t), "http://control.example/mt")
+	if len(plain) != 1 || plain[0].Transport != "ws" {
+		t.Errorf("a plaintext server must be reached over ws, got %+v", plain)
 	}
 }
 
-// Not an empty registry: with no lines the client has nowhere to send anything and every request
-// fails. "However you were already reaching the server" is the answer that keeps a fresh machine
-// working exactly as it did before any of this existed.
-func TestASameOriginLineStillSendsRequests(t *testing.T) {
-	var reached atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+// A label from before 0.2.0 must not cost a machine its lines.
+//
+// This field was free-form and unread until the substrate made it name the encapsulation, so caches
+// and operator configs in the wild carry "same-origin", "cloudflare", "direct". An unknown label is
+// refused outright, and a line that cannot be dialled is simply one the client does not have — so
+// the machine would end up with nothing at all and no error to show for it.
+//
+// Replaced rather than merely cleared: an empty transport means "let the URL's scheme decide", and
+// that decides RAW TLS for an https line — a TLS connection to a port answered by nginx, which
+// speaks HTTP there. What every deployment actually wants is a WebSocket upgrade through its proxy.
+func TestALabelFromBeforeTheSubstrateBecomesOneThatCanBeDialled(t *testing.T) {
+	path := cfgPath(t)
+	writeCache(t, path, multipath.Registry{Lines: []multipath.Line{
+		{ID: "cf", URL: "https://cf.example", Transport: "cloudflare"},
+		{ID: "plain", URL: "http://plain.example", Transport: "direct"},
+	}})
 
-	client := &http.Client{Transport: New(cfgPath(t), server.URL+"/mt").RoundTripper()}
-	resp, err := client.Get(server.URL + "/mt/chat")
+	got := For(path, "https://control.example/mt")
+	if len(got) != 2 {
+		t.Fatalf("a line was thrown away entirely: %+v", got)
+	}
+	if got[0].Transport != "wss" || got[1].Transport != "ws" {
+		t.Errorf("undialable labels were not replaced with the scheme's own: %+v", got)
+	}
+}
+
+// startOrigin runs the server end of the substrate in this process, splicing every normal stream to
+// addr, and returns the http:// URL its lines are dialled at.
+func startOrigin(t *testing.T, addr string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("a machine with no cache could not send a request: %v", err)
+		t.Fatal(err)
 	}
-	_ = resp.Body.Close()
-	if reached.Load() != 1 {
-		t.Errorf("the request never arrived: %d", reached.Load())
-	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Services{AppService: multipath.DialService(addr)})
+	}()
+	return "http://" + ln.Addr().String()
 }
 
 func TestACorruptCacheIsIgnoredRatherThanFatal(t *testing.T) {
@@ -64,7 +98,7 @@ func TestACorruptCacheIsIgnoredRatherThanFatal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := New(path, "https://control.example/mt").Lines()
+	got := For(path, "https://control.example/mt")
 	if len(got) != 1 || got[0].ID != "origin" {
 		t.Fatalf("expected the fallback, got %+v", got)
 	}
@@ -80,7 +114,7 @@ func TestAnInvalidCachedRegistryFallsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := New(path, "https://control.example/mt").Lines(); len(got) != 1 || got[0].ID != "origin" {
+	if got := For(path, "https://control.example/mt"); len(got) != 1 || got[0].ID != "origin" {
 		t.Fatalf("expected the fallback, got %+v", got)
 	}
 }
@@ -101,18 +135,12 @@ func TestRefreshAdoptsTheRegistryAndCachesItForShortCommands(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path, control.URL+"/mt")
-	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err != nil {
+	if err := Refresh(context.Background(), control.URL+"/mt", path); err != nil {
 		t.Fatalf("refresh failed: %v", err)
 	}
 
-	if ids := ids(client.Lines()); len(ids) != 2 || ids[1] != "direct" {
-		t.Fatalf("the registry was not adopted: %v", ids)
-	}
-
 	// The half that matters for `microteams api`: the next process must find it without asking.
-	next := New(path, control.URL+"/mt")
-	if ids := ids(next.Lines()); len(ids) != 2 || ids[1] != "direct" {
+	if ids := ids(For(path, control.URL+"/mt")); len(ids) != 2 || ids[1] != "direct" {
 		t.Fatalf("a later command did not see the cached registry: %v", ids)
 	}
 }
@@ -124,11 +152,10 @@ func TestRefreshKeepsWhatItHadWhenTheEndpointIsMissing(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path, control.URL+"/mt")
-	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err != nil {
+	if err := Refresh(context.Background(), control.URL+"/mt", path); err != nil {
 		t.Errorf("a control plane without the endpoint is not an error here: %v", err)
 	}
-	if got := client.Lines(); len(got) != 1 || got[0].ID != "origin" {
+	if got := For(path, control.URL+"/mt"); len(got) != 1 || got[0].ID != "origin" {
 		t.Errorf("expected to keep the same-origin line, got %+v", got)
 	}
 }
@@ -142,11 +169,10 @@ func TestRefreshReportsAMalformedRegistry(t *testing.T) {
 	defer control.Close()
 
 	path := cfgPath(t)
-	client := New(path, control.URL+"/mt")
-	if err := Refresh(context.Background(), client, control.URL+"/mt", path); err == nil {
+	if err := Refresh(context.Background(), control.URL+"/mt", path); err == nil {
 		t.Error("a malformed registry was accepted silently")
 	}
-	if got := client.Lines(); len(got) != 1 || got[0].ID != "origin" {
+	if got := For(path, control.URL+"/mt"); len(got) != 1 || got[0].ID != "origin" {
 		t.Errorf("the working line was replaced by a bad one: %+v", got)
 	}
 	if _, err := os.Stat(Path(path)); err == nil {
@@ -155,50 +181,44 @@ func TestRefreshReportsAMalformedRegistry(t *testing.T) {
 }
 
 // The end of the chain, and the reason the cache exists: a document written by the resident service
-// makes a later command's reads race. Nothing else in these tests would notice if the cached shape
-// were subtly wrong — the client would just quietly use one line.
-func TestACachedRegistryMakesReadsRace(t *testing.T) {
-	var slowAsked, fastAsked atomic.Int32
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slowAsked.Add(1)
-		select {
-		case <-time.After(2 * time.Second):
-		case <-r.Context().Done():
-			return
-		}
-		_, _ = w.Write([]byte("slow"))
+// is what a later command carries its stream over.
+//
+// It used to say "makes a later command's reads race", and the racing is gone — the redundant layer
+// writes every byte to every line and takes whichever arrives first, so there is no per-request race
+// to observe from here. What is left to pin is the part that still fails silently: a cached document
+// that round-trips into something undialable would leave the command on one line, or on none, and
+// nothing would say so.
+func TestACachedRegistryIsWhatTheNextCommandCarries(t *testing.T) {
+	var reached atomic.Int32
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		_, _ = w.Write([]byte("served"))
 	}))
-	defer slow.Close()
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fastAsked.Add(1)
-		_, _ = w.Write([]byte("fast"))
-	}))
-	defer fast.Close()
+	defer app.Close()
 
+	origin := startOrigin(t, app.Listener.Addr().String())
 	path := cfgPath(t)
-	registry := multipath.Registry{Lines: []multipath.Line{
-		{ID: "slow", URL: slow.URL, Weight: 100},
-		{ID: "fast", URL: fast.URL, Weight: 90},
-	}}
-	writeCache(t, path, registry)
+	writeCache(t, path, multipath.Registry{Lines: []multipath.Line{
+		{ID: "a", URL: origin, Transport: "tcp"},
+		{ID: "b", URL: origin, Transport: "tcp"},
+	}})
 
-	client := multipath.New(multipath.Options{
-		Registry:   cached(path),
-		HedgeAfter: 50 * time.Millisecond,
-	})
-	response, err := client.Get(context.Background(), "/mt/chat")
+	if got := For(path, ""); len(got) != 2 {
+		t.Fatalf("the cached document did not come back as two lines: %+v", got)
+	}
+
+	client := &http.Client{Transport: Transport(path, "")}
+	response, err := client.Get(origin + "/mt/chat")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a command could not send over the cached lines: %v", err)
 	}
 	defer func() { _ = response.Body.Close() }()
-
-	body := make([]byte, 4)
-	_, _ = response.Body.Read(body)
-	if string(body) != "fast" {
-		t.Errorf("the slow line won: %q", body)
+	body, _ := io.ReadAll(response.Body)
+	if string(body) != "served" {
+		t.Errorf("the answer did not come back intact: %q", body)
 	}
-	if fastAsked.Load() == 0 {
-		t.Error("the second line was never asked, so nothing raced")
+	if reached.Load() != 1 {
+		t.Errorf("the application saw %d requests, want exactly one", reached.Load())
 	}
 }
 
@@ -219,33 +239,6 @@ func ids(lines []multipath.Line) []string {
 		out = append(out, line.ID)
 	}
 	return out
-}
-
-// The defect this file did not catch until production did: a connector has no origin of its own, so
-// the same-origin entry cannot become a URL unless it is told what "same" means. Requests survived
-// it — they carry a host the transport can infer from — but a probe does not, so the origin line
-// failed every probe, went down after three, and the ranking was based on a fiction.
-func TestTheSameOriginLineIsProbable(t *testing.T) {
-	var probes atomic.Int32
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/mt/probe" {
-			probes.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer control.Close()
-
-	client := New(cfgPath(t), control.URL+"/mt")
-	client.Probe(context.Background(), "/mt/probe")
-
-	if probes.Load() == 0 {
-		t.Fatal("the same-origin line was never probed, so its health is a guess")
-	}
-	if health := client.Health().Get("origin"); !health.Measured || health.State != multipath.StateUp {
-		t.Errorf("the origin line is not measured as up: %+v", health)
-	}
 }
 
 // And the specific way the base can be wrong: the API base carries a path, every line in the

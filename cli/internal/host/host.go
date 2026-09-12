@@ -9,12 +9,12 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"net/url"
+	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -49,16 +49,28 @@ type Host struct {
 	conn    protocol.Transport
 	tm      *terminal.Manager
 	cfgPath string // for the shared screen-count state file ("" disables)
-	lines   *multipath.Client
 	base    string // server origin, for self-update downloads
 
 	apiBase string // control-plane API root, for the line registry
 
-	// The control link's choice of network path, and the line it last chose. `microteams status`
-	// reads the latter out of the state file; the selector is what decides it.
-	linkLines *multipath.StreamSelector
+	// The substrate: one redundant stream to the origin carried over every line at once, and the
+	// lines it was dialled with. The control WebSocket is a mux stream ON this, which is why a line
+	// dying is no longer a disconnection — the stream survives it underneath.
+	//
+	// Brought up lazily, on the first attempt that needs it, and re-dialled if it dies. Not in the
+	// constructor: a machine whose network is not up yet must still start, and the transport's own
+	// reconnect loop is already the right place for "try again in a moment".
+	// mpMu serialises DIALLING only; the client itself is read through an atomic pointer. The
+	// distinction is load-bearing: the transport reports a link coming up from its own goroutine
+	// WHILE the dial that created it is still in progress, so a reader that took the dial's lock
+	// would deadlock against it — which it did, and the symptom was indistinguishable from a
+	// network problem (both links up, said so in the log, and then nothing ever completed).
+	mpMu    sync.Mutex
+	mp      atomic.Pointer[multipath.Client]
+	mpLines []multipath.Line
+
 	lineMu    sync.Mutex
-	lastLine  state.Line
+	lastLines []state.LineState
 	// The last screen count published, so recording a line change can rewrite the state file
 	// without asking tmux again. Asking would be wrong twice over: it happens on every dial
 	// attempt, and it would drag the tmux server into a code path that has nothing to do with
@@ -90,20 +102,20 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 		return nil, err
 	}
 
-	// The control link goes over a line too, and choosing one is a different question from choosing
-	// one for a request. A route can serve requests perfectly and refuse to hold a WebSocket — a
-	// cheap proxy that rejects the Upgrade, a middlebox that severs anything long-lived — so a line
-	// that fails to hold this connection is skipped for streams while remaining fine for everything
-	// else. That is the selector's whole job; the library keeps the reconnect loop, because backoff
-	// and heartbeats are about the protocol rather than about the network.
-	client := lines.New(cfgPath, cfg.APIBase())
+	// The control link goes over the substrate rather than beside it. Before, this process chose one
+	// of several public routes per dial attempt and skipped the ones that could not hold a stream;
+	// now there is nothing to choose, because the redundant transport carries every byte over every
+	// line at once and delivers whichever copy arrives first. A route that cannot hold a stream is
+	// simply never the one that arrives, and — the part that matters for a machine — a route dying
+	// is no longer a disconnection: the mux stream this WebSocket lives on survives the link
+	// underneath it being re-dialled, so the machine does not go offline while that happens.
 	host := &Host{
-		linkLines: multipath.NewStreamSelector(client.Ranked, 0, 0, nil),
-		lines:     client,
+		mpLines: lines.For(cfgPath, cfg.APIBase()),
+		apiBase: cfg.APIBase(),
 	}
 	conn := ws.NewWithOptions(ctrlURL, cfg.Token, cfg.APIBase(), ws.Options{
-		ChooseURL: func() string { return host.chooseLink(ctrlURL) },
-		Report:    host.reportLink,
+		NetDial: host.dialSubstrate,
+		Report:  host.reportLink,
 	})
 	host.logw = hostlog.Open(cfgPath)
 	if err := host.init(conn, cfg, cfgPath); err != nil {
@@ -112,28 +124,119 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	return host, nil
 }
 
-// chooseLink names where the next dial attempt goes.
+// dialSubstrate hands the WebSocket dialler a stream on the redundant transport, bringing that
+// transport up if it is not already.
 //
-// The configured URL is the answer for the same-origin line and the fallback for everything else:
-// "wherever this machine already reaches the control plane" is a fact this process has and the
-// registry does not.
-func (h *Host) chooseLink(configured string) string {
-	line, ok := h.linkLines.Next()
-	if !ok || line.URL == "" {
-		h.rememberLine(state.Line{ID: "origin", URL: configured})
-		return configured
-	}
+// Errors here are ordinary: the caller is the reconnect loop, so "the network is not there yet" is
+// answered by being asked again in a moment. A client that failed to dial is dropped rather than
+// kept, so the next attempt tries the whole thing afresh instead of re-using something dead.
+func (h *Host) dialSubstrate(ctx context.Context, _, _ string) (net.Conn, error) {
+	h.mpMu.Lock()
+	defer h.mpMu.Unlock()
 
-	target := multipath.StreamURL(line, controlPath(configured))
-	h.rememberLine(state.Line{ID: line.ID, URL: target})
-	return target
+	if live := h.mp.Load(); live != nil {
+		if st, err := live.Open(lines.AppService, nil); err == nil {
+			return muxConn{st}, nil
+		}
+		live.Close()
+		h.mp.Store(nil)
+	}
+	if len(h.mpLines) == 0 {
+		return nil, errors.New("microteams: no line to reach the control plane over")
+	}
+	client, err := multipath.Dial(ctx, multipath.ClientOptions{
+		Lines: h.mpLines,
+		Redundant: multipath.RedundantOptions{
+			// Every up/down transition, said out loud. A redundant transport hides line failure from
+			// everything above it, which is its purpose and also the reason this has to be reported:
+			// three of four lines can die in silence while the machine works perfectly, and the
+			// first anyone would hear of it is when the last one goes.
+			OnLinkState: h.reportLine,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	st, err := client.Open(lines.AppService, nil)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
+	h.mp.Store(client)
+	h.publishLines()
+	return muxConn{st}, nil
 }
 
-// reportLink feeds the outcome back: a connection that never became stable is evidence about this
-// line's ability to carry a stream, which the selector turns into a temporary skip. One that lasted
-// and then dropped is an ordinary disconnection and costs the line nothing.
+// muxConn dresses a mux stream as a net.Conn for the WebSocket dialler.
 //
-// It also says what happened out loud, which it did not before: the error argument used to be `_`.
+// The deadlines are accepted and ignored, which is the honest behaviour rather than a shortcut: the
+// substrate has its own liveness (a ping per link, and a link that stops producing frames is reaped
+// and re-dialled), and a stream that is idle is not a stream that is broken — which is precisely the
+// state a control link spends most of its life in.
+type muxConn struct{ *multipath.MuxStream }
+
+type substrateAddr struct{}
+
+func (substrateAddr) Network() string            { return "multipath" }
+func (substrateAddr) String() string             { return "origin" }
+func (muxConn) LocalAddr() net.Addr              { return substrateAddr{} }
+func (muxConn) RemoteAddr() net.Addr             { return substrateAddr{} }
+func (muxConn) SetDeadline(time.Time) error      { return nil }
+func (muxConn) SetReadDeadline(time.Time) error  { return nil }
+func (muxConn) SetWriteDeadline(time.Time) error { return nil }
+
+// reportLine narrates one line coming up or going down, and republishes the table `status` reads.
+func (h *Host) reportLine(st multipath.LinkState) {
+	id := h.lineID(st.Index)
+	if st.Up {
+		h.logf("microteams: line %s is up after %s", id, st.Duration.Round(time.Second))
+	} else {
+		h.logf("microteams: line %s went down after %s: %s", id, st.Duration.Round(time.Second), st.Reason)
+	}
+	h.publishLines()
+}
+
+func (h *Host) lineID(i int) string {
+	if i < 0 || i >= len(h.mpLines) {
+		return fmt.Sprintf("#%d", i)
+	}
+	return h.mpLines[i].ID
+}
+
+// publishLines writes the current per-line table where `microteams status` can read it.
+//
+// It takes no lock the dial holds, on purpose: see mpMu. A link coming up is reported from inside
+// the dial, so this has to be callable from there.
+func (h *Host) publishLines() {
+	client := h.mp.Load()
+	if client == nil {
+		return
+	}
+	table := make([]state.LineState, 0, len(h.mpLines))
+	for _, stat := range client.Stats() {
+		line := state.LineState{
+			ID:         h.lineID(stat.Index),
+			State:      stat.State,
+			Reconnects: stat.Reconnects,
+			Reason:     stat.Reason,
+		}
+		if stat.Index >= 0 && stat.Index < len(h.mpLines) {
+			line.URL = h.mpLines[stat.Index].URL
+		}
+		table = append(table, line)
+	}
+	h.lineMu.Lock()
+	h.lastLines = table
+	h.lineMu.Unlock()
+	h.writeState(int(h.lastScreens.Load()))
+}
+
+// reportLink narrates the control link itself — not a line, which the transport underneath now
+// reports separately. With the WebSocket riding a mux stream, this fires when the STREAM ends, which
+// is a rarer and more meaningful event than it used to be: a line dropping no longer reaches here at
+// all.
+//
+// It says what happened out loud, which it did not before: the error argument used to be `_`.
 // The transport's reconnect loop is the only place that knows why a dial failed, it hands that
 // reason to exactly one callback, and this was that callback — so a machine that could not reach
 // the server wrote NOTHING to its log while retrying forever. A real machine sat like that and the
@@ -142,12 +245,6 @@ func (h *Host) chooseLink(configured string) string {
 func (h *Host) reportLink(url string, held time.Duration, err error) {
 	h.logLink(url, held, err)
 	h.markLinkDown(err)
-	for _, line := range h.lines.Ranked() {
-		if line.URL == "" || strings.HasPrefix(url, multipath.StreamURL(line, "")) {
-			h.linkLines.Closed(line, held)
-			return
-		}
-	}
 }
 
 // linkLogEvery bounds how often a machine that cannot connect repeats itself. The loop retries
@@ -239,25 +336,10 @@ func (h *Host) currentLink() state.Link {
 	return h.link
 }
 
-func (h *Host) rememberLine(line state.Line) {
-	h.lineMu.Lock()
-	h.lastLine = line
-	h.lineMu.Unlock()
-	h.writeState(int(h.lastScreens.Load()))
-}
-
-func (h *Host) currentLine() state.Line {
+func (h *Host) currentLines() []state.LineState {
 	h.lineMu.Lock()
 	defer h.lineMu.Unlock()
-	return h.lastLine
-}
-
-// controlPath is the path part of the configured control URL, to be joined to another line's origin.
-func controlPath(configured string) string {
-	if u, err := url.Parse(configured); err == nil {
-		return u.RequestURI()
-	}
-	return configured
+	return h.lastLines
 }
 
 // NewWithTransport builds a Host on a caller-supplied transport.
@@ -267,7 +349,7 @@ func controlPath(configured string) string {
 // handling and the same applets over an HTTP exchange that ends when the command does. Everything
 // below this line is written to not care which it is.
 func NewWithTransport(conn protocol.Transport, cfg *config.Config, cfgPath string) (*Host, error) {
-	host := &Host{lines: lines.New(cfgPath, cfg.APIBase())}
+	host := &Host{mpLines: lines.For(cfgPath, cfg.APIBase()), apiBase: cfg.APIBase()}
 	if err := host.init(conn, cfg, cfgPath); err != nil {
 		return nil, err
 	}
@@ -340,17 +422,12 @@ func (h *Host) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-relink:
-				go h.remeasureAndRelink(ctx)
+				go h.relink(ctx)
 			}
 		}
 	}()
 
-	go h.measureLines(ctx)
-
-	// Measure before choosing, and keep asking whether the choice still holds. Both matter and for
-	// different reasons — see warmUpLines and reviewLines.
-	h.warmUpLines(ctx)
-	go h.reviewLines(ctx)
+	go h.refreshLines(ctx)
 
 	return h.conn.Run(ctx, h.dispatch)
 }
@@ -385,150 +462,27 @@ func (h *Host) dispatch(msg protocol.Msg) {
 	h.mgr.Dispatch(msg)
 }
 
-// How many times each line is probed before the first route decision, and how long that may take.
-//
-// The first probe of a line is not a measurement of the line: it pays DNS, the TCP handshake and
-// the TLS handshake, all of which are gone by the second one. Deciding on it means deciding on a
-// number that is systematically too high and unusually noisy — and because the health table blends
-// samples, one bad first reading takes several more probes to forget.
-//
-// Bounded, because this delays the first connection: if the network is slow enough that warming up
-// takes longer than this, connecting matters more than choosing well, and reviewLines will correct
-// the choice shortly afterwards.
-const (
-	warmUpProbes  = 4
-	warmUpBudget  = 3 * time.Second
-	reviewEvery   = 5 * time.Minute
-	minHold       = 10 * time.Minute
-	betterBy      = 0.25
-	betterByFloor = 30 * time.Millisecond
-)
-
-// warmUpLines probes every line a few times before anything picks one.
-//
-// Without this the first dial happens with NO measurement at all — the prober has only just been
-// started and the registry may not even have arrived — so the machine takes whatever the fallback
-// is and, because a healthy connection is never reconsidered, stays there for as long as it holds.
-func (h *Host) warmUpLines(ctx context.Context) {
-	if len(h.lines.Ranked()) < 2 {
-		return // one line: there is nothing to choose between, and nothing to wait for
-	}
-	deadline := time.Now().Add(warmUpBudget)
-	for i := 0; i < warmUpProbes; i++ {
-		if ctx.Err() != nil || time.Now().After(deadline) {
-			break
-		}
-		h.lines.Probe(ctx, "/mt/probe")
-	}
-	h.logf("microteams: measured %s", h.lineSummary())
-}
-
-// lineSummary is what we measured, for the log and for `status` — "which route and why" is
-// otherwise unanswerable from outside the process.
-func (h *Host) lineSummary() string {
-	health := h.lines.Health()
-	parts := make([]string, 0, 4)
-	for _, line := range h.lines.Ranked() {
-		entry := health.Get(line.ID)
-		if !entry.Measured {
-			parts = append(parts, fmt.Sprintf("%s=?", line.ID))
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s", line.ID, entry.Latency.Round(time.Millisecond)))
-	}
-	return strings.Join(parts, " ")
-}
-
-// reviewLines asks, occasionally, whether the line this machine is on is still the right one.
-//
-// The route is chosen when a dial happens, and a connection that keeps working never dials again —
-// so without this, a choice made in the first seconds of the process lasts until something breaks.
-// That is how a machine ends up on a route that measured badly for hours after the network changed.
-//
-// Deliberately reluctant: it moves only when another line is clearly and repeatedly better, and
-// never while the current connection is young. A chooser that switches on every wobble is worse
-// than one that never switches, because each move costs a reconnect — cheap now that screens are
-// re-adopted, but not free, and a flapping link is harder to reason about than a merely suboptimal
-// one.
-func (h *Host) reviewLines(ctx context.Context) {
-	ticker := time.NewTicker(reviewEvery)
-	defer ticker.Stop()
-	agreed := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			better, ok := h.betterLine()
-			if !ok {
-				agreed = 0
-				continue
-			}
-			// Twice in a row before acting: one review is a moment, two is a trend.
-			agreed++
-			if agreed < 2 {
-				continue
-			}
-			agreed = 0
-			h.logf("microteams: switching to line %s — measured %s", better, h.lineSummary())
-			h.remeasureAndRelink(ctx)
-		}
-	}
-}
-
-// betterLine reports a line worth moving to, if there is one.
-func (h *Host) betterLine() (string, bool) {
-	link := h.currentLink()
-	if !link.Up || link.Since.IsZero() || h.clock().Sub(link.Since) < minHold {
-		return "", false // not connected, or not connected long enough to be worth disturbing
-	}
-	current := h.currentLine().ID
-	if current == "" {
-		return "", false
-	}
-	health := h.lines.Health()
-	mine := health.Get(current)
-	if !mine.Measured {
-		return "", false // nothing to compare against; leave it alone
-	}
-	for _, line := range h.lines.Ranked() {
-		if line.ID == current {
-			continue
-		}
-		entry := health.Get(line.ID)
-		if !entry.Measured || entry.State != multipath.StateUp {
-			continue
-		}
-		gain := mine.Latency - entry.Latency
-		// Both a proportion and a floor: 25% of 4ms is not worth a reconnect, and 30ms off a
-		// 500ms link is not worth one either.
-		if gain > betterByFloor && float64(gain) > float64(mine.Latency)*betterBy {
-			return line.ID, true
-		}
-	}
-	return "", false
-}
-
-// measureLines keeps this machine's view of the network paths current, and publishes it.
+// refreshLines keeps this machine's list of network paths current, and publishes it.
 //
 // Two jobs, and the second is the one that is easy to miss: the short `microteams api` commands
-// cannot afford to fetch a routing table or measure anything — they exist for a few hundred
-// milliseconds — so they read what this loop cached. A resident process is the only thing here that
-// can pay for measurement, so it pays for everybody.
+// cannot afford to fetch a routing table — they exist for a few hundred milliseconds — so they read
+// what this loop cached. A resident process is the only thing here that can pay for the fetch, so
+// it pays for everybody.
 //
-// Entirely best-effort. A machine that cannot reach the registry endpoint keeps the line it was
-// already using, which is the one it reached the control plane over.
-func (h *Host) measureLines(ctx context.Context) {
-	client := h.lines
-	if err := lines.Refresh(ctx, client, h.apiBase, h.cfgPath); err != nil {
+// What it no longer does is measure. Ranking lines by latency, holding a choice, and moving when
+// another looked better were all answers to "which line should this connection use", and from
+// MultiPath 0.2.0 that question does not exist: the transport carries every byte over every line and
+// takes whichever arrives first, which is the same decision made per byte instead of per hour, with
+// no measurement to go stale and no reconnect to pay when it changes its mind.
+//
+// Entirely best-effort. A machine that cannot reach the registry endpoint keeps the lines it has.
+func (h *Host) refreshLines(ctx context.Context) {
+	if err := lines.Refresh(ctx, h.apiBase, h.cfgPath); err != nil {
 		// Said out loud rather than swallowed: a registry that arrived and could not be read means
 		// the deployment believes it has several paths while every machine quietly uses one, and
 		// that is invisible from the outside for exactly as long as one path still works.
 		fmt.Fprintf(os.Stderr, "microteams: line registry unavailable, using one line: %v\n", err)
 	}
-
-	prober := client.Prober(multipath.ProberOptions{ProbePath: "/mt/probe"})
-	go prober.Run(ctx)
 
 	// The registry itself changes only when an operator adds or removes a path, which is rare —
 	// hourly is often enough to pick it up without asking a question nobody has changed the answer
@@ -540,20 +494,31 @@ func (h *Host) measureLines(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = lines.Refresh(ctx, client, h.apiBase, h.cfgPath)
+			_ = lines.Refresh(ctx, h.apiBase, h.cfgPath)
 		}
 	}
 }
 
-// remeasureAndRelink re-reads the registry, measures every line, and asks the transport for a fresh
-// attempt so the choice is made again with what was just measured.
+// relink re-reads the registry and rebuilds the transport over whatever it now says.
+//
+// This is what SIGHUP asks for, and under the substrate it means something narrower than it used to:
+// not "measure again and pick better", but "a line was added or removed, carry the new set". A
+// redundant stream's links are fixed when it is dialled, so adopting a changed registry means
+// dialling again — and the cheapest correct way to do that is to drop the control stream and let the
+// transport's own loop bring everything back, which is also the path that is exercised constantly
+// and therefore the one most likely to work.
 //
 // Nothing here touches tmux, and that is the whole point of it existing.
-func (h *Host) remeasureAndRelink(ctx context.Context) {
-	if err := lines.Refresh(ctx, h.lines, h.apiBase, h.cfgPath); err != nil {
+func (h *Host) relink(ctx context.Context) {
+	if err := lines.Refresh(ctx, h.apiBase, h.cfgPath); err != nil {
 		fmt.Fprintf(os.Stderr, "microteams: line registry unavailable: %v\n", err)
 	}
-	h.lines.Probe(ctx, "/mt/probe")
+	h.mpMu.Lock()
+	h.mpLines = lines.For(h.cfgPath, h.apiBase)
+	if live := h.mp.Swap(nil); live != nil {
+		live.Close()
+	}
+	h.mpMu.Unlock()
 
 	// Only a transport that can be asked; the HTTP-polling one has no connection to drop.
 	if redialer, ok := h.conn.(interface{ Reconnect() }); ok {
@@ -620,7 +585,7 @@ func (h *Host) writeState(live int) {
 	if h.cfgPath == "" {
 		return
 	}
-	state.Write(h.cfgPath, live, h.currentLine(), h.currentLink())
+	state.Write(h.cfgPath, live, h.currentLines(), h.currentLink())
 }
 
 func (h *Host) clearState() {

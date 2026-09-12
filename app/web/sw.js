@@ -20,6 +20,12 @@
  *               The consequence, stated plainly: the FIRST visit needs the network. It always did.
  *               Every visit after it does not.
  *
+ *               It used to also carry the network — every request went out over the MultiPath
+ *               substrate from inside this worker, because the page itself could not dial one. As
+ *               of MultiPath 0.2.0-rc.3 the Dart client can dial from inside the page on the web
+ *               too, so that job moved there (see lib/src/common/multipath_adapter.dart) and this
+ *               file went back to being what its name says: caching only.
+ *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
@@ -102,14 +108,12 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // The API and the sockets are never cached: a stale answer about who is online, or a replayed
-  // message, is worse than an error.
+  // The API is never cached — a stale answer about who is online, or a replayed message, is worse
+  // than an error. It goes straight to the network, over the transport the page itself now dials.
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mt/")) return;
 
   // The escape hatch must always come from the network if the network is there — it is what people
-  // are told to open when the cache itself is the problem. The build stamp likewise: a cached
-  // answer to "what is deployed?" is an answer about the past, which is the one thing it must
-  // never be.
+  // are told to open when the cache itself is the problem.
   // Installers are not part of the app: they are megabytes somebody downloads once, and a browser
   // cache is the wrong place for them. Left to the rule below they would be cached forever, since
   // their paths never change.

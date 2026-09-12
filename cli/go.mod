@@ -3,8 +3,9 @@ module github.com/micro-teams/microteams/cli
 go 1.26.0
 
 require (
-	github.com/micro-teams/micro-connector/cli v0.1.5
-	github.com/micro-teams/multipath/go v0.1.6
+	github.com/gorilla/websocket v1.5.3
+	github.com/micro-teams/micro-connector/cli v0.1.6
+	github.com/micro-teams/multipath/go v0.2.0-rc.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.30.0
 )
@@ -15,7 +16,6 @@ require (
 	github.com/dop251/goja v0.0.0-20260723142020-b4aef50fa347 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kardianos/service v1.3.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect

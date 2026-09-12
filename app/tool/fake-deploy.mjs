@@ -28,7 +28,9 @@ for (const file of ["main.dart.js", ENGINE]) {
 // A deploy is a new version, said in all the places a build says it: the launcher carries it, the
 // worker is stamped with it, and /version serves it.
 const sw = await readFile(path.join(dist, "sw.js"), "utf8");
-const current = /const VERSION = "([^"]+)"/.exec(sw)?.[1];
+// `const` or `var`: the worker is bundled now (it imports the transport it routes over), so which
+// keyword the declaration ends up with is the bundler's business rather than a fact about the build.
+const current = /(?:const|var) VERSION = "([^"]+)"/.exec(sw)?.[1];
 if (!current) {
   console.error("no stamped VERSION in sw.js — run tool/make-sw.mjs first");
   process.exit(1);

@@ -37,20 +37,18 @@
 
     <dependencies>
         <!--
-            Absorbs a write that arrives twice, so a client free to retry over another network path
-            cannot make the same thing happen twice. Adding the dependency IS the installation: no
-            annotation, no bean to inject, no business code changes. That is deliberate — a
-            controller that had to know about redundant paths would need re-auditing every time one
-            was added.
+          No MultiPath dependency, on purpose.
 
-            It de-duplicates in this JVM's heap, which is only correct while there is exactly one
-            backend instance. See the note in deploy/docker-compose.yml.
+          Until 0.1.6 this carried `multipath-spring-boot-starter`, a servlet filter that
+          de-duplicated writes arriving twice by `Idempotency-Key`. From 0.2.0 there is nothing to
+          add: the substrate's redundant layer delivers every byte exactly once, and the origin —
+          a separate process in front of this one — splices a normal stream to this application on
+          loopback. The application is an ordinary server that never learns a line existed, which
+          is the whole point of the new architecture.
+
+          What stays ours: `application.multipath.lines`, served at /mt/lines, because WHICH routes
+          exist is deployment configuration and the clients ask us for it.
         -->
-        <dependency>
-            <groupId>app.microteams.multipath</groupId>
-            <artifactId>multipath-spring-boot-starter</artifactId>
-            <version>0.1.6</version>
-        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
@@ -261,18 +259,6 @@
     </dependencies>
 
     <!-- Project Dependencies -->
-    <repositories>
-        <!--
-            MultiPath is published to GitHub Packages, which requires authentication to read even
-            though the repository and the package are public. That is GitHub's rule and cannot be
-            turned off. CI passes the workflow's own GITHUB_TOKEN; locally, add a `github` server to
-            ~/.m2/settings.xml with a token that has read:packages (see backend/CLAUDE.md).
-        -->
-        <repository>
-            <id>github</id>
-            <url>https://maven.pkg.github.com/micro-teams/multipath</url>
-        </repository>
-    </repositories>
 
     <!-- Build Configuration -->
     <build>

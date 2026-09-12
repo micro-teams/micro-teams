@@ -17,11 +17,12 @@ on:
 jobs:
   build-jar:
     runs-on: ubuntu-latest
-    # The MultiPath starter comes from GitHub Packages, which requires an authenticated read even
-    # for a public package — the same friction as the npm packages in the jobs below.
+    # No packages: read. The backend needed an authenticated GitHub Packages pull for exactly one
+    # dependency, the MultiPath starter, and 0.2.0 has no server-side middleware to depend on — so
+    # the backend now builds from Maven Central alone. The origin, which DOES need the package, is
+    # its own job below.
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: backend
@@ -34,13 +35,6 @@ jobs:
           distribution: "temurin"
           cache: "maven"
           cache-dependency-path: backend/pom.xml
-          # Credentials for the `github` repository declared in backend/pom.xml, written to
-          # ~/.m2/settings.xml — where Maven looks on its own, so `./mvnw install` stays `./mvnw
-          # install`. Not settings-path: that puts the file inside the checkout, where Maven does not
-          # read it and where the spotless "uncommitted changes" check has to be told to ignore it.
-          server-id: github
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_TOKEN
 
       # Packaging only. The tests live in test-api below, because they are integration tests that
       # need a real Postgres and the real cheese-auth service — and there is no reason for the job
@@ -48,9 +42,6 @@ jobs:
       # when the jar itself cannot be built, and the deployment bundle stops waiting on a test suite.
       - name: Build with Maven (packaging only)
         run: ./mvnw install -DskipTests
-        env:
-          MAVEN_USERNAME: ${{ github.actor }}
-          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check uncommitted changes to ensure format applied
         run: |
@@ -69,6 +60,46 @@ jobs:
           name: jar
           path: backend/target/*.jar
 
+  # The MultiPath origin: the server end of the substrate, a separate process that runs in front of
+  # the backend. It is the one thing in this repository that pulls from GitHub Packages, which is
+  # why it carries the token plumbing the backend used to.
+  build-origin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: origin
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+          cache-dependency-path: origin/pom.xml
+          # Credentials for the `github` repository declared in origin/pom.xml, written to
+          # ~/.m2/settings.xml — where Maven looks on its own, so `./mvnw package` stays `./mvnw
+          # package`.
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+
+      - name: Build the origin
+        run: ./mvnw package
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload the origin jar
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          name: origin-jar
+          path: origin/target/origin-*.jar
+
   # The backend's own tests. They are integration tests — every one of them talks to a real Postgres
   # and the real cheese-auth service — so they bring their dependencies up themselves rather than
   # borrowing the packaging job's runner. What survives here is meant to shrink: the rules that show
@@ -79,7 +110,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: backend
@@ -92,9 +122,6 @@ jobs:
           distribution: "temurin"
           cache: "maven"
           cache-dependency-path: backend/pom.xml
-          server-id: github
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_TOKEN
 
       - name: Start dependencies (Postgres + cheese-auth)
         run: ./scripts/dependency-start.sh
@@ -106,8 +133,6 @@ jobs:
       - name: Run the tests
         run: ./mvnw verify -Dschema.regenerate.skip=false
         env:
-          MAVEN_USERNAME: ${{ github.actor }}
-          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPRING_APPLICATION_JSON: '{"spring.jpa.hibernate.ddl-auto":"update","application.git-repo-base":"${{ runner.temp }}/microteams-git"}'
 
       - name: Check CREATE.sql matches the entities
@@ -214,8 +239,6 @@ jobs:
             --dart-define=MT_BUILT_AT=$MT_BUILT_AT
 
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The browsers are a fixed download for a pinned version of Playwright, which is exactly what
       # a cache is for.
@@ -376,7 +399,7 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-web, build-android, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-origin, build-web, build-android, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -392,7 +415,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE=microteams-deploy
-          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets"
+          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/origin"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
           cp -r deploy/init "$STAGE/"
           # Ship the JPA-generated schema at the bundle root. The stack still creates/updates its own
@@ -402,6 +425,7 @@ jobs:
           # migration an upgrade needs. Committed in-repo (CI verifies it matches the entities).
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
+          cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
           cp -r artifacts/web-dist/. "$STAGE/frontend/dist/"
           # The installable clients, into the bundle that is actually deployed. Here rather than in
           # the web job because this is the moment the two halves meet, and it is the only place

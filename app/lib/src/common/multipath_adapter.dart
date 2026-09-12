@@ -1,34 +1,175 @@
-/// Dio, sending over whichever line is currently best.
+/// Sends every request over the MultiPath substrate: one redundant stream to the origin, carried
+/// over all of this deployment's lines at once.
 ///
-/// An adapter rather than an interceptor, and that is the whole design. Interceptors run ABOVE
-/// this: the bearer token is attached, the idempotency key is minted, the error is translated —
-/// all before a line has been chosen. Underneath, the decision has already been made and travels
-/// with the request. This mirrors the Go package's RoundTripper for the same reason it gives there:
-/// authentication belongs closer to the caller, and line selection belongs closer to the socket.
+/// An adapter rather than an interceptor, and that is still the whole design. Interceptors run
+/// ABOVE this — the bearer token is attached, the error is translated — while the request is still
+/// an ordinary HTTP request. Underneath, it stops being one: it becomes bytes on a mux stream, and
+/// the redundancy happens below that, where the caller cannot see it.
 ///
-/// Reads are hedged, writes are not. A read may be asked of several lines because two copies of an
-/// answer are one answer; a write may not, because two writes are two writes. Only SILENCE moves a
-/// request to another line — an error status is an answer, and a 404 asked of every line is still a
-/// 404, asked N times.
+/// What changed with 0.2.0 is that there is nothing here to decide. There used to be: reads were
+/// hedged across lines, writes were pinned to one, and silence moved a request elsewhere. The
+/// redundant layer does all of that per byte instead — every line carries every byte and the first
+/// copy to arrive is the one delivered — so a dead line is never the one an answer comes from, with
+/// no timeout to wait out and no retry to issue. This file is now only a translation: Dio's request
+/// in, Dio's response out, MultiPath's shapes in between.
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:multipath/multipath.dart';
+import 'package:flutter/foundation.dart';
+import 'package:multipath/multipath.dart' as mp;
 
-/// Methods that get an idempotency key and are never raced.
+/// The name every stream this product opens is addressed to.
 ///
-/// PUT is absent because a well-formed PUT already means the same thing twice; GET/HEAD/OPTIONS
-/// because they change nothing.
-const Set<String> _writes = {'POST', 'PATCH', 'DELETE'};
+/// A contract with the origin rather than a local choice: from 0.2.0-rc.1 a client names a SERVICE
+/// and the origin looks it up, so a name it does not know is refused outright. That makes a typo
+/// here total rather than partial, which is why it is written once and referred to.
+///
+/// One name for everything the app does over the wire: ordinary requests, responses that arrive
+/// gradually, and WebSockets. They are all bytes on a stream to the same HTTP stack, and splitting
+/// them would invent a distinction the application does not have.
+const String appService = 'app';
 
+/// Brings the substrate up in the BACKGROUND and hands out whatever is ready.
+///
+/// Never something a request waits on, and that is the whole shape of it. The first version awaited
+/// the dial on the first request that needed one: a dial that FAILS is easy to recover from, but a
+/// dial that never settles — every line unreachable, or a line that accepts a socket and then says
+/// nothing — leaves every request behind it waiting forever. The app loaded to 100% and never
+/// painted a frame. A transport that might never come up must not be something the product waits on.
+///
+/// So requests go out the ordinary way until there is a live client, and over it once there is. The
+/// cost is that the first few requests of a cold start have no redundancy, which is the right trade:
+/// they are the ones somebody is waiting for.
+class Substrate {
+  Substrate({
+    required this.lines,
+    mp.Client Function(List<String>)? dial,
+    void Function(Object error)? onDialFailed,
+  }) : _dial = dial,
+       _onDialFailed = onDialFailed;
+
+  /// Every path to the origin. Order is irrelevant — all of them carry every byte.
+  List<String> lines;
+
+  final mp.Client Function(List<String>)? _dial;
+  final void Function(Object error)? _onDialFailed;
+  mp.Client? _client;
+  bool _dialling = false;
+
+  /// The live client, or null while there is not one yet. Starts a dial if none is under way.
+  mp.Client? clientOrStartDialling() {
+    if (_client != null) return _client;
+    if (_dialling || lines.isEmpty) return null;
+    _dialling = true;
+    unawaited(
+      Future(() async {
+        final dial = _dial;
+        _client = dial != null
+            ? dial(lines)
+            : await mp.Client.dial([
+                for (final line in lines) asWebSocket(line),
+              ]);
+      }).catchError((Object error) {
+        // Said out loud, because a client that silently has no redundancy is the state this whole
+        // layer exists to make impossible to be in unknowingly.
+        //
+        // Only a FAILED dial is reported. "There is no transport yet" is the ordinary state of every
+        // cold start and of every request that goes out before the registry has arrived — saying so
+        // would put a worrying line in the log constantly, which is how a real warning later gets
+        // ignored.
+        (_onDialFailed ??
+                (e) =>
+                    debugPrint('MultiPath: no substrate, sending directly: $e'))
+            .call(error);
+        // And retried on the NEXT triggering call, not abandoned for the life of this Substrate.
+        // This used to rely entirely on app.dart's own registry-fetch calling reset() once at
+        // startup to clear it — which works only if THAT one attempt does not also lose the same
+        // race, in which case the substrate is gone for the rest of the session. The web worker's
+        // own former reimplementation of this exact idea (before it was replaced by dialling
+        // straight into multipath's own browser link layer) had the identical bug, found the same
+        // way: a freshly-started docker-compose stack does not guarantee every container is truly
+        // ready for connections the instant its healthcheck passes, and the first dial can lose
+        // that race even though the deployment is perfectly healthy a moment later.
+        _dialling = false;
+      }),
+    );
+    return null;
+  }
+
+  /// The live client, or null when there is not one yet. Never starts a dial.
+  ///
+  /// For a caller that can carry on without the substrate and should not be the thing that brings it
+  /// up — a socket, say. Requests are what dial it: they are frequent, they are short, and one of
+  /// them going out the ordinary way costs nothing. A socket is long-lived, so the same wait is paid
+  /// once and then held.
+  mp.Client? get live => _client;
+
+  /// What the transport currently sees on each line: up, connecting or down, how many times it has
+  /// recovered, and what killed it last. Empty until something has been sent, because until then
+  /// there is no transport to ask.
+  ///
+  /// Redundancy hides line failure from the data path on purpose — this is the one place a caller
+  /// can see the failures it is surviving.
+  List<mp.LinkStat> stats() => _client?.stats() ?? const [];
+
+  /// The URL of line [index], for a view that has a stat and wants to name the path it belongs to.
+  String urlOf(int index) =>
+      index >= 0 && index < lines.length ? lines[index] : '';
+
+  /// Drops the transport, so the next request dials afresh. Used when the registry changes: a
+  /// redundant stream's links are fixed when it is dialled, so a new list means a new dial.
+  void reset() {
+    _client?.close();
+    _client = null;
+    _dialling = false;
+  }
+}
+
+/// A line's origin as something a WebSocket can be opened at.
+///
+/// The registry deals in origins — `https://host` — because that is what a line IS, and every other
+/// use of one wants it that way. A link is a WebSocket, and `WebSocket.connect` accepts only ws and
+/// wss: handed an http URL it throws "Unsupported URL scheme 'http'" before anything reaches the
+/// network. So the conversion happens here, at the one place that dials, rather than by making the
+/// registry carry URLs in a shape only this caller wants.
+@visibleForTesting
+String asWebSocket(String origin) =>
+    origin.startsWith('http') ? origin.replaceFirst('http', 'ws') : origin;
+
+/// The request's URL, with a host on it.
+///
+/// On the web this app's base URL is relative — the page's own origin IS the server, and every
+/// request it makes says `/mt/...` with no authority. That is right for `fetch`, which fills the
+/// host in from the document, and wrong for a stream: the request written to it carries a `Host:`
+/// header taken from the URL, and an empty one is answered with a 400 by any proxy worth the name.
+///
+/// It cost a journey to find, and the shape of it is worth remembering: every request before the
+/// transport came up went out directly and worked, so the failure appeared only once the substrate
+/// was carrying things — several steps after the change that caused it.
+@visibleForTesting
+Uri absolute(Uri url) => url.hasAuthority ? url : Uri.base.resolveUri(url);
+
+/// Dio's adapter over the substrate.
+///
+/// [inner] is the ordinary HTTP adapter, and it is what a failure to dial falls back to: the origin
+/// is reachable directly or this app would not be running, so a missing or misconfigured origin
+/// process degrades to "no redundancy" rather than to "no product".
+///
+/// One code path for every platform, including the web, since MultiPath 0.2.0-rc.3 gave its Dart
+/// client a browser-native link layer (`package:web`, no `dart:io`) — the same `Substrate` this
+/// adapter already used natively now works from inside the page on the web too. Before rc.3 the
+/// page could not dial at all there, so the service worker carried a substrate of its own instead;
+/// that JS-side transport is gone now (see web/sw.js), and with it an entire second implementation
+/// of the same idea, which had — and independently found — the identical retry bug this file's
+/// [Substrate] once had. One implementation is not just less code; it is one fewer place for that
+/// class of bug to hide.
 class MultiPathAdapter implements HttpClientAdapter {
-  MultiPathAdapter({required this.manager, required HttpClientAdapter inner})
+  MultiPathAdapter({required this.substrate, required HttpClientAdapter inner})
     : _inner = inner;
 
-  final LineManager manager;
+  final Substrate substrate;
   final HttpClientAdapter _inner;
 
   @override
@@ -37,51 +178,39 @@ class MultiPathAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    final path = _pathOf(options.uri);
-    final method = options.method.toUpperCase();
+    // Whatever is ready right now. No lines yet, or a dial still in flight, means the ordinary way
+    // — which is also the ordinary state of every app start, since the registry has not arrived and
+    // the request that fetches it is one of the ones going out.
+    final client = substrate.clientOrStartDialling();
+    if (client == null) {
+      return _inner.fetch(options, requestStream, cancelFuture);
+    }
 
-    // The body is read into memory once, up front. A stream can be read once and failover needs the
-    // same bytes twice; this is the same thing the Go transport does with GetBody.
+    // Read into memory once. A stream can be read once, and the request is written to the mux
+    // stream in one piece; this is the same thing every other client in the org does.
     final body = requestStream == null ? null : await _collect(requestStream);
 
-    Future<ResponseBody> attempt(Line line, {required Future<void> cancelled}) {
-      // A same-origin line is left completely alone — the request goes out exactly as Dio built it.
-      // Rewriting it would drop the base URL and produce a host-less path, which happens to work in
-      // a browser and fails everywhere else; the adoption case must change nothing at all.
-      // The query travels INSIDE the path here, so the parameters have to be cleared with it —
-      // Dio appends `queryParameters` to whatever query the path already carries, and the result
-      // is every parameter twice. Spring binds a repeated `path=&path=` into the single string
-      // "," and answers "file not found in git: ,", which is what opening docs did the day the
-      // second line started being used. Nobody saw it before that, because the same-origin branch
-      // above leaves the request completely alone.
-      final routed = line.url.isEmpty
-          ? options
-          : (options.copyWith(
-              path: line.resolve(path),
-              queryParameters: const <String, dynamic>{},
-            )..baseUrl = '');
-      return _inner.fetch(
-        routed,
-        body == null ? null : Stream.value(body),
-        // Losing the race is what makes a request disposable; the caller's own cancellation still
-        // applies to whichever attempt wins.
-        cancelFuture == null
-            ? cancelled
-            : Future.any([cancelFuture, cancelled]),
-      );
-    }
+    final response = await client.roundTrip(
+      appService,
+      mp.MultipathRequest(
+        options.method.toUpperCase(),
+        absolute(options.uri),
+        headers: {
+          for (final entry in options.headers.entries)
+            entry.key: '${entry.value}',
+        },
+        body: body,
+      ),
+    );
 
-    if (!_writes.contains(method)) {
-      return manager.read(attempt);
-    }
-    return manager.write(attempt);
-  }
-
-  /// Path and query together: a line is an ORIGIN, and everything after it belongs to the request.
-  String _pathOf(Uri uri) {
-    final query = uri.hasQuery ? '?${uri.query}' : '';
-    final path = uri.path.isEmpty ? '/' : uri.path;
-    return '$path$query';
+    return ResponseBody.fromBytes(
+      response.body,
+      response.statusCode,
+      headers: {
+        for (final entry in response.headers.entries) entry.key: [entry.value],
+      },
+      statusMessage: response.reasonPhrase,
+    );
   }
 
   Future<Uint8List> _collect(Stream<Uint8List> stream) async {
@@ -94,20 +223,4 @@ class MultiPathAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) => _inner.close(force: force);
-}
-
-/// Mints one idempotency key per logical write, before any line is chosen.
-///
-/// Before, not per attempt: every attempt at one write carries the SAME key, which is precisely
-/// what lets the server recognise a second arrival as one attempt seen twice rather than two
-/// writes. A key minted per attempt would look like the mechanism was in place while defeating it.
-class IdempotencyInterceptor extends Interceptor {
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    if (_writes.contains(options.method.toUpperCase()) &&
-        options.headers[idempotencyHeader] == null) {
-      options.headers[idempotencyHeader] = newIdempotencyKey();
-    }
-    handler.next(options);
-  }
 }

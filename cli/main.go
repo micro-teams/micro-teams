@@ -82,15 +82,14 @@ func main() {
 // library, routed by MultiPath underneath.
 //
 // The order is the point, and it is why apiauth grew a seam rather than MultiPath being wedged in
-// somewhere: the credential is decided by looking at the API host, so it has to be attached before
-// anything rewrites that host to whichever line is currently best.
+// somewhere: the credential is decided by looking at the API host, so it has to be attached above a
+// transport that no longer has a single host at all.
 //
-// A short command has measured nothing, so it ranks on whatever the resident service last cached
-// (see internal/lines). With no cache that is one same-origin line and the request goes out exactly
-// as it did before any of this existed.
+// A short command has fetched nothing, so it sends over whatever lines the resident service last
+// cached (see internal/lines). With no cache that is one same-origin line and the request goes out
+// exactly as it did before any of this existed.
 func apiClient() *http.Client {
-	client := lines.New(filepath.Join(configDir(), "config.json"), apiauth.APIBase())
-	return apiauth.ClientOver(client.RoundTripper())
+	return apiauth.ClientOver(lines.Transport(filepath.Join(configDir(), "config.json"), apiauth.APIBase()))
 }
 
 // loadAPICommands fetches the CLI applet and hangs its commands under apiCmd.

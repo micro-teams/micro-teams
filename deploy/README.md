@@ -7,12 +7,17 @@ from a registry, and every image is pinned by digest so a deploy is reproducible
 ## What's in here
 
 ```
-docker-compose.yml     the four services (nginx, backend, cheese-auth, postgres)
-nginx.conf             the domain-independent gateway (SPA + /api + /mt)
+docker-compose.yml     the five services (nginx, origin, backend, cheese-auth, postgres)
+nginx.conf             the domain-independent gateway (SPA + /api + /mt + /mt/link)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
+origin/origin.jar      the MultiPath origin: the server end of the substrate. Clients bring up one
+                       redundant stream over every published line at once and it terminates them,
+                       splicing each exchange back into nginx — so a request that arrived over a
+                       line lands exactly where the same request over plain HTTP lands. Nothing
+                       else in the stack knows more than one path to it exists.
 frontend/dist/         the built web client (static, domain-independent) — a Flutter build
                        since 0.1.16; the directory name is unchanged so upgrades in place still work
 applets/               cli.js + claude.js (mounted into the backend, swappable)
@@ -277,6 +282,30 @@ for the first time. That is a one-time bootstrap, not a permanent state.
 
 Back up `app_data/` and `.env` together — `.env` holds the secrets that decrypt nothing but
 authorize everything, and losing the JWT secret logs everyone out.
+
+## The origin, and why nothing may be deployed on its own
+
+The `origin` service is the server end of the MultiPath substrate: clients bring up one redundant
+stream carried over every published line at once, and it terminates that, demultiplexes it, and
+splices each exchange back into nginx. Nothing else in the stack knows more than one path to it
+exists.
+
+**The whole bundle goes out together — the origin, the backend and all three clients.** This is not
+a preference, and neither half of it is safe on its own:
+
+- **The backend must not go first.** A client built before the substrate sends an `Idempotency-Key`
+  with every write and relies on the server recognising a repeat. The server side of that is gone,
+  because the substrate delivers each byte exactly once and there is nothing left to de-duplicate.
+  Deploy the backend alone and a write retried on a bad network is executed twice, silently.
+- **A client must not go first either.** A client built for the substrate reaches the deployment
+  through the origin, and before the origin is running there is nothing at the other end of a line.
+
+Note what does NOT go away with the transport-level de-duplication: a write that was executed and
+whose answer was lost — the connection died before the response came back — is still a write the
+client may send again, and that is an application-level fact no transport can settle. Sending a
+message carries a `clientToken` for exactly this reason and the server de-duplicates on it. Anything
+new that retries a write automatically needs its own equivalent; it cannot inherit one from the
+network.
 
 ## Notes
 

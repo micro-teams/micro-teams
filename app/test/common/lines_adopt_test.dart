@@ -1,9 +1,9 @@
 // The registry has to be ASKED for, and the asking has to actually happen.
 //
-// `adoptRegistry` existed for weeks and nothing called it: every client ran on the inline
-// same-origin line no matter what the deployment's /mt/lines said, so multi-line routing was never
-// once in effect. It looked fine from everywhere, because one working line is indistinguishable
-// from a routing layer with nothing to route between. This is the test that would have said so.
+// The function that adopts it existed for weeks and nothing called it: every client ran on its own
+// origin no matter what the deployment's /mt/lines said, so multi-line was never once in effect. It
+// looked fine from everywhere, because one working line is indistinguishable from a transport with
+// nothing to spread across. This is the test that would have said so.
 
 import 'dart:typed_data';
 
@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:microteams/src/common/api.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/common/lines.dart';
-import 'package:multipath/multipath.dart';
 import 'package:microteams/src/app.dart';
 import 'package:microteams/src/auth/auth_api.dart';
 import 'package:microteams/src/providers.dart';
@@ -93,7 +92,7 @@ ProviderContainer _container(_Fake backend) => ProviderContainer(
       (ref) => MtClient(
         baseUrl: 'http://backend.test/mt',
         reauthorize: () async => null,
-        lines: ref.watch(linesProvider),
+        substrate: ref.watch(substrateProvider),
         adapter: backend,
       ),
     ),
@@ -101,48 +100,57 @@ ProviderContainer _container(_Fake backend) => ProviderContainer(
 );
 
 void main() {
-  test('a client starts on the one line it already has', () {
+  test('a client starts with nothing to carry a stream over', () {
     final container = _container(_Fake());
     addTearDown(container.dispose);
 
-    // Before anything is asked: the origin the page came from, which always works.
-    expect(container.read(linesProvider).lines.map((l) => l.id), ['origin']);
+    // Before the registry arrives there is no transport, and requests go out the ordinary way. That
+    // is not a gap to be closed: the request that FETCHES the registry cannot travel over the lines
+    // the registry is about.
+    expect(container.read(substrateProvider).lines, isEmpty);
   });
 
-  test('and adopts the registry the deployment serves', () async {
+  test('and adopts the lines the deployment serves', () async {
     final container = _container(_Fake());
     addTearDown(container.dispose);
-    final manager = container.read(linesProvider);
 
-    await adoptRegistry(manager, container.read(mtClientProvider).transport);
+    final lines = await fetchLines(
+      container.read(mtClientProvider).transport,
+      fallback: 'http://backend.test',
+    );
 
-    expect(manager.lines.map((l) => l.id), ['origin', 'frp-1']);
-    expect(manager.lines.last.url, 'https://frp.example');
+    // The same-origin entry becomes this client's own origin: a link is dialled AT a URL, and an
+    // empty one is not something a link can be opened over.
+    expect(lines, ['http://backend.test', 'https://frp.example']);
   });
 
-  test('an empty registry leaves the line it already had', () async {
-    // A deployment that lists nothing is not a deployment with no lines; it is one that has not
-    // been told about any. Dropping the origin here would take the client offline.
+  test('an empty registry leaves the origin this client came from', () async {
+    // A deployment that lists nothing is not a deployment with no lines; it is one that has not been
+    // told about any. Returning nothing here would take the client offline.
     final container = _container(_Fake(body: '{"lines":[]}'));
     addTearDown(container.dispose);
-    final manager = container.read(linesProvider);
 
-    await adoptRegistry(manager, container.read(mtClientProvider).transport);
+    final lines = await fetchLines(
+      container.read(mtClientProvider).transport,
+      fallback: 'http://backend.test',
+    );
 
-    expect(manager.lines.map((l) => l.id), ['origin']);
+    expect(lines, ['http://backend.test']);
   });
 
-  test('a registry that cannot be read leaves the line it already had', () async {
-    // Malformed rather than absent: falling back is still right, and the failure is logged rather
-    // than thrown, because a client that refused to start without a routing table would make the
-    // transport a startup dependency — backwards for the thing whose job is surviving an outage.
-    final container = _container(_Fake(body: '{"lines":[{"id":""}]}'));
+  test('a registry that cannot be read leaves the origin it already had', () async {
+    // Malformed rather than absent: falling back is still right, and nothing is thrown, because a
+    // client that refused to start without a routing table would make the transport a startup
+    // dependency — backwards for the thing whose job is surviving an outage.
+    final container = _container(_Fake(body: '{"lines":[{"id":'));
     addTearDown(container.dispose);
-    final manager = container.read(linesProvider);
 
-    await adoptRegistry(manager, container.read(mtClientProvider).transport);
+    final lines = await fetchLines(
+      container.read(mtClientProvider).transport,
+      fallback: 'http://backend.test',
+    );
 
-    expect(manager.lines.map((l) => l.id), ['origin']);
+    expect(lines, ['http://backend.test']);
   });
 
   testWidgets('the app asks for it on startup', (tester) async {
@@ -152,11 +160,6 @@ void main() {
     final backend = _AppFake();
     final container = ProviderContainer(
       overrides: [
-        // A manager with no way to send a probe: this test is about whether the registry is
-        // ASKED for, and a live measuring loop would leave its timers running past the end of it.
-        linesProvider.overrideWithValue(
-          LineManager(registry: sameOriginOnly()),
-        ),
         // Signed OUT on purpose: the app asks for the registry before it asks who you are — a
         // client that had to be logged in before it could route would have made the transport
         // depend on the session. It also keeps this test to one screen and one request.
@@ -168,7 +171,7 @@ void main() {
           (ref) => MtClient(
             baseUrl: 'http://backend.test/mt',
             reauthorize: () async => null,
-            lines: ref.watch(linesProvider),
+            substrate: ref.watch(substrateProvider),
             adapter: backend,
           ),
         ),
@@ -184,9 +187,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(container.read(linesProvider).lines.map((l) => l.id), [
-      'origin',
-      'frp-1',
+    expect(container.read(substrateProvider).lines, [
+      'http://backend.test',
+      'https://frp.example',
     ], reason: 'asked /mt/lines and took the answer');
   });
 }

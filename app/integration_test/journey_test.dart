@@ -648,6 +648,25 @@ void main() {
           'read what was said in it',
     );
     await note('the stranger was given nothing at ${mine.location}');
+
+    // --- and all of it went over the substrate --------------------------------------------------
+    // Last, because it asks about the whole run rather than about any one step, and because it is
+    // the only assertion here that would be unaffected by the transport being switched off. That is
+    // exactly why it is needed: a client that cannot dial a line sends its requests directly
+    // instead, which works perfectly, so every step above would pass with the layer underneath them
+    // doing nothing at all. Losing redundancy costs nobody an error — that is its whole nature — so
+    // it has to be asked about out loud or not at all.
+    //
+    // Every client, web included: MultiPath 0.2.0-rc.3 gave its Dart client a browser-native link
+    // layer, so the page itself dials on the web too now — there is no longer a service worker
+    // standing in for it, and nothing here depends on one being served.
+    await go(tester, '/__lines');
+    await waitFor(
+      tester,
+      find.text('up'),
+      what: 'a line the transport says is carrying traffic',
+    );
+    await note('PASS: the requests in this run went over the substrate');
     // Twenty-two minutes, and the number is the journey's length rather than a guess: it signs two
     // people up (two real emails, two codes), approves a machine, waits for the real Claude Code to
     // finish its first-run gates, and walks the docs tree. When it outgrew fourteen the drive

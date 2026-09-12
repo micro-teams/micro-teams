@@ -22,7 +22,7 @@ func TestLinkUpIsRecordedAndReadBack(t *testing.T) {
 	cfg := tempCfg(t)
 	at := time.Now().Truncate(time.Second)
 
-	Write(cfg, 2, Line{ID: "eu", URL: "https://eu.example"}, Link{Up: true, Since: at})
+	Write(cfg, 2, []LineState{{ID: "eu", URL: "https://eu.example", State: "up"}}, Link{Up: true, Since: at})
 
 	link := CurrentLink(cfg)
 	if !link.Up {
@@ -38,7 +38,7 @@ func TestLinkUpIsRecordedAndReadBack(t *testing.T) {
 func TestLinkDownKeepsTheReason(t *testing.T) {
 	cfg := tempCfg(t)
 
-	Write(cfg, 0, Line{}, Link{Up: false, Error: "dial tcp 10.0.0.1:443: i/o timeout"})
+	Write(cfg, 0, nil, Link{Up: false, Error: "dial tcp 10.0.0.1:443: i/o timeout"})
 
 	link := CurrentLink(cfg)
 	if link.Up {
@@ -57,7 +57,7 @@ func TestLinkDownKeepsTheReason(t *testing.T) {
 func TestNotConnectedYetIsNotAnError(t *testing.T) {
 	cfg := tempCfg(t)
 
-	Write(cfg, 0, Line{}, Link{})
+	Write(cfg, 0, nil, Link{})
 
 	link := CurrentLink(cfg)
 	if link.Up || link.Error != "" {
@@ -69,7 +69,7 @@ func TestNotConnectedYetIsNotAnError(t *testing.T) {
 // outlives the process, and "connected" from a dead writer is the same wrong answer in a new place.
 func TestARecordedLinkFromADeadWriterIsNotBelieved(t *testing.T) {
 	cfg := tempCfg(t)
-	Write(cfg, 1, Line{ID: "eu"}, Link{Up: true, Since: time.Now()})
+	Write(cfg, 1, []LineState{{ID: "eu", State: "up"}}, Link{Up: true, Since: time.Now()})
 
 	// Rewrite the snapshot with a pid that cannot be alive.
 	data, err := os.ReadFile(Path(cfg))
@@ -148,4 +148,39 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return digits
+}
+
+// The table a reader needs when redundancy is doing its job: several paths, and the state of each.
+//
+// A line that is down while the machine works perfectly is the case this exists for. Nothing else in
+// the system notices it — that is what the redundant transport is FOR — so if this file does not
+// carry it, the failure is invisible until the last path goes too, and by then it is an outage
+// rather than a warning.
+func TestEveryLineIsRecordedWithWhatItIsDoing(t *testing.T) {
+	cfg := tempCfg(t)
+
+	Write(cfg, 0, []LineState{
+		{ID: "origin", State: "up"},
+		{ID: "cf", URL: "https://cf.example", State: "down", Reconnects: 3, Reason: "i/o timeout"},
+	}, Link{Up: true, Since: time.Now()})
+
+	got := CurrentLines(cfg)
+	if len(got) != 2 {
+		t.Fatalf("expected both lines, got %+v", got)
+	}
+	if got[1].State != "down" || got[1].Reason != "i/o timeout" || got[1].Reconnects != 3 {
+		t.Errorf("a dead line lost what made it worth reporting: %+v", got[1])
+	}
+}
+
+// An older host wrote no line table at all. That must read as "nothing to say", not as "no lines" —
+// the two look the same in a struct and mean opposite things to whoever is reading the screen.
+func TestAHostThatReportsNoLinesIsNotAMachineWithoutLines(t *testing.T) {
+	cfg := tempCfg(t)
+	if err := os.WriteFile(Path(cfg), []byte(`{"screens":1,"pid":`+itoa(os.Getpid())+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := CurrentLines(cfg); got != nil {
+		t.Errorf("expected nothing recorded, got %+v", got)
+	}
 }

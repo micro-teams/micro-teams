@@ -11,8 +11,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:microteams/src/common/stream_lines.dart';
-import 'package:multipath/multipath.dart' as mp;
 import 'package:microteams/src/providers.dart';
 import 'package:microteams/src/common/config.dart';
 import 'package:microteams/src/terminal/screen_link.dart';
@@ -53,11 +51,18 @@ Widget host(_FakeSocket socket) => ProviderScope(
 );
 
 void main() {
-  testWidgets('the screen is dialled over a line, not over the page origin', (
+  testWidgets('the screen is dialled at the origin this app is talking to', (
     tester,
   ) async {
-    // The live screen is the app's heaviest stream, and it was the last connection still hard-wired
-    // to whichever host served the document.
+    // This used to assert the opposite — that a live screen went out over whichever LINE had been
+    // measured best, rather than over the host that served the document. MultiPath 0.2.0 removed
+    // line-picking entirely, and the replacement for it (a socket riding the substrate as a mux
+    // stream, so no single line failing can drop it) is the one part of that migration still to do.
+    //
+    // So this asserts today's truth rather than leaving a hole where a test was: the screen goes to
+    // the origin, which is exactly what it did on a single-line deployment — and every deployment is
+    // single-line today. When the socket moves onto the substrate, this becomes an assertion about
+    // surviving a line failure, which is a better thing to be able to say than "it chose well".
     final socket = _FakeSocket();
     final dialled = <Uri>[];
     await tester.pumpWidget(
@@ -65,18 +70,6 @@ void main() {
         overrides: [
           endpointsProvider.overrideWithValue(
             const Endpoints(origin: 'http://machine.test'),
-          ),
-          streamLinesProvider.overrideWithValue(
-            StreamLines(
-              selector: mp.StreamSelector(
-                lines: () => mp.parseRegistry({
-                  'lines': [
-                    {'id': 'near', 'url': 'https://near.example.com'},
-                  ],
-                }).lines,
-              ),
-              endpoints: const Endpoints(origin: 'http://machine.test'),
-            ),
           ),
         ],
         child: MaterialApp(
@@ -92,10 +85,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      dialled.single.toString(),
-      'wss://near.example.com/mt/machine/screen/s1',
-    );
+    expect(dialled.single.toString(), 'ws://machine.test/mt/machine/screen/s1');
   });
   testWidgets('switching to typing tells the machine, with a size', (
     tester,

@@ -309,6 +309,20 @@ Future<void> tap(WidgetTester tester, Finder finder, {String? what}) async {
     await tester.ensureVisible(finder.first);
     await tester.pump(const Duration(milliseconds: 100));
   } catch (_) {}
+  // Found, then gone before it could be tapped. A live list is redrawn whenever the server says
+  // something changed — a machine coming online, an agent's status — and the row this is aiming at
+  // can be replaced between the wait above and the tap below. Without this the run dies on
+  // "Bad state: No element" out of Iterable.first, which says nothing at all about what happened.
+  //
+  // Waited for again rather than failed, because a row that vanished usually came straight back:
+  // the rebuild replaced it with an equal one. If it really is gone, the second wait says so with
+  // the name of the thing it wanted.
+  if (finder.evaluate().isEmpty) {
+    await note(
+      '  ${what ?? finder} went away before it could be tapped — waiting again',
+    );
+    await waitFor(tester, finder, what: what);
+  }
   await tester.tap(finder.first);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
@@ -509,6 +523,10 @@ Future<void> tapUntil(
   int tries = 3,
 }) async {
   for (var attempt = 1; attempt <= tries; attempt++) {
+    // Already there: the previous tap worked and the screen has only just caught up. Tapping again
+    // would be a tap on whatever has taken its place, which is how a retry turns a slow success
+    // into a failure somewhere else entirely.
+    if (until.evaluate().isNotEmpty) return;
     await tap(tester, finder, what: what);
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {

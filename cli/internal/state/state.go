@@ -16,10 +16,15 @@ import (
 type snapshot struct {
 	Screens int `json:"screens"`
 	PID     int `json:"pid"`
-	// Which network path the control link is using. Written by the host, read by `status`, and
-	// meaningless to anything else — a machine with one line always reports that one.
-	LineID  string `json:"lineId,omitempty"`
-	LineURL string `json:"lineUrl,omitempty"`
+	// Every network path this machine's transport is carrying, and what each of them is doing.
+	//
+	// A list rather than one chosen line, because from MultiPath 0.2.0 there is no chosen line: the
+	// transport writes every byte to all of them at once and takes whichever copy arrives first. The
+	// interesting question stopped being "which one are we on" and became "which of them are still
+	// alive", and that one has to be asked out loud — a redundancy that is only visible when it has
+	// completely failed is a redundancy nobody can act on. Three of four lines can die in silence
+	// while everything works perfectly; this is where that shows.
+	Lines []LineState `json:"lines,omitempty"`
 	// Whether the control link is actually established right now, since when, and why the last
 	// attempt failed if it did.
 	//
@@ -51,10 +56,15 @@ func Path(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), "state.json")
 }
 
-// Line names a network path the control link is using.
-type Line struct {
-	ID  string
-	URL string
+// LineState is one network path and what the transport last saw of it: "up", "connecting" (never
+// yet up) or "down" (was up, now reconnecting), how many times it has come back, and the reason it
+// last dropped.
+type LineState struct {
+	ID         string `json:"id"`
+	URL        string `json:"url,omitempty"`
+	State      string `json:"state"`
+	Reconnects int    `json:"reconnects,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // Link is what the host knows about the control connection, as opposed to what the service manager
@@ -67,16 +77,16 @@ type Link struct {
 	Error string
 }
 
-// Write records the current number of hosted screens and the line carrying the control link.
+// Write records the current number of hosted screens, the state of every line, and the control
+// link.
 //
-// Both together, in one write, because the host is the only writer and knows both. Two writers each
-// owning a field would race on the file and each would occasionally erase the other's.
-func Write(cfgPath string, screens int, line Line, link Link) {
+// All of it together, in one write, because the host is the only writer and knows all of it. Two
+// writers each owning a field would race on the file and each would occasionally erase the other's.
+func Write(cfgPath string, screens int, lines []LineState, link Link) {
 	snap := snapshot{
 		Screens:   screens,
 		PID:       os.Getpid(),
-		LineID:    line.ID,
-		LineURL:   line.URL,
+		Lines:     lines,
 		LinkUp:    link.Up,
 		LinkError: link.Error,
 		Relink:    true,
@@ -144,18 +154,18 @@ func CanRelink(cfgPath string) bool {
 	return s.Relink
 }
 
-// CurrentLine reports the path the running host's control link is using, or an empty Line when
-// nothing is recorded — an older host, or none running.
-func CurrentLine(cfgPath string) Line {
+// CurrentLines reports every line the running host's transport is carrying and what each is doing,
+// or nothing when nothing is recorded — an older host, or none running.
+func CurrentLines(cfgPath string) []LineState {
 	data, err := os.ReadFile(Path(cfgPath))
 	if err != nil {
-		return Line{}
+		return nil
 	}
 	var s snapshot
 	if json.Unmarshal(data, &s) != nil {
-		return Line{}
+		return nil
 	}
-	return Line{ID: s.LineID, URL: s.LineURL}
+	return s.Lines
 }
 
 // CurrentLink reports what the running host knows about the control connection.

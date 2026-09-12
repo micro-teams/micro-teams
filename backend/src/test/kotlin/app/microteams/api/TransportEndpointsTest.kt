@@ -52,4 +52,44 @@ class TransportEndpointsTest @Autowired constructor(private val mockMvc: MockMvc
             .andExpect(jsonPath("$.lines[0].id").value("origin"))
             .andExpect(jsonPath("$.lines[0].url").value(""))
     }
+
+    /**
+     * The scheme a client is told to dial with has to match the one it actually reached us over.
+     *
+     * This is a silent failure in both directions and that is the whole reason it is pinned. Hand a
+     * plain-HTTP deployment "wss" and every client fails to dial, falls back to sending directly,
+     * and works — so the transport is switched off and nothing anywhere says so. Hand an HTTPS
+     * deployment "ws" and the browser refuses the connection outright as mixed content.
+     *
+     * X-Forwarded-Proto is the authority because the proxy terminated the TLS; this application
+     * only ever sees plain HTTP from it, so its own scheme would say "ws" on every production
+     * deployment there is.
+     */
+    @Test
+    fun aTlsClientIsToldToDialOverTls() {
+        mockMvc
+            .perform(get("/lines").header("X-Forwarded-Proto", "https"))
+            .andExpect(jsonPath("$.lines[0].transport").value("wss"))
+    }
+
+    @Test
+    fun aPlainHttpClientIsToldToDialPlainly() {
+        mockMvc
+            .perform(get("/lines").header("X-Forwarded-Proto", "http"))
+            .andExpect(jsonPath("$.lines[0].transport").value("ws"))
+    }
+
+    /**
+     * Nothing in front at all: the request's own scheme is the answer, which is the ordinary case
+     * for anything talking to this process directly.
+     *
+     * Its own test rather than a third assertion inside one of the others, because what is read is
+     * per-request state reached through a proxy — and two requests in one test method share enough
+     * context that the second can be answered with the first one's header. That is not a
+     * hypothetical: it is how this assertion first went green while being wrong.
+     */
+    @Test
+    fun withNothingInFrontTheRequestsOwnSchemeIsUsed() {
+        mockMvc.perform(get("/lines")).andExpect(jsonPath("$.lines[0].transport").value("ws"))
+    }
 }

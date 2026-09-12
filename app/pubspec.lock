@@ -362,11 +362,11 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "v0.1.6"
-      resolved-ref: "1bfd4a61f7803d850325fe881242eafd582ff957"
+      ref: "v0.2.0-rc.3"
+      resolved-ref: bd658daab6a2eaf9b4f6adc0583cd6e06efa29ec
       url: "https://github.com/micro-teams/multipath.git"
     source: git
-    version: "0.1.6"
+    version: "0.2.0-rc.3"
   path:
     dependency: transitive
     description:
@@ -525,7 +525,7 @@ packages:
     source: hosted
     version: "1.0.0"
   stream_channel:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: stream_channel
       sha256: "969e04c80b8bcdf826f8f16579c7b14d780458bd97f56d107d3950fdbeef059d"

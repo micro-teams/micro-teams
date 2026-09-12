@@ -144,3 +144,39 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  # The MultiPath origin: the server end of the substrate, and the only thing in this deployment
+  # that knows more than one path to it exists.
+  #
+  # It is spliced to NGINX, not to the backend, so a request that arrives over a line lands exactly
+  # where the same request over plain HTTP lands — /api/ to auth, /mt/ to the backend with the
+  # prefix stripped, everything else to static files. Splicing to the backend would have made a
+  # request's path depend on which way it travelled, which is the difference this layer exists to
+  # abolish. It starts after nginx for that reason: with nothing to splice to, a link that connects
+  # is worse than one that does not, because the client believes it has a working path.
+  #
+  # No TLS here: nginx terminates it and proxies /mt/link in as a plaintext WebSocket.
+  origin:
+    image: eclipse-temurin:21-jre
+    restart: unless-stopped
+    depends_on:
+      nginx:
+        condition: service_healthy
+    working_dir: /app
+    command: ["java", "-jar", "/app/origin.jar"]
+    environment:
+      MT_ORIGIN_PORT: "9443"
+      MT_APP_HOST: "nginx"
+      MT_APP_PORT: "80"
+      MT_LINK_PATH: "/mt/link"
+    volumes:
+      - ./origin/origin.jar:/app/origin.jar:ro
+    healthcheck:
+      # A TCP connect, because there is no HTTP here to ask: what this port speaks is the substrate's
+      # own framing, and anything that talks to it properly would be a second implementation of the
+      # client. Accepting a connection is the whole of what the rest of the stack needs from it.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9443' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
