@@ -343,7 +343,15 @@ await chat.mouse.click(size.width * 0.6, size.height - 32);
 await chat.keyboard.type("probe message");
 await chat.waitForTimeout(300);
 await chat.mouse.click(size.width - 100, size.height - 32);
-await chat.waitForTimeout(1500);
+// A fixed 1.5s wait used to be enough because every web request went out as an ordinary fetch —
+// there was nothing to dial. Now the page dials the substrate itself (MultiPath 0.2.0-rc.3's
+// browser-native link layer), and the request this click sends may be the first one to actually
+// wait on that dial settling, which a busy CI runner can push past a flat deadline even though the
+// request always does eventually go out. Polled for the same reason the journey's own assertion
+// of this is polled rather than slept for.
+for (let waited = 0; waited < 8000 && sent.length === 0; waited += 200) {
+  await chat.waitForTimeout(200);
+}
 
 check(
   "a message typed into a conversation is posted",
