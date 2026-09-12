@@ -362,11 +362,11 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "v0.2.0-rc.2"
-      resolved-ref: a35895657990409d6bbe1a688a0c6ef99b64d2d9
+      ref: "v0.2.0-rc.3"
+      resolved-ref: bd658daab6a2eaf9b4f6adc0583cd6e06efa29ec
       url: "https://github.com/micro-teams/multipath.git"
     source: git
-    version: "0.2.0-rc.2"
+    version: "0.2.0-rc.3"
   path:
     dependency: transitive
     description:

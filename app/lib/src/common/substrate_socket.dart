@@ -7,10 +7,10 @@
 /// app made survived it.
 ///
 /// Uses multipath's own [mp.MultipathWebSocket] rather than implementing RFC 6455 ourselves — it is
-/// pure Dart (no dart:io), so the same code path works whether or not the caller ends up able to
-/// use it. On the web it never is: nothing dials the substrate there in the first place (the
-/// service worker carries the network instead — see worker_routes.dart), so [substrate].live is
-/// always null and every caller falls back to an ordinary WebSocket, exactly as before.
+/// pure Dart (no dart:io), so the same code path works on every platform, the web included since
+/// MultiPath 0.2.0-rc.3 gave its Dart client a browser-native link layer. [substrate].live is null
+/// only until the substrate has dialled, in which case the caller falls back to an ordinary
+/// WebSocket.
 library;
 
 import 'dart:async';

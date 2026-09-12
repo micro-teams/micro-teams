@@ -20,8 +20,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:multipath/multipath.dart' as mp;
 
-import 'worker_routes.dart';
-
 /// The name every stream this product opens is addressed to.
 ///
 /// A contract with the origin rather than a local choice: from 0.2.0-rc.1 a client names a SERVICE
@@ -75,9 +73,7 @@ class Substrate {
               ]);
       }).catchError((Object error) {
         // Said out loud, because a client that silently has no redundancy is the state this whole
-        // layer exists to make impossible to be in unknowingly. Not retried here: the next line
-        // registry that arrives resets this and tries again, and retrying per request would put a
-        // dial attempt in front of every request the app makes.
+        // layer exists to make impossible to be in unknowingly.
         //
         // Only a FAILED dial is reported. "There is no transport yet" is the ordinary state of every
         // cold start and of every request that goes out before the registry has arrived — saying so
@@ -87,6 +83,16 @@ class Substrate {
                 (e) =>
                     debugPrint('MultiPath: no substrate, sending directly: $e'))
             .call(error);
+        // And retried on the NEXT triggering call, not abandoned for the life of this Substrate.
+        // This used to rely entirely on app.dart's own registry-fetch calling reset() once at
+        // startup to clear it — which works only if THAT one attempt does not also lose the same
+        // race, in which case the substrate is gone for the rest of the session. The web worker's
+        // own former reimplementation of this exact idea (before it was replaced by dialling
+        // straight into multipath's own browser link layer) had the identical bug, found the same
+        // way: a freshly-started docker-compose stack does not guarantee every container is truly
+        // ready for connections the instant its healthcheck passes, and the first dial can lose
+        // that race even though the deployment is perfectly healthy a moment later.
+        _dialling = false;
       }),
     );
     return null;
@@ -151,14 +157,14 @@ Uri absolute(Uri url) => url.hasAuthority ? url : Uri.base.resolveUri(url);
 /// is reachable directly or this app would not be running, so a missing or misconfigured origin
 /// process degrades to "no redundancy" rather than to "no product".
 ///
-/// On the web it stands down WHEN A WORKER IS CONTROLLING THE PAGE: that worker routes every
-/// request the document makes, including the API, over a substrate of its own (see web/sw.js), and
-/// dialling a second one here would open a second set of links to every line to do one job.
-///
-/// Not simply "on the web", because a page often has no worker in front of it — the first visit
-/// before one takes over, a browser with them disabled, a driven test that serves none. Standing
-/// down there would mean no redundancy at all, silently, which is the state this layer exists to
-/// make impossible to be in unknowingly.
+/// One code path for every platform, including the web, since MultiPath 0.2.0-rc.3 gave its Dart
+/// client a browser-native link layer (`package:web`, no `dart:io`) — the same `Substrate` this
+/// adapter already used natively now works from inside the page on the web too. Before rc.3 the
+/// page could not dial at all there, so the service worker carried a substrate of its own instead;
+/// that JS-side transport is gone now (see web/sw.js), and with it an entire second implementation
+/// of the same idea, which had — and independently found — the identical retry bug this file's
+/// [Substrate] once had. One implementation is not just less code; it is one fewer place for that
+/// class of bug to hide.
 class MultiPathAdapter implements HttpClientAdapter {
   MultiPathAdapter({required this.substrate, required HttpClientAdapter inner})
     : _inner = inner;
@@ -172,12 +178,6 @@ class MultiPathAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    // This page's requests belong to the service worker, which is already carrying them over a
-    // substrate of its own. Nothing to do here but hand the request on and let it be intercepted.
-    if (aWorkerCarriesRequests) {
-      return _inner.fetch(options, requestStream, cancelFuture);
-    }
-
     // Whatever is ready right now. No lines yet, or a dial still in flight, means the ordinary way
     // — which is also the ordinary state of every app start, since the registry has not arrived and
     // the request that fetches it is one of the ones going out.

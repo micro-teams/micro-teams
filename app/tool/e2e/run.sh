@@ -267,19 +267,6 @@ done
 curl -fsS "http://localhost:$GATEWAY_PORT/mt/lines" >/dev/null 2>&1 ||
   fail "the gateway cannot reach the deployment"
 
-# --- the deployed frontend's own worker, against the real origin -------------------------------
-# Not the flutter-drive build under test, and not through the gateway (which deliberately serves no
-# service worker to that build — see the comment at the top of gateway.conf.template). This is the
-# BUNDLE's own frontend, on the stack's own nginx, with the real origin process and the real worker
-# both in front of a real backend: the one place either exists together, and therefore the one
-# place "does the worker really carry a line" can be asked at all. Web only — it is the worker's own
-# substrate being asked about, and nothing here changes with which client is being driven.
-if [ "$CLIENT" = "web" ]; then
-  step "the deployed frontend's own service worker carries a line"
-  ( cd "$APP" && node tool/e2e/check-substrate.mjs "http://localhost:$STACK_PORT" ) ||
-    fail "the deployed frontend's service worker is not carrying traffic over a real line"
-fi
-
 # --- the client ----------------------------------------------------------------------------------
 if [ "$CLIENT" = "android" ]; then
   step "check the emulator is there"

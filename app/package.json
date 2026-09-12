@@ -9,10 +9,6 @@
     "check:web": "bash tool/check-web.sh"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2",
     "playwright": "1.63.0"
-  },
-  "dependencies": {
-    "@micro-teams/multipath": "^0.2.0-rc.1"
   }
 }

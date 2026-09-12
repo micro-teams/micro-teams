@@ -41,7 +41,7 @@ dependencies:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      ref: v0.2.0-rc.2
+      ref: v0.2.0-rc.3
   web_socket_channel: ^3.0.1
   # A WebSocket over the substrate is StreamChannel-shaped (multipath's own MultipathWebSocket is
   # callback-based, not Stream/StreamSink) — this is the adapter's own dependency, made direct
