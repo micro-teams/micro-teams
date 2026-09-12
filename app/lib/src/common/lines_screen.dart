@@ -1,13 +1,16 @@
 /// The developer line panel, behind a route nothing links to.
 ///
-/// Everything MultiPath does is invisible when it works, which is exactly what makes it hard to
-/// trust: there is nothing to see when it is fine, and nothing to see when it is not. This puts
-/// what each line IS — its rank, its state, what has been measured about it — next to what actually
-/// HAPPENED, which is whether the last request over it worked. Those two disagree more often than
-/// you would expect, and the disagreement is usually where the bug is.
+/// Everything the substrate does is invisible when it works, which is exactly what makes it hard to
+/// trust: there is nothing to see when it is fine, and nothing to see when it is not. Under 0.2.0
+/// that got worse rather than better, and this panel is the answer. Redundancy means a line can die
+/// and cost nobody anything — no error, no slowdown, no reconnect — so a deployment can lose three
+/// of its four paths in complete silence and only find out when the last one goes, by which time it
+/// is an outage instead of a warning. This is where that shows.
 ///
-/// The React client had exactly this at `/__lines`, mounting the library's own panel. The Dart
-/// package has no panel to mount, so this is one — the same question, asked in Flutter.
+/// What it no longer shows is a ranking. Latency, throughput and "which line is preferred" answered
+/// a question the substrate deleted: nothing picks a line, every line carries every byte, and the
+/// fastest one wins each byte without anybody measuring anything. What is left is the question that
+/// still has an answer — is this path alive, has it been flapping, and what killed it last time.
 library;
 
 import 'package:flutter/material.dart';
@@ -26,21 +29,19 @@ class LinesScreen extends ConsumerStatefulWidget {
 class _LinesScreenState extends ConsumerState<LinesScreen> {
   @override
   Widget build(BuildContext context) {
-    final manager = ref.watch(linesProvider);
-    final ranked = manager.ranked;
+    final substrate = ref.watch(substrateProvider);
+    final stats = substrate.stats();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('lines'),
         actions: [
           IconButton(
-            tooltip: 'measure now',
-            // Measuring costs real requests, so nothing here polls: what is on screen is what was
-            // known when it was drawn, and this is how you ask for more.
-            onPressed: () async {
-              await ref.read(probeLinesProvider)();
-              if (mounted) setState(() {});
-            },
+            tooltip: 'refresh',
+            // Nothing polls: what is on screen is what the transport knew when it was drawn. A view
+            // that refreshed itself would hide the one thing worth noticing here, which is a line
+            // whose state changed while you were looking at the old value.
+            onPressed: () => setState(() {}),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -49,16 +50,16 @@ class _LinesScreenState extends ConsumerState<LinesScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Ranked best first. A line with nothing measured sorts below one that has been, '
-            'because unknown is not the same as fast.',
+            'Every line carries every byte; the first copy to arrive is the one used. So none of '
+            'these is "the" line, and a line being down costs nothing until it is the last one.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
-          for (final line in ranked)
-            _LineRow(line: line, health: manager.health[line.id]),
-          if (ranked.isEmpty)
+          for (final stat in stats)
+            _LineRow(url: substrate.urlOf(stat.index), stat: stat),
+          if (stats.isEmpty)
             const Text(
-              'no lines — the registry is empty, so everything goes to this origin',
+              'no transport yet — nothing has been sent, or there is no line to send it over',
             ),
         ],
       ),
@@ -67,18 +68,18 @@ class _LinesScreenState extends ConsumerState<LinesScreen> {
 }
 
 class _LineRow extends StatelessWidget {
-  const _LineRow({required this.line, required this.health});
+  const _LineRow({required this.url, required this.stat});
 
-  final mp.Line line;
-  final mp.LineHealth health;
+  final String url;
+  final mp.LinkStat stat;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final colour = switch (health.state) {
-      mp.LineState.up => scheme.primary,
-      mp.LineState.degraded => Colors.amber,
-      mp.LineState.down => scheme.error,
+    final colour = switch (stat.state) {
+      'up' => scheme.primary,
+      'connecting' => Colors.amber,
+      _ => scheme.error,
     };
 
     return Card(
@@ -99,10 +100,13 @@ class _LineRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(line.id, style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  'line ${stat.index}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const Spacer(),
                 Text(
-                  health.state.name,
+                  stat.state,
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: colour),
@@ -111,31 +115,27 @@ class _LineRow extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              line.url.isEmpty ? '(this origin)' : line.url,
+              url.isEmpty ? '(this origin)' : url,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
             const SizedBox(height: 6),
             Text(
               [
-                line.transport,
-                'weight ${line.weight}',
-                // Two measurements, because one is not enough: a line can answer a probe in 20ms
-                // and still take seconds to deliver a megabyte, and that is the case this whole
-                // library exists for.
-                health.measured
-                    ? '${health.latency!.inMilliseconds}ms'
-                    : 'never measured',
-                if (health.throughputBps > 0)
-                  '${(health.throughputBps / 1000).round()} kB/s',
-                if (health.consecutiveFailures > 0)
-                  '${health.consecutiveFailures} failures in a row',
+                // The recovery count, because "up" at the instant you look says nothing about a
+                // path that has come and gone forty times this morning — and flapping is the
+                // failure this panel is most likely to be the only witness to.
+                if (stat.reconnects > 0) 'recovered ${stat.reconnects}×',
+                if (stat.lastByteMs > 0)
+                  'last byte ${DateTime.fromMillisecondsSinceEpoch(stat.lastByteMs).toIso8601String()}'
+                else
+                  'nothing has arrived on it',
               ].join(' · '),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (health.lastError != null) ...[
+            if (stat.reason.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
-                health.lastError!,
+                stat.reason,
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: scheme.error),

@@ -13,10 +13,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import './src/app.dart';
 import 'src/providers.dart';
-import 'package:multipath/multipath.dart' as mp;
 
 import './src/common/key_value.dart';
 import './src/common/prefs_store.dart';
+import './src/common/request_cache.dart';
 import './src/common/ready_signal.dart';
 import './src/common/url_strategy.dart';
 
@@ -44,16 +44,15 @@ Future<void> main() async {
   // Both shelves are opened before the first frame so that what survived the last run can be
   // painted in it: a cold start that shows a spinner where content used to be reads as data loss,
   // and on a phone a cold start is most of the experience.
-  final cache = mp.RequestCache(store: const PrefsCacheStore());
+  final cache = RequestCache(store: const PrefsCacheStore());
   await cache.restore();
   final state = await KeyValueStore.open();
 
-  // The line manager is NOT built here. It was, and the manager built here had no way to send a
-  // probe and nowhere to remember what it measured — so it quietly replaced the one in
-  // providers.dart that had both, and every line except the one real traffic used sat at "never
-  // measured" in production while the tests, which use the provider, measured everything correctly.
-  // An override that constructs a second, poorer copy of a provider is a hard thing to see; the
-  // rule that follows is that a provider with wiring in it is built in exactly one place.
+  // The transport is NOT built here. A version of this file built its own line manager, which had
+  // no way to send a probe and nowhere to remember what it measured, and it quietly replaced the
+  // one in providers.dart that had both — so production ran on the poorer copy while the tests,
+  // which use the provider, exercised the good one. The probing is gone now but the rule it taught
+  // is not: a provider with wiring in it is built in exactly one place.
 
   runApp(
     ProviderScope(

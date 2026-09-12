@@ -207,11 +207,12 @@ void main() {
       'serverProvider',
       'requestCacheProvider',
       'stateStoreProvider',
-      'linesProvider',
+      // The transport, which knows nothing about who is signed in: it carries bytes over this
+      // deployment's network paths and would be the same object for any account.
+      'substrateProvider',
       'authApiProvider',
-      'probeLinesProvider',
       'mtClientProvider',
-      'updatesStoreProvider', 'streamLinesProvider', 'updatesSocketProvider',
+      'updatesStoreProvider', 'updatesSocketProvider',
       // The session itself, and the team you picked. Both are set by the sign-in that follows.
       'sessionProvider', 'selectedTeamProvider',
     };

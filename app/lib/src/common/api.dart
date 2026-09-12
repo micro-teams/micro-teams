@@ -24,12 +24,12 @@ library;
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:mt_api/mt_api.dart';
-import 'package:multipath/multipath.dart' as mp;
 
 import 'errors.dart';
-import 'lines.dart';
 import 'multipath_adapter.dart';
+import 'request_cache.dart';
 
 /// Asked for a fresh access token after a 401. Returns null if the session is really over.
 typedef Reauthorize = Future<String?> Function();
@@ -41,12 +41,13 @@ class MtClient {
   MtClient({
     required String baseUrl,
     required Reauthorize reauthorize,
-    mp.LineManager? lines,
-    mp.RequestCache? cache,
+    Substrate? substrate,
+    RequestCache? cache,
     HttpClientAdapter? adapter,
+    void Function(Object error)? onTransportFallback,
   }) : _reauthorize = reauthorize,
-       lines = lines ?? mp.LineManager(registry: sameOriginOnly()),
-       cache = cache ?? mp.RequestCache(),
+       substrate = substrate ?? Substrate(lines: const []),
+       cache = cache ?? RequestCache(),
        _dio = Dio(
          BaseOptions(
            baseUrl: baseUrl,
@@ -57,12 +58,20 @@ class MtClient {
          ),
        ) {
     _dio.httpClientAdapter = MultiPathAdapter(
-      manager: this.lines,
+      substrate: this.substrate,
       inner: adapter ?? _dio.httpClientAdapter,
+      // Falling back to a direct request is the right thing to do and the wrong thing to do
+      // quietly: a deployment whose origin process is missing would work perfectly and have no
+      // redundancy, which is the state this whole layer exists to make impossible to be in
+      // unknowingly.
+      onFallback:
+          onTransportFallback ??
+          (error) => debugPrint(
+            'MultiPath: sending directly, the substrate could not be dialled: $error',
+          ),
     );
     _dio.interceptors.addAll([
       InterceptorsWrapper(onRequest: _attachToken),
-      IdempotencyInterceptor(),
       InterceptorsWrapper(onResponse: _recordAndTranslate, onError: _asMtError),
     ]);
   }
@@ -70,12 +79,12 @@ class MtClient {
   final Dio _dio;
   final Reauthorize _reauthorize;
 
-  /// Which lines exist, what is known about each, and therefore which one a request leaves by.
-  final mp.LineManager lines;
+  /// The transport every request leaves by: one redundant stream over every line at once.
+  final Substrate substrate;
 
   /// What the same request returned last time — offered ALONGSIDE the real answer, never in place
   /// of it. Every request still goes out; this is only something a screen may paint while waiting.
-  final mp.RequestCache cache;
+  final RequestCache cache;
 
   /// Kept in lockstep with the session by the auth layer, so a screen can call a typed API method
   /// without threading a token through every signature.
@@ -93,7 +102,7 @@ class MtClient {
   /// screens inventing two names for the same data and never sharing it — and what lets the cache
   /// be filled automatically below rather than by every caller remembering to.
   T? cached<T>(String method, String path) =>
-      cache.get<T>(mp.RequestCache.keyFor(method, path));
+      cache.get<T>(RequestCache.keyFor(method, path));
 
   void _attachToken(RequestOptions options, RequestInterceptorHandler handler) {
     final token = accessToken;
@@ -140,7 +149,7 @@ class MtClient {
     final data = response.data;
     if (data == null) return;
     cache.set(
-      mp.RequestCache.keyFor('GET', _pathOf(options.uri)),
+      RequestCache.keyFor('GET', _pathOf(options.uri)),
       // The decoded body, not the object: what comes back is a generated model on the way out of
       // the client but a Map here, and a Map is what survives being written to disk and read again.
       data is String ? _tryDecode(data) : data,

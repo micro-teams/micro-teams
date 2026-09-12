@@ -25,7 +25,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
 import '../providers.dart';
-import '../common/stream_lines.dart';
 import '../common/ui/theme.dart';
 import 'screen_link.dart';
 
@@ -110,26 +109,23 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _stable?.cancel();
     _link?.close();
 
-    // Over a line, not over the page's origin. A live screen is the app's heaviest stream — every
-    // keystroke and every frame of output — and it was the one connection still hard-wired to
-    // whichever host served the document, so a viewer on the far side of the world watched a
-    // machine sitting next to a nearer line.
-    final streams = ref.read(streamLinesProvider);
-    StreamDial? dial;
+    // Straight to the origin, for now. Picking a line per dial was 0.1.6's answer to "a cheap proxy
+    // serves requests perfectly and refuses to hold a WebSocket"; 0.2.0's answer is that a stream
+    // rides the substrate and survives any single line failing underneath it, which is strictly
+    // better and is the one piece of this migration still to do. Until then this behaves as it did
+    // on a single-line deployment, which is every deployment today.
+    final endpoints = ref.read(endpointsProvider);
     _link = ScreenLink(
       // Read the token per dial: a socket that reconnects with an expired token is refused, and a
-      // refusal looks exactly like a machine that has gone quiet. The line is chosen per dial for
-      // the same reason — one that cannot hold a stream is skipped on the next attempt rather than
-      // retried forever.
+      // refusal looks exactly like a machine that has gone quiet.
       url: () {
         final token = ref.read(sessionProvider).valueOrNull?.accessToken;
-        dial = streams.dial(
-          ref.read(endpointsProvider).screenPath(widget.sessionId, token),
+        return endpoints.socketUrl(
+          endpoints.publicOrigin,
+          endpoints.screenPath(widget.sessionId, token),
         );
-        return dial!.url;
       },
       onOpened: () {
-        dial?.opened(DateTime.now());
         if (!mounted) return;
         // Here, not after open(): what makes an attempt a success is the handshake, not the dial.
         // Set at dial time — as it was — every failure read as "the connection dropped", including
@@ -169,7 +165,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         }
       },
       onClosed: () {
-        dial?.closed(DateTime.now());
         _handleClosed();
       },
       connect: widget.connect,

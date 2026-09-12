@@ -1,35 +1,100 @@
-/// Dio, sending over whichever line is currently best.
+/// Sends every request over the MultiPath substrate: one redundant stream to the origin, carried
+/// over all of this deployment's lines at once.
 ///
-/// An adapter rather than an interceptor, and that is the whole design. Interceptors run ABOVE
-/// this: the bearer token is attached, the idempotency key is minted, the error is translated —
-/// all before a line has been chosen. Underneath, the decision has already been made and travels
-/// with the request. This mirrors the Go package's RoundTripper for the same reason it gives there:
-/// authentication belongs closer to the caller, and line selection belongs closer to the socket.
+/// An adapter rather than an interceptor, and that is still the whole design. Interceptors run
+/// ABOVE this — the bearer token is attached, the error is translated — while the request is still
+/// an ordinary HTTP request. Underneath, it stops being one: it becomes bytes on a mux stream, and
+/// the redundancy happens below that, where the caller cannot see it.
 ///
-/// Reads are hedged, writes are not. A read may be asked of several lines because two copies of an
-/// answer are one answer; a write may not, because two writes are two writes. Only SILENCE moves a
-/// request to another line — an error status is an answer, and a 404 asked of every line is still a
-/// 404, asked N times.
+/// What changed with 0.2.0 is that there is nothing here to decide. There used to be: reads were
+/// hedged across lines, writes were pinned to one, and silence moved a request elsewhere. The
+/// redundant layer does all of that per byte instead — every line carries every byte and the first
+/// copy to arrive is the one delivered — so a dead line is never the one an answer comes from, with
+/// no timeout to wait out and no retry to issue. This file is now only a translation: Dio's request
+/// in, Dio's response out, MultiPath's shapes in between.
 library;
 
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:multipath/multipath.dart';
+import 'package:multipath/multipath.dart' as mp;
 
-/// Methods that get an idempotency key and are never raced.
+/// Brings the substrate up once and hands it out, re-dialling if it has died.
 ///
-/// PUT is absent because a well-formed PUT already means the same thing twice; GET/HEAD/OPTIONS
-/// because they change nothing.
-const Set<String> _writes = {'POST', 'PATCH', 'DELETE'};
+/// Lazily, on the first request that needs it: a client whose network is not up yet must still
+/// start, and an app that refused to run because it could not dial would have made the transport a
+/// prerequisite for having a user interface.
+class Substrate {
+  Substrate({required this.lines, mp.Client Function(List<String>)? dial})
+    : _dial = dial;
 
+  /// Every path to the origin. Order is irrelevant — all of them carry every byte.
+  List<String> lines;
+
+  final mp.Client Function(List<String>)? _dial;
+  mp.Client? _client;
+  Future<mp.Client>? _dialling;
+
+  /// The live client, dialling if there is not one yet.
+  ///
+  /// One dial at a time: without this, a screen that fires five requests at once on a cold start
+  /// opens five redundant transports, each with its own links to every line, and four of them are
+  /// pure waste that the origin has to hold open.
+  Future<mp.Client> client() {
+    final live = _client;
+    if (live != null) return Future.value(live);
+    return _dialling ??= _open().whenComplete(() => _dialling = null);
+  }
+
+  Future<mp.Client> _open() async {
+    if (lines.isEmpty) {
+      throw StateError('multipath: no line to reach the server over');
+    }
+    final client = _dial != null ? _dial(lines) : await mp.Client.dial(lines);
+    _client = client;
+    return client;
+  }
+
+  /// What the transport currently sees on each line: up, connecting or down, how many times it has
+  /// recovered, and what killed it last. Empty until something has been sent, because until then
+  /// there is no transport to ask.
+  ///
+  /// Redundancy hides line failure from the data path on purpose — this is the one place a caller
+  /// can see the failures it is surviving.
+  List<mp.LinkStat> stats() => _client?.stats() ?? const [];
+
+  /// The URL of line [index], for a view that has a stat and wants to name the path it belongs to.
+  String urlOf(int index) =>
+      index >= 0 && index < lines.length ? lines[index] : '';
+
+  /// Drops the transport, so the next request dials afresh. Used when the registry changes: a
+  /// redundant stream's links are fixed when it is dialled, so a new list means a new dial.
+  void reset() {
+    _client?.close();
+    _client = null;
+  }
+}
+
+/// Dio's adapter over the substrate.
+///
+/// [inner] is the ordinary HTTP adapter, and it is the answer in two cases rather than one. On the
+/// web it is the ONLY answer: a page's requests are routed by the service worker, which holds the
+/// substrate for the whole document, and a second one dialled from inside the Dart isolate would be
+/// a duplicate transport doing the same job twice. And on any platform it is what a failure to dial
+/// falls back to — the origin is reachable directly or the app would not have loaded, so a
+/// misconfigured or absent origin process degrades to "no redundancy" rather than to "no product".
 class MultiPathAdapter implements HttpClientAdapter {
-  MultiPathAdapter({required this.manager, required HttpClientAdapter inner})
-    : _inner = inner;
+  MultiPathAdapter({
+    required this.substrate,
+    required HttpClientAdapter inner,
+    void Function(Object error)? onFallback,
+  }) : _inner = inner,
+       _onFallback = onFallback;
 
-  final LineManager manager;
+  final Substrate substrate;
   final HttpClientAdapter _inner;
+  final void Function(Object error)? _onFallback;
 
   @override
   Future<ResponseBody> fetch(
@@ -37,51 +102,46 @@ class MultiPathAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    final path = _pathOf(options.uri);
-    final method = options.method.toUpperCase();
+    // No lines yet is not a failure and must not be reported as one. It is the ordinary state of
+    // every app start — the registry has not arrived, and the request that fetches it is one of the
+    // ones going out right now. Reporting it would put a worrying line in the log on every cold
+    // start, which is how a real warning later gets ignored.
+    if (substrate.lines.isEmpty) {
+      return _inner.fetch(options, requestStream, cancelFuture);
+    }
 
-    // The body is read into memory once, up front. A stream can be read once and failover needs the
-    // same bytes twice; this is the same thing the Go transport does with GetBody.
+    final mp.Client client;
+    try {
+      client = await substrate.client();
+    } catch (error) {
+      _onFallback?.call(error);
+      return _inner.fetch(options, requestStream, cancelFuture);
+    }
+
+    // Read into memory once. A stream can be read once, and the request is written to the mux
+    // stream in one piece; this is the same thing every other client in the org does.
     final body = requestStream == null ? null : await _collect(requestStream);
 
-    Future<ResponseBody> attempt(Line line, {required Future<void> cancelled}) {
-      // A same-origin line is left completely alone — the request goes out exactly as Dio built it.
-      // Rewriting it would drop the base URL and produce a host-less path, which happens to work in
-      // a browser and fails everywhere else; the adoption case must change nothing at all.
-      // The query travels INSIDE the path here, so the parameters have to be cleared with it —
-      // Dio appends `queryParameters` to whatever query the path already carries, and the result
-      // is every parameter twice. Spring binds a repeated `path=&path=` into the single string
-      // "," and answers "file not found in git: ,", which is what opening docs did the day the
-      // second line started being used. Nobody saw it before that, because the same-origin branch
-      // above leaves the request completely alone.
-      final routed = line.url.isEmpty
-          ? options
-          : (options.copyWith(
-              path: line.resolve(path),
-              queryParameters: const <String, dynamic>{},
-            )..baseUrl = '');
-      return _inner.fetch(
-        routed,
-        body == null ? null : Stream.value(body),
-        // Losing the race is what makes a request disposable; the caller's own cancellation still
-        // applies to whichever attempt wins.
-        cancelFuture == null
-            ? cancelled
-            : Future.any([cancelFuture, cancelled]),
-      );
-    }
+    final response = await client.roundTrip(
+      mp.MultipathRequest(
+        options.method.toUpperCase(),
+        options.uri,
+        headers: {
+          for (final entry in options.headers.entries)
+            entry.key: '${entry.value}',
+        },
+        body: body,
+      ),
+    );
 
-    if (!_writes.contains(method)) {
-      return manager.read(attempt);
-    }
-    return manager.write(attempt);
-  }
-
-  /// Path and query together: a line is an ORIGIN, and everything after it belongs to the request.
-  String _pathOf(Uri uri) {
-    final query = uri.hasQuery ? '?${uri.query}' : '';
-    final path = uri.path.isEmpty ? '/' : uri.path;
-    return '$path$query';
+    return ResponseBody.fromBytes(
+      response.body,
+      response.statusCode,
+      headers: {
+        for (final entry in response.headers.entries) entry.key: [entry.value],
+      },
+      statusMessage: response.reasonPhrase,
+    );
   }
 
   Future<Uint8List> _collect(Stream<Uint8List> stream) async {
@@ -94,20 +154,4 @@ class MultiPathAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) => _inner.close(force: force);
-}
-
-/// Mints one idempotency key per logical write, before any line is chosen.
-///
-/// Before, not per attempt: every attempt at one write carries the SAME key, which is precisely
-/// what lets the server recognise a second arrival as one attempt seen twice rather than two
-/// writes. A key minted per attempt would look like the mechanism was in place while defeating it.
-class IdempotencyInterceptor extends Interceptor {
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    if (_writes.contains(options.method.toUpperCase()) &&
-        options.headers[idempotencyHeader] == null) {
-      options.headers[idempotencyHeader] = newIdempotencyKey();
-    }
-    handler.next(options);
-  }
 }
