@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'agents/agents_controller.dart';
 import 'auth/auth_api.dart';
@@ -23,6 +24,7 @@ import 'common/errors.dart';
 import 'common/key_value.dart';
 import 'common/multipath_adapter.dart';
 import 'common/request_cache.dart';
+import 'common/substrate_socket.dart';
 import 'common/api.dart';
 import 'common/updates/socket.dart';
 import 'common/updates/store.dart';
@@ -151,17 +153,21 @@ final updatesSocketProvider = Provider<UpdatesSocket?>((ref) {
   if (token == null) return null;
 
   final endpoints = ref.watch(endpointsProvider);
+  final substrate = ref.watch(substrateProvider);
   final socket = UpdatesSocket(
     store: ref.watch(updatesStoreProvider),
+    // Over the substrate where there is one, and beside it where there is not. This is the traffic
+    // redundancy is most worth having: a request that fails can be sent again, while a socket that
+    // drops takes what it was carrying with it — and on a mux stream a line dying underneath is not
+    // a disconnection at all.
+    connect: (url) =>
+        socketOverSubstrate(substrate, url) ?? WebSocketChannel.connect(url),
     // Read the token per dial rather than closing over this one: a reconnect after a refresh must
     // carry the new token.
     //
-    // One origin, not a line chosen per attempt. Choosing was 0.1.6's answer to "a route can serve
-    // requests perfectly and refuse to hold a WebSocket"; 0.2.0's answer is that a socket rides the
-    // substrate as a mux stream and survives any single line, which is strictly better — and is the
-    // one piece of this migration not yet done. Until it is, this socket goes to the origin
-    // directly, which is exactly what it did on a single-line deployment, and every deployment is
-    // single-line today. See todo: the socket belongs on the substrate.
+    // One origin rather than a line chosen per attempt: there is nothing to choose any more. The
+    // socket rides the substrate as a mux stream (see connect above), so the URL names where the
+    // deployment is and the transport decides how the bytes get there.
     url: () {
       final live = ref.read(sessionProvider).valueOrNull?.accessToken;
       final query = live == null || live.isEmpty

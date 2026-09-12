@@ -92,6 +92,14 @@ class Substrate {
     return null;
   }
 
+  /// The live client, or null when there is not one yet. Never starts a dial.
+  ///
+  /// For a caller that can carry on without the substrate and should not be the thing that brings it
+  /// up — a socket, say. Requests are what dial it: they are frequent, they are short, and one of
+  /// them going out the ordinary way costs nothing. A socket is long-lived, so the same wait is paid
+  /// once and then held.
+  mp.Client? get live => _client;
+
   /// What the transport currently sees on each line: up, connecting or down, how many times it has
   /// recovered, and what killed it last. Empty until something has been sent, because until then
   /// there is no transport to ask.

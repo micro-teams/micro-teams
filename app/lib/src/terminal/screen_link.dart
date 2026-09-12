@@ -20,6 +20,9 @@ import 'dart:typed_data';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../common/multipath_adapter.dart';
+import '../common/substrate_socket.dart';
+
 /// The socket, narrowed to the four things this class needs.
 ///
 /// Narrowed rather than used directly so a test can drive the awkward cases — a frame arriving, a
@@ -36,8 +39,13 @@ abstract class ScreenSocket {
   void close();
 }
 
+/// A screen socket over the substrate where there is one, and beside it where there is not.
+ScreenSocket screenSocketOver(Substrate substrate, Uri url) =>
+    _WebSocket(url, over: socketOverSubstrate(substrate, url));
+
 class _WebSocket implements ScreenSocket {
-  _WebSocket(Uri url) : _channel = WebSocketChannel.connect(url);
+  _WebSocket(Uri url, {WebSocketChannel? over})
+    : _channel = over ?? WebSocketChannel.connect(url);
 
   final WebSocketChannel _channel;
 

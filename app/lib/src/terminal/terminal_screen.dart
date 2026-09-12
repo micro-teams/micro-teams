@@ -167,7 +167,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       onClosed: () {
         _handleClosed();
       },
-      connect: widget.connect,
+      // A live screen is the app's heaviest stream — every keystroke and every frame of output —
+      // and it rides the substrate for the same reason the updates feed does: on a mux stream a
+      // line dying underneath is not a disconnection. Where there is no transport yet, or on the
+      // web where a browser will not let anything else carry a socket, it is dialled the ordinary
+      // way.
+      connect:
+          widget.connect ??
+          (url) => screenSocketOver(ref.read(substrateProvider), url),
     )..open();
   }
 
