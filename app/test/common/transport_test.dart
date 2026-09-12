@@ -119,6 +119,23 @@ void main() {
     expect(wire.urls, hasLength(1));
   });
 
+  test('a relative request is given a host before it is written to a stream', () {
+    // The web's base URL is relative: the page's own origin IS the server, so every request says
+    // "/mt/..." with no authority. `fetch` fills that in from the document; a stream cannot — the
+    // request written to it carries a Host header taken from the URL, and an empty one is answered
+    // with a 400.
+    //
+    // The journey is what caught this, and the reason it took until then is worth keeping: every
+    // request made before the transport came up went out directly and worked, so nothing looked
+    // wrong until the substrate was actually carrying something.
+    expect(absolute(Uri.parse('/mt/chat/1/messages')).hasAuthority, isTrue);
+    expect(
+      absolute(Uri.parse('https://elsewhere.example/mt/probe')).toString(),
+      'https://elsewhere.example/mt/probe',
+      reason: 'a URL that already names a host must be left exactly as it is',
+    );
+  });
+
   test('a successful GET is remembered under the request itself', () async {
     final wire = _Wire();
     final client = _client(wire);

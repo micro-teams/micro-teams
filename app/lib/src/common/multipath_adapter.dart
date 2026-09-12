@@ -109,6 +109,19 @@ class Substrate {
   }
 }
 
+/// The request's URL, with a host on it.
+///
+/// On the web this app's base URL is relative — the page's own origin IS the server, and every
+/// request it makes says `/mt/...` with no authority. That is right for `fetch`, which fills the
+/// host in from the document, and wrong for a stream: the request written to it carries a `Host:`
+/// header taken from the URL, and an empty one is answered with a 400 by any proxy worth the name.
+///
+/// It cost a journey to find, and the shape of it is worth remembering: every request before the
+/// transport came up went out directly and worked, so the failure appeared only once the substrate
+/// was carrying things — several steps after the change that caused it.
+@visibleForTesting
+Uri absolute(Uri url) => url.hasAuthority ? url : Uri.base.resolveUri(url);
+
 /// Dio's adapter over the substrate.
 ///
 /// [inner] is the ordinary HTTP adapter, and it is what a failure to dial falls back to: the origin
@@ -158,7 +171,7 @@ class MultiPathAdapter implements HttpClientAdapter {
       appService,
       mp.MultipathRequest(
         options.method.toUpperCase(),
-        options.uri,
+        absolute(options.uri),
         headers: {
           for (final entry in options.headers.entries)
             entry.key: '${entry.value}',
