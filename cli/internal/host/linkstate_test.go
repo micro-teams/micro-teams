@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/micro-teams/micro-connector/cli/protocol"
-	"github.com/micro-teams/microteams/cli/internal/state"
+	multipath "github.com/micro-teams/multipath/go"
 )
 
 func TestNoConnectionIsClaimedBeforeTheServerSpeaks(t *testing.T) {
@@ -83,37 +83,31 @@ func TestReconnectingClearsTheOldFailure(t *testing.T) {
 	}
 }
 
-// Moving between lines is only worth a reconnect when another line is clearly and durably better.
-// These pin the "leave it alone" side, which is the side that keeps a link from flapping.
-func TestAYoungConnectionIsNotDisturbed(t *testing.T) {
-	h, _, clock := quietHost(t)
-	h.dispatch(protocol.Msg{T: "welcome", V: 1})
-	h.rememberLine(state.Line{ID: "origin"})
-
-	// Barely connected: even a better line is not worth a reconnect yet.
-	*clock = clock.Add(time.Minute)
-
-	if _, ok := h.betterLine(); ok {
-		t.Fatal("a connection this young must be left alone")
-	}
-}
-
-func TestADownLinkHasNothingToImprove(t *testing.T) {
-	h, _, _ := quietHost(t)
-
-	if _, ok := h.betterLine(); ok {
-		t.Fatal("nothing to switch away from when nothing is connected")
-	}
-}
-
-// With one line there is no choice to make, and warming up would only delay the first connection.
-func TestWarmUpIsSkippedWithASingleLine(t *testing.T) {
+// A line going down is said out loud, and lands in the table `microteams status` reads.
+//
+// This is the observability the substrate takes away by working: every byte goes over every line, so
+// a line dying changes nothing anybody can feel. Three of four can fail in silence while the machine
+// looks perfect, and the first anyone would hear of it is the outage when the last one goes. The
+// transport reports the transition; this is where it becomes something a person can see.
+func TestALineGoingDownIsNarratedAndRecorded(t *testing.T) {
 	h, log, _ := quietHost(t)
 
-	h.warmUpLines(t.Context())
+	h.reportLine(multipath.LinkState{Index: 0, Up: false, Reason: "i/o timeout", Duration: 90 * time.Second})
 
-	if log.Len() != 0 {
-		t.Fatalf("nothing to measure, nothing to say: %q", log.String())
+	if !contains(log.String(), "origin") || !contains(log.String(), "i/o timeout") {
+		t.Errorf("a line died and the log does not name it or why: %q", log.String())
+	}
+}
+
+// And coming back is worth a line too: a path that has flapped forty times this morning is "up" at
+// any instant you look, which is exactly why the transitions have to be written down as they happen.
+func TestALineComingBackIsNarrated(t *testing.T) {
+	h, log, _ := quietHost(t)
+
+	h.reportLine(multipath.LinkState{Index: 0, Up: true, Duration: 3 * time.Second})
+
+	if !contains(log.String(), "origin") || !contains(log.String(), "up") {
+		t.Errorf("a line recovered and the log does not say so: %q", log.String())
 	}
 }
 

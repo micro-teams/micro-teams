@@ -27,8 +27,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	multipath "github.com/micro-teams/multipath/go"
-
 	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/auth"
 	"github.com/micro-teams/micro-connector/cli/config"
@@ -385,56 +383,36 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 	return group
 }
 
-// retestCmd re-measures the network paths and asks the running service to dial again.
+// retestCmd re-reads the line registry and asks the running service to carry its transport over
+// whatever the registry now says.
 //
-// It exists because the only way to make a machine reconsider its route used to be `link
-// disconnect` + `connect`, and that stops the service — which kills every screen on the machine.
-// "Try the lines again" and "stop everything" should not be the same operation, and until now they
-// were.
+// It exists because the only way to make a machine reconsider its paths used to be `link disconnect`
+// + `connect`, and that stops the service — which kills every screen on the machine. "Pick up the
+// new line list" and "stop everything" should not be the same operation, and until now they were.
 //
-// What it prints is what it measured, from this process, against every line in the registry. The
-// service does its own measuring and its own choosing; showing this alongside the choice is what
-// makes the choice legible, and the two disagreeing is itself worth seeing.
+// What it no longer does is measure. Latency, ranking and choosing were answers to "which line
+// should this connection use", and from MultiPath 0.2.0 there is no such choice: the transport
+// carries every byte over every line at once and delivers whichever copy arrives first. So what is
+// worth printing changed with it — not what this short-lived process measured, but what the RESIDENT
+// one is actually seeing on each line right now, which is the only place a line that quietly died
+// shows up at all.
 func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
 	return withConfig(&cobra.Command{
 		Use:   "retest",
-		Short: "Re-measure the network paths and re-dial the link (sessions keep running)",
-		Long: "Measures every network path this machine could reach the server over, then asks the\n" +
-			"running service to choose again and re-dial its control link.\n\n" +
+		Short: "Re-read the network path list and re-dial the link (sessions keep running)",
+		Long: "Re-reads the list of network paths this machine can reach the server over, then asks\n" +
+			"the running service to bring its transport up again over the new list.\n\n" +
 			"Sessions are not touched: nothing is stopped, so the terminals on this machine keep\n" +
 			"running throughout. A route added since the machine connected only takes effect on the\n" +
-			"next attempt, and this is how to ask for one.",
+			"next dial, and this is how to ask for one.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			base := apiauth.APIBase()
-			client := lines.New(*cfgPath, base)
 
-			// Fetch first, so a line added five minutes ago appears here rather than after the
-			// service's hourly refresh.
-			if err := lines.Refresh(ctx, client, base, *cfgPath); err != nil {
-				ui.Hint("could not refresh the line list (%v) — measuring what was cached", err)
-			}
-
-			ui.Heading("network paths")
-			client.Probe(ctx, "/mt/probe")
-			ranked := client.Ranked()
-			// Padded to the longest id rather than to a fixed width: the point of this output is
-			// comparing numbers down a column, and a line id can be as long as an operator likes.
-			width := 0
-			for _, line := range ranked {
-				if len(line.ID) > width {
-					width = len(line.ID)
-				}
-			}
-			for i, line := range ranked {
-				label := fmt.Sprintf("%-*s", width, line.ID)
-				value := describe(client.Health().Get(line.ID), line.URL)
-				if i == 0 {
-					// Best first, and said out loud: the order is the answer, and a reader should
-					// not have to infer it from the numbers.
-					value += ui.Dim("  ← preferred")
-				}
-				fmt.Printf("  %s  %s\n", ui.Dim(label), value)
+			// Fetch first, so a line added five minutes ago is in the list the service picks up
+			// rather than waiting for its hourly refresh.
+			if err := lines.Refresh(ctx, base, *cfgPath); err != nil {
+				ui.Hint("could not refresh the line list (%v) — using what was cached", err)
 			}
 
 			pid := state.PID(*cfgPath)
@@ -445,7 +423,7 @@ func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			// The binary on disk updates without the service restarting, so this command can meet a
 			// process older than itself — and the signal it is about to send terminates a process
 			// that does not handle it. Refusing is the only safe answer: the alternative takes the
-			// machine offline to ask a question about latency.
+			// machine offline to ask a question about routing.
 			if !state.CanRelink(*cfgPath) {
 				ui.Hint("the running service predates this command; restart it to pick up the new")
 				ui.Hint("build (`microteams link connect`), then this will work — note that stopping")
@@ -456,45 +434,63 @@ func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 				return fmt.Errorf("signal running service (pid %d): %w", pid, err)
 			}
 
-			// The service measures and re-dials on its own clock; wait for the state file to name a
-			// line rather than guessing how long that takes.
-			before := state.CurrentLine(*cfgPath)
+			// The service re-dials on its own clock; wait for it to publish a line table rather than
+			// guessing how long that takes.
 			deadline := time.Now().Add(15 * time.Second)
 			for time.Now().Before(deadline) {
-				if now := state.CurrentLine(*cfgPath); now.ID != "" && now != before {
-					ui.OK("Re-dialled on %s (%s).", now.ID, now.URL)
+				if now := state.CurrentLines(*cfgPath); len(now) > 0 {
+					printLines(now)
 					return nil
 				}
 				time.Sleep(250 * time.Millisecond)
 			}
-
-			// Not an error: choosing the same line again is the most likely outcome, and it writes
-			// nothing new. Say what it is on rather than pretending something happened.
-			if now := state.CurrentLine(*cfgPath); now.ID != "" {
-				ui.OK("Re-dialled; still on %s (%s).", now.ID, now.URL)
-			} else {
-				ui.Hint("the service did not report a line — `microteams status` to check")
-			}
+			ui.Hint("the service did not report its lines — `microteams status` to check")
 			return nil
 		},
 	})
 }
 
-// describe renders one line's measurement the way somebody comparing routes wants to read it.
-func describe(health multipath.LineHealth, url string) string {
-	where := ui.Dim(url)
-	if url == "" {
+// printLines renders what the running service sees on each path.
+//
+// Every line, not only the broken ones, and the recovery count alongside: redundancy means a line
+// can fail and come back repeatedly without anything above it noticing, so "up" on its own is not
+// the whole truth about a path that has flapped forty times this morning.
+func printLines(table []state.LineState) {
+	ui.Heading("network paths")
+	// Padded to the longest id rather than to a fixed width: the point of this output is reading
+	// down a column, and a line id can be as long as an operator likes.
+	width := 0
+	for _, line := range table {
+		if len(line.ID) > width {
+			width = len(line.ID)
+		}
+	}
+	for _, line := range table {
+		fmt.Printf("  %s  %s\n", ui.Dim(fmt.Sprintf("%-*s", width, line.ID)), describe(line))
+	}
+}
+
+// describe renders one line's state the way somebody asking "is this path working?" wants to read it.
+func describe(line state.LineState) string {
+	where := ui.Dim(line.URL)
+	if line.URL == "" {
 		where = ui.Dim("(this machine's own route to the server)")
 	}
-	switch {
-	case !health.Measured && health.ConsecutiveFailures > 0:
-		return ui.Red("unreachable") + " " + where
-	case !health.Measured:
-		return ui.Yellow("not measured") + " " + where
-	case health.State == multipath.StateDown:
-		return ui.Red(fmt.Sprintf("down after %d failures", health.ConsecutiveFailures)) + " " + where
+	flapped := ""
+	if line.Reconnects > 0 {
+		flapped = ui.Dim(fmt.Sprintf("  (recovered %d×)", line.Reconnects))
+	}
+	switch line.State {
+	case "up":
+		return ui.Bold("up") + " " + where + flapped
+	case "connecting":
+		return ui.Yellow("connecting") + " " + where + flapped
 	default:
-		return ui.Bold(health.Latency.Round(time.Millisecond).String()) + " " + where
+		reason := line.Reason
+		if reason == "" {
+			reason = "no reason given"
+		}
+		return ui.Red("down: "+reason) + " " + where + flapped
 	}
 }
 
@@ -765,12 +761,15 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			}
 			ui.Field("screens", screens)
 
-			// Which network path the long connection is on. With one line it always says the same
-			// thing, and that is the point of showing it: when there are several, "why is this
-			// machine slow" and "which route is it on" stop being answerable from the outside, and
-			// this is the only place the answer exists.
-			if line := state.CurrentLine(*cfgPath); line.ID != "" {
-				ui.Field("link line", ui.Bold(line.ID)+" "+ui.Dim(line.URL))
+			// Every network path, and what the service sees on each — not "which one are we on",
+			// because there is no longer such a thing: the transport carries every byte over all of
+			// them at once. That makes this the ONLY place a dead line is visible at all, since the
+			// redundancy is busy hiding exactly that from everything else. A machine can be down to
+			// its last working path and look perfect from every other angle.
+			if table := state.CurrentLines(*cfgPath); len(table) > 0 {
+				for _, line := range table {
+					ui.Field("line "+line.ID, describe(line))
+				}
 			}
 
 			// Whether this machine goes through a proxy is invisible from outside the process, and

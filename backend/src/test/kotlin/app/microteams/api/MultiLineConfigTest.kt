@@ -46,7 +46,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
             "application.multipath.lines[0].url=",
             "application.multipath.lines[1].id=cf",
             "application.multipath.lines[1].url=https://cf.mt.example.app",
-            "application.multipath.lines[1].transport=cloudflare",
+            "application.multipath.lines[1].transport=wss",
             "application.multipath.lines[1].weight=90",
         ]
 )
@@ -60,7 +60,7 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
             .andExpect(jsonPath("$.lines.length()").value(2))
             .andExpect(jsonPath("$.lines[1].id").value("cf"))
             .andExpect(jsonPath("$.lines[1].url").value("https://cf.mt.example.app"))
-            .andExpect(jsonPath("$.lines[1].transport").value("cloudflare"))
+            .andExpect(jsonPath("$.lines[1].transport").value("wss"))
     }
 
     /**
@@ -80,25 +80,35 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
             .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
     }
 
-    /** The header the transport adds to every write must survive preflight, credentials and all. */
+    /**
+     * The transport label a client is given has to be one it can actually dial.
+     *
+     * It was a free-form diagnostic string until MultiPath 0.2.0 and is now the encapsulation:
+     * "wss" is a WebSocket upgrade through the proxy, "tcp"/"tls" a port that speaks the substrate
+     * directly. A value outside that vocabulary — "cloudflare", "direct", "same-origin", all of
+     * which were once perfectly good labels here — means every client refuses to dial the line, and
+     * refuses silently, because a line that cannot be dialled is simply one the client does not
+     * have. The registry would look right in every dashboard while nothing could connect over it.
+     */
     @Test
-    fun theIdempotencyKeyHeaderSurvivesPreflight() {
-        val allowed =
+    fun everyLineNamesATransportAClientCanDial() {
+        val dialable = setOf("ws", "wss", "tcp", "tls")
+        val body =
             mockMvc
-                .perform(
-                    options("/chat")
-                        .header("Origin", "https://cf.mt.example.app")
-                        .header("Access-Control-Request-Method", "POST")
-                        .header("Access-Control-Request-Headers", "Idempotency-Key")
-                )
+                .perform(get("/lines"))
                 .andExpect(status().isOk)
                 .andReturn()
                 .response
-                .getHeader("Access-Control-Allow-Headers")
-        assertTrue(
-            allowed != null && allowed.contains("Idempotency-Key", ignoreCase = true),
-            "preflight did not allow Idempotency-Key, it answered: $allowed",
-        )
+                .contentAsString
+        val transports =
+            Regex("\"transport\":\"([^\"]*)\"").findAll(body).map { it.groupValues[1] }.toList()
+        assertTrue(transports.isNotEmpty(), "the registry named no transport at all: $body")
+        transports.forEach {
+            assertTrue(
+                it in dialable,
+                "line transport \"$it\" is not one a client can dial: $dialable",
+            )
+        }
     }
 
     /**

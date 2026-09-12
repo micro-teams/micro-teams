@@ -1,127 +1,123 @@
-// Which line the control link dials, and what happens to a line that cannot hold it.
+// Where the control link goes, now that it does not choose.
 //
-// This is the half that ops could not diagnose from the outside: a machine whose control link keeps
-// dropping looks the same whether the route is bad or the server is restarting, and until now the
-// connector reconnected to the same route either way. The three things worth pinning are that a
-// line is actually chosen, that a route which drops the connection immediately stops being chosen,
-// and that a route which worked for a while keeps its place.
+// This file used to pin which of several routes was dialled and what happened to one that could not
+// hold a connection. MultiPath 0.2.0 deleted the question: the link is a stream on ONE redundant
+// transport carried over every line at once, so there is no route to pick and a bad route is simply
+// never the one a byte arrives on. What is left worth pinning is what replaced it — that the link
+// really is carried inside the substrate rather than beside it, that a changed registry is picked up
+// without stopping the service, and that a line's state reaches the place `microteams status` reads.
+//
+// The first of those is tested end to end against a real origin in this process, because "the
+// WebSocket went over the substrate" is exactly the kind of claim that a test with a stub would make
+// convincingly and wrongly: the connector works either way until the day the direct route is the one
+// that is blocked.
 
 package host
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	multipath "github.com/micro-teams/multipath/go"
 
 	"github.com/micro-teams/micro-connector/cli/protocol"
-	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
-func hostWithLines(t *testing.T, lines ...multipath.Line) *Host {
+// origin runs the server end of the substrate in this process, splicing every normal stream to addr.
+// It returns the http:// URL a line is dialled at.
+func origin(t *testing.T, addr string) string {
 	t.Helper()
-	client := multipath.New(multipath.Options{Registry: multipath.Registry{Lines: lines}})
-	return &Host{
-		lines:     client,
-		linkLines: multipath.NewStreamSelector(client.Ranked, 5*time.Second, time.Minute, nil),
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Router(multipath.DialLocal(addr), nil))
+	}()
+	return "http://" + ln.Addr().String()
+}
+
+// The whole point of the change, proved rather than assumed: the control WebSocket's bytes travel
+// inside the redundant transport.
+//
+// It is proved by giving the substrate somewhere to go that the WebSocket could not reach on its
+// own — the control plane listens on loopback and is reachable only by being spliced to from the
+// origin — so a connector that dialled the URL itself would fail. A test whose lines pointed at the
+// same place the URL does would pass just as well with the substrate removed entirely.
+func TestTheControlLinkIsCarriedInsideTheSubstrate(t *testing.T) {
+	var upgraded atomic.Int32
+	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		upgraded.Add(1)
+		defer func() { _ = conn.Close() }()
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer control.Close()
+
+	// Two lines to the SAME origin, which is what a line is: a different network path to one
+	// process, never a different process. Every byte is written to both and the origin reassembles
+	// one stream from whichever copies arrive first, so two origins would be two half-conversations.
+	at := origin(t, control.Listener.Addr().String())
+	host := &Host{mpLines: []multipath.Line{
+		{ID: "a", URL: at, Transport: "tcp"},
+		{ID: "b", URL: at, Transport: "tcp"},
+	}}
+
+	dialer := *websocket.DefaultDialer
+	dialer.Proxy = nil
+	dialer.NetDialContext = host.dialSubstrate
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := dialer.DialContext(ctx, "ws://control.invalid/mt/machine/link", nil)
+	if err != nil {
+		t.Fatalf("the control link could not be opened over the substrate: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if upgraded.Load() != 1 {
+		t.Fatalf("the control plane saw %d handshakes", upgraded.Load())
+	}
+
+	// And every line's state reached the table `microteams status` reads. Not a detail: redundancy
+	// hides line failure from everything above it, so this table is the only place a path that
+	// quietly died is visible at all.
+	table := host.currentLines()
+	if len(table) != 2 {
+		t.Fatalf("expected both lines to be reported, got %+v", table)
+	}
+	for _, line := range table {
+		if line.State != "up" {
+			t.Errorf("line %s reported %q, want up", line.ID, line.State)
+		}
 	}
 }
 
-const configured = "wss://microteams.example/mt/machine/link"
-
-func TestTheLinkDialsTheBestLine(t *testing.T) {
-	host := hostWithLines(t,
-		multipath.Line{ID: "cf", URL: "https://cf.mt.example", Weight: 100},
-		multipath.Line{ID: "direct", URL: "https://direct.mt.example", Weight: 90},
-	)
-
-	got := host.chooseLink(configured)
-
-	if got != "wss://cf.mt.example/mt/machine/link" {
-		t.Errorf("dialled %q", got)
-	}
-	// And it says so where `microteams status` will find it.
-	if line := host.currentLine(); line.ID != "cf" {
-		t.Errorf("status would report %+v", line)
+// With no line there is nothing to dial, and that must arrive as a failed attempt rather than as a
+// process that will not start: the reconnect loop above this is what turns "not yet" into "again in
+// a moment", and a machine whose network comes up late still has to connect when it does.
+func TestWithNoLinesTheDialFailsRatherThanPanics(t *testing.T) {
+	host := &Host{}
+	if _, err := host.dialSubstrate(context.Background(), "tcp", "ignored"); err == nil {
+		t.Error("a host with no lines reported a connection")
 	}
 }
 
-// The same-origin line means "wherever this machine already reaches the control plane", which is a
-// fact this process has and the registry does not — so the configured URL is the answer, unchanged.
-func TestTheSameOriginLineDialsTheConfiguredURL(t *testing.T) {
-	host := hostWithLines(t, multipath.Line{ID: "origin", URL: "", Weight: 100})
-
-	if got := host.chooseLink(configured); got != configured {
-		t.Errorf("dialled %q, expected the configured URL untouched", got)
-	}
-	if line := host.currentLine(); line.ID != "origin" || line.URL != configured {
-		t.Errorf("status would report %+v", line)
-	}
-}
-
-// A machine with no registry at all still has to connect.
-func TestWithNoLinesTheLinkStillDials(t *testing.T) {
-	host := hostWithLines(t)
-
-	if got := host.chooseLink(configured); got != configured {
-		t.Errorf("dialled %q", got)
-	}
-}
-
-// The case ops hit: a route that accepts the handshake and drops it. Measured as "did it connect"
-// it looks like a success every time, and the connector reconnects to it forever.
-func TestALineThatCannotHoldTheLinkIsSkipped(t *testing.T) {
-	host := hostWithLines(t,
-		multipath.Line{ID: "cf", URL: "https://cf.mt.example", Weight: 100},
-		multipath.Line{ID: "direct", URL: "https://direct.mt.example", Weight: 90},
-	)
-
-	first := host.chooseLink(configured)
-	host.reportLink(first, 900*time.Millisecond, nil) // dropped well before it was stable
-
-	if got := host.chooseLink(configured); got != "wss://direct.mt.example/mt/machine/link" {
-		t.Errorf("kept dialling a line that could not hold the connection: %q", got)
-	}
-}
-
-// And the converse, or a machine would work its way through every line for no reason: a connection
-// that lasted and then dropped is an ordinary disconnection — a server restart, a network blip —
-// and says nothing bad about the route.
-func TestAnOrdinaryDisconnectionCostsTheLineNothing(t *testing.T) {
-	host := hostWithLines(t,
-		multipath.Line{ID: "cf", URL: "https://cf.mt.example", Weight: 100},
-		multipath.Line{ID: "direct", URL: "https://direct.mt.example", Weight: 90},
-	)
-
-	first := host.chooseLink(configured)
-	host.reportLink(first, 2*time.Hour, nil)
-
-	if got := host.chooseLink(configured); got != first {
-		t.Errorf("moved off a line that had been working: %q", got)
-	}
-}
-
-func TestTheRecordedLineIsWhatStatusReads(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := dir + "/config.json"
-
-	host := hostWithLines(t, multipath.Line{ID: "direct", URL: "https://direct.mt.example"})
-	host.cfgPath = cfgPath
-	host.chooseLink(configured)
-
-	if got := state.CurrentLine(cfgPath); got.ID != "direct" {
-		t.Errorf("`microteams status` would report %+v", got)
-	}
-}
-
-// The signal handler's job, minus the signal: re-read the registry, measure, and ask the transport
-// for a fresh attempt. What matters is the last part — that it asks rather than stops, because
-// stopping is what kills the screens this machine hosts.
+// The signal handler's job, minus the signal: re-read the registry and ask the transport for a fresh
+// attempt. What matters is the last part — that it ASKS rather than stops, because stopping is what
+// kills the screens this machine hosts.
 type redialCounter struct {
 	protocol.Transport
 	redials atomic.Int32
@@ -129,47 +125,57 @@ type redialCounter struct {
 
 func (r *redialCounter) Reconnect() { r.redials.Add(1) }
 
-func TestRemeasureAsksForANewAttemptRatherThanStopping(t *testing.T) {
+func TestRelinkAsksForANewAttemptRatherThanStopping(t *testing.T) {
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/mt/lines":
-			_, _ = w.Write([]byte(`{"lines":[{"id":"origin","url":""}]}`))
-		case "/mt/probe":
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+		if r.URL.Path == "/mt/lines" {
+			_, _ = w.Write([]byte(`{"lines":[{"id":"origin","url":""},{"id":"cf","url":"https://cf.example","transport":"wss"}]}`))
+			return
 		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer control.Close()
 
-	dir := t.TempDir()
-	host := hostWithLines(t, multipath.Line{ID: "origin", URL: ""})
-	host.cfgPath = dir + "/config.json"
-	host.apiBase = control.URL + "/mt"
-	host.lines = lines.New(host.cfgPath, control.URL)
+	host := &Host{cfgPath: t.TempDir() + "/config.json", apiBase: control.URL + "/mt"}
 	transport := &redialCounter{}
 	host.conn = transport
 
-	host.remeasureAndRelink(context.Background())
+	host.relink(context.Background())
 
 	if transport.redials.Load() != 1 {
 		t.Errorf("expected exactly one re-dial, got %d", transport.redials.Load())
 	}
-	// And it measured rather than merely re-dialling: a choice made on nothing is what this exists
-	// to avoid.
-	if health := host.lines.Health().Get("origin"); !health.Measured {
-		t.Error("re-dialled without measuring anything")
+	// And it adopted what it just fetched, rather than re-dialling the list it already had. A relink
+	// that did not re-read the registry would look identical from the outside and be useless: adding
+	// a line is the only reason anyone asks for one.
+	if len(host.mpLines) != 2 {
+		t.Errorf("the new registry was not adopted: %+v", host.mpLines)
 	}
 }
 
 // A transport with nothing to re-dial — the one-shot HTTP one — must not be a crash.
-func TestRemeasureIsHarmlessOnATransportThatCannotRedial(t *testing.T) {
-	dir := t.TempDir()
-	host := hostWithLines(t, multipath.Line{ID: "origin", URL: ""})
-	host.cfgPath = dir + "/config.json"
-	host.apiBase = "http://127.0.0.1:1/mt"
-	host.lines = lines.New(host.cfgPath, "http://127.0.0.1:1")
+func TestRelinkIsHarmlessOnATransportThatCannotRedial(t *testing.T) {
+	host := &Host{cfgPath: t.TempDir() + "/config.json", apiBase: "http://127.0.0.1:1/mt"}
 	host.conn = struct{ protocol.Transport }{}
 
-	host.remeasureAndRelink(context.Background())
+	host.relink(context.Background())
+}
+
+// What `microteams status` reads has to survive the trip through the state file, because that file
+// is the only channel between the resident service and every command that reports on it.
+func TestTheLineTableIsWhatStatusReads(t *testing.T) {
+	cfgPath := t.TempDir() + "/config.json"
+	host := &Host{cfgPath: cfgPath}
+	host.lastLines = []state.LineState{
+		{ID: "origin", State: "up"},
+		{ID: "cf", URL: "https://cf.example", State: "down", Reconnects: 2, Reason: "i/o timeout"},
+	}
+	host.writeState(0)
+
+	got := state.CurrentLines(cfgPath)
+	if len(got) != 2 {
+		t.Fatalf("`microteams status` would report %+v", got)
+	}
+	if got[1].State != "down" || got[1].Reason != "i/o timeout" {
+		t.Errorf("the dead line lost what made it worth reporting: %+v", got[1])
+	}
 }

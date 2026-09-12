@@ -60,7 +60,18 @@ class TransportController(private val lines: LineRegistryProperties) : ProbeApi,
                 )
             }
         val registry = configured.ifEmpty {
-            listOf(LineDTO(id = "origin", url = "", transport = "same-origin", weight = 100))
+            // "wss", not "same-origin". Up to MultiPath 0.1.6 this field was a free-form label for
+            // diagnosis and nothing read it; from 0.2.0 it NAMES THE ENCAPSULATION a client opens
+            // the line with, and a value outside its vocabulary (ws, wss, tcp, tls) is refused. So
+            // the old label would now mean every client fails to dial every line — silently, since
+            // a
+            // client that cannot dial simply has no lines rather than an error to show.
+            //
+            // wss is the right answer for any deployment with a proxy in front, which is all of
+            // them: the link arrives as a WebSocket upgrade at /mt/link, which is what nginx routes
+            // to the origin process. Raw tls would be a TLS connection to port 443 speaking
+            // something nginx does not answer.
+            listOf(LineDTO(id = "origin", url = "", transport = "wss", weight = 100))
         }
         return ResponseEntity.ok(LineRegistryDTO(lines = registry))
     }
