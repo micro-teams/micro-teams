@@ -184,10 +184,12 @@ CREATE
             updated_at TIMESTAMP(6) NOT NULL,
             user_id BIGINT NOT NULL,
             ROLE VARCHAR(255) NOT NULL CHECK(
-                ROLE IN(
-                    'OWNER',
-                    'ADMIN',
-                    'MEMBER'
+                (
+                    ROLE IN(
+                        'OWNER',
+                        'ADMIN',
+                        'MEMBER'
+                    )
                 )
             ),
             PRIMARY KEY(id)
@@ -214,10 +216,12 @@ CREATE
             updated_at TIMESTAMP(6) NOT NULL,
             user_id BIGINT NOT NULL,
             ROLE VARCHAR(255) NOT NULL CHECK(
-                ROLE IN(
-                    'MEMBER',
-                    'ADMIN',
-                    'OWNER'
+                (
+                    ROLE IN(
+                        'MEMBER',
+                        'ADMIN',
+                        'OWNER'
+                    )
                 )
             ),
             PRIMARY KEY(id),

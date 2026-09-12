@@ -23,7 +23,6 @@ package app.microteams.machine.screen
 
 import app.microteams.machine.link.MachineHub
 import app.microteams.machine.link.ViewerTransport
-import com.fasterxml.jackson.databind.ObjectMapper
 import java.util.concurrent.ConcurrentHashMap
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.BinaryMessage
@@ -31,6 +30,7 @@ import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.handler.AbstractWebSocketHandler
+import tools.jackson.databind.ObjectMapper
 
 /**
  * Asked, just before a viewer attaches, whether anything needs doing to the screen first — the

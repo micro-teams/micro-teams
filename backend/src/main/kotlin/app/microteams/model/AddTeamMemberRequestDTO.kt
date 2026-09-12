@@ -11,11 +11,11 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class AddTeamMemberRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("userId")
+    @param:JsonProperty("userId", required = true)
     @get:JsonProperty("userId", required = true)
     val userId: kotlin.Long,
     @Schema(required = true, description = "")
-    @param:JsonProperty("role")
+    @param:JsonProperty("role", required = true)
     @get:JsonProperty("role", required = true)
     val role: AddTeamMemberRequestDTO.Role,
 ) {

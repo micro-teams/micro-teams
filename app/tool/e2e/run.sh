@@ -88,6 +88,35 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; trace; exit 1; }
 # What the journey itself said, in order. A release web build reports only the test's name when an
 # expectation fails, so this is the only thing that says WHERE it stopped.
 trace() {
+  # The machine's own side of the story. Printed with the trace rather than only at the very last
+  # assertion, because "the machine never came online" and "the app could not see it" look identical
+  # from the app and are one line apart in this log.
+  if docker ps --format '{{.Names}}' | grep -qx "$MACHINE_CT"; then
+    printf '\n--- what the connector on the machine said ---\n'
+    docker exec "$MACHINE_CT" tail -25 /tmp/connector.log 2>/dev/null ||
+      echo '(no connector log — it never started)'
+  fi
+  # The two halves of the token, side by side. "unknown machine token" can mean the machine kept a
+  # token nobody stored, or that the row it belongs to is gone; from either side alone the two look
+  # the same. Only the first characters, because this is a log.
+  if docker ps --format '{{.Names}}' | grep -qx "$MACHINE_CT"; then
+    printf '\n--- the token, from both ends ---\n'
+    printf 'the machine holds: %s\n' "$(docker exec "$MACHINE_CT" \
+      python3 -c 'import json;print(json.load(open("/home/'"$MACHINE_USER"'/.config/microteams/config.json"))["token"][:14])' \
+      2>/dev/null || echo '(no config)')"
+    printf 'the database has:  %s\n' "$(docker exec "${PROJECT}-postgres-1" bash -c \
+      'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "select machine_id, left(token,14) from machine;"' \
+      2>/dev/null | tr -d ' ' | tr '\n' ' ' || echo '(could not ask)')"
+  fi
+
+  # And the deployment's own. The workflow has a "dump logs on failure" step, and it prints nothing
+  # useful: this script's own trap tears the stack down on the way out, so by the time that step
+  # runs there is no container left to ask. Whatever the backend said has to be taken here.
+  if docker ps --format '{{.Names}}' | grep -q "^${PROJECT}-backend"; then
+    printf '\n--- what the backend said ---\n'
+    (cd "$BUNDLE" && docker compose -p "$PROJECT" logs --no-color --tail 60 backend 2>/dev/null) ||
+      true
+  fi
   printf '\n--- what the journey was doing ---\n'
   curl -fsS "http://localhost:${MAIL_PORT:-52027}/notes" 2>/dev/null |
     python3 -c 'import sys,json;[print(" ",n) for n in json.load(sys.stdin)]' 2>/dev/null || true
@@ -317,6 +346,16 @@ if [ "$JOURNEY" = "full" ]; then
   # Handed over at runtime, not compiled in: this code did not exist when a prebuilt APK was built.
   RUN_PARAMS="{\"runId\":\"$RUN_ID\",\"enrollCode\":\"$CODE\"}"
 
+  # `or ""`, not `.get(key, "")`. The default only applies when the key is ABSENT, and a poll that
+  # is still pending answers `{"status":"pending","machineId":null,"token":null}` — the key is
+  # there, holding null, so Python's get returns None and prints the four characters N-o-n-e. That
+  # is a non-empty string to the shell, so the loop concluded it had a token, wrote "None" into the
+  # machine's config and started the connector against it. The backend then said, correctly and
+  # forever, "unknown machine token".
+  #
+  # It only surfaced when the backend began including nulls in that response. Nothing about this was
+  # ever right; a null was simply never sent before.
+  #
   # The machine's own half of enrolment, waiting for the human to approve in the interface: poll
   # until a token comes back, write the config, and run the connector the way its boot service would
   # (a container has no init to install one into). This is the only thing that happens in parallel
@@ -333,8 +372,8 @@ if [ "$JOURNEY" = "full" ]; then
     for _ in \$(seq 1 1200); do
       OUT=\$(curl -fsS -X POST http://nginx/mt/machine/enroll/poll -H 'Content-Type: application/json' \
         -d '{\"code\":\"$CODE\"}' || true)
-      TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\",\"\"))' 2>/dev/null || true)
-      MID=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"machineId\",\"\"))' 2>/dev/null || true)
+      TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\") or \"\")' 2>/dev/null || true)
+      MID=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"machineId\") or \"\")' 2>/dev/null || true)
       if [ -n \"\$TOKEN\" ]; then
         printf '{\"base\":\"http://nginx/mt\",\"token\":\"%s\",\"machine_id\":\"%s\"}' \"\$TOKEN\" \"\$MID\" \
           > /home/$MACHINE_USER/.config/microteams/config.json

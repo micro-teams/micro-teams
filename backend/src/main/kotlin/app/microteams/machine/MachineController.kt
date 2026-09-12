@@ -23,8 +23,8 @@ import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.MachineHub
 import app.microteams.model.*
 import app.microteams.team.machine.TeamMachineService
+import jakarta.annotation.PostConstruct
 import jakarta.servlet.http.HttpServletRequest
-import javax.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthenticationService
 import org.rucca.cheese.auth.AuthorizationService
 import org.rucca.cheese.auth.AuthorizedAction

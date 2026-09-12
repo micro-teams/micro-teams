@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** @param nickname The agent's new display name. */
 data class SetAgentNicknameRequestDTO(
     @Schema(required = true, description = "The agent's new display name.")
-    @param:JsonProperty("nickname")
+    @param:JsonProperty("nickname", required = true)
     @get:JsonProperty("nickname", required = true)
     val nickname: kotlin.String
 ) {}

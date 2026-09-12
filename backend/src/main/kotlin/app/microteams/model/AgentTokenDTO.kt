@@ -13,14 +13,14 @@ data class AgentTokenDTO(
         description =
             "A JWT that is the agent's own user token, sent as an Authorization Bearer header.",
     )
-    @param:JsonProperty("token")
+    @param:JsonProperty("token", required = true)
     @get:JsonProperty("token", required = true)
     val token: kotlin.String,
     @Schema(
         required = true,
         description = "Unix epoch seconds after which the token is no longer valid.",
     )
-    @param:JsonProperty("expiresAt")
+    @param:JsonProperty("expiresAt", required = true)
     @get:JsonProperty("expiresAt", required = true)
     val expiresAt: kotlin.Long,
 ) {}

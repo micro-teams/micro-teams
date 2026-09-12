@@ -18,7 +18,7 @@ import app.microteams.chat.message.MessageRepository
 import app.microteams.chat.message.MessageService
 import app.microteams.chat.thread.*
 import app.microteams.model.*
-import javax.annotation.PostConstruct
+import jakarta.annotation.PostConstruct
 import org.rucca.cheese.auth.AuthenticationService
 import org.rucca.cheese.auth.AuthorizationService
 import org.rucca.cheese.auth.AuthorizedAction

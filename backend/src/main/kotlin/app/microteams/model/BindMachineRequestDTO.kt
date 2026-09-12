@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** @param machineId */
 data class BindMachineRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("machineId")
+    @param:JsonProperty("machineId", required = true)
     @get:JsonProperty("machineId", required = true)
     val machineId: kotlin.String
 ) {}

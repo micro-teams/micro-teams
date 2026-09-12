@@ -1,9 +1,6 @@
 package app.microteams.model
 
-import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.annotation.JsonSetter
-import com.fasterxml.jackson.annotation.Nulls
 import io.swagger.v3.oas.annotations.media.Schema
 
 /**
@@ -16,22 +13,18 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class ThreadDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("id")
+    @param:JsonProperty("id", required = true)
     @get:JsonProperty("id", required = true)
     val id: kotlin.Long,
     @Schema(required = true, description = "")
-    @param:JsonProperty("createdAt")
+    @param:JsonProperty("createdAt", required = true)
     @get:JsonProperty("createdAt", required = true)
     val createdAt: java.time.OffsetDateTime,
     @Schema(description = "")
-    @field:JsonInclude(JsonInclude.Include.NON_NULL)
-    @field:JsonSetter(nulls = Nulls.SKIP)
     @param:JsonProperty("title")
     @get:JsonProperty("title")
     val title: kotlin.String? = null,
     @Schema(description = "")
-    @field:JsonInclude(JsonInclude.Include.NON_NULL)
-    @field:JsonSetter(nulls = Nulls.SKIP)
     @param:JsonProperty("updatedAt")
     @get:JsonProperty("updatedAt")
     val updatedAt: java.time.OffsetDateTime? = null,

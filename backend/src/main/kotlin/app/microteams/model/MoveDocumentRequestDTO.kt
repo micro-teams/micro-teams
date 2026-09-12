@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** @param newPath */
 data class MoveDocumentRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("newPath")
+    @param:JsonProperty("newPath", required = true)
     @get:JsonProperty("newPath", required = true)
     val newPath: kotlin.String
 ) {}

@@ -22,7 +22,6 @@
 
 package app.microteams.updates
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -31,6 +30,7 @@ import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.handler.TextWebSocketHandler
+import tools.jackson.databind.ObjectMapper
 
 /** How many unwritten frames a browser may owe before we stop trying to keep it up to date. */
 const val UPDATES_QUEUE_DEPTH = 512

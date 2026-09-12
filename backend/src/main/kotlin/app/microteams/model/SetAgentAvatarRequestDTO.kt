@@ -9,7 +9,7 @@ data class SetAgentAvatarRequestDTO(
         required = true,
         description = "An avatar id from the identity service (POST /avatars).",
     )
-    @param:JsonProperty("avatarId")
+    @param:JsonProperty("avatarId", required = true)
     @get:JsonProperty("avatarId", required = true)
     val avatarId: kotlin.Int
 ) {}

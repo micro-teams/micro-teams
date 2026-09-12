@@ -11,12 +11,12 @@ import javax.validation.Valid
 data class ListMachinesResponseDTO(
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("machines")
+    @param:JsonProperty("machines", required = true)
     @get:JsonProperty("machines", required = true)
     val machines: kotlin.collections.List<MachineDTO>,
     @field:Valid
     @Schema(required = true, description = "")
-    @param:JsonProperty("page")
+    @param:JsonProperty("page", required = true)
     @get:JsonProperty("page", required = true)
     val page: PageDTO,
 ) {}

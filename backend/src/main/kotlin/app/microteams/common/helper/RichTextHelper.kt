@@ -1,7 +1,7 @@
 package app.microteams.common.helper
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
 
 object RichTextHelper {
     private val objectMapper = ObjectMapper()
@@ -16,15 +16,28 @@ object RichTextHelper {
             node.has("type") -> {
                 when (val type = node.get("type").asText()) {
                     "doc" ->
-                        node.get("content")?.map { nodeToMarkdown(it) }?.joinToString("\n") ?: ""
+                        node
+                            .get("content")
+                            ?.values()
+                            ?.map { nodeToMarkdown(it) }
+                            ?.joinToString("\n") ?: ""
                     "table" -> processTable(node)
                     "tableRow" ->
-                        node.get("content")?.map { nodeToMarkdown(it) }?.joinToString(" | ") ?: ""
+                        node
+                            .get("content")
+                            ?.values()
+                            ?.map { nodeToMarkdown(it) }
+                            ?.joinToString(" | ") ?: ""
                     "tableCell" ->
-                        node.get("content")?.map { nodeToMarkdown(it) }?.joinToString(" ") ?: ""
+                        node.get("content")?.values()?.map { nodeToMarkdown(it) }?.joinToString(" ")
+                            ?: ""
                     "paragraph" -> {
                         val content =
-                            node.get("content")?.map { nodeToMarkdown(it) }?.joinToString("") ?: ""
+                            node
+                                .get("content")
+                                ?.values()
+                                ?.map { nodeToMarkdown(it) }
+                                ?.joinToString("") ?: ""
                         "$content\n"
                     }
                     "text" -> {
@@ -44,7 +57,9 @@ object RichTextHelper {
                         }
                         text
                     }
-                    else -> node.get("content")?.map { nodeToMarkdown(it) }?.joinToString(" ") ?: ""
+                    else ->
+                        node.get("content")?.values()?.map { nodeToMarkdown(it) }?.joinToString(" ")
+                            ?: ""
                 }
             }
             else -> ""
@@ -53,9 +68,11 @@ object RichTextHelper {
 
     private fun processTable(node: JsonNode): String {
         val rows =
-            node.get("content")?.map { row ->
-                row.get("content")?.map { cell -> nodeToMarkdown(cell).trim() }?.joinToString(" | ")
-                    ?: ""
+            node.get("content")?.values()?.map { row ->
+                row.get("content")
+                    ?.values()
+                    ?.map { cell -> nodeToMarkdown(cell).trim() }
+                    ?.joinToString(" | ") ?: ""
             } ?: return ""
 
         if (rows.isEmpty()) return ""
@@ -87,6 +104,7 @@ object RichTextHelper {
             node.has("content") -> {
                 node
                     .get("content")
+                    .values()
                     .map { extractTextFromNode(it) }
                     .joinToString(" ")
                     .replace(Regex("\\s+"), " ")

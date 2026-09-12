@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** @param code */
 data class PollEnrollmentRequestDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("code")
+    @param:JsonProperty("code", required = true)
     @get:JsonProperty("code", required = true)
     val code: kotlin.String
 ) {}

@@ -1,11 +1,8 @@
 package app.microteams.model
 
 import com.fasterxml.jackson.annotation.JsonCreator
-import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.annotation.JsonSetter
 import com.fasterxml.jackson.annotation.JsonValue
-import com.fasterxml.jackson.annotation.Nulls
 import io.swagger.v3.oas.annotations.media.Schema
 
 /**
@@ -22,37 +19,33 @@ import io.swagger.v3.oas.annotations.media.Schema
  */
 data class ThreadMemberDTO(
     @Schema(required = true, description = "")
-    @param:JsonProperty("id")
+    @param:JsonProperty("id", required = true)
     @get:JsonProperty("id", required = true)
     val id: kotlin.Long,
     @Schema(required = true, description = "")
-    @param:JsonProperty("threadId")
+    @param:JsonProperty("threadId", required = true)
     @get:JsonProperty("threadId", required = true)
     val threadId: kotlin.Long,
     @Schema(required = true, description = "")
-    @param:JsonProperty("userId")
+    @param:JsonProperty("userId", required = true)
     @get:JsonProperty("userId", required = true)
     val userId: kotlin.Long,
     @Schema(required = true, description = "0=MEMBER, 1=ADMIN, 2=OWNER")
-    @param:JsonProperty("role")
+    @param:JsonProperty("role", required = true)
     @get:JsonProperty("role", required = true)
     val role: ThreadMemberDTO.Role,
     @Schema(required = true, description = "")
-    @param:JsonProperty("joinedAt")
+    @param:JsonProperty("joinedAt", required = true)
     @get:JsonProperty("joinedAt", required = true)
     val joinedAt: java.time.OffsetDateTime,
     @Schema(
         description =
             "The member's display name, carried here so a thread view can paint its members without a second lookup (ChatMember carries the same for the chat list). "
     )
-    @field:JsonInclude(JsonInclude.Include.NON_NULL)
-    @field:JsonSetter(nulls = Nulls.SKIP)
     @param:JsonProperty("nickname")
     @get:JsonProperty("nickname")
     val nickname: kotlin.String? = null,
     @Schema(description = "The member's avatar; absent if they have none.")
-    @field:JsonInclude(JsonInclude.Include.NON_NULL)
-    @field:JsonSetter(nulls = Nulls.SKIP)
     @param:JsonProperty("avatarId")
     @get:JsonProperty("avatarId")
     val avatarId: kotlin.Long? = null,

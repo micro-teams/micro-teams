@@ -22,7 +22,6 @@ import app.microteams.user.RolePermissionService
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.rucca.cheese.auth.Authorization
 import org.rucca.cheese.auth.AuthorizedResource
 import org.rucca.cheese.auth.Permission
@@ -30,6 +29,8 @@ import org.rucca.cheese.auth.TokenPayload
 import org.rucca.cheese.common.config.ApplicationConfig
 import org.rucca.cheese.common.persistent.IdType
 import org.springframework.stereotype.Service
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.json.JsonMapper
 
 /** A freshly signed agent token and the epoch-seconds instant it stops being valid. */
 data class MintedToken(val token: String, val expiresAt: Long)
@@ -43,8 +44,16 @@ class AgentTokenService(
     private val jwtSecret = applicationConfig.jwtSecret
     // Drop nulls so the nested claim map carries only supported JSON values; the verifier reads
     // it straight back into TokenPayload, whose absent fields default to null anyway.
-    private val claimMapper =
-        objectMapper.copy().setSerializationInclusion(JsonInclude.Include.NON_NULL)
+    // Jackson 3 mappers are immutable: `copy()` is gone and `rebuild()` hands back the builder the
+    // mapper was made from, so a variant is built rather than mutated.
+    // Through JsonMapper rather than through the ObjectMapper type: `rebuild()` is generic in the
+    // mapper and its builder, and from the abstract type Kotlin has nothing to infer them from.
+    // What Boot auto-configures for JSON is a JsonMapper, and the tests below say so if it is not.
+    private val claimMapper: ObjectMapper =
+        (objectMapper as JsonMapper)
+            .rebuild()
+            .changeDefaultPropertyInclusion { it.withValueInclusion(JsonInclude.Include.NON_NULL) }
+            .build()
 
     fun mint(agentUserId: IdType): MintedToken {
         val now = System.currentTimeMillis()

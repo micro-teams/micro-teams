@@ -9,24 +9,24 @@
 
 package org.rucca.cheese.common.error
 
-import com.fasterxml.jackson.core.JsonGenerator
-import com.fasterxml.jackson.databind.JsonSerializer
-import com.fasterxml.jackson.databind.SerializerProvider
-import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import org.springframework.http.HttpStatus
+import tools.jackson.core.JsonGenerator
+import tools.jackson.databind.SerializationContext
+import tools.jackson.databind.ValueSerializer
+import tools.jackson.databind.annotation.JsonSerialize
 
-private class ErrorSerializer : JsonSerializer<BaseError>() {
-    override fun serialize(err: BaseError, gen: JsonGenerator, serializer: SerializerProvider) {
+private class ErrorSerializer : ValueSerializer<BaseError>() {
+    override fun serialize(err: BaseError, gen: JsonGenerator, serializer: SerializationContext) {
         val name = err::class.simpleName
         gen.writeStartObject()
-        gen.writeNumberField("code", err.status.value())
-        gen.writeStringField("message", "$name: ${err.message}")
-        gen.writeFieldName("error")
+        gen.writeNumberProperty("code", err.status.value())
+        gen.writeStringProperty("message", "$name: ${err.message}")
+        gen.writeName("error")
         gen.writeStartObject()
-        gen.writeStringField("name", name)
-        gen.writeStringField("message", err.message)
+        gen.writeStringProperty("name", name)
+        gen.writeStringProperty("message", err.message)
         if (err.data != null) {
-            gen.writeObjectField("data", err.data)
+            gen.writePOJOProperty("data", err.data)
         }
         gen.writeEndObject()
         gen.writeEndObject()
