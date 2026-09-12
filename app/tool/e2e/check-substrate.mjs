@@ -50,19 +50,19 @@ try {
     { timeout: 30000 },
   );
 
-  // Registration can lag the first frame by a beat; the worker answers /__mt/transport itself once
-  // it exists, and no other page in this app makes that request, so waiting for a non-empty answer
-  // IS waiting for registration plus a dial plus at least one request having gone out.
-  //
-  // Polled from Node rather than with page.waitForFunction: the predicate is async and its failure
-  // modes (no worker yet, a dial still in flight) are ordinary steps on the way to true, not errors
-  // — polling in the open lets each attempt's result be logged if this ever needs debugging, which
-  // a value hidden inside a JSHandle does not.
+  // Registration can lag the first frame by a beat, and the app makes at most one /mt/ or /api/
+  // request on its own (the session restore) before it settles on a signed-out screen and goes
+  // quiet — one triggering request is not the same guarantee as "the worker got a fair chance",
+  // because that one request may race the worker's own registration and lose. So each iteration
+  // also fires an explicit /mt/probe: cheap, side-effect-free, and — because it goes through this
+  // app's own fetch(), not this script's — it is answered by the worker exactly as a real request
+  // from the app would be, which is the thing being proven.
   let lines = null;
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     lines = await page.evaluate(async () => {
       try {
+        await fetch("/mt/probe", { cache: "no-store" }).catch(() => {});
         const res = await fetch("/__mt/transport", { cache: "no-store" });
         if (!res.ok) return null;
         const body = await res.json();
@@ -72,7 +72,7 @@ try {
       }
     });
     if (lines) break;
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
   }
   lines ??= [];
 
