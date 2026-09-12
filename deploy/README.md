@@ -7,12 +7,17 @@ from a registry, and every image is pinned by digest so a deploy is reproducible
 ## What's in here
 
 ```
-docker-compose.yml     the four services (nginx, backend, cheese-auth, postgres)
-nginx.conf             the domain-independent gateway (SPA + /api + /mt)
+docker-compose.yml     the five services (nginx, origin, backend, cheese-auth, postgres)
+nginx.conf             the domain-independent gateway (SPA + /api + /mt + /mt/link)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
+origin/origin.jar      the MultiPath origin: the server end of the substrate. Clients bring up one
+                       redundant stream over every published line at once and it terminates them,
+                       splicing each exchange back into nginx — so a request that arrived over a
+                       line lands exactly where the same request over plain HTTP lands. Nothing
+                       else in the stack knows more than one path to it exists.
 frontend/dist/         the built web client (static, domain-independent) — a Flutter build
                        since 0.1.16; the directory name is unchanged so upgrades in place still work
 applets/               cli.js + claude.js (mounted into the backend, swappable)
