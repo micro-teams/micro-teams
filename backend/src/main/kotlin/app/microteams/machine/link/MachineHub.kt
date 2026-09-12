@@ -352,20 +352,35 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         rows: Int = 32,
     ) {
         val screen = screens[sid] ?: return
-        machine(machineId)
-            .send(
-                LinkMsg(
-                    t = "session.create",
-                    sid = sid,
-                    command = command,
-                    screen = screen.token,
-                    cols = cols,
-                    rows = rows,
-                    source = appletSource,
-                    adopt = true,
-                    env = env?.ifEmpty { null },
-                )
+        val machine = machine(machineId)
+        machine.send(
+            LinkMsg(
+                t = "session.create",
+                sid = sid,
+                command = command,
+                screen = screen.token,
+                cols = cols,
+                rows = rows,
+                source = appletSource,
+                adopt = true,
+                env = env?.ifEmpty { null },
             )
+        )
+        // The reconnecting CLI is a fresh process (its old one either exited or, on a machine
+        // reboot, tmux and everything above it are gone) — it remembers no `screen.subscribe`
+        // from before, whatever this HubScreen's viewers set says. That set survives a machine
+        // outage untouched (nothing here closes a viewer just because its machine went away, and
+        // a browser tab sitting on a stalled ViewerPump never notices to reconnect — see
+        // ViewerPump's header), so attachViewer's "first viewer" fan-out gate — the ONLY other
+        // place screen.subscribe is sent — will never fire again for it: every viewer already in
+        // the set reads as "not first". Without this, a viewer that survived the outage keeps its
+        // handshake but the newly (re)spawned session never starts streaming to it: a silent,
+        // permanent black screen. Re-asking here, unconditionally on any pre-existing viewer,
+        // costs the machine nothing (screen.subscribe is idempotent there) and is the only point
+        // that knows the session underneath just changed.
+        if (screen.viewers.isNotEmpty()) {
+            machine.send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
+        }
     }
 
     /**
@@ -409,6 +424,15 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         )
         screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
         markScreen(sid, ScreenState.STARTING)
+        // Same reasoning as readoptScreen's resubscribe just below: session.close + session.create
+        // hands the machine a brand-new tmux session under the old sid, so any subscription it
+        // remembered for the old one is gone, while this HubScreen's viewers set (and therefore
+        // attachViewer's "first viewer" gate) is untouched. Left alone, a viewer already attached
+        // when wakeAgent respawns a dead screen keeps its socket open but never receives another
+        // byte — exactly the black-screen this respawn is meant to cure.
+        if (screen.viewers.isNotEmpty()) {
+            machine.send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
+        }
         return true
     }
 
