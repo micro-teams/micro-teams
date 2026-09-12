@@ -57,11 +57,14 @@ func TestTheControlLinkIsCarriedInsideTheSubstrate(t *testing.T) {
 	var upgraded atomic.Int32
 	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Counted on ARRIVAL, not after the upgrade completes. The client's dial returns the moment
+		// it has read the 101, which can be before this handler has run its next statement — so
+		// counting afterwards is a race the assertion loses on a loaded machine.
+		upgraded.Add(1)
 		conn, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		upgraded.Add(1)
 		defer func() { _ = conn.Close() }()
 		_, _, _ = conn.ReadMessage()
 	}))
@@ -95,14 +98,25 @@ func TestTheControlLinkIsCarriedInsideTheSubstrate(t *testing.T) {
 	// And every line's state reached the table `microteams status` reads. Not a detail: redundancy
 	// hides line failure from everything above it, so this table is the only place a path that
 	// quietly died is visible at all.
+	//
+	// Every line REPORTED, and at least one of them up — not all of them. Dialling returns as soon
+	// as one link is up and the rest are still connecting, which is the right behaviour (waiting for
+	// the slowest line before the first request would hand the slowest line the latency the whole
+	// design exists to avoid). An assertion that all of them are up is therefore a race, and it is
+	// one that passes on a quiet laptop and fails on a loaded CI runner — which is how this was
+	// found.
 	table := host.currentLines()
 	if len(table) != 2 {
 		t.Fatalf("expected both lines to be reported, got %+v", table)
 	}
+	carrying := 0
 	for _, line := range table {
-		if line.State != "up" {
-			t.Errorf("line %s reported %q, want up", line.ID, line.State)
+		if line.State == "up" {
+			carrying++
 		}
+	}
+	if carrying == 0 {
+		t.Errorf("no line is carrying anything, yet a stream was served over it: %+v", table)
 	}
 }
 
