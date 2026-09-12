@@ -15,10 +15,13 @@
 library;
 
 import 'dart:async';
+
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:multipath/multipath.dart' as mp;
+
+import 'worker_routes.dart';
 
 /// Brings the substrate up once and hands it out, re-dialling if it has died.
 ///
@@ -93,11 +96,14 @@ class Substrate {
 /// is reachable directly or this app would not be running, so a missing or misconfigured origin
 /// process degrades to "no redundancy" rather than to "no product".
 ///
-/// This runs on the web too, for now. A browser can dial a line — a link is a WebSocket — so the
-/// substrate works here exactly as it does natively. When the service worker takes over routing for
-/// the whole document it will be holding a substrate of its own, and this one should then stand
-/// down rather than open a second transport doing the same job; that is a change to make when the
-/// worker lands, not a state to describe before it.
+/// On the web it stands down WHEN A WORKER IS CONTROLLING THE PAGE: that worker routes every
+/// request the document makes, including the API, over a substrate of its own (see web/sw.js), and
+/// dialling a second one here would open a second set of links to every line to do one job.
+///
+/// Not simply "on the web", because a page often has no worker in front of it — the first visit
+/// before one takes over, a browser with them disabled, a driven test that serves none. Standing
+/// down there would mean no redundancy at all, silently, which is the state this layer exists to
+/// make impossible to be in unknowingly.
 class MultiPathAdapter implements HttpClientAdapter {
   MultiPathAdapter({
     required this.substrate,
@@ -116,6 +122,12 @@ class MultiPathAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    // This page's requests belong to the service worker, which is already carrying them over a
+    // substrate of its own. Nothing to do here but hand the request on and let it be intercepted.
+    if (aWorkerCarriesRequests) {
+      return _inner.fetch(options, requestStream, cancelFuture);
+    }
+
     // No lines yet is not a failure and must not be reported as one. It is the ordinary state of
     // every app start — the registry has not arrived, and the request that fetches it is one of the
     // ones going out right now. Reporting it would put a worrying line in the log on every cold

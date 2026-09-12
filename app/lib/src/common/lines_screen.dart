@@ -15,9 +15,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:multipath/multipath.dart' as mp;
-
 import '../providers.dart';
+import 'transport_stats.dart';
 
 class LinesScreen extends ConsumerStatefulWidget {
   const LinesScreen({super.key});
@@ -27,11 +26,12 @@ class LinesScreen extends ConsumerStatefulWidget {
 }
 
 class _LinesScreenState extends ConsumerState<LinesScreen> {
+  late Future<List<LineReport>> _lines = transportStats(
+    ref.read(substrateProvider),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final substrate = ref.watch(substrateProvider);
-    final stats = substrate.stats();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('lines'),
@@ -41,42 +41,51 @@ class _LinesScreenState extends ConsumerState<LinesScreen> {
             // Nothing polls: what is on screen is what the transport knew when it was drawn. A view
             // that refreshed itself would hide the one thing worth noticing here, which is a line
             // whose state changed while you were looking at the old value.
-            onPressed: () => setState(() {}),
+            onPressed: () => setState(() {
+              _lines = transportStats(ref.read(substrateProvider));
+            }),
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            'Every line carries every byte; the first copy to arrive is the one used. So none of '
-            'these is "the" line, and a line being down costs nothing until it is the last one.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 16),
-          for (final stat in stats)
-            _LineRow(url: substrate.urlOf(stat.index), stat: stat),
-          if (stats.isEmpty)
-            const Text(
-              'no transport yet — nothing has been sent, or there is no line to send it over',
-            ),
-        ],
+      body: FutureBuilder<List<LineReport>>(
+        future: _lines,
+        builder: (context, snapshot) {
+          final lines = snapshot.data ?? const <LineReport>[];
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'Every line carries every byte; the first copy to arrive is the one used. So none '
+                'of these is "the" line, and a line being down costs nothing until it is the last '
+                'one.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              for (final line in lines) _LineRow(line: line),
+              if (snapshot.connectionState != ConnectionState.done)
+                const Text('asking the transport…')
+              else if (lines.isEmpty)
+                const Text(
+                  'no transport yet — nothing has been sent, or there is no line to send it over',
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _LineRow extends StatelessWidget {
-  const _LineRow({required this.url, required this.stat});
+  const _LineRow({required this.line});
 
-  final String url;
-  final mp.LinkStat stat;
+  final LineReport line;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final colour = switch (stat.state) {
+    final colour = switch (line.state) {
       'up' => scheme.primary,
       'connecting' => Colors.amber,
       _ => scheme.error,
@@ -100,13 +109,10 @@ class _LineRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'line ${stat.index}',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+                Text(line.name, style: Theme.of(context).textTheme.titleSmall),
                 const Spacer(),
                 Text(
-                  stat.state,
+                  line.state,
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: colour),
@@ -115,7 +121,7 @@ class _LineRow extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              url.isEmpty ? '(this origin)' : url,
+              line.url.isEmpty ? '(this origin)' : line.url,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
             const SizedBox(height: 6),
@@ -124,18 +130,18 @@ class _LineRow extends StatelessWidget {
                 // The recovery count, because "up" at the instant you look says nothing about a
                 // path that has come and gone forty times this morning — and flapping is the
                 // failure this panel is most likely to be the only witness to.
-                if (stat.reconnects > 0) 'recovered ${stat.reconnects}×',
-                if (stat.lastByteMs > 0)
-                  'last byte ${DateTime.fromMillisecondsSinceEpoch(stat.lastByteMs).toIso8601String()}'
+                if (line.reconnects > 0) 'recovered ${line.reconnects}×',
+                if (line.lastByteMs > 0)
+                  'last byte ${DateTime.fromMillisecondsSinceEpoch(line.lastByteMs).toIso8601String()}'
                 else
                   'nothing has arrived on it',
               ].join(' · '),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (stat.reason.isNotEmpty) ...[
+            if (line.reason.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
-                stat.reason,
+                line.reason,
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: scheme.error),

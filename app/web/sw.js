@@ -20,9 +20,21 @@
  *               The consequence, stated plainly: the FIRST visit needs the network. It always did.
  *               Every visit after it does not.
  *
+ *               It also carries the network. Every request this worker cannot answer from its cache
+ *               goes over the MultiPath substrate — one redundant stream to the origin, carried
+ *               across every line the deployment publishes — rather than over the browser's own
+ *               connection. The page never learns: it calls fetch() exactly as it always did, and
+ *               the worker is the seam where "the network" stops meaning "one host".
+ *
+ *               Which is why the caching decisions below are untouched by that. The substrate
+ *               replaces the transport under `fetch`, not the rules about what may be answered from
+ *               disk — those are about staleness, and staleness is not a network property.
+ *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
+
+import { Client } from "@micro-teams/multipath";
 
 // Replaced at build time by tool/make-sw.mjs with the bundle's version — the same string the
 // launcher carries and /version serves. A new build is a new cache, and the old one is deleted on
@@ -32,6 +44,57 @@
 // one request of a page load that cannot be answered from a cache. See tool/launcher.mjs.
 const VERSION = "__MT_BUILD__";
 const CACHE = `microteams-${VERSION}`;
+
+/**
+ * The one service name every stream is addressed to.
+ *
+ * A contract with the origin rather than a local choice: a client names a SERVICE and the origin
+ * looks it up, so a name it does not know is refused outright — which makes a typo here total rather
+ * than partial. One name covers everything: ordinary requests, responses that arrive gradually, and
+ * WebSockets, because they are all bytes on a stream to the same HTTP stack.
+ */
+const APP_SERVICE = "app";
+
+/**
+ * The substrate, dialled on the first request that needs it and re-dialled if that fails.
+ *
+ * The line list is fetched DIRECTLY, and it has to be: it is the answer to "which lines exist", so
+ * it cannot travel over them. Everything after it can.
+ *
+ * A failure to dial falls back to the browser's own fetch. The origin is reachable directly or this
+ * page would not have loaded, so a missing or misconfigured origin process costs the redundancy and
+ * not the product — but it is said out loud, because a deployment that silently has no redundancy is
+ * the state this whole layer exists to make impossible to be in unknowingly.
+ */
+let substrate = null;
+async function transport() {
+  if (substrate) return substrate;
+  substrate = (async () => {
+    const response = await fetch("/mt/lines", { cache: "no-store" });
+    if (!response.ok) throw new Error(`the line registry answered ${response.status}`);
+    const registry = await response.json();
+    const lines = (registry.lines ?? [])
+      .map((line) => line.url || self.location.origin)
+      .filter(Boolean);
+    if (!lines.length) throw new Error("the line registry named no line");
+    return Client.dial(lines);
+  })().catch((error) => {
+    substrate = null; // let the next request try again rather than wedging the worker
+    throw error;
+  });
+  return substrate;
+}
+
+/** fetch, over the substrate where it can be, over the browser where it cannot. */
+async function net(request) {
+  try {
+    const client = await transport();
+    return await client.fetch(APP_SERVICE, request);
+  } catch (error) {
+    console.warn("sw: sending directly, the substrate could not be used:", error);
+    return fetch(request);
+  }
+}
 
 /**
  * The files whose NAMES never change, and which therefore may not be answered from cache without
@@ -102,9 +165,51 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // The API and the sockets are never cached: a stale answer about who is online, or a replayed
-  // message, is worse than an error.
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mt/")) return;
+  // What the worker's own transport is doing, answered by the worker itself.
+  //
+  // It exists because the page cannot see it. On the web the substrate lives in here, so the app's
+  // own line panel would otherwise have nothing to show and no way to get it — and the one thing
+  // that layer needs is somewhere to say "this line is dead" out loud, since losing a line costs
+  // nobody an error. A path under /__mt/ rather than a postMessage protocol: the panel already
+  // speaks HTTP, and a request is something a person can also just open in a tab.
+  if (url.pathname === "/__mt/transport") {
+    event.respondWith(
+      (async () => {
+        const client = substrate ? await substrate.catch(() => null) : null;
+        const lines = client
+          ? client.stats().map((stat) => ({
+              index: stat.index,
+              state: stat.state,
+              lastByteMs: stat.lastByteMs,
+              reconnects: stat.reconnects,
+              reason: stat.reason,
+            }))
+          : [];
+        return new Response(JSON.stringify({ lines }), {
+          headers: { "content-type": "application/json" },
+        });
+      })(),
+    );
+    return;
+  }
+
+  // The API is never cached — a stale answer about who is online, or a replayed message, is worse
+  // than an error — but it IS carried, and that matters more than the caching does. It is the
+  // traffic redundancy is for: static assets are fetched once and then come from disk forever,
+  // while every message, every roster and every document goes over the network every time.
+  //
+  // Routing it here rather than in the Dart client means one transport per page instead of two. The
+  // application's own client used to dial its own; with this worker in front of it, a second
+  // redundant stream would be a second set of links to every line doing the same job.
+  //
+  // The registry itself is the exception, and has to be: it is the answer to "which lines exist", so
+  // it cannot travel over them. `transport()` fetches it directly for exactly this reason, and this
+  // guard keeps a page's own call to it from being routed either.
+  if (url.pathname === "/mt/lines") return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mt/")) {
+    event.respondWith(net(request));
+    return;
+  }
 
   // The escape hatch must always come from the network if the network is there — it is what people
   // are told to open when the cache itself is the problem. The build stamp likewise: a cached
@@ -128,7 +233,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         try {
-          return await fetch(request);
+          return await net(request);
         } catch (_) {
           const cache = await caches.open(CACHE);
           return (
@@ -161,7 +266,7 @@ self.addEventListener("fetch", (event) => {
 
       if (isCode) {
         try {
-          const fresh = await fetch(request);
+          const fresh = await net(request);
           if (fresh.ok && fresh.type === "basic") {
             cache.put(request, fresh.clone());
           }
@@ -175,7 +280,7 @@ self.addEventListener("fetch", (event) => {
 
       const hit = await cache.match(request);
       if (hit) return hit;
-      const response = await fetch(request);
+      const response = await net(request);
       // Opaque and error responses are not worth keeping; a cached failure is a failure that
       // repeats even after the problem is fixed.
       if (response.ok && response.type === "basic") {

@@ -20,6 +20,8 @@ import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { build } from "esbuild";
+
 import { appVersion } from "./version.mjs";
 
 const dist = path.resolve(process.argv[2] ?? "build/web");
@@ -63,7 +65,26 @@ if (!source.includes("__MT_BUILD__")) {
   console.error("web/sw.js has no __MT_BUILD__ placeholder — did it change?");
   process.exit(1);
 }
-await writeFile(path.join(dist, "sw.js"), source.replace("__MT_BUILD__", version));
+// Bundled, because the worker now imports the transport it routes over. A classic worker (which is
+// what the launcher registers — see tool/launcher.mjs) cannot import anything at runtime, and a
+// module worker is not the answer either: registering one as classic, or the reverse, fails quietly
+// and the page then works from the network while the cache is never filled. So the imports are
+// resolved here, at build time, and what ships is one file with no imports in it — exactly the kind
+// of file the worker was before, which is the point.
+const bundled = await build({
+  stdin: {
+    contents: source.replace("__MT_BUILD__", version),
+    resolveDir: path.dirname(fileURLToPath(import.meta.url)) + "/../web",
+    sourcefile: "sw.js",
+    loader: "js",
+  },
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: "es2020",
+  write: false,
+});
+await writeFile(path.join(dist, "sw.js"), bundled.outputFiles[0].text);
 
 /**
  * What the server says is deployed, as one line of text at the bundle root.
