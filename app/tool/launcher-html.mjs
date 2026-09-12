@@ -1,0 +1,216 @@
+/*
+ *  Description: Generates the launcher document — the one request in the whole system that cannot
+ *               be spread across lines.
+ *
+ *               This used to be buildLauncher, from the MultiPath package. It is here now because
+ *               0.2.0 took the one part that belonged to a transport library and left the rest.
+ *               What it did was race the lines for the first asset and then start the app on
+ *               whichever answered; under the substrate that race happens in the bytes, underneath
+ *               a service worker, where it belongs. What is left — a splash, a percentage, a
+ *               version check, registering the worker — was never about networking. It is what THIS
+ *               product wants the first two seconds to look like, so it lives in this repository
+ *               and answers to it.
+ *
+ *               The document deliberately fetches nothing but the app: no font, no image, no
+ *               second document. It is the request with no redundancy behind it, so every byte in
+ *               it is a byte the visitor waits for on one host.
+ *
+ *  Author(s):
+ *      Nictheboy Li    <nictheboy@outlook.com>
+ */
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The version check, emitted before anything else runs.
+ *
+ * It is first because everything after it is a decision made with cached material: which worker
+ * answers, what it answers with, and what the application believes it already knows. Asking
+ * afterwards would mean acting on the old build and correcting later, which is the half-updated
+ * state this exists to prevent.
+ *
+ * There are two ways to be out of date and they need different questions. What is CACHED here may
+ * belong to an older build — asked locally, by remembering which version filled these caches, and
+ * it is the case that matters most because a fresh document with a stale engine does not start.
+ * And this DOCUMENT may itself be an old copy served while a newer build is deployed — which only
+ * the server can answer, on the one request of a page load that is never answered from a cache.
+ *
+ * A failed check is silence, not an error: offline is ordinary, and a client that refused to start
+ * because it could not confirm its version would be broken far more often than a stale one is.
+ *
+ * The reload is guarded per tab, so a disagreement that somehow never resolves cannot become a
+ * loop — one attempt, then it carries on with what it has.
+ */
+function versionGuard({ version, versionUrl, clearOnUpdate = [] }) {
+  if (!version) return "";
+  const askServer = versionUrl
+    ? `    if (!stale) {
+      // The other way to be out of date: this document is itself a cached copy, served while a
+      // newer build sits on the server. Only the server can answer that, and this is the one
+      // request in a page load that is never answered from a cache.
+      try {
+        const response = await fetch(${JSON.stringify(versionUrl)}, { cache: "no-store" });
+        if (response.ok) {
+          const deployed = (await response.text()).trim();
+          if (deployed && deployed !== __version) stale = deployed;
+        }
+      } catch (e) {
+        // Offline. Carrying on with what we have is exactly right.
+      }
+    }
+`
+    : "";
+  return `const __version = ${JSON.stringify(version)};
+await (async function () {
+  const KEY = "mt:version";
+  try {
+    // What the caches on this machine were filled for. A build change makes every one of them a
+    // copy of something that no longer exists — and mixing them with new code is the failure this
+    // guard exists to prevent: new application code running against the previous build's engine
+    // does not start, and nothing on screen says why.
+    let stale = null;
+    const held = localStorage.getItem(KEY);
+    if (held && held !== __version) stale = held;
+${askServer}    if (!stale) {
+      localStorage.setItem(KEY, __version);
+      return;
+    }
+    if (sessionStorage.getItem("mt:updating") === __version + ">" + stale) return;
+    sessionStorage.setItem("mt:updating", __version + ">" + stale);
+    console.warn("mt: " + __version + " meeting " + stale + " — starting over");
+
+    if (window.caches) {
+      const names = await caches.keys();
+      await Promise.all(names.map((name) => caches.delete(name)));
+    }
+    const prefixes = ${JSON.stringify(clearOnUpdate)};
+    for (const key of Object.keys(localStorage)) {
+      if (prefixes.some((p) => key.startsWith(p))) localStorage.removeItem(key);
+    }
+    localStorage.setItem(KEY, __version);
+    // The worker included: it is code from the build being replaced, and it is what would answer
+    // the reload out of its own memory.
+    if (navigator.serviceWorker) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((r) => r.unregister()));
+    }
+    location.reload();
+    await new Promise(() => {});
+  } catch (e) {
+    // A guard that throws would stop the application starting, which is strictly worse than the
+    // staleness it is guarding against.
+  }
+})();
+`;
+}
+
+/**
+ * Builds the launcher document.
+ *
+ * `preload` is what the first frame needs, with the sizes the build measured, so the percentage is
+ * a percentage of the whole wait rather than of one file out of ten megabytes. `registry` is baked
+ * in for the service worker to start from before it has fetched anything — one same-origin line is
+ * enough to start, and "wherever this page came from" always is.
+ */
+export function buildLauncher(options) {
+  const config = {
+    appEntry: options.appEntry,
+    registry: options.registry ?? null,
+    registryUrl: options.registryUrl ?? null,
+  };
+  const preload = (options.preload ?? []).map((entry) =>
+    typeof entry === "string" ? { url: entry } : { url: entry.url, bytes: entry.bytes, when: entry.when },
+  );
+  const register = options.serviceWorker
+    ? `if ("serviceWorker" in navigator) {
+navigator.serviceWorker.register(${JSON.stringify(options.serviceWorker)}${
+        options.serviceWorkerType ? `, { type: ${JSON.stringify(options.serviceWorkerType)} }` : ""
+      }).catch(() => {});
+}
+`
+    : "";
+
+  const warm = preload.length
+    ? `const __pre = ${JSON.stringify(preload)};
+// Known up front, from the build, so the first byte already moves a bar that means something. Only
+// the files this browser will actually ask for: a build that ships alternatives says which is
+// which, and preloading the other one spends megabytes warming a cache nobody reads.
+function __cond(expression) {
+  try { return !!eval(expression); } catch (e) { return false; }
+}
+const __want_files = __pre.filter((f) => !f.when || __cond(f.when));
+let __got = 0, __want = __want_files.reduce((sum, f) => sum + (f.bytes || 0), 0);
+function __say(p) {
+  document.querySelectorAll("[data-multipath-progress]").forEach((e) => { e.textContent = p + "%"; });
+}
+function __drain(r, known) {
+  // Content-Length only when the build did not say and the response is not compressed: the header
+  // counts wire bytes, and what a reader hands over is decoded ones. Mixing the two makes a bar
+  // that leaps to 99 and then crawls.
+  if (!known && !r.headers.get("content-encoding")) {
+    const length = Number(r.headers.get("content-length"));
+    if (length > 0) __want += length;
+  }
+  if (!r.body || !r.body.getReader) return r.blob().then(() => {});
+  const reader = r.body.getReader();
+  return (function pump() {
+    return reader.read().then((c) => {
+      if (c.done) return;
+      __got += c.value.length;
+      if (__want > 0) __say(Math.min(99, Math.floor((__got / __want) * 100)));
+      return pump();
+    });
+  })();
+}
+function __warm() {
+  __say(0);
+  return Promise.all(
+    __want_files.map((f) =>
+      fetch(f.url, { credentials: "omit" })
+        .then((r) => (r.ok ? __drain(r, !!f.bytes) : 0))
+        .catch(() => {}),
+    ),
+  ).then(() => {});
+}`
+    : `function __warm() { return Promise.resolve(); }
+function __say() {}`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(options.title ?? "Loading")}</title>
+${options.headHtml ?? ""}
+</head>
+<body>
+${options.bodyHtml ?? ""}
+<script>
+// Configuration, inline, so the worker has the lines before anything has been fetched — no request
+// has to succeed before requests can be routed.
+window.__multipath__ = ${JSON.stringify(config)};
+</script>
+<script type="module">
+${versionGuard(options)}${register}${warm}
+// One URL, not a race between lines. Every fetch from here on goes through the service worker and,
+// underneath it, one redundant stream carried over every line at once — the fastest line wins each
+// byte without this document choosing anything. What it still cannot spread is itself, which is
+// why it is as small as it is.
+__warm()
+  .then(() => import(${JSON.stringify(options.appEntry)}))
+  .then(() => __say(100))
+  .catch((error) => {
+    console.error("mt: could not start the application", error);
+    document.body.insertAdjacentHTML("beforeend", '<p data-multipath-error>Could not start. Check your connection and reload.</p>');
+  });
+</script>
+</body>
+</html>
+`;
+}

@@ -28,7 +28,7 @@ import path from "node:path";
 
 import { appVersion } from "./version.mjs";
 import { preloadFor } from "./manifest.mjs";
-import { buildLauncher } from "@micro-teams/multipath";
+import { buildLauncher } from "./launcher-html.mjs";
 
 const dist = path.resolve(process.argv[2] ?? "build/web");
 
