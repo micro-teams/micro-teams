@@ -53,8 +53,20 @@ class _MultipathChannel
       opening
           .then((ws) {
             _ws = ws;
-            ws.onMessage = (m) => _incoming.add(m.isText ? m.text : m.data);
-            ws.onError = (e) => _incoming.addError(e);
+            // Guarded rather than trusted to fire in a tidy order: onDone can be called for the
+            // peer's close frame while a message the read loop had already decoded is still in
+            // flight to this callback, and StreamController.add after close throws — which would
+            // turn an ordinary end-of-connection into a crash reported as a test failure with a
+            // stack trace pointing at this file instead of at whatever actually happened on the
+            // wire.
+            ws.onMessage = (m) {
+              if (_incoming.isClosed) return;
+              _incoming.add(m.isText ? m.text : m.data);
+            };
+            ws.onError = (e) {
+              if (_incoming.isClosed) return;
+              _incoming.addError(e);
+            };
             ws.onDone = () => unawaited(_incoming.close());
           })
           .catchError((Object error, StackTrace stack) async {
