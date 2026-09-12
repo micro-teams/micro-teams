@@ -146,9 +146,14 @@ function startDialling() {
     const response = await fetch("/mt/lines", { cache: "no-store" });
     if (!response.ok) throw new Error(`the line registry answered ${response.status}`);
     const registry = await response.json();
+    // As WebSocket URLs, because that is what a link is. The registry deals in origins —
+    // "https://host" — since that is what a line IS and every other use of one wants it that way,
+    // but `new WebSocket("https://…")` throws before anything reaches the network. The conversion
+    // belongs here, at the one place that dials.
     const lines = (registry.lines ?? [])
       .map((line) => line.url || self.location.origin)
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((url) => (url.startsWith("http") ? url.replace("http", "ws") : url));
     if (!lines.length) throw new Error("the line registry named no line");
     client = await Client.dial(lines, { wsCtor: budgetedSocket() });
   })().catch((error) => {

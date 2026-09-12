@@ -68,7 +68,11 @@ class Substrate {
     unawaited(
       Future(() async {
         final dial = _dial;
-        _client = dial != null ? dial(lines) : await mp.Client.dial(lines);
+        _client = dial != null
+            ? dial(lines)
+            : await mp.Client.dial([
+                for (final line in lines) asWebSocket(line),
+              ]);
       }).catchError((Object error) {
         // Said out loud, because a client that silently has no redundancy is the state this whole
         // layer exists to make impossible to be in unknowingly. Not retried here: the next line
@@ -108,6 +112,17 @@ class Substrate {
     _dialling = false;
   }
 }
+
+/// A line's origin as something a WebSocket can be opened at.
+///
+/// The registry deals in origins — `https://host` — because that is what a line IS, and every other
+/// use of one wants it that way. A link is a WebSocket, and `WebSocket.connect` accepts only ws and
+/// wss: handed an http URL it throws "Unsupported URL scheme 'http'" before anything reaches the
+/// network. So the conversion happens here, at the one place that dials, rather than by making the
+/// registry carry URLs in a shape only this caller wants.
+@visibleForTesting
+String asWebSocket(String origin) =>
+    origin.startsWith('http') ? origin.replaceFirst('http', 'ws') : origin;
 
 /// The request's URL, with a host on it.
 ///

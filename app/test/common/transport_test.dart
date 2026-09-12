@@ -136,6 +136,24 @@ void main() {
     );
   });
 
+  test('a line is dialled as a WebSocket, not as the origin it is written as', () {
+    // The registry deals in origins, because that is what a line is. A link is a WebSocket, and
+    // `WebSocket.connect` takes only ws and wss — handed an http URL it throws "Unsupported URL
+    // scheme" before anything reaches the network, so every line fails to dial and the client
+    // quietly has no transport at all.
+    //
+    // Found by the journey, on Android, after everything else in it had passed: the app worked
+    // perfectly the whole way through, because a client with no transport simply sends its requests
+    // directly. Nothing else could have noticed.
+    expect(asWebSocket('https://mt.example'), 'wss://mt.example');
+    expect(asWebSocket('http://127.0.0.1:8080'), 'ws://127.0.0.1:8080');
+    expect(
+      asWebSocket('wss://already.example'),
+      'wss://already.example',
+      reason: 'a line already written as a socket must be left alone',
+    );
+  });
+
   test('a successful GET is remembered under the request itself', () async {
     final wire = _Wire();
     final client = _client(wire);
