@@ -289,37 +289,38 @@ void main() {
   // frames, so `hidden` changes a little on every one of them, not once. A correction applied a frame
   // late chases that the whole time it is rising — net zero at the end, but visibly jittery while it
   // moves. Reported as "the animation starts and ends at the same place but still moves in between".
-  testWidgets('the keyboard rising in steps never moves the messages, even mid-rise', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(400, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'the keyboard rising in steps never moves the messages, even mid-rise',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
 
-    final keyboard = ValueNotifier<double>(0);
-    addTearDown(keyboard.dispose);
-    await tester.pumpWidget(_host(keyboard));
-    await tester.pumpAndSettle();
+      final keyboard = ValueNotifier<double>(0);
+      addTearDown(keyboard.dispose);
+      await tester.pumpWidget(_host(keyboard));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(TextField));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byType(TextField));
+      await tester.pumpAndSettle();
 
-    final title = tester.getRect(find.byType(AppBar));
-    double bubbleBelowTitle() =>
-        tester.getTopLeft(find.text('message 20')).dy - title.bottom;
-    final before = bubbleBelowTitle();
+      final title = tester.getRect(find.byType(AppBar));
+      double bubbleBelowTitle() =>
+          tester.getTopLeft(find.text('message 20')).dy - title.bottom;
+      final before = bubbleBelowTitle();
 
-    // Rise to 300 over several small steps, one frame each — standing in for the OS's own
-    // multi-frame keyboard animation. A build lands for every step; the fix must correct within
-    // that same build, not the next one.
-    for (final target in [60.0, 120.0, 180.0, 240.0, 300.0]) {
-      keyboard.value = target;
-      await tester.pump();
-      expect(
-        bubbleBelowTitle(),
-        closeTo(before, 0.5),
-        reason: 'moved mid-rise, at keyboard height $target',
-      );
-    }
-  });
+      // Rise to 300 over several small steps, one frame each — standing in for the OS's own
+      // multi-frame keyboard animation. A build lands for every step; the fix must correct within
+      // that same build, not the next one.
+      for (final target in [60.0, 120.0, 180.0, 240.0, 300.0]) {
+        keyboard.value = target;
+        await tester.pump();
+        expect(
+          bubbleBelowTitle(),
+          closeTo(before, 0.5),
+          reason: 'moved mid-rise, at keyboard height $target',
+        );
+      }
+    },
+  );
 }
