@@ -645,6 +645,26 @@ jobs:
         with:
           name: microteams-deploy
           path: ${{ runner.temp }}/microteams-deploy
+      # For tool/e2e/check-substrate.mjs — the web leg's own check that the deployed bundle's
+      # service worker really carries a line over a real origin process, which is what npm's
+      # playwright package drives. Not installed for the android leg, which has no service worker
+      # to check.
+      - name: npm ci
+        if: matrix.client == 'web'
+        working-directory: app
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/cache@v6
+        if: matrix.client == 'web'
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+        id: playwright-cache
+      - name: Install the browser Playwright drives
+        if: matrix.client == 'web' && steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: app
+        run: npx playwright install --with-deps chromium
       # The runner image ships Chrome and a matching ChromeDriver; the fallback is for images that
       # do not, and for anybody running this workflow somewhere else.
       - name: Make sure there is a chromedriver
