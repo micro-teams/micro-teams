@@ -78,12 +78,15 @@ class Substrate {
 
 /// Dio's adapter over the substrate.
 ///
-/// [inner] is the ordinary HTTP adapter, and it is the answer in two cases rather than one. On the
-/// web it is the ONLY answer: a page's requests are routed by the service worker, which holds the
-/// substrate for the whole document, and a second one dialled from inside the Dart isolate would be
-/// a duplicate transport doing the same job twice. And on any platform it is what a failure to dial
-/// falls back to — the origin is reachable directly or the app would not have loaded, so a
-/// misconfigured or absent origin process degrades to "no redundancy" rather than to "no product".
+/// [inner] is the ordinary HTTP adapter, and it is what a failure to dial falls back to: the origin
+/// is reachable directly or this app would not be running, so a missing or misconfigured origin
+/// process degrades to "no redundancy" rather than to "no product".
+///
+/// This runs on the web too, for now. A browser can dial a line — a link is a WebSocket — so the
+/// substrate works here exactly as it does natively. When the service worker takes over routing for
+/// the whole document it will be holding a substrate of its own, and this one should then stand
+/// down rather than open a second transport doing the same job; that is a change to make when the
+/// worker lands, not a state to describe before it.
 class MultiPathAdapter implements HttpClientAdapter {
   MultiPathAdapter({
     required this.substrate,

@@ -62,6 +62,12 @@ done
 [ -n "$BUNDLE" ] || { echo "--bundle <dir> is required" >&2; exit 2; }
 BUNDLE="$(cd "$BUNDLE" && pwd)"
 [ -f "$BUNDLE/docker-compose.yml" ] || { echo "$BUNDLE is not a deployment bundle" >&2; exit 2; }
+# Named rather than left to fail at `up`: a bundle without it dies on a bind-mount error that says
+# nothing about what is missing. It matters here more than most files — without the origin process
+# the whole journey runs on the fallback path, which works, so the run would be green while proving
+# nothing about the transport it was meant to prove.
+[ -f "$BUNDLE/origin/origin.jar" ] || {
+  echo "$BUNDLE has no origin/origin.jar — the substrate would not be exercised" >&2; exit 2; }
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT="${MT_E2E_PROJECT:-mte2e}"
