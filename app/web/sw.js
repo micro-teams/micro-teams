@@ -158,10 +158,16 @@ function startDialling() {
     client = await Client.dial(lines, { wsCtor: budgetedSocket() });
   })().catch((error) => {
     // Said out loud, because a deployment that silently has no redundancy is the state this whole
-    // layer exists to make impossible to be in unknowingly. Not retried in this worker: a worker is
-    // short-lived and restarted often, so the next one tries again from nothing, and retrying per
-    // request would put a registry fetch in front of every request the app makes.
-    console.warn("sw: no substrate, sending directly:", error);
+    // layer exists to make impossible to be in unknowingly.
+    console.warn("sw: no substrate yet, sending directly:", error);
+    // And retried on the NEXT triggering request, not abandoned for the life of the worker. This
+    // used to be "abandoned", on the theory that a worker is short-lived and the next one tries
+    // again from nothing — which is true for a deployment that structurally has none (the 404 path
+    // above), but wrong for a deployment that has one and this one attempt merely lost a race with
+    // it starting up, which a fresh docker-compose stack under load does often enough to matter.
+    // Bounded the same way every attempt already is: the 404 probe is cheap and the dial itself is
+    // capped at DIAL_BUDGET_MS, so retrying costs at most one more of each, not a storm.
+    dialling = false;
   });
 }
 
