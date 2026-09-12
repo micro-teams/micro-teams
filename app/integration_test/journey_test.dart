@@ -21,6 +21,7 @@
 /// enrolment code — see collectRunParameters in support.dart for why they are not compiled in.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -657,15 +658,22 @@ void main() {
     // doing nothing at all. Losing redundancy costs nobody an error — that is its whole nature — so
     // it has to be asked about out loud or not at all.
     //
-    // The developer panel is where the transport says what it is doing, and a line reported "up"
-    // there means a redundant stream was really dialled and really carried something.
-    await go(tester, '/__lines');
-    await waitFor(
-      tester,
-      find.text('up'),
-      what: 'a line the transport says is carrying traffic',
-    );
-    await note('PASS: the requests in this run went over the substrate');
+    // Native only, and the reason is a fact about browsers rather than a gap in this run. A page's
+    // substrate lives in the service worker, because the Dart client dials with dart:io's WebSocket
+    // and dart2js compiles that to a stub that throws — so an isolate in a browser cannot hold one.
+    // And this run deliberately serves no worker: it would precache the shipped shell over the build
+    // under test and the app would never start (see tool/e2e/gateway.conf.template). So on the web
+    // leg there is nothing to ask, by design; what the worker does is checked in a real browser by
+    // tool/check-web.mjs, and the transport itself is proved here, on Android.
+    if (!kIsWeb) {
+      await go(tester, '/__lines');
+      await waitFor(
+        tester,
+        find.text('up'),
+        what: 'a line the transport says is carrying traffic',
+      );
+      await note('PASS: the requests in this run went over the substrate');
+    }
     // Twenty-two minutes, and the number is the journey's length rather than a guess: it signs two
     // people up (two real emails, two codes), approves a machine, waits for the real Claude Code to
     // finish its first-run gates, and walks the docs tree. When it outgrew fourteen the drive

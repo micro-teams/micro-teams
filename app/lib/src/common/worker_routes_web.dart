@@ -1,11 +1,15 @@
 /// The web half of [aWorkerCarriesRequests]. See worker_routes.dart for why this exists.
 library;
 
-import 'package:web/web.dart' as web;
-
-/// True when a service worker is controlling this page.
+/// Always true in a browser, and not because a worker is always there.
 ///
-/// `controller`, not `registration`: a worker that is registered but not yet in control does not see
-/// this page's requests, and a page that stood down for it would be sending nothing over anything.
-bool get aWorkerCarriesRequests =>
-    web.window.navigator.serviceWorker.controller != null;
+/// Because this isolate cannot hold a substrate at all. The MultiPath Dart client dials with
+/// `dart:io`'s WebSocket, and dart2js compiles that import to a stub whose every call throws
+/// `Unsupported operation` — so a browser build can reference it, which is why this compiles, and
+/// can never use it, which is what matters. A page's substrate lives in the service worker or
+/// nowhere.
+///
+/// It read `navigator.serviceWorker.controller != null` for one round, on the theory that a page
+/// with no worker should carry its own. It cannot; all that produced was a dial that failed on every
+/// request and a line panel reporting an absence that was never going to fill.
+bool get aWorkerCarriesRequests => true;
