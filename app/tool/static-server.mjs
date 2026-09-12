@@ -305,13 +305,24 @@ const server = createServer(async (req, res) => {
 });
 
 /**
- * Accept the updates socket, and then say nothing.
+ * Accept the updates socket, and then say nothing. Refuse everything else, `/mt/link` above all.
  *
  * Enough of a WebSocket to complete the handshake, because a failed one is a console error on
  * every page and drowns the errors a check is actually looking for. What travels over it is the
  * sync layer's business, and no fake here can stand in for that.
+ *
+ * `/mt/link` used to reach this same blanket accept, and that was a real bug once the app started
+ * dialling MultiPath from inside the page on the web too (0.2.0-rc.3): the registry above
+ * advertises this server as a line, the browser's WebSocket connects, gets a bare 101 and then
+ * silence — a real origin's multipath handshake never arrives — so the dial never settles and
+ * never fails either. A client stuck waiting for a link that will neither come up nor visibly fail
+ * is exactly the hang this file exists to keep out of the checks; the fix is to let `/mt/link`
+ * fail the way a server with no multipath support actually would, so the app falls back to an
+ * ordinary request the way it is designed to.
  */
 server.on("upgrade", (req, socket) => {
+  const path = (req.url ?? "/").split("?")[0];
+  if (path === "/mt/link") return socket.destroy();
   const key = req.headers["sec-websocket-key"];
   if (!key) return socket.destroy();
   const accept = createHash("sha1")

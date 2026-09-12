@@ -32,10 +32,19 @@ const browser = await chromium.launch();
 const context = await browser.newContext();
 const page = await context.newPage();
 
+// A failed WebSocket connection is logged by the BROWSER itself, not by any script, so nothing
+// server-side or client-side can suppress it — only avoid attempting the connection at all. The
+// app dials MultiPath's `/mt/link` from inside the page now (0.2.0-rc.3), and this fixture's fake
+// backend does not speak that protocol, so the dial fails and the browser logs it, exactly as it
+// would against any real deployment with no MultiPath support at the origin. That is expected
+// noise, not a bug this check exists to catch — see static-server.mjs's `/mt/link` handling.
+const isExpectedLinkNoise = (text) =>
+  text.includes("WebSocket connection") && text.includes("/mt/link");
+
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => {
-  if (m.type() === "error") errors.push(m.text());
+  if (m.type() === "error" && !isExpectedLinkNoise(m.text())) errors.push(m.text());
 });
 
 // Recorded from before the first byte of the document runs, because the thing being measured
@@ -321,7 +330,9 @@ const chat = await context.newPage();
 const chatErrors = [];
 chat.on("pageerror", (e) => chatErrors.push(`pageerror: ${e.message ?? e}`));
 chat.on("console", (m) => {
-  if (m.type() === "error") chatErrors.push(`console: ${m.text()}`);
+  if (m.type() === "error" && !isExpectedLinkNoise(m.text())) {
+    chatErrors.push(`console: ${m.text()}`);
+  }
 });
 const sent = [];
 chat.on("request", (r) => {
