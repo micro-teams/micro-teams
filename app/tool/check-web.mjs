@@ -191,7 +191,9 @@ const stamped = await page.evaluate(async () => {
     fetch("/index.html").then((r) => r.text()),
   ]);
   return {
-    worker: /const VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
+    // `const` or `var`: the worker is bundled now (it imports the transport it routes over), and
+    // which keyword the bundler emits is its business rather than a fact about this build.
+    worker: /(?:const|var) VERSION = "([^"]+)"/.exec(sw)?.[1] ?? null,
     served: served.trim(),
     launcher: /const __version = "([^"]+)"/.exec(launcher)?.[1] ?? null,
   };
@@ -396,30 +398,11 @@ check(
 );
 await revisit.close();
 
-// Measuring, not just routing. Every line but the one real traffic happened to use sat at "never
-// measured" in production for weeks, and nothing here could see it: the fake registry had a single
-// line, and with one line a client that measures and a client that does not look identical.
-{
-  const probes = new Set();
-  const probePage = await context.newPage();
-  probePage.on("request", (r) => {
-    const url = new URL(r.url());
-    if (url.pathname === "/mt/probe") probes.add(url.origin);
-  });
-  await probePage.goto(BASE + "/", { waitUntil: "load" });
-  await probePage.waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, {
-    timeout: 30000,
-  });
-  // The registry has to arrive before measuring starts, so this is a wait, not an instant.
-  await probePage
-    .waitForRequest((r) => new URL(r.url()).pathname === "/mt/probe", { timeout: 20000 })
-    .catch(() => {});
-  await probePage.waitForTimeout(2000);
-  // Both lines, not just the near one: the registry's second line is a different origin, so a
-  // client that only ever measured the one it was served from would show exactly one here.
-  check("every line in the registry is actually probed", probes.size >= 2, [...probes].join(" "));
-  await probePage.close();
-}
+// What this file used to check here, and why it no longer can: that every line in the registry was
+// PROBED. MultiPath 0.2.0 removed probing along with line-picking — the transport writes every byte
+// to every line and delivers whichever copy arrives first, so there is no measurement to take and no
+// ranking to verify. The question that replaced it, "is each line alive?", is asked of the transport
+// itself and answered in the journey, at /__lines.
 
 // A deploy, on top of a browser that is already running the build before it.
 //

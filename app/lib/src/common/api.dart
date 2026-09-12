@@ -24,7 +24,6 @@ library;
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:mt_api/mt_api.dart';
 
 import 'errors.dart';
@@ -44,7 +43,6 @@ class MtClient {
     Substrate? substrate,
     RequestCache? cache,
     HttpClientAdapter? adapter,
-    void Function(Object error)? onTransportFallback,
   }) : _reauthorize = reauthorize,
        substrate = substrate ?? Substrate(lines: const []),
        cache = cache ?? RequestCache(),
@@ -60,15 +58,6 @@ class MtClient {
     _dio.httpClientAdapter = MultiPathAdapter(
       substrate: this.substrate,
       inner: adapter ?? _dio.httpClientAdapter,
-      // Falling back to a direct request is the right thing to do and the wrong thing to do
-      // quietly: a deployment whose origin process is missing would work perfectly and have no
-      // redundancy, which is the state this whole layer exists to make impossible to be in
-      // unknowingly.
-      onFallback:
-          onTransportFallback ??
-          (error) => debugPrint(
-            'MultiPath: sending directly, the substrate could not be dialled: $error',
-          ),
     );
     _dio.interceptors.addAll([
       InterceptorsWrapper(onRequest: _attachToken),

@@ -57,13 +57,16 @@ void main() {
           substrate: Substrate(
             lines: const ['http://first.test'],
             dial: (_) => throw StateError('no route'),
+            onDialFailed: (_) => fellBack++,
           ),
           inner: inner,
-          onFallback: (_) => fellBack++,
         ),
       );
 
       final user = await api.me('token');
+      // The dial happens beside the request rather than in front of it, so its report arrives on a
+      // later turn of the event loop.
+      await Future<void>.delayed(Duration.zero);
 
       expect(user.username, 'me');
       expect(

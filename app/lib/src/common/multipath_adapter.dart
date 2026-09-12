@@ -16,18 +16,12 @@ library;
 
 import 'dart:async';
 
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:multipath/multipath.dart' as mp;
 
 import 'worker_routes.dart';
 
-/// Brings the substrate up once and hands it out, re-dialling if it has died.
-///
-/// Lazily, on the first request that needs it: a client whose network is not up yet must still
-/// start, and an app that refused to run because it could not dial would have made the transport a
-/// prerequisite for having a user interface.
 /// The name every stream this product opens is addressed to.
 ///
 /// A contract with the origin rather than a local choice: from 0.2.0-rc.1 a client names a SERVICE
@@ -39,35 +33,59 @@ import 'worker_routes.dart';
 /// them would invent a distinction the application does not have.
 const String appService = 'app';
 
+/// Brings the substrate up in the BACKGROUND and hands out whatever is ready.
+///
+/// Never something a request waits on, and that is the whole shape of it. The first version awaited
+/// the dial on the first request that needed one: a dial that FAILS is easy to recover from, but a
+/// dial that never settles — every line unreachable, or a line that accepts a socket and then says
+/// nothing — leaves every request behind it waiting forever. The app loaded to 100% and never
+/// painted a frame. A transport that might never come up must not be something the product waits on.
+///
+/// So requests go out the ordinary way until there is a live client, and over it once there is. The
+/// cost is that the first few requests of a cold start have no redundancy, which is the right trade:
+/// they are the ones somebody is waiting for.
 class Substrate {
-  Substrate({required this.lines, mp.Client Function(List<String>)? dial})
-    : _dial = dial;
+  Substrate({
+    required this.lines,
+    mp.Client Function(List<String>)? dial,
+    void Function(Object error)? onDialFailed,
+  }) : _dial = dial,
+       _onDialFailed = onDialFailed;
 
   /// Every path to the origin. Order is irrelevant — all of them carry every byte.
   List<String> lines;
 
   final mp.Client Function(List<String>)? _dial;
+  final void Function(Object error)? _onDialFailed;
   mp.Client? _client;
-  Future<mp.Client>? _dialling;
+  bool _dialling = false;
 
-  /// The live client, dialling if there is not one yet.
-  ///
-  /// One dial at a time: without this, a screen that fires five requests at once on a cold start
-  /// opens five redundant transports, each with its own links to every line, and four of them are
-  /// pure waste that the origin has to hold open.
-  Future<mp.Client> client() {
-    final live = _client;
-    if (live != null) return Future.value(live);
-    return _dialling ??= _open().whenComplete(() => _dialling = null);
-  }
-
-  Future<mp.Client> _open() async {
-    if (lines.isEmpty) {
-      throw StateError('multipath: no line to reach the server over');
-    }
-    final client = _dial != null ? _dial(lines) : await mp.Client.dial(lines);
-    _client = client;
-    return client;
+  /// The live client, or null while there is not one yet. Starts a dial if none is under way.
+  mp.Client? clientOrStartDialling() {
+    if (_client != null) return _client;
+    if (_dialling || lines.isEmpty) return null;
+    _dialling = true;
+    unawaited(
+      Future(() async {
+        final dial = _dial;
+        _client = dial != null ? dial(lines) : await mp.Client.dial(lines);
+      }).catchError((Object error) {
+        // Said out loud, because a client that silently has no redundancy is the state this whole
+        // layer exists to make impossible to be in unknowingly. Not retried here: the next line
+        // registry that arrives resets this and tries again, and retrying per request would put a
+        // dial attempt in front of every request the app makes.
+        //
+        // Only a FAILED dial is reported. "There is no transport yet" is the ordinary state of every
+        // cold start and of every request that goes out before the registry has arrived — saying so
+        // would put a worrying line in the log constantly, which is how a real warning later gets
+        // ignored.
+        (_onDialFailed ??
+                (e) =>
+                    debugPrint('MultiPath: no substrate, sending directly: $e'))
+            .call(error);
+      }),
+    );
+    return null;
   }
 
   /// What the transport currently sees on each line: up, connecting or down, how many times it has
@@ -87,6 +105,7 @@ class Substrate {
   void reset() {
     _client?.close();
     _client = null;
+    _dialling = false;
   }
 }
 
@@ -105,16 +124,11 @@ class Substrate {
 /// down there would mean no redundancy at all, silently, which is the state this layer exists to
 /// make impossible to be in unknowingly.
 class MultiPathAdapter implements HttpClientAdapter {
-  MultiPathAdapter({
-    required this.substrate,
-    required HttpClientAdapter inner,
-    void Function(Object error)? onFallback,
-  }) : _inner = inner,
-       _onFallback = onFallback;
+  MultiPathAdapter({required this.substrate, required HttpClientAdapter inner})
+    : _inner = inner;
 
   final Substrate substrate;
   final HttpClientAdapter _inner;
-  final void Function(Object error)? _onFallback;
 
   @override
   Future<ResponseBody> fetch(
@@ -128,19 +142,11 @@ class MultiPathAdapter implements HttpClientAdapter {
       return _inner.fetch(options, requestStream, cancelFuture);
     }
 
-    // No lines yet is not a failure and must not be reported as one. It is the ordinary state of
-    // every app start — the registry has not arrived, and the request that fetches it is one of the
-    // ones going out right now. Reporting it would put a worrying line in the log on every cold
-    // start, which is how a real warning later gets ignored.
-    if (substrate.lines.isEmpty) {
-      return _inner.fetch(options, requestStream, cancelFuture);
-    }
-
-    final mp.Client client;
-    try {
-      client = await substrate.client();
-    } catch (error) {
-      _onFallback?.call(error);
+    // Whatever is ready right now. No lines yet, or a dial still in flight, means the ordinary way
+    // — which is also the ordinary state of every app start, since the registry has not arrived and
+    // the request that fetches it is one of the ones going out.
+    final client = substrate.clientOrStartDialling();
+    if (client == null) {
       return _inner.fetch(options, requestStream, cancelFuture);
     }
 

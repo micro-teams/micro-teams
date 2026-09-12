@@ -75,12 +75,16 @@ void main() {
   });
 
   test('a transport that cannot be dialled falls back rather than failing', () async {
-    // A line that cannot be reached must not take the product with it. The origin is reachable
-    // directly or this app would not be running at all, so a missing or misconfigured origin process
-    // degrades to "no redundancy" — which is where every deployment was last month — instead of to a
-    // client that cannot talk to its server.
+    // A line that cannot be reached must not take the product with it — and must not make it WAIT
+    // either, which is the sharper half. A dial that fails is easy; a dial that never settles is
+    // what left the web app at 100% with no first frame. So the request goes out immediately and the
+    // dial happens beside it.
+    //
+    // The origin is reachable directly or this app would not be running at all, so a missing or
+    // misconfigured origin process degrades to "no redundancy" — which is where every deployment was
+    // last month — instead of to a client that cannot talk to its server.
     final wire = _Wire();
-    var fellBack = 0;
+    final failures = <Object>[];
     final client = MtClient(
       baseUrl: _base,
       reauthorize: () async => null,
@@ -88,15 +92,22 @@ void main() {
       substrate: Substrate(
         lines: const ['http://127.0.0.1:1'],
         dial: (_) => throw StateError('no route'),
+        onDialFailed: failures.add,
       ),
       adapter: wire,
-      onTransportFallback: (_) => fellBack++,
     );
 
     await client.transport.probe();
+    // The dial happens beside the request rather than in front of it, so the report arrives on a
+    // later turn of the event loop. That ordering IS the fix: a request must never wait on a dial.
+    await Future<void>.delayed(Duration.zero);
 
     expect(wire.urls.single, '$_base/probe');
-    expect(fellBack, 1, reason: 'falling back has to be visible, not silent');
+    expect(
+      failures,
+      hasLength(1),
+      reason: 'falling back has to be visible, not silent',
+    );
   });
 
   test('an error status is an answer', () async {

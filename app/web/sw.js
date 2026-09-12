@@ -55,21 +55,94 @@ const CACHE = `microteams-${VERSION}`;
  */
 const APP_SERVICE = "app";
 
+/** The live substrate, once there is one. Null until then, and null forever in a worker that could
+ * not bring one up — see startDialling. */
+let client = null;
+let dialling = false;
+
 /**
- * The substrate, dialled on the first request that needs it and re-dialled if that fails.
+ * Brings the substrate up in the BACKGROUND, and never makes a request wait for it.
  *
- * The line list is fetched DIRECTLY, and it has to be: it is the answer to "which lines exist", so
- * it cannot travel over them. Everything after it can.
+ * This is the whole shape of it, and the first version got it wrong in a way worth writing down: it
+ * awaited the dial on the first request that needed one. A dial that fails rejects and is easy to
+ * recover from — but a dial that HANGS (every line unreachable, or a line that accepts a socket and
+ * never completes the handshake) simply never settles, and then every request behind it waits
+ * forever. The app loaded to 99% and never painted, and the same thing happened on Flutter's own
+ * document where none of this code is even involved. A transport that might never come up must not
+ * be something a page waits on.
  *
- * A failure to dial falls back to the browser's own fetch. The origin is reachable directly or this
- * page would not have loaded, so a missing or misconfigured origin process costs the redundancy and
- * not the product — but it is said out loud, because a deployment that silently has no redundancy is
- * the state this whole layer exists to make impossible to be in unknowingly.
+ * So: requests go directly until there is a live client, and over it once there is. The cost is that
+ * the first few requests of a cold worker have no redundancy, which is the right trade — they are
+ * the ones a person is waiting for.
  */
-let substrate = null;
-async function transport() {
-  if (substrate) return substrate;
-  substrate = (async () => {
+/**
+ * How long the transport gets to come up before this worker stops trying.
+ *
+ * There is no way to ask the library to give up: its dial never resolves while no line is reachable,
+ * it retries for as long as the worker lives, and there is no handle to cancel. That is not free —
+ * the failing sockets go to the same host the page loads from, and they starve the page's own
+ * requests. So the budget is enforced from outside, by refusing to hand out any more sockets once it
+ * is spent: the library's next reconnect gets one that never opens and never errors, so the loop
+ * stops there. Ugly, and honest about it — the alternative is a page that a missing origin process
+ * can stall.
+ */
+const DIAL_BUDGET_MS = 8000;
+
+/** A socket that does nothing, so a retry loop with nothing left to try quietly stops. */
+class SpentSocket {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0; // CONNECTING, forever
+    this.binaryType = "arraybuffer";
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  send() {}
+  close() {}
+}
+
+/** WebSocket while the budget lasts, nothing afterwards. */
+function budgetedSocket() {
+  const deadline = Date.now() + DIAL_BUDGET_MS;
+  return function (url, protocols) {
+    if (Date.now() > deadline) {
+      console.warn("sw: giving up on the substrate, sending directly from here on");
+      return new SpentSocket(url);
+    }
+    return new WebSocket(url, protocols);
+  };
+}
+
+/** True when this deployment answers /mt/link with a 404 — the one answer that means "no origin". */
+async function noLinkEndpoint() {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), 1000);
+  try {
+    const probe = await fetch("/mt/link", { signal: stop.signal, cache: "no-store" });
+    return probe.status === 404;
+  } catch (_) {
+    return false; // aborted or refused: not a 404, so not a "definitely not here"
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function startDialling() {
+  if (client || dialling) return;
+  dialling = true;
+  (async () => {
+    // Is there a substrate here at all? Asked first, and cheaply, because dialling one that does
+    // not exist is the expensive mistake: the redundant transport retries every line forever, and
+    // those failing sockets go to the same host the page is loading from.
+    //
+    // A 404 is the deployment saying it has no origin process in front of it — nginx routes
+    // /mt/link there and nowhere else. Anything else, including a request that hangs (an origin
+    // reading a plain GET as a link will never answer it), means one is there and the dial is worth
+    // making. So the timeout below counts as a yes, not a no.
+    if (await noLinkEndpoint()) throw new Error("this deployment serves no /mt/link");
+
+    // Fetched directly, and it has to be: it is the answer to "which lines exist", so it cannot
+    // travel over them.
     const response = await fetch("/mt/lines", { cache: "no-store" });
     if (!response.ok) throw new Error(`the line registry answered ${response.status}`);
     const registry = await response.json();
@@ -77,23 +150,23 @@ async function transport() {
       .map((line) => line.url || self.location.origin)
       .filter(Boolean);
     if (!lines.length) throw new Error("the line registry named no line");
-    return Client.dial(lines);
+    client = await Client.dial(lines, { wsCtor: budgetedSocket() });
   })().catch((error) => {
-    substrate = null; // let the next request try again rather than wedging the worker
-    throw error;
+    // Said out loud, because a deployment that silently has no redundancy is the state this whole
+    // layer exists to make impossible to be in unknowingly. Not retried in this worker: a worker is
+    // short-lived and restarted often, so the next one tries again from nothing, and retrying per
+    // request would put a registry fetch in front of every request the app makes.
+    console.warn("sw: no substrate, sending directly:", error);
   });
-  return substrate;
 }
 
-/** fetch, over the substrate where it can be, over the browser where it cannot. */
-async function net(request) {
-  try {
-    const client = await transport();
-    return await client.fetch(APP_SERVICE, request);
-  } catch (error) {
-    console.warn("sw: sending directly, the substrate could not be used:", error);
+/** fetch, over the substrate when one is up, over the browser until then. */
+function net(request) {
+  if (!client) return fetch(request);
+  return client.fetch(APP_SERVICE, request).catch((error) => {
+    console.warn("sw: falling back to a direct request:", error);
     return fetch(request);
-  }
+  });
 }
 
 /**
@@ -175,7 +248,6 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname === "/__mt/transport") {
     event.respondWith(
       (async () => {
-        const client = substrate ? await substrate.catch(() => null) : null;
         const lines = client
           ? client.stats().map((stat) => ({
               index: stat.index,
@@ -207,6 +279,19 @@ self.addEventListener("fetch", (event) => {
   // guard keeps a page's own call to it from being routed either.
   if (url.pathname === "/mt/lines") return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mt/")) {
+    // The dial starts HERE, on the first application request, rather than on the first request of
+    // any kind. Two reasons, and the second one cost a day:
+    //
+    // This is the traffic the substrate is for. Static assets are fetched once and then come from
+    // the cache forever; the API is what crosses the network for the rest of the session.
+    //
+    // And a dial that cannot succeed is not free. Against a deployment with no origin process the
+    // redundant transport retries every line, starting a few hundred milliseconds apart, and never
+    // stops — nothing here waits on it, but the failing sockets go to the same host the page is
+    // loading from, and they starve the engine's own requests. The symptom was an app that reached
+    // 100% and never painted a frame, with no error anywhere. Starting on the first API request
+    // keeps all of that out of the load somebody is watching.
+    startDialling();
     event.respondWith(net(request));
     return;
   }
