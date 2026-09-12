@@ -179,9 +179,22 @@ SID="$(printf '%s' "$OPENED" | json "d['sid']")"
 pass "agent $AGENT_ID on screen $SID"
 
 step "the screen really exists on the machine"
-# The connector keeps its tmux on a private socket under /tmp, named by the uid it runs as — the
-# same path the connector derives, resolved here rather than assumed.
-SOCK="/tmp/microteams-$(docker exec -u "$MACHINE_USER" "$MACHINE_CT" id -u | tr -d '\r')/t.sock"
+# The connector keeps its tmux on a private socket, and WHERE that socket is moved in connector
+# 0.1.6: out of /tmp (world-writable, and emptied on boot — both had bitten it) and into
+# $XDG_RUNTIME_DIR or $HOME/.local/state, with the old path kept only as a last resort. This script
+# hardcoded the old one, so the session was there and nobody was looking at it: "no tmux session on
+# the machine", about a machine that had one.
+#
+# Asked rather than assumed, in the connector's own order of preference, and the first that exists
+# wins — which also means this keeps working across the crossing, when a machine updated in place is
+# still using the socket the previous build opened.
+SOCK="$(docker exec -u "$MACHINE_USER" "$MACHINE_CT" sh -c '
+  for d in "${XDG_RUNTIME_DIR:-}/microteams" "$HOME/.local/state/microteams" "/tmp/microteams-$(id -u)"; do
+    [ -S "$d/t.sock" ] && { printf %s "$d/t.sock"; exit 0; }
+  done
+  printf %s "$HOME/.local/state/microteams/t.sock"
+' | tr -d '\r')"
+printf 'the machine keeps its tmux at %s\n' "$SOCK"
 mtmux() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" \
   "/home/$MACHINE_USER/.config/microteams/bin/tmux" -S "$SOCK" "$@"; }
 for _ in $(seq 1 30); do
