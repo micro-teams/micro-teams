@@ -27,6 +27,7 @@ import (
 	multipath "github.com/micro-teams/multipath/go"
 
 	"github.com/micro-teams/micro-connector/cli/protocol"
+	"github.com/micro-teams/microteams/cli/internal/lines"
 	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
@@ -40,7 +41,7 @@ func origin(t *testing.T, addr string) string {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
-		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Router(multipath.DialLocal(addr), nil))
+		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Services{lines.AppService: multipath.DialService(addr)})
 	}()
 	return "http://" + ln.Addr().String()
 }

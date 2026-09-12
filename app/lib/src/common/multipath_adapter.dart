@@ -25,6 +25,17 @@ import 'package:multipath/multipath.dart' as mp;
 /// Lazily, on the first request that needs it: a client whose network is not up yet must still
 /// start, and an app that refused to run because it could not dial would have made the transport a
 /// prerequisite for having a user interface.
+/// The name every stream this product opens is addressed to.
+///
+/// A contract with the origin rather than a local choice: from 0.2.0-rc.1 a client names a SERVICE
+/// and the origin looks it up, so a name it does not know is refused outright. That makes a typo
+/// here total rather than partial, which is why it is written once and referred to.
+///
+/// One name for everything the app does over the wire: ordinary requests, responses that arrive
+/// gradually, and WebSockets. They are all bytes on a stream to the same HTTP stack, and splitting
+/// them would invent a distinction the application does not have.
+const String appService = 'app';
+
 class Substrate {
   Substrate({required this.lines, mp.Client Function(List<String>)? dial})
     : _dial = dial;
@@ -126,6 +137,7 @@ class MultiPathAdapter implements HttpClientAdapter {
     final body = requestStream == null ? null : await _collect(requestStream);
 
     final response = await client.roundTrip(
+      appService,
       mp.MultipathRequest(
         options.method.toUpperCase(),
         options.uri,

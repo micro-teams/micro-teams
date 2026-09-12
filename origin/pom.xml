@@ -37,7 +37,7 @@
         <dependency>
             <groupId>app.microteams</groupId>
             <artifactId>multipath</artifactId>
-            <version>0.2.0</version>
+            <version>0.2.0-rc.1</version>
         </dependency>
     </dependencies>
 

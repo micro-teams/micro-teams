@@ -135,7 +135,7 @@ func (h *Host) dialSubstrate(ctx context.Context, _, _ string) (net.Conn, error)
 	defer h.mpMu.Unlock()
 
 	if live := h.mp.Load(); live != nil {
-		if st, err := live.OpenNormal(); err == nil {
+		if st, err := live.Open(lines.AppService, nil); err == nil {
 			return muxConn{st}, nil
 		}
 		live.Close()
@@ -157,7 +157,7 @@ func (h *Host) dialSubstrate(ctx context.Context, _, _ string) (net.Conn, error)
 	if err != nil {
 		return nil, err
 	}
-	st, err := client.OpenNormal()
+	st, err := client.Open(lines.AppService, nil)
 	if err != nil {
 		client.Close()
 		return nil, err

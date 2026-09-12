@@ -78,7 +78,7 @@ func startOrigin(t *testing.T, addr string) string {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
-		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Router(multipath.DialLocal(addr), nil))
+		_ = multipath.Serve(ln, multipath.ServerOptions{}, multipath.Services{AppService: multipath.DialService(addr)})
 	}()
 	return "http://" + ln.Addr().String()
 }

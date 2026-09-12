@@ -146,6 +146,17 @@ func Refresh(ctx context.Context, apiBase, cfgPath string) error {
 	return nil
 }
 
+// AppService is the name every stream this product opens is addressed to.
+//
+// A contract with the origin rather than a local choice: from 0.2.0-rc.1 a client names a SERVICE
+// and the origin looks it up, so a name it does not know is refused outright — which makes a typo
+// here total rather than partial, and is exactly why it is written once and referred to.
+//
+// One name for everything the product does over the wire: ordinary requests, responses that arrive
+// gradually, and WebSockets. They are all bytes on a stream to the same HTTP stack, and splitting
+// them would invent a distinction the application does not have.
+const AppService = "app"
+
 // Transport is the http.RoundTripper a short command sends over: one redundant stream to the origin
 // carried across every cached line, brought up on the first request and torn down when the command
 // exits.
@@ -186,5 +197,5 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	client := t.client
 	t.mu.Unlock()
-	return client.RoundTrip(req)
+	return client.RoundTrip(AppService, nil, req)
 }

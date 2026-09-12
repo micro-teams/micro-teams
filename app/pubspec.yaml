@@ -37,13 +37,11 @@ dependencies:
   # exchange a mux stream on top. Pinned to an exact commit rather than a branch — a ref that moves
   # means two people building the same commit can get different code.
   #
-  # A commit rather than v0.2.0 only because that tag does not exist yet; it becomes the tag the day
-  # it is cut. This is what the field was always for.
   multipath:
     git:
       url: https://github.com/micro-teams/multipath.git
       path: dart
-      ref: 375c33f
+      ref: v0.2.0-rc.1
   web_socket_channel: ^3.0.1
 
   # The live terminal. Proven against a real device before any of this was written — see
