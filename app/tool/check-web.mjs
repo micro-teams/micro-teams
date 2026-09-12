@@ -42,7 +42,7 @@ page.on("console", (m) => {
 // happens during the load: by the time a test could attach a listener, the launcher is done.
 await page.addInitScript(() => {
   window.__mpProgress = [];
-  window.addEventListener("multipath:progress", (e) => window.__mpProgress.push(e.detail.percent));
+  window.addEventListener("mt:progress", (e) => window.__mpProgress.push(e.detail.percent));
 });
 
 // Every request this page makes, so the check below can say where the bytes came from.
@@ -55,8 +55,8 @@ await page.goto(BASE + "/", { waitUntil: "load" });
 // cannot be spread across lines, so it is small and does one job. Flutter's document is kept as
 // /app.html.
 const launcher = await page.evaluate(() => ({
-  splash: Boolean(document.querySelector("[data-multipath-progress]")),
-  config: Boolean(window.__multipath__ && window.__multipath__.registry),
+  splash: Boolean(document.querySelector("[data-mt-progress]")),
+  config: Boolean(window.__mt__ && window.__mt__.registry),
 }));
 check("the launcher is what the browser was served", launcher.splash && launcher.config);
 
@@ -464,7 +464,7 @@ if (process.env.CHECK_WEB_DEPLOY_BASE && process.env.CHECK_WEB_DEPLOY_DIR) {
 
   // Not a detail: the caches that were filled by the previous build are gone, rather than being
   // mixed with the new code.
-  const held = await deployPage.evaluate(() => localStorage.getItem("multipath:version"));
+  const held = await deployPage.evaluate(() => localStorage.getItem("mt:version"));
   const servedNow = await deployPage.evaluate(() =>
     fetch("/version").then((r) => r.text()).then((t) => t.trim()),
   );

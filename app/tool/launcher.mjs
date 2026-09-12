@@ -55,7 +55,7 @@ async function exists(file) {
  */
 const SPLASH = `<div id="mt-splash">
   <div id="mt-splash-name">MicroTeams</div>
-  <div id="mt-splash-percent" data-multipath-progress>0%</div>
+  <div id="mt-splash-percent" data-mt-progress>0%</div>
   <div id="mt-splash-slow" hidden>
     <div>This is taking longer than it should.</div>
     <div id="mt-splash-ways">
@@ -81,7 +81,7 @@ const SPLASH = `<div id="mt-splash">
     if (slow) slow.hidden = false;
     console.error(
       "mt: no first frame after " + after + "ms — the app did not start. Loaded: " +
-        (document.querySelector("[data-multipath-progress]") || {}).textContent
+        (document.querySelector("[data-mt-progress]") || {}).textContent
     );
   }, after);
 })();
@@ -100,7 +100,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #060606; }
 #mt-splash-slow { color: #8a8a8a; font-size: 13px; text-align: center; line-height: 1.8; }
 #mt-splash-slow a { color: #f5f5f5; }
 html[data-mt-ready="1"] #mt-splash { opacity: 0; pointer-events: none; }
-[data-multipath-error] { position: fixed; inset: auto 0 24px; text-align: center;
+[data-mt-error] { position: fixed; inset: auto 0 24px; text-align: center;
   color: #f5f5f5; font: 400 14px system-ui, sans-serif; z-index: 2147483647; }
 </style>`;
 
