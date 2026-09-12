@@ -56,7 +56,8 @@ class TerminalScreen extends ConsumerStatefulWidget {
   ConsumerState<TerminalScreen> createState() => _TerminalScreenState();
 }
 
-class _TerminalScreenState extends ConsumerState<TerminalScreen> {
+class _TerminalScreenState extends ConsumerState<TerminalScreen>
+    with WidgetsBindingObserver {
   /// A deliberately tiny scrollback. tmux owns the history — a large local buffer would be a
   /// second, disagreeing copy of it, and scrolling it would show the reader a stale fragment while
   /// the scroll controls are busy paging the real thing.
@@ -83,6 +84,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _terminal.onOutput = (data) => _link?.sendKeys(data);
     _terminal.onResize = (cols, rows, _, _) =>
@@ -179,7 +181,24 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // A live screen held open across a backgrounding is exactly the case app.dart's own resume
+    // handler cannot reach: it drops the substrate's mp.Client so the NEXT dial is fresh, but this
+    // widget's [_link] already exists, built over whatever the substrate handed out before — and a
+    // socket over an abandoned mp.Client does not fire onClosed on its own. There is nothing to
+    // read from it and nothing to notice it died, so without this the pane would sit there, silent,
+    // forever, which is precisely "终端打不开" if the user happened to be looking at one when the
+    // app went to the background. Re-dialling unconditionally on resume costs one reconnect on the
+    // common "glanced at a notification and came right back" case, same trade-off app.dart makes
+    // for the substrate itself.
+    if (state == AppLifecycleState.resumed && mounted) {
+      _dial();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _retry?.cancel();
     _stable?.cancel();
     _link?.close();

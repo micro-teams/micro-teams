@@ -81,9 +81,23 @@ class UpdatesSocket {
   void resumed() {
     if (_closed) return;
     _store.refocused();
-    // A socket that was suspended may be dead without knowing it. Prod it now rather than waiting
-    // out the silence window, because the human is looking at the screen right now.
-    _heartbeat();
+    // A socket that was suspended may be dead without knowing it — and, when this socket is
+    // riding the substrate, resuming is also the moment app.dart drops the substrate's mp.Client
+    // (see Substrate.reset in app.dart), which abandons whatever this socket's own channel was
+    // built on with no error ever delivered to it. Waiting out the silence window, as a plain
+    // heartbeat does, is right for a socket that goes quietly stale on its own — but it is the
+    // wrong answer here: a write to an abandoned multipath stream can succeed locally (it is
+    // buffered on a mux stream nobody is reading any more) without ever raising _lastHeard's
+    // silence past 45s, which would leave exactly the dead-substrate case broken indefinitely.
+    // So this redials immediately rather than merely pinging and hoping a failure surfaces.
+    _stable?.cancel();
+    _retry?.cancel();
+    final old = _channel;
+    _channel = null;
+    unawaited(_messages?.cancel());
+    if (old != null) unawaited(old.sink.close());
+    _store.disconnected();
+    _dial();
   }
 
   void close() {
