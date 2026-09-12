@@ -1,9 +1,14 @@
 /// What the transport is doing, wherever it happens to live.
 ///
-/// Two answers to one question, and the split is not an implementation detail: on a native client the
-/// substrate is in this isolate and can simply be asked, while on the web it is in the service
-/// worker, in front of the whole document, and the page cannot see it at all. So the worker answers
-/// for itself at /__mt/transport (see web/sw.js) and this hides which of the two happened.
+/// Two answers to one question, and the split is not "web or not". It is WHERE THE TRANSPORT IS: a
+/// service worker that is controlling this page is holding it, and the page cannot see inside — so
+/// the worker answers for itself at /__mt/transport (see web/sw.js). With no worker in front, and on
+/// every native client, the substrate is in this isolate and can simply be asked.
+///
+/// Asking the wrong one is not a small mistake: a browser with no worker (a first visit, a driven
+/// test that serves none) has a perfectly good transport in this isolate, and a panel that asked the
+/// worker would report nothing at all and read as "no redundancy". That is precisely what the
+/// journey caught.
 ///
 /// It exists because a redundant transport hides line failure from everything above it — that is its
 /// purpose — so unless something asks out loud, a deployment can lose every path but one and nobody
@@ -14,6 +19,8 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+
+import 'worker_routes.dart';
 
 import 'multipath_adapter.dart';
 
@@ -45,7 +52,7 @@ class LineReport {
 /// useless exactly when it is needed. An empty list means "nothing is carrying anything", which is
 /// itself an answer and is rendered as one.
 Future<List<LineReport>> transportStats(Substrate substrate) async {
-  if (!kIsWeb) {
+  if (!aWorkerCarriesRequests) {
     return [
       for (final stat in substrate.stats())
         LineReport(
