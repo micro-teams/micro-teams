@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +35,7 @@ import (
 // request fails. This entry resolves to whatever host the request already carried, so a connector
 // with no cache behaves precisely as it did before.
 var sameOrigin = multipath.Registry{
-	Lines: []multipath.Line{{ID: "origin", URL: "", Transport: "wss", Weight: 100}},
+	Lines: []multipath.Line{{ID: "origin", URL: "", Transport: "", Weight: 100}},
 }
 
 // Path is where the registry is cached, beside the config file.
@@ -73,13 +74,31 @@ func For(cfgPath, apiBase string) []multipath.Line {
 		// are undialable now. Dropping them costs a deployment its explicit choice of
 		// encapsulation, which is recoverable; keeping them costs it every line, silently.
 		switch line.Transport {
-		case "", "ws", "wss", "tcp", "tls":
+		case "ws", "wss", "tcp", "tls":
 		default:
-			line.Transport = ""
+			// Unset, or a label from before 0.2.0 ("same-origin", "cloudflare", "direct" — all
+			// perfectly good once, all undialable now). Either way the answer is a WebSocket upgrade
+			// through the proxy every deployment has in front of it: wss where that proxy speaks
+			// TLS, ws where it does not.
+			//
+			// Inferred rather than left empty, because empty means "let the URL's scheme decide",
+			// and that decides RAW TLS on 443 — a TLS connection to a port answered by nginx, which
+			// speaks HTTP there. And inferred rather than fixed at wss, because a plaintext
+			// deployment handed wss has every client fail with "first record does not look like a
+			// TLS handshake". That is not hypothetical: it is what the connector e2e did.
+			line.Transport = socketScheme(line.URL)
 		}
 		out = append(out, line)
 	}
 	return out
+}
+
+// socketScheme is "wss" for an https origin and "ws" for anything else.
+func socketScheme(origin string) string {
+	if strings.HasPrefix(strings.ToLower(origin), "https://") {
+		return "wss"
+	}
+	return "ws"
 }
 
 func originOf(apiBase string) string {

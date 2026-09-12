@@ -37,12 +37,17 @@ func TestNoCacheMeansOneSameOriginLine(t *testing.T) {
 	if len(got) != 1 || got[0].URL != "https://control.example" {
 		t.Fatalf("expected a single resolved same-origin line, got %+v", got)
 	}
-	// And wss, not inferred from the scheme. Inference would give raw TLS on 443, which is a TLS
-	// connection to a port answered by nginx — nginx speaks HTTP there, so the link would be
-	// refused by every real deployment. Every deployment has a proxy in front, so the fallback has
-	// to name the encapsulation that goes through one.
+	// And a WebSocket through the proxy, at the scheme this machine actually reaches the server on.
+	// Not raw TLS (the port is answered by nginx, which speaks HTTP there), and not a fixed "wss"
+	// either: a plaintext deployment handed wss has every client fail to dial with "first record
+	// does not look like a TLS handshake" — which is how this was found, on the connector e2e.
 	if got[0].Transport != "wss" {
-		t.Errorf("the fallback line must be dialled as a WebSocket through the proxy, got %q", got[0].Transport)
+		t.Errorf("an https server must be reached over wss, got %q", got[0].Transport)
+	}
+
+	plain := For(cfgPath(t), "http://control.example/mt")
+	if len(plain) != 1 || plain[0].Transport != "ws" {
+		t.Errorf("a plaintext server must be reached over ws, got %+v", plain)
 	}
 }
 
@@ -50,21 +55,25 @@ func TestNoCacheMeansOneSameOriginLine(t *testing.T) {
 //
 // This field was free-form and unread until the substrate made it name the encapsulation, so caches
 // and operator configs in the wild carry "same-origin", "cloudflare", "direct". An unknown label is
-// refused outright and a line that cannot be dialled is simply one the client does not have — so the
-// machine would fall back to nothing at all, with no error to show for it. Dropping the label leaves
-// the URL's scheme to decide, which is recoverable; keeping it is not.
-func TestALabelFromBeforeTheSubstrateIsDroppedRatherThanFatal(t *testing.T) {
+// refused outright, and a line that cannot be dialled is simply one the client does not have — so
+// the machine would end up with nothing at all and no error to show for it.
+//
+// Replaced rather than merely cleared: an empty transport means "let the URL's scheme decide", and
+// that decides RAW TLS for an https line — a TLS connection to a port answered by nginx, which
+// speaks HTTP there. What every deployment actually wants is a WebSocket upgrade through its proxy.
+func TestALabelFromBeforeTheSubstrateBecomesOneThatCanBeDialled(t *testing.T) {
 	path := cfgPath(t)
 	writeCache(t, path, multipath.Registry{Lines: []multipath.Line{
 		{ID: "cf", URL: "https://cf.example", Transport: "cloudflare"},
+		{ID: "plain", URL: "http://plain.example", Transport: "direct"},
 	}})
 
 	got := For(path, "https://control.example/mt")
-	if len(got) != 1 {
-		t.Fatalf("the line was thrown away entirely: %+v", got)
+	if len(got) != 2 {
+		t.Fatalf("a line was thrown away entirely: %+v", got)
 	}
-	if got[0].Transport != "" {
-		t.Errorf("an undialable label survived: %q", got[0].Transport)
+	if got[0].Transport != "wss" || got[1].Transport != "ws" {
+		t.Errorf("undialable labels were not replaced with the scheme's own: %+v", got)
 	}
 }
 
