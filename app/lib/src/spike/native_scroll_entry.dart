@@ -8,26 +8,28 @@
 ///
 /// Two things here are load-bearing and easy to get wrong:
 ///
-///   * `@pragma('vm:entry-point')` on [spikeNativeScrollMain]. Without it a `--release` build tree-
-///     shakes the function away — and the failure is invisible until somebody installs the release
-///     APK, because every debug build works fine. The APK the product owner downloads from CI IS a
-///     release build (`flutter build apk --release`), so this annotation is the difference between
-///     the experiment existing and a blank screen.
+///   * The entrypoint the engine is told to run is `spikeNativeScrollMain` in `lib/main.dart`, NOT
+///     a function in this file, and it carries `@pragma('vm:entry-point')` there. Two separate
+///     release-only traps live here: without the pragma the function is tree-shaken away, and named
+///     by a non-main library URI it resolves to nothing at all in AOT. Both look identical from a
+///     phone — a blank FlutterView, no error — and both work perfectly in every debug build.
 ///   * NO `ListView`, NO scroll view, NO viewport. A `Column` that simply IS three screens tall,
 ///     clipped by an `OverflowBox` so that overflowing the bottom is a non-event rather than a
 ///     yellow-and-black error stripe. Every row is laid out and painted once, up front. Putting any
 ///     lazy list here would silently turn variant B back into variant A.
 ///
-/// Kotlin names this function by library URI, so MOVING OR RENAMING THIS FILE breaks variant B with
-/// no compile error — see `SpikeNativeScrollActivity.kt`.
+/// Kotlin asks for the entrypoint BY NAME ONLY, against the default library — see
+/// `SpikeNativeScrollActivity.kt` and `spikeNativeScrollMain` in `lib/main.dart`.
 library;
 
 import 'package:flutter/material.dart';
 
 import 'fake_rows.dart';
 
-@pragma('vm:entry-point')
-void spikeNativeScrollMain() {
+/// Called by `spikeNativeScrollMain` in `lib/main.dart`, which is the name Kotlin actually asks the
+/// engine for. It lives in the default library rather than here because a secondary entrypoint
+/// named by a non-main library URI resolves to nothing in an AOT release build — see that function.
+void runSpikeNativeScroll() {
   runApp(const _SpikeTallSurface());
 }
 

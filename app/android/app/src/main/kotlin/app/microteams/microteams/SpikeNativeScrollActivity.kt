@@ -40,8 +40,9 @@ import io.flutter.embedding.engine.dart.DartExecutor
  *     This costs something — a TextureView-backed Flutter is somewhat slower to render than a
  *     SurfaceView-backed one — so variant B is competing with a handicap the production app does
  *     not have. That asymmetry is stated in the PR rather than buried here.
- *  2. The engine runs `spikeNativeScrollMain`, named by library URI plus function name. That URI is
- *     a STRING: renaming or moving the Dart file breaks this with no compile error anywhere.
+ *  2. The engine runs `spikeNativeScrollMain` BY NAME, against the default library — so that
+ *     function lives in lib/main.dart. Naming a non-main library URI instead is an AOT-only trap:
+ *     it works in debug and resolves to nothing in a release build, with no error anywhere.
  *  3. The Flutter side must be told the app is resumed, or the engine renders nothing at all. A
  *     FlutterActivity does that for you; a hand-built FlutterView does not.
  */
@@ -54,10 +55,14 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         super.onCreate(savedInstanceState)
 
         val engine = FlutterEngine(this)
+        // Named by FUNCTION ONLY, which resolves against the default library — lib/main.dart, where
+        // spikeNativeScrollMain therefore lives. The three-argument form that also names a library
+        // URI works in a debug build and resolves to nothing in an AOT release build, and the
+        // symptom of that is a blank FlutterView with no error in any log: exactly what the first
+        // build of this spike did on a real phone.
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint(
                 FlutterInjector.instance().flutterLoader().findAppBundlePath(),
-                "package:microteams/src/spike/native_scroll_entry.dart",
                 "spikeNativeScrollMain",
             ),
         )
@@ -84,7 +89,11 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         }
 
         val header = TextView(this).apply {
-            text = "B — native ScrollView over a 3-screen-tall FlutterView (texture mode)"
+            // Starts as a QUESTION, not a label. A blank variant B has two completely different
+            // causes — the Dart entrypoint never ran, or it ran and the texture is not reaching the
+            // screen — and from a phone with no adb attached they look identical. The first-frame
+            // listener below turns this line into the answer.
+            text = "B — waiting for the first Flutter frame…"
             setPadding(24, 24, 24, 24)
             setBackgroundColor(0xFF202020.toInt())
             setTextColor(0xFFFFFFFF.toInt())
@@ -148,6 +157,32 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         val meter = NativeFrameMeter(readout, refreshHz())
         reset.setOnClickListener { meter.reset() }
         this.meter = meter
+
+        // Said out loud on screen, because the alternative is a white rectangle that means three
+        // different things. If this fires, Dart ran and painted and anything still wrong is about
+        // the texture reaching the ScrollView; if it never fires, the entrypoint is the suspect and
+        // nothing about the layout matters yet.
+        view.addOnFirstFrameRenderedListener(
+            object : io.flutter.embedding.engine.renderer.FlutterUiDisplayListener {
+                override fun onFlutterUiDisplayed() {
+                    header.text = "B — native ScrollView over a 3-screen-tall FlutterView (texture mode)"
+                }
+
+                override fun onFlutterUiNoLongerDisplayed() = Unit
+            },
+        )
+        // A deadline, so "never" is distinguishable from "slow". Three seconds is far longer than a
+        // second engine needs to paint its first frame on any phone this app runs on.
+        header.postDelayed(
+            {
+                if (header.text.toString().startsWith("B — waiting")) {
+                    header.text =
+                        "B — NO Flutter frame after 3s: the second Dart entrypoint never painted"
+                    header.setBackgroundColor(0xFF7F1D1D.toInt())
+                }
+            },
+            3000L,
+        )
 
         view.attachToFlutterEngine(engine)
         // Without this the engine sits in "detached" and never produces a frame: the ScrollView

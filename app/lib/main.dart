@@ -19,6 +19,20 @@ import './src/common/prefs_store.dart';
 import './src/common/request_cache.dart';
 import './src/common/ready_signal.dart';
 import './src/common/url_strategy.dart';
+import './src/spike/native_scroll_entry.dart';
+
+/// DISPOSABLE SPIKE — variant B's entrypoint, and it lives HERE for one reason.
+///
+/// A second Dart entrypoint can be named to the engine either by function name alone, which
+/// resolves against the DEFAULT library (this file), or by library URI plus function name. Only the
+/// first is the well-trodden path: naming a non-main library works in a debug/JIT build and is
+/// exactly the kind of thing that silently resolves to nothing in an AOT release build — where the
+/// symptom is a blank FlutterView and no error anywhere, which is what the product owner saw.
+///
+/// So the function the engine asks for by name sits in the default library, and the actual widget
+/// it runs stays in `src/spike/`. Delete this together with the rest of the spike.
+@pragma('vm:entry-point')
+void spikeNativeScrollMain() => runSpikeNativeScroll();
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
