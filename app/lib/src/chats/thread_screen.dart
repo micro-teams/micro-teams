@@ -42,6 +42,7 @@ import 'package:mt_api/mt_api.dart';
 import '../providers.dart';
 import '../common/ui/avatar.dart';
 import 'chat_time.dart';
+import '../common/ui/scroll_tuning.dart';
 import '../common/ui/theme.dart';
 import 'outbox.dart';
 import 'thread_controller.dart';
@@ -291,6 +292,7 @@ class _MessageList extends StatelessWidget {
           child: ListView.builder(
             controller: scroll,
             reverse: true,
+            scrollCacheExtent: smoothCacheExtent,
             // The keyboard's bite, given back as room to scroll into. Holding the list still puts
             // the newest messages behind the keyboard, and without this there is nowhere for them
             // to come from: the list has exactly as much content as before and no more room, so

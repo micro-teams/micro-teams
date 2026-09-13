@@ -19,6 +19,7 @@ import 'package:mt_api/mt_api.dart';
 import '../providers.dart';
 import '../common/ui/avatar.dart';
 import 'chat_time.dart';
+import '../common/ui/scroll_tuning.dart';
 import '../common/ui/theme.dart';
 import 'chats_controller.dart';
 
@@ -133,6 +134,7 @@ class _List extends StatelessWidget {
       );
     }
     return ListView.builder(
+      scrollCacheExtent: smoothCacheExtent,
       itemCount: threads.length,
       itemBuilder: (context, index) => _ChatRow(
         // Keyed, so picking a conversation does not replace the row's element mid-ripple. Without

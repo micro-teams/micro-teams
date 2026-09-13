@@ -24,6 +24,7 @@ import 'docs_controller.dart';
 import 'markdown_view.dart';
 import '../common/ui/app_dialog.dart';
 import '../common/ui/menu.dart';
+import '../common/ui/scroll_tuning.dart';
 
 class DocsScreen extends ConsumerStatefulWidget {
   const DocsScreen({
@@ -179,6 +180,7 @@ class _TreePaneState extends ConsumerState<_TreePane> {
                 // same way; a plus in the title bar was ours, and it left the root as the one
                 // folder you could not point at.
                 return ListView.builder(
+                  scrollCacheExtent: smoothCacheExtent,
                   itemCount: rows.length + 1,
                   itemBuilder: (context, index) {
                     if (index == 0) {
