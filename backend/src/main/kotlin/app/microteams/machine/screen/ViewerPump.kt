@@ -25,10 +25,13 @@
  *               (a fresh tmux client paints the whole pane), so the picture comes back correct
  *               rather than subtly broken.
  *
- *               Caveat worth knowing: that reattach only repaints when the reconnecting viewer is
- *               the only one on the screen, because the hub subscribes on the first viewer alone.
- *               A second watcher still waits for the screen to change on its own. That is the same
- *               gap as the missing resync, and it is not fixed here.
+ *               Former caveat, now fixed (T-091): that reattach used to only repaint when the
+ *               reconnecting viewer was the only one on the screen, because the hub subscribed on
+ *               the first viewer alone — a second watcher just waited for the screen to change on
+ *               its own, sometimes indefinitely. MachineHub.attachViewer now sends screen.subscribe
+ *               for every viewer, and the machine (once running the matching micro-connector fix)
+ *               answers a subscribe on an already-attached screen with a synthesized snapshot
+ *               instead of silence.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>

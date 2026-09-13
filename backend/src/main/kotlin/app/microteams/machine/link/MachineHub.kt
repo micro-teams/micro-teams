@@ -546,7 +546,29 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
 
     // -- viewers (browser <-> machine screen) -------------------------------
 
-    /** Attach a browser viewer to a screen. The first viewer triggers a screen.subscribe. */
+    /**
+     * Attach a browser viewer to a screen. Every viewer — not just the first — triggers a
+     * screen.subscribe.
+     *
+     * The first viewer's subscribe makes the CLI do a real `tmux attach-session`, which tmux itself
+     * repaints in full on attach — nothing more was ever needed for it. A later viewer used to add
+     * itself to [HubScreen.viewers] (so it shares the running client's future deltas) and stop
+     * there, on the theory that the screen was "already subscribed". It was not: from that viewer's
+     * own point of view nothing had ever painted the screen it opened onto. Confirmed by packet
+     * capture and a live tmux session (T-091) — a second (or later) viewer joining a screen that
+     * already has a watcher saw a blank/stale screen until an unrelated future delta or resize
+     * happened to repaint over it, sometimes indefinitely.
+     *
+     * screen.subscribe is idempotent on a machine that already has a client attached to this sid —
+     * see this session's earlier fixes in [readoptScreen] and [respawnScreen], which already lean
+     * on sending it unconditionally after a session changes underneath existing viewers. As of the
+     * matching micro-connector fix, a machine that gets a screen.subscribe for a screen it already
+     * has a client on synthesizes a snapshot from the pane's current content instead of doing
+     * nothing, so this new every-viewer send now actually reaches somewhere useful. Before that
+     * connector fix ships, sending it here is still harmless (the old CLI's subscribeScreen bails
+     * out silently on an already-attached client, exactly as before) — this backend change and the
+     * connector one are independent to deploy, in either order.
+     */
     fun attachViewer(
         machineId: String,
         sid: String,
@@ -555,12 +577,9 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         rows: Int = 32,
     ) {
         val screen = requireScreen(machineId, sid)
-        val first = screen.viewers.isEmpty()
         screen.viewers.add(viewer)
-        if (first) {
-            machine(machineId)
-                .send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
-        }
+        machine(machineId)
+            .send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
     }
 
     fun detachViewer(machineId: String, sid: String, viewer: ViewerTransport) {
