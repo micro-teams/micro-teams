@@ -21,20 +21,24 @@ import './src/common/ready_signal.dart';
 import './src/common/url_strategy.dart';
 import './src/spike/native_scroll_entry.dart';
 
-/// DISPOSABLE SPIKE — variant B's entrypoint, and it lives HERE for one reason.
+/// DISPOSABLE SPIKE. The flag variant B's engine passes to [main] — it must match
+/// `SPIKE_ENTRY_ARG` in SpikeNativeScrollActivity.kt, which is a plain string on both sides.
 ///
-/// A second Dart entrypoint can be named to the engine either by function name alone, which
-/// resolves against the DEFAULT library (this file), or by library URI plus function name. Only the
-/// first is the well-trodden path: naming a non-main library works in a debug/JIT build and is
-/// exactly the kind of thing that silently resolves to nothing in an AOT release build — where the
-/// symptom is a blank FlutterView and no error anywhere, which is what the product owner saw.
-///
-/// So the function the engine asks for by name sits in the default library, and the actual widget
-/// it runs stays in `src/spike/`. Delete this together with the rest of the spike.
-@pragma('vm:entry-point')
-void spikeNativeScrollMain() => runSpikeNativeScroll();
+/// A separate Dart entrypoint would be the tidier shape, and it is not used here: two spellings of
+/// one were tried and BOTH produced a blank FlutterView on a real release build with nothing in any
+/// log. `main` is the one entrypoint an AOT build is certain to resolve, so variant B runs it and
+/// branches on an argument instead. Nothing about the experiment needed a second entrypoint.
+const String spikeNativeScrollArg = '--spike-native-scroll';
 
-Future<void> main() async {
+Future<void> main([List<String> args = const []]) async {
+  // DISPOSABLE SPIKE — before anything else, because none of the app's own boot applies to it: no
+  // caches, no session, no router. Delete with the rest of the spike.
+  if (args.contains(spikeNativeScrollArg)) {
+    WidgetsFlutterBinding.ensureInitialized();
+    runSpikeNativeScroll();
+    return;
+  }
+
   final binding = WidgetsFlutterBinding.ensureInitialized();
   // Before the router exists, so the first route is read from a real path rather than a hash.
   configureUrlStrategy();

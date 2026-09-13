@@ -40,12 +40,15 @@ import io.flutter.embedding.engine.dart.DartExecutor
  *     This costs something — a TextureView-backed Flutter is somewhat slower to render than a
  *     SurfaceView-backed one — so variant B is competing with a handicap the production app does
  *     not have. That asymmetry is stated in the PR rather than buried here.
- *  2. The engine runs `spikeNativeScrollMain` BY NAME, against the default library — so that
- *     function lives in lib/main.dart. Naming a non-main library URI instead is an AOT-only trap:
- *     it works in debug and resolves to nothing in a release build, with no error anywhere.
+ *  2. The engine runs `main` with an argument rather than a second entrypoint. Both secondary-
+ *     entrypoint spellings produced a blank view on a real release build with nothing in any log,
+ *     and `main` is the one name a release build certainly resolves — see the call site.
  *  3. The Flutter side must be told the app is resumed, or the engine renders nothing at all. A
  *     FlutterActivity does that for you; a hand-built FlutterView does not.
  */
+/** The flag `main` looks for in its own arguments to know it is variant B. Matches lib/main.dart. */
+const val SPIKE_ENTRY_ARG = "--spike-native-scroll"
+
 class SpikeNativeScrollActivity : android.app.Activity() {
     private var engine: FlutterEngine? = null
     private var flutterView: FlutterView? = null
@@ -55,16 +58,21 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         super.onCreate(savedInstanceState)
 
         val engine = FlutterEngine(this)
-        // Named by FUNCTION ONLY, which resolves against the default library — lib/main.dart, where
-        // spikeNativeScrollMain therefore lives. The three-argument form that also names a library
-        // URI works in a debug build and resolves to nothing in an AOT release build, and the
-        // symptom of that is a blank FlutterView with no error in any log: exactly what the first
-        // build of this spike did on a real phone.
+        // `main`, with an ARGUMENT — not a second entrypoint of its own.
+        //
+        // Two earlier spellings both produced a blank FlutterView on a release build with nothing
+        // in any log: naming a library URI plus a function, and naming a bare secondary function.
+        // Whatever the reason, a secondary entrypoint is the part of this that is hard to verify
+        // from here and easy to get silently wrong in AOT — so it is gone. `main` is the one
+        // entrypoint a release build is guaranteed to resolve, and Dart reads the flag out of its
+        // own arguments to decide which app to run (see lib/main.dart). Nothing about the
+        // hypothesis being tested needs a separate entrypoint; that was incidental.
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint(
                 FlutterInjector.instance().flutterLoader().findAppBundlePath(),
-                "spikeNativeScrollMain",
+                "main",
             ),
+            listOf(SPIKE_ENTRY_ARG),
         )
         this.engine = engine
 
