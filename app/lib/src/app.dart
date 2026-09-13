@@ -205,7 +205,13 @@ GoRouter _buildRouter(WidgetRef ref) {
 
       // Both screens that exist before a session. Bouncing someone off /register back to /login
       // for not being signed in is how registration became unreachable.
-      const anonymous = {'/login', '/register'};
+      //
+      // '/__scroll' is here for the DISPOSABLE SPIKE only, and goes when it does. Its one entry
+      // point is the settings dialog on the login screen — deliberately, so the experiment can be
+      // run on a freshly installed APK with no account — and without this line that button did
+      // exactly nothing visible: the dialog closed and this gate immediately sent the tap back to
+      // /login, which from a phone looks like a dead button rather than a redirect.
+      const anonymous = {'/login', '/register', '/__scroll'};
       final atAnonymous = anonymous.contains(state.matchedLocation);
       if (!signedIn) return atAnonymous ? null : '/login';
       if (atAnonymous) return '/chats';
