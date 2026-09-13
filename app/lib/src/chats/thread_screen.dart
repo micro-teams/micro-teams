@@ -407,16 +407,25 @@ class _KeepsItsHeightState extends State<_KeepsItsHeight> {
         if (hidden != _hidden) {
           final added = hidden - _hidden;
           _hidden = hidden;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || !widget.scroll.hasClients) return;
+          // Corrected NOW, in this same build, not a frame later. A soft keyboard does not open in
+          // one jump: the OS animates `inset` over many frames, so `build` re-runs — and `hidden`
+          // changes again — on every one of them. `addPostFrameCallback` used to apply this
+          // correction one frame after the layout that already used the new `hidden` value had
+          // painted, so every one of those frames flashed by uncorrected before catching up on the
+          // next — a jittery, one-frame-late chase that nets out to zero but is plainly visible
+          // while the keyboard is still rising or falling. `correctPixels` is the framework's own
+          // tool for this: it changes `pixels` without notifying listeners or scheduling a frame, so
+          // the [ListView] below lays out — later in this very frame — against the corrected
+          // position and nothing is ever painted at the uncorrected one.
+          if (widget.scroll.hasClients) {
             final position = widget.scroll.position;
-            widget.scroll.jumpTo(
+            position.correctPixels(
               (position.pixels + added).clamp(
                 position.minScrollExtent,
                 position.maxScrollExtent,
               ),
             );
-          });
+          }
         }
 
         return ClipRect(
