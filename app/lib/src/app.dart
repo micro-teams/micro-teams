@@ -112,6 +112,26 @@ class _MicroTeamsAppState extends ConsumerState<MicroTeamsApp>
     // the backstop that matters most: the OS suspends the process without telling anyone, and a
     // socket that was asleep cannot know what it missed.
     if (state == AppLifecycleState.resumed) {
+      // The substrate's mp.Client is the same kind of asleep-and-doesn't-know-it. Its own
+      // redundant transport DOES self-heal a dead line on its own — a periodic ping plus a
+      // deadAfter timeout that reconnects without any app-side help — but that healing is driven
+      // by a Dart Timer, and a backgrounded process's timers are exactly what the OS is free to
+      // freeze rather than merely slow: while frozen nothing reconnects, and a half-open TCP
+      // socket (the network changed, or a NAT/middlebox dropped the mapping, while backgrounded)
+      // does not error on write — it just goes silent — so there is nothing to notice until a
+      // timer fires again. `clientOrStartDialling()`/`live` keep handing out this same client
+      // forever regardless, since nothing besides the one-time startup registry fetch ever called
+      // reset() on it. Dropping it here means the very next request or socket-open dials fresh
+      // instead of reusing transport that may be silently dead.
+      //
+      // This is unconditional rather than "only if actually dead": mp.Client exposes stats() but
+      // nothing cheaper than that, and stats() cannot tell a line that is genuinely up from one
+      // that is up in the redundant stream's bookkeeping but silently dead on the wire — that
+      // distinction is exactly the failure mode this exists to cover. The cost of resetting a
+      // substrate that was actually fine (a quick app-switch and back) is one redundant dial the
+      // next request pays for by briefly going out unmultiplexed while it completes, which is far
+      // cheaper than the alternative of staying dead until the process is killed and restarted.
+      ref.read(substrateProvider).reset();
       ref.read(updatesSocketProvider)?.resumed();
     }
   }

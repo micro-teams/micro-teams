@@ -79,4 +79,39 @@ void main() {
       );
     },
   );
+
+  test('resumed() redials immediately rather than waiting out the silence '
+      'window', () {
+    final store = UpdatesStore();
+    var dials = 0;
+    final sockets = <_NeverOpens>[];
+    final socket = UpdatesSocket(
+      store: store,
+      url: () => 'ws://line.test/mt/updates',
+      connect: (_) {
+        dials++;
+        final made = _NeverOpens();
+        sockets.add(made);
+        return made;
+      },
+    );
+
+    socket.start();
+    addTearDown(socket.close);
+    expect(dials, 1, reason: 'the initial dial from start()');
+
+    // The channel is still open by every signal this class can see — no onDone, no onError, and
+    // well inside the 45s silence window a plain heartbeat would wait out. This is exactly the
+    // shape of a socket built over an mp.Client that app.dart has just dropped on resume: nothing
+    // about the abandoned channel itself ever says it died.
+    socket.resumed();
+
+    expect(
+      dials,
+      2,
+      reason:
+          'resume must redial on the spot, not rely on silence eventually '
+          'accumulating past 45s',
+    );
+  });
 }
