@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../build_info.dart';
 import '../../providers.dart';
@@ -80,6 +81,19 @@ class _SettingsState extends ConsumerState<_Settings> {
         ),
       ),
       actions: [
+        // DISPOSABLE SPIKE — the only way onto /__scroll from a phone. On the web that route is
+        // reachable by typing it, which is the whole premise of an unlinked dev route; an installed
+        // Android build has no address bar, so without a button here the experiment cannot be run
+        // on the devices it exists to measure. Here rather than anywhere prettier because this
+        // dialog opens from the LOGIN screen: it is reachable on a fresh install, before an account
+        // exists. Delete with the rest of the spike — see lib/src/spike/.
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            GoRouter.of(context).go('/__scroll');
+          },
+          child: const Text('scroll spike'),
+        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('cancel'),
