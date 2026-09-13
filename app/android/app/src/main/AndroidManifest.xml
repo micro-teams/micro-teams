@@ -33,6 +33,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!--
+            DISPOSABLE SPIKE. Variant B of the "should Android own the scroll gesture?" experiment,
+            reached only from the unlinked /__scroll dev route. Not exported: nothing outside this
+            app has any business launching it. Delete this block together with
+            SpikeNativeScrollActivity.kt and app/lib/src/spike/ once the question is answered.
+        -->
+        <activity
+            android:name=".SpikeNativeScrollActivity"
+            android:exported="false"
+            android:theme="@style/NormalTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

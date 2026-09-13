@@ -34,6 +34,7 @@ import 'teams/teams_screen.dart';
 import 'terminal/scene.dart';
 import 'common/lines.dart';
 import 'common/lines_screen.dart';
+import 'spike/scroll_spike_screen.dart';
 import 'common/ui/avatar.dart';
 import 'common/ui/destination_button.dart';
 import 'common/ui/app_dialog.dart';
@@ -373,6 +374,11 @@ GoRouter _buildRouter(WidgetRef ref) {
       // Nothing links here. It is for the moment somebody asks "is it the network?" — see
       // common/lines_screen.dart.
       GoRoute(path: '/__lines', pageBuilder: _page(const LinesScreen())),
+      // DISPOSABLE SPIKE, same unlinked-route precedent. Two ways to scroll the same fake list,
+      // each with its own frame counter, so "is native-owned scrolling meaningfully smoother on a
+      // cheap phone" gets a number instead of an opinion. Delete this line and lib/src/spike/
+      // together once that is answered — see spike/scroll_spike_screen.dart.
+      GoRoute(path: '/__scroll', pageBuilder: _page(const ScrollSpikeScreen())),
       // Where `microteams link auto-connect` sends a human. Outside the branches: it is not a
       // section, it is a thing you were sent to do once, and it leaves for /agents when done.
       GoRoute(
