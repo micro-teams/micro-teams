@@ -76,7 +76,8 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         )
         this.engine = engine
 
-        val view = FlutterView(this, FlutterTextureView(this))
+        val texture = FlutterTextureView(this)
+        val view = FlutterView(this, texture)
         this.flutterView = view
 
         // Three screens tall. Not "very tall": the point is a surface Flutter can realistically
@@ -84,6 +85,23 @@ class SpikeNativeScrollActivity : android.app.Activity() {
         // instead of the hypothesis.
         val screenHeight = resources.displayMetrics.heightPixels
         val surfaceHeight = screenHeight * 3
+
+        // The height that actually takes effect, and the LayoutParams below are NOT it.
+        //
+        // ScrollView measures its child with an UNSPECIFIED height spec on purpose — the whole
+        // point of it is that the child says how tall it wants to be — so the explicit height in
+        // the child's LayoutParams is simply ignored. A FlutterView is a FrameLayout with no
+        // Android children, so asked "how tall do you want to be?" it answers zero, and the result
+        // was `FlutterView{0,0-1080,0}` in `dumpsys activity top`, `FlutterRenderer: Height is
+        // zero` in logcat, and a blank screen with no error. What a view answers under UNSPECIFIED
+        // is its suggested minimum, so the minimum is where the height has to be said.
+        //
+        // BOTH of them. Setting it only on the FlutterView got that view to 1080x6216 and left the
+        // FlutterTextureView inside it at 1080x0 — the UNSPECIFIED spec cascades down, so the child
+        // answers zero for exactly the same reason its parent did, and the surface Flutter actually
+        // renders into is the child's.
+        view.minimumHeight = surfaceHeight
+        texture.minimumHeight = surfaceHeight
 
         val scroller = ScrollView(this).apply {
             isFillViewport = false
