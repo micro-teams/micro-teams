@@ -393,6 +393,19 @@ void main() {
     unawaited(_secondViewerThroughRestart(tester, sid));
     await note('RESTART_BACKEND_NOW');
     await tap(tester, find.byTooltip('close'), what: 'closing the terminal');
+    await note('closed the terminal right after the restart note');
+
+    // The detach that might trigger T-092 already happened on the tap above — nothing below changes
+    // that. But two CI runs of an earlier version of this step (with this same immediate close) went
+    // red on an UNRELATED timeout: the backend restart takes far longer to actually finish booting
+    // (Spring context + the websocket broker) than the "restarted" note back from `docker compose
+    // restart` implies, and the very next UI action after the close — asking to remove the agent from
+    // the conversation — depends on a round trip through that same machine link. Driving straight into
+    // that while the backend is still mid-boot just stalls the removal request with nothing to show
+    // for it, which says nothing about T-092 either way. So: give the backend a real chance to finish
+    // coming up before asking the app to do anything else that depends on it, while leaving the close
+    // above untouched.
+    await Future<void>.delayed(const Duration(seconds: 20));
 
     // Everything from here on is a real round trip through a backend that may only just have come
     // back, so it gets more than the default 60s — but not so much that it defeats the point above:

@@ -119,8 +119,15 @@ trace() {
   # useful: this script's own trap tears the stack down on the way out, so by the time that step
   # runs there is no container left to ask. Whatever the backend said has to be taken here.
   if docker ps --format '{{.Names}}' | grep -q "^${PROJECT}-backend"; then
-    printf '\n--- what the backend said ---\n'
-    (cd "$BUNDLE" && docker compose -p "$PROJECT" logs --no-color --tail 60 backend 2>/dev/null) ||
+    # A restart mid-journey alone reprints ~150 lines of Spring Data boilerplate on the way back up,
+    # which used to push the actual failure clean off the end of a 60-line tail. Grep the FULL log
+    # for anything that looks like a crash first — that is what T-092 chasing actually needs to see
+    # — then still tail a wider window for general context.
+    printf '\n--- anything that looked like an exception, anywhere in the backend log ---\n'
+    (cd "$BUNDLE" && docker compose -p "$PROJECT" logs --no-color backend 2>/dev/null) |
+      grep -iE 'Exception|IllegalState|detachViewer|ERROR' || echo '(none)'
+    printf '\n--- what the backend said (last 400 lines) ---\n'
+    (cd "$BUNDLE" && docker compose -p "$PROJECT" logs --no-color --tail 400 backend 2>/dev/null) ||
       true
   fi
   printf '\n--- what the journey was doing ---\n'
