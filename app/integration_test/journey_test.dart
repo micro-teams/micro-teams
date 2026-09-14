@@ -376,16 +376,25 @@ void main() {
     );
 
     // And closing puts the terminal away without taking what was underneath with it.
+    //
+    // Every wait from here through the agent's removal still follows RESTART_BACKEND_NOW, so each
+    // one gets the same 2-minute margin as the first: a round trip through a backend that only just
+    // came back — its own boot, and this viewer's own sockets resyncing — can still be catching up
+    // for a while after the control link itself looks fine, and the default 60s cut two of these
+    // close before T-092 ever got a chance to reproduce or not.
+    const afterRestart = Duration(minutes: 2);
     await tap(tester, find.byTooltip('close'), what: 'closing the terminal');
     await waitUntilGone(
       tester,
       find.byTooltip('watching'),
       what: 'the terminal, put away',
+      limit: afterRestart,
     );
     await waitFor(
       tester,
       find.text(me),
       what: 'the roster underneath, still where it was',
+      limit: afterRestart,
     );
 
     // And taking somebody out: asked first, and then they are gone from the roster. (An owner
@@ -396,6 +405,7 @@ void main() {
       tester,
       find.textContaining('remove '),
       what: 'the question, before anybody is removed',
+      limit: afterRestart,
     );
     await tap(
       tester,
@@ -409,6 +419,7 @@ void main() {
       tester,
       removeButton,
       what: 'the agent, out of the conversation',
+      limit: afterRestart,
     );
 
     // --- and a document in the team's own tree -----------------------------------------------------
