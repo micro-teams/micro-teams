@@ -4,18 +4,32 @@ Four things ship from this repository, and each one has its own conventions in i
 
 | where | what it is | its own notes |
 |---|---|---|
-| `app/` | the client, Flutter — web, Android, and the installers built from the same source | — |
+| `app/` | the client, Compose Multiplatform (Kotlin) — web (wasmJs) and Android from the same source | — |
 | `backend/` | Kotlin / Spring Boot, behind an OpenAPI contract at `MicroTeams-API.yml` | `backend/CLAUDE.md` |
 | `cli/` | the connector a customer installs on their own machine, Go | `cli/CLAUDE.md` |
 | `applets/` | the applet runtime, TypeScript | — |
 
-Nothing here can be built or tested from the root. `app/` needs `bash tool/codegen.sh` first —
-`packages/mt_api` is generated from the contract and gitignored, so a fresh clone has no package to
-resolve against — then `flutter test`. `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
+The Flutter client this replaces is gone from the repository entirely, on purpose — nictheboy
+wants a clean history from the start of the rewrite, not a codebase still carrying what it is
+replacing. It is not preserved anywhere in this repo, not even read-only; do not go looking for it
+here.
+
+Nothing here can be built or tested from the root. `app/` is `./gradlew :composeApp:compileKotlinWasmJs`
+(web) and `./gradlew :composeApp:assembleDebug` (Android, needs an Android SDK — CI has one, a
+local machine may not). `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
 
 ## Which test to write
 
-**Prefer a step in the journey.** `app/integration_test/journey_test.dart` drives the real client
+**Prefer a step in the journey.** This principle predates the Compose rewrite and still holds. What
+it describes below — a real deployment, a real machine with the connector on it, a step added to
+prove a feature works once the whole thing is deployed — is being rebuilt for the new client as
+part of the rewrite itself, not held for later. Compose Multiplatform for web renders to a single
+`<canvas>`; driving it from outside the browser (Playwright or similar) means going through the
+accessibility DOM overlay Compose maintains alongside that canvas, not ordinary DOM queries —
+`Modifier.testTag(...)` becomes that overlay element's `id`.
+
+What follows was written for the Flutter client and is being ported concept-for-concept, not
+reinvented: `journey_test.dart` used to drive the real client
 against a real deployment: the bundle CI built, its own nginx, a machine with the connector on it,
 and the real Claude Code in front of a mock Anthropic API. A step added there is the only evidence
 that a feature *works once the whole thing is deployed* — which is the question a person actually

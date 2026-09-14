@@ -274,6 +274,52 @@ jobs:
           name: web-dist
           path: app/build/web
 
+  # The Compose Multiplatform rewrite of app/ (see compose/rewrite): built alongside the Flutter
+  # client while the two coexist — app-legacy-reference/ is the Flutter source these two jobs
+  # above still build; app/ is Kotlin/Compose now. Not yet wired into assemble-web or the
+  # deployment bundle below: the new client cannot serve a real deployment yet, so there is
+  # nothing for those steps to do with its output besides publish it for direct download, which is
+  # what these two do. Fold them into the bundle once the client is ready to replace the Flutter
+  # one there.
+  build-compose-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :composeApp:wasmJsBrowserDistribution --no-daemon
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: compose-web
+          path: app/composeApp/build/dist/wasmJs/productionExecutable
+
+  build-compose-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :composeApp:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: compose-android
+          path: app/composeApp/build/outputs/apk/debug/*.apk
+
   build-applet:
     runs-on: ubuntu-latest
     # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which
@@ -758,6 +804,47 @@ jobs:
         working-directory: ${{ runner.temp }}/microteams-deploy
         run: docker compose down -v
 
+  # The Compose client's own journey, alongside test-journeys rather than folded into it: it drives
+  # a different client against the same shipped bundle, through a harness (app/e2e) built for this
+  # rewrite specifically — see that directory's run.sh for what it covers and what it still sets up
+  # through the API because the client has no screen for it yet. Kept as its own job so it can grow
+  # (a matrix of its own, once there is more than one thing to vary) without reshaping the Flutter
+  # leg's matrix above.
+  test-compose-journey:
+    needs: [package-zip, build-compose-web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: microteams-deploy
+          path: ${{ runner.temp }}/microteams-deploy
+      - uses: actions/download-artifact@v8
+        with:
+          name: compose-web
+          path: ${{ runner.temp }}/compose-web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: app/e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: app/e2e
+      - name: "End-to-end: sign in, chat, open a terminal — through the real client"
+        run: |
+          bash app/e2e/run.sh \
+            --bundle "${{ runner.temp }}/microteams-deploy" \
+            --dist "${{ runner.temp }}/compose-web"
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: ${{ runner.temp }}/microteams-deploy
+        run: docker compose logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        working-directory: ${{ runner.temp }}/microteams-deploy
+        run: docker compose down -v
+
   # One check to require in branch protection: it succeeds only when every job above did (a job with
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
   # The three leaves, and nothing else: package-zip already needs every build, and both test jobs
@@ -769,7 +856,7 @@ jobs:
   # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs: [test-api, test-machinery, test-journeys]
+    needs: [test-api, test-machinery, test-journeys, test-compose-journey]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
