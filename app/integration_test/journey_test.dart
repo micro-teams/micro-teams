@@ -21,13 +21,19 @@
 /// enrolment code — see collectRunParameters in support.dart for why they are not compiled in.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart';
 import 'package:microteams/src/common/ui/avatar.dart';
 import 'package:microteams/src/common/ui/team_picker.dart';
 import 'package:microteams/src/common/ui/theme.dart';
+import 'package:microteams/src/providers.dart';
+import 'package:microteams/src/terminal/terminal_screen.dart';
 import 'package:integration_test/integration_test.dart';
 
 import 'support.dart';
@@ -354,13 +360,21 @@ void main() {
     // real machine's real control link. That is exactly the shape of 2026-09-14's incident: nine
     // machines reconnected after a backend restart, then all nine dropped again ~1.2s later on an
     // uncaught IllegalStateException out of MachineHub.detachViewer — a viewer's connection
-    // closing tried to notify a machine whose control-link session was itself already gone. A
-    // single viewer/single machine here cannot reproduce "nine at once", but the crash itself
-    // does not need nine: it needs one viewer detaching into one stale machine session, and a
-    // restart is the reliable way to put the app back into "reconnecting" precisely when this
-    // page still holds a viewer on a screen. If backend does not come back, everything below times
-    // out and the harness's own failure diagnostics (backend container logs) show whether the same
-    // exception fired.
+    // closing tried to notify a machine whose control-link session was itself already gone.
+    //
+    // A SECOND viewer is what actually gives that race a chance to fire. This app's own
+    // TerminalScreen viewer recovers too smoothly to exercise it on its own — PR #261 made its
+    // resume path re-dial deliberately, well ahead of the app's own account for "did the socket
+    // actually die", so its own detach/reattach almost never lands in the narrow window right
+    // after the machine's control link comes back up. A raw second connection to the same screen,
+    // opened and torn down on its own clock rather than through any of the app's reconnect
+    // logic, stands a real chance of detaching exactly when the machine's freshly-reconnected
+    // session is itself still settling — which is what the incident's own timeline (nine machines
+    // reconnected, then ALL nine gone again 1.2s later) describes.
+    final sid = tester
+        .widget<TerminalScreen>(find.byType(TerminalScreen))
+        .sessionId;
+    unawaited(_secondViewerThroughRestart(tester, sid));
     await note('RESTART_BACKEND_NOW');
 
     // Watching never types; typing is a mode you choose, and choosing it tells the machine. Only a
@@ -714,6 +728,56 @@ final removeButton = find.byWidgetPredicate(
       widget is Tooltip && (widget.message ?? '').startsWith('Remove user '),
   description: 'a remove button',
 );
+
+/// T-092: a second, independent viewer on [sid] — deliberately NOT the app's own ScreenLink/
+/// [TerminalScreen] machinery, whose resume logic (PR #261's substrate reset, the updates socket's
+/// own redial) is exactly what makes a single-viewer restart recover too cleanly to exercise the
+/// race.
+/// This opens `package:web_socket_channel` straight at `/mt/machine/screen/{sid}`, the same wire
+/// T-091's own hand-rolled packet capture read from, with this run's own session token; the browser
+/// carries this test's own origin and cookies, so the handshake needs nothing else. It rides the
+/// backend restart on its own clock — no reconnect logic at all — then detaches partway through the
+/// window where the machine's own control link is freshly back but may not have settled, which is
+/// what a second, unrelated browser tab on the same screen would do without knowing anything about
+/// the restart underway.
+Future<void> _secondViewerThroughRestart(
+  WidgetTester tester,
+  String sid,
+) async {
+  final element = tester.element(find.byType(TerminalScreen));
+  final container = ProviderScope.containerOf(element);
+  final endpoints = container.read(endpointsProvider);
+  String dial() {
+    final token = container.read(sessionProvider).valueOrNull?.accessToken;
+    return endpoints.socketUrl(
+      endpoints.publicOrigin,
+      endpoints.screenPath(sid, token),
+    );
+  }
+
+  WebSocketChannel? channel;
+  try {
+    channel = WebSocketChannel.connect(Uri.parse(dial()));
+    await channel.ready;
+    await note('a second viewer attached to $sid');
+  } catch (e) {
+    await note('the second viewer never attached: $e');
+    return;
+  }
+
+  // Backend's own boot took ~13s and the machine reconnected ~2s after that in every run so far
+  // (see the RESTART_BACKEND_NOW trace above); 15s lands this detach just past both, in the window
+  // this journey step exists to probe.
+  await Future<void>.delayed(const Duration(seconds: 15));
+  try {
+    await channel.sink.close();
+    await note('the second viewer detached');
+  } catch (e) {
+    // Already gone — the backend restart itself may have closed it first, which is fine: that is
+    // still a viewer detaching around the restart, just on the server's clock instead of this one's.
+    await note('the second viewer was already gone: $e');
+  }
+}
 
 /// Follow a link, the way a person following a link does.
 ///
