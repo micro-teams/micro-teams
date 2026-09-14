@@ -347,6 +347,22 @@ void main() {
       'the terminal opened over a real machine and its output arrived',
     );
 
+    // --- T-092: a backend restart while a viewer is attached -----------------------------------
+    // The harness watches for this note (opt-in via MT_E2E_RESTART_BACKEND_ON_NOTE — off by
+    // default, so an ordinary run never pays for it) and, on seeing it, restarts the backend
+    // container while this terminal is open and this app instance is attached as a viewer on a
+    // real machine's real control link. That is exactly the shape of 2026-09-14's incident: nine
+    // machines reconnected after a backend restart, then all nine dropped again ~1.2s later on an
+    // uncaught IllegalStateException out of MachineHub.detachViewer — a viewer's connection
+    // closing tried to notify a machine whose control-link session was itself already gone. A
+    // single viewer/single machine here cannot reproduce "nine at once", but the crash itself
+    // does not need nine: it needs one viewer detaching into one stale machine session, and a
+    // restart is the reliable way to put the app back into "reconnecting" precisely when this
+    // page still holds a viewer on a screen. If backend does not come back, everything below times
+    // out and the harness's own failure diagnostics (backend container logs) show whether the same
+    // exception fired.
+    await note('RESTART_BACKEND_NOW');
+
     // Watching never types; typing is a mode you choose, and choosing it tells the machine. Only a
     // machine can fail to be told, which is why this is here and not in a widget test.
     await tap(tester, find.byTooltip('typing'), what: 'the typing mode');
@@ -354,6 +370,9 @@ void main() {
       tester,
       find.text('the agent is not driving'),
       what: 'the warning that comes with taking the keyboard',
+      // Longer than the usual 60s default: this is the first assertion after RESTART_BACKEND_NOW,
+      // and a backend cold start plus this viewer's own socket reconnecting both eat into it.
+      limit: const Duration(minutes: 2),
     );
 
     // And closing puts the terminal away without taking what was underneath with it.

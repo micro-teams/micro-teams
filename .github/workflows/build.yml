@@ -741,6 +741,13 @@ jobs:
 
       - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
         working-directory: app
+        # T-092: restart the backend container mid-journey, right after the journey's own viewer
+        # attaches to a real machine's real screen (see the RESTART_BACKEND_NOW note in
+        # integration_test/journey_test.dart). This is what 2026-09-14's incident looked like —
+        # a backend restart with a viewer already attached — so it belongs in the journey that
+        # runs on every push, not only as a manual repro.
+        env:
+          MT_E2E_RESTART_BACKEND_ON_NOTE: RESTART_BACKEND_NOW
         run: |
           bash tool/e2e/run.sh \
             --bundle "${{ runner.temp }}/microteams-deploy" \

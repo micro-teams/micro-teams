@@ -147,9 +147,11 @@ restore_service_worker() {
 }
 
 CHROMEDRIVER_PID=""
+RESTART_WATCHER_PID=""
 cleanup() {
   restore_service_worker
   [ -n "$CHROMEDRIVER_PID" ] && kill "$CHROMEDRIVER_PID" 2>/dev/null || true
+  [ -n "$RESTART_WATCHER_PID" ] && kill "$RESTART_WATCHER_PID" 2>/dev/null || true
   if [ "$KEEP" = "1" ]; then
     echo "(--keep: the stack, the gateway, the mail sink and any machine are still up; app on :$GATEWAY_PORT)"
     return
@@ -509,6 +511,30 @@ $GATEWAY_PORT/$MAIL_PORT — build the APK for these ports, or let this run use 
 curl -fsS -X POST "http://localhost:$MAIL_PORT/run" \
   -H 'Content-Type: application/json' -d "$RUN_PARAMS" >/dev/null \
   || fail "could not tell the mail sink what this run is"
+
+# T-092 repro: opt-in only (MT_E2E_RESTART_BACKEND_ON_NOTE unset in every normal run, CI included)
+# — restarting a container mid-journey is not something an ordinary run should pay for or be
+# destabilised by. When set to a marker string, watch the mail sink's trace (the journey's own
+# note() calls, see integration_test/journey_test.dart) for that string and restart the backend
+# container the moment it appears — which is deliberately mid-journey, with a viewer still
+# attached to a real machine's screen, because that is the shape of 2026-09-14's incident.
+if [ -n "${MT_E2E_RESTART_BACKEND_ON_NOTE:-}" ]; then
+  ( seen=""
+    while : ; do
+      notes="$(curl -fsS "http://localhost:$MAIL_PORT/notes" 2>/dev/null || true)"
+      if [ -z "$seen" ] && printf '%s' "$notes" | grep -qF "$MT_E2E_RESTART_BACKEND_ON_NOTE"; then
+        seen=1
+        echo "(restart-backend watcher: saw '$MT_E2E_RESTART_BACKEND_ON_NOTE' — restarting backend)"
+        (cd "$BUNDLE" && docker compose -p "$PROJECT" restart backend) \
+          && echo "(restart-backend watcher: backend restarted)" \
+          || echo "(restart-backend watcher: backend restart FAILED)"
+        break
+      fi
+      sleep 1
+    done
+  ) &
+  RESTART_WATCHER_PID=$!
+fi
 
 attempt=1
 while : ; do
