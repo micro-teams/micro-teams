@@ -9,8 +9,10 @@ Four things ship from this repository, and each one has its own conventions in i
 | `cli/` | the connector a customer installs on their own machine, Go | `cli/CLAUDE.md` |
 | `applets/` | the applet runtime, TypeScript | — |
 
-`app-legacy-reference/` is the Flutter client this is replacing — kept read-only, as a reference
-while the rewrite lands, not built or tested by anything. It ships nothing; do not add to it.
+The Flutter client this replaces is gone from the repository entirely, on purpose — nictheboy
+wants a clean history from the start of the rewrite, not a codebase still carrying what it is
+replacing. It is not preserved anywhere in this repo, not even read-only; do not go looking for it
+here.
 
 Nothing here can be built or tested from the root. `app/` is `./gradlew :composeApp:compileKotlinWasmJs`
 (web) and `./gradlew :composeApp:assembleDebug` (Android, needs an Android SDK — CI has one, a
@@ -18,14 +20,16 @@ local machine may not). `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
 
 ## Which test to write
 
-**Prefer a step in the journey.** This principle predates the Compose rewrite and still holds, but
-the Flutter journey harness it describes (`app/tool/e2e/run.sh`, `flutter drive`) does not exist for
-the new client yet — rebuilding an equivalent is part of the rewrite, not optional follow-up. Until
-it exists, new `app/` behavior is only as trustworthy as whatever manual check nictheboy did against
-a real CI build; say so rather than implying journey-level coverage that is not there. The old
-harness in `app-legacy-reference/tool/e2e/` is the reference for what it needs to do.
+**Prefer a step in the journey.** This principle predates the Compose rewrite and still holds. What
+it describes below — a real deployment, a real machine with the connector on it, a step added to
+prove a feature works once the whole thing is deployed — is being rebuilt for the new client as
+part of the rewrite itself, not held for later. Compose Multiplatform for web renders to a single
+`<canvas>`; driving it from outside the browser (Playwright or similar) means going through the
+accessibility DOM overlay Compose maintains alongside that canvas, not ordinary DOM queries —
+`Modifier.testTag(...)` becomes that overlay element's `id`.
 
-`app/integration_test/journey_test.dart` (in the reference copy) drives the real client
+What follows was written for the Flutter client and is being ported concept-for-concept, not
+reinvented: `journey_test.dart` used to drive the real client
 against a real deployment: the bundle CI built, its own nginx, a machine with the connector on it,
 and the real Claude Code in front of a mock Anthropic API. A step added there is the only evidence
 that a feature *works once the whole thing is deployed* — which is the question a person actually
