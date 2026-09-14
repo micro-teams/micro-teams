@@ -22,10 +22,11 @@ import kotlinx.serialization.json.jsonPrimitive
 class ApiError(message: String) : Exception(message)
 
 /**
- * Everything the app says to the server, over one origin. `baseUrl` covers both the app's own
- * backend (/chat, /machine, /agent, /mt/...) and cheese-auth (/users/...) — in every deployment
- * this app has ever run against, both are reverse-proxied behind the same nginx origin, so a
- * second base URL has never been needed.
+ * Everything the app says to the server, over one origin. `baseUrl` is the outer gateway
+ * (deploy/nginx.conf): cheese-auth is mounted there at `/api` (prefix stripped), and the backend
+ * itself at `/mt` (prefix kept — its own routes are `/chat`, `/machine`, `/agent`, matching
+ * MicroTeams-API.yml). One base URL covers both because that is how every deployment this app has
+ * ever run against is fronted; a second one has never been needed.
  */
 class ApiClient(private val baseUrl: String) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -48,7 +49,7 @@ class ApiClient(private val baseUrl: String) {
     // -- cheese-auth: enveloped {code, message, data} ------------------------------------------
 
     suspend fun login(username: String, password: String): Session {
-        val response = client.post("${httpBase()}/users/auth/login") {
+        val response = client.post("${httpBase()}/api/users/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(LoginRequest(username, password))
         }
@@ -88,16 +89,16 @@ class ApiClient(private val baseUrl: String) {
         return response.body()
     }
 
-    suspend fun listChats(): List<ChatSummary> = authedGet<ListChatsResponse>("/chat").chats
+    suspend fun listChats(): List<ChatSummary> = authedGet<ListChatsResponse>("/mt/chat").chats
 
     suspend fun listMessages(threadId: Long): List<Message> =
-        authedGet<ListMessagesResponse>("/chat/$threadId/messages").messages
+        authedGet<ListMessagesResponse>("/mt/chat/$threadId/messages").messages
 
     suspend fun postMessage(threadId: Long, content: String): Message =
-        authedPost("/chat/$threadId/messages", PostMessageRequest(content))
+        authedPost("/mt/chat/$threadId/messages", PostMessageRequest(content))
 
     suspend fun listMachines(): List<Machine> =
-        authedGet<ListMachinesResponse>("/machine").machines
+        authedGet<ListMachinesResponse>("/mt/machine").machines
 
     suspend fun listAgents(teamId: Long? = null, online: Boolean? = null): List<Agent> {
         val query = buildString {
@@ -107,11 +108,11 @@ class ApiClient(private val baseUrl: String) {
             }
             if (parts.isNotEmpty()) append("?" + parts.joinToString("&"))
         }
-        return authedGet<ListAgentsResponse>("/agent$query").agents
+        return authedGet<ListAgentsResponse>("/mt/agent$query").agents
     }
 
     suspend fun openAgent(machineId: String, teamId: Long): OpenedAgent =
-        authedPost("/agent", OpenAgentRequest(machineId, teamId))
+        authedPost("/mt/agent", OpenAgentRequest(machineId, teamId))
 
     /** The token a screen websocket is opened with: the user's own, exactly as the legacy app did
      * for an already-live agent (see terminal_screen.dart). */

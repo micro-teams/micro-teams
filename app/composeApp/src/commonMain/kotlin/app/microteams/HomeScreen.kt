@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -30,8 +31,18 @@ fun HomeScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("chats") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("machines") })
+            Tab(
+                selected = tab == 0,
+                onClick = { tab = 0 },
+                text = { Text("chats") },
+                modifier = Modifier.testTag(TestTags.TAB_CHATS),
+            )
+            Tab(
+                selected = tab == 1,
+                onClick = { tab = 1 },
+                text = { Text("machines") },
+                modifier = Modifier.testTag(TestTags.TAB_MACHINES),
+            )
         }
         when (tab) {
             0 -> ChatsTab(api, onOpenThread)
@@ -61,7 +72,7 @@ private fun ChatsTab(api: ApiClient, onOpenThread: (Long, String) -> Unit) {
                         headlineContent = { Text(chat.title.ifBlank { "chat ${chat.id}" }) },
                         supportingContent = { Text(chat.lastMessage?.content ?: "") },
                         modifier =
-                            Modifier.clickable {
+                            Modifier.testTag(TestTags.chatItem(chat.id)).clickable {
                                 onOpenThread(chat.id, chat.title.ifBlank { "chat ${chat.id}" })
                             },
                     )
@@ -91,7 +102,7 @@ private fun MachinesTab(api: ApiClient, onOpenTerminal: (String, String) -> Unit
                         headlineContent = { Text(agent.nickname.ifBlank { "agent ${agent.userId}" }) },
                         supportingContent = { Text(if (agent.online) "online" else "offline") },
                         modifier =
-                            Modifier.clickable {
+                            Modifier.testTag(TestTags.agentItem(agent.userId)).clickable {
                                 onOpenTerminal(
                                     agent.sid!!,
                                     agent.nickname.ifBlank { "agent ${agent.userId}" },

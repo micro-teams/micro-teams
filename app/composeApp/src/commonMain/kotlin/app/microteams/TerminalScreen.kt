@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -49,11 +50,18 @@ fun TerminalScreen(api: ApiClient, sid: String, title: String, onBack: () -> Uni
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.padding(8.dp)) {
-            Button(onClick = onBack) { Text("back") }
+            Button(modifier = Modifier.testTag(TestTags.TERMINAL_BACK), onClick = onBack) {
+                Text("back")
+            }
             Text(title, modifier = Modifier.padding(start = 12.dp))
         }
         SelectionContainer(
-            modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp),
+            modifier =
+                Modifier.weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(8.dp)
+                    .testTag(TestTags.TERMINAL_OUTPUT),
         ) {
             Text(scrollback)
         }
@@ -61,13 +69,16 @@ fun TerminalScreen(api: ApiClient, sid: String, title: String, onBack: () -> Uni
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag(TestTags.TERMINAL_INPUT),
             )
-            Button(onClick = {
-                val text = draft
-                draft = ""
-                scope.launch { session.sendLine(text) }
-            }) {
+            Button(
+                modifier = Modifier.testTag(TestTags.TERMINAL_SEND),
+                onClick = {
+                    val text = draft
+                    draft = ""
+                    scope.launch { session.sendLine(text) }
+                },
+            ) {
                 Text("send")
             }
         }

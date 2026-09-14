@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -42,39 +43,42 @@ fun LoginScreen(initialBaseUrl: String, onSignedIn: (String, ApiClient) -> Unit)
             value = baseUrl,
             onValueChange = { baseUrl = it },
             label = { Text("server URL (e.g. https://microteams.app)") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_SERVER_URL),
         )
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
             label = { Text("username") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_USERNAME),
         )
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             label = { Text("password") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_PASSWORD),
         )
-        if (error != null) Text(error!!)
+        if (error != null) Text(error!!, modifier = Modifier.testTag(TestTags.LOGIN_ERROR))
         if (loading) {
             CircularProgressIndicator()
         } else {
-            Button(onClick = {
-                loading = true
-                error = null
-                scope.launch {
-                    try {
-                        val client = ApiClient(baseUrl)
-                        client.login(username, password)
-                        onSignedIn(baseUrl, client)
-                    } catch (e: Exception) {
-                        error = e.message ?: "sign-in failed"
-                    } finally {
-                        loading = false
+            Button(
+                modifier = Modifier.testTag(TestTags.LOGIN_SUBMIT),
+                onClick = {
+                    loading = true
+                    error = null
+                    scope.launch {
+                        try {
+                            val client = ApiClient(baseUrl)
+                            client.login(username, password)
+                            onSignedIn(baseUrl, client)
+                        } catch (e: Exception) {
+                            error = e.message ?: "sign-in failed"
+                        } finally {
+                            loading = false
+                        }
                     }
-                }
-            }) {
+                },
+            ) {
                 Text("sign in")
             }
         }
