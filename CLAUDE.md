@@ -4,18 +4,28 @@ Four things ship from this repository, and each one has its own conventions in i
 
 | where | what it is | its own notes |
 |---|---|---|
-| `app/` | the client, Flutter — web, Android, and the installers built from the same source | — |
+| `app/` | the client, Compose Multiplatform (Kotlin) — web (wasmJs) and Android from the same source | — |
 | `backend/` | Kotlin / Spring Boot, behind an OpenAPI contract at `MicroTeams-API.yml` | `backend/CLAUDE.md` |
 | `cli/` | the connector a customer installs on their own machine, Go | `cli/CLAUDE.md` |
 | `applets/` | the applet runtime, TypeScript | — |
 
-Nothing here can be built or tested from the root. `app/` needs `bash tool/codegen.sh` first —
-`packages/mt_api` is generated from the contract and gitignored, so a fresh clone has no package to
-resolve against — then `flutter test`. `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
+`app-legacy-reference/` is the Flutter client this is replacing — kept read-only, as a reference
+while the rewrite lands, not built or tested by anything. It ships nothing; do not add to it.
+
+Nothing here can be built or tested from the root. `app/` is `./gradlew :composeApp:compileKotlinWasmJs`
+(web) and `./gradlew :composeApp:assembleDebug` (Android, needs an Android SDK — CI has one, a
+local machine may not). `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
 
 ## Which test to write
 
-**Prefer a step in the journey.** `app/integration_test/journey_test.dart` drives the real client
+**Prefer a step in the journey.** This principle predates the Compose rewrite and still holds, but
+the Flutter journey harness it describes (`app/tool/e2e/run.sh`, `flutter drive`) does not exist for
+the new client yet — rebuilding an equivalent is part of the rewrite, not optional follow-up. Until
+it exists, new `app/` behavior is only as trustworthy as whatever manual check nictheboy did against
+a real CI build; say so rather than implying journey-level coverage that is not there. The old
+harness in `app-legacy-reference/tool/e2e/` is the reference for what it needs to do.
+
+`app/integration_test/journey_test.dart` (in the reference copy) drives the real client
 against a real deployment: the bundle CI built, its own nginx, a machine with the connector on it,
 and the real Claude Code in front of a mock Anthropic API. A step added there is the only evidence
 that a feature *works once the whole thing is deployed* — which is the question a person actually
