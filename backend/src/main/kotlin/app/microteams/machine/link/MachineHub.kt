@@ -161,9 +161,30 @@ class HubMachine(val machineId: String) {
      * Serialize sends to one machine: a WebSocket is not safe for concurrent writes, and the
      * orchestrator, exec, and every viewer's fan-out all send here. Without this, interleaved
      * frames corrupt the channel.
+     *
+     * T-092: a machine's control-link session can already be closed by the time some other,
+     * unrelated event (a viewer detaching, a screen readopting after reconnect) gets around to
+     * sending to it — most sharply right after a backend restart, when a burst of reconnects and
+     * the resubscribes/detaches they trigger all land in the same narrow window. Tomcat's WebSocket
+     * session throws IllegalStateException for a write against an already-closed session, and that
+     * used to propagate straight out of here, up through whatever caller happened to be sending
+     * (e.g. MachineHub.detachViewer, itself called from a viewer's own connection-closed handler)
+     * and fail that unrelated request. A missed send here just means this one machine misses one
+     * message it will get again next time something resyncs it — never worth taking the caller down
+     * for.
      */
     fun send(msg: LinkMsg) {
-        sendLock.withLock { transport?.sendJson(msg) }
+        try {
+            sendLock.withLock { transport?.sendJson(msg) }
+        } catch (e: IllegalStateException) {
+            logger.warn(
+                "dropped a send to a machine whose control-link session was already closed: ${e.message}"
+            )
+        }
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(HubMachine::class.java)
     }
 }
 
