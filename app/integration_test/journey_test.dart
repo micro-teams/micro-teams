@@ -353,6 +353,18 @@ void main() {
       'the terminal opened over a real machine and its output arrived',
     );
 
+    // Watching never types; typing is a mode you choose, and choosing it tells the machine. Only a
+    // machine can fail to be told, which is why this is here and not in a widget test. Done BEFORE
+    // the restart below, deliberately: it is its own thing to prove, and it has nothing to do with
+    // T-092, so it must not sit between RESTART_BACKEND_NOW and this viewer's own close — see why
+    // that gap matters just below.
+    await tap(tester, find.byTooltip('typing'), what: 'the typing mode');
+    await waitFor(
+      tester,
+      find.text('the agent is not driving'),
+      what: 'the warning that comes with taking the keyboard',
+    );
+
     // --- T-092: a backend restart while a viewer is attached -----------------------------------
     // The harness watches for this note (opt-in via MT_E2E_RESTART_BACKEND_ON_NOTE — off by
     // default, so an ordinary run never pays for it) and, on seeing it, restarts the backend
@@ -362,42 +374,30 @@ void main() {
     // uncaught IllegalStateException out of MachineHub.detachViewer — a viewer's connection
     // closing tried to notify a machine whose control-link session was itself already gone.
     //
-    // A SECOND viewer is what actually gives that race a chance to fire. This app's own
-    // TerminalScreen viewer recovers too smoothly to exercise it on its own — PR #261 made its
-    // resume path re-dial deliberately, well ahead of the app's own account for "did the socket
-    // actually die", so its own detach/reattach almost never lands in the narrow window right
-    // after the machine's control link comes back up. A raw second connection to the same screen,
-    // opened and torn down on its own clock rather than through any of the app's reconnect
-    // logic, stands a real chance of detaching exactly when the machine's freshly-reconnected
-    // session is itself still settling — which is what the incident's own timeline (nine machines
-    // reconnected, then ALL nine gone again 1.2s later) describes.
+    // What actually gives that race a chance to fire is not a special second viewer — it is
+    // closing THIS viewer promptly, right as the machine is reconnecting, rather than leaving a
+    // leisurely wait in between. The first version of this step put a 2-minute wait right after
+    // RESTART_BACKEND_NOW (for the typing-mode check, now moved above) before ever closing the
+    // terminal; by the time that close happened, the machine had long since reconnected and
+    // settled, and two CI runs went red on an unrelated timeout with nothing in the backend's own
+    // log — no exception, because the close never landed anywhere near the window it needed to.
+    // Closing right here, with nothing in between, is what a person watching a screen when the
+    // server drops out actually does: they do not wait two minutes to give up and close the tab.
+    //
+    // A second, independent raw viewer rides alongside this one anyway (see
+    // _secondViewerThroughRestart) — it costs nothing extra to also exercise a detach the app's
+    // own reconnect logic never touches, but it is not what carries this step's main weight.
     final sid = tester
         .widget<TerminalScreen>(find.byType(TerminalScreen))
         .sessionId;
     unawaited(_secondViewerThroughRestart(tester, sid));
     await note('RESTART_BACKEND_NOW');
-
-    // Watching never types; typing is a mode you choose, and choosing it tells the machine. Only a
-    // machine can fail to be told, which is why this is here and not in a widget test.
-    await tap(tester, find.byTooltip('typing'), what: 'the typing mode');
-    await waitFor(
-      tester,
-      find.text('the agent is not driving'),
-      what: 'the warning that comes with taking the keyboard',
-      // Longer than the usual 60s default: this is the first assertion after RESTART_BACKEND_NOW,
-      // and a backend cold start plus this viewer's own socket reconnecting both eat into it.
-      limit: const Duration(minutes: 2),
-    );
-
-    // And closing puts the terminal away without taking what was underneath with it.
-    //
-    // Every wait from here through the agent's removal still follows RESTART_BACKEND_NOW, so each
-    // one gets the same 2-minute margin as the first: a round trip through a backend that only just
-    // came back — its own boot, and this viewer's own sockets resyncing — can still be catching up
-    // for a while after the control link itself looks fine, and the default 60s cut two of these
-    // close before T-092 ever got a chance to reproduce or not.
-    const afterRestart = Duration(minutes: 2);
     await tap(tester, find.byTooltip('close'), what: 'closing the terminal');
+
+    // Everything from here on is a real round trip through a backend that may only just have come
+    // back, so it gets more than the default 60s — but not so much that it defeats the point above:
+    // this is recovery-time margin for what happens AFTER the close, not a reason to delay it.
+    const afterRestart = Duration(minutes: 2);
     await waitUntilGone(
       tester,
       find.byTooltip('watching'),
