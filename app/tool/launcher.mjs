@@ -148,7 +148,13 @@ export async function build(dir) {
       // with "flutter." on the web; ours is mt:cache: under that. A remembered response from the
       // previous build may no longer mean what it says.
       clearOnUpdate: ["flutter.mt:cache:", "flutter.mt:lines:health"],
-      serviceWorker: "/sw.js",
+      // Under /app/, not root: the deployment now puts a marketing site at "/" (see site/), and
+      // the app itself — this document included — lives at /app/. sw.js has to move with it so its
+      // scope stays limited to /app/ rather than defaulting to root and intercepting the marketing
+      // pages' own requests. Everything ELSE this launcher references stays at root on purpose —
+      // flutter_bootstrap.js, main.dart.js, the icons, manifest.json, /version, /mt/lines — none of
+      // those moved, so nothing about them needed to change here.
+      serviceWorker: "/app/sw.js",
       // Hand-written and free of imports, so "classic" — see web/sw.js. Registering a module worker
       // as classic fails quietly: the page works from the network and only the cache is never
       // filled.
