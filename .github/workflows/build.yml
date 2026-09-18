@@ -437,6 +437,18 @@ jobs:
           mv "$STAGE/frontend/dist/index.html" "$STAGE/frontend/dist/app.html" \
              "$STAGE/frontend/dist/unregister.html" "$STAGE/frontend/dist/sw.js" \
              "$STAGE/frontend/dist/app/"
+          # Both moved files still say "/sw.js", "/index.html", "/app.html", "/unregister.html" and
+          # bare "/" — written that way on purpose (see tool/launcher.mjs and web/sw.js) so
+          # check-web.mjs keeps testing the SAME strings `flutter build web` actually produced,
+          # rather than a build-time guess at where a bundle will eventually put them. This is the
+          # one place that guess stops being deferred: rewrite them now that /app/ is real.
+          sed -i 's#"/sw\.js"#"/app/sw.js"#' "$STAGE/frontend/dist/app/index.html"
+          sed -i \
+            -e 's#"/index\.html"#"/app/index.html"#g' \
+            -e 's#"/app\.html"#"/app/app.html"#g' \
+            -e 's#"/unregister\.html"#"/app/unregister.html"#g' \
+            -e 's#"/"#"/app/"#g' \
+            "$STAGE/frontend/dist/app/sw.js"
           # site/README.md is a repo-only doc, not something to ship — everything else in site/ is.
           find site -maxdepth 1 -type f ! -name README.md -exec cp {} "$STAGE/frontend/dist/" \;
           # The installable clients, into the bundle that is actually deployed. Here rather than in

@@ -42,20 +42,23 @@ const CACHE = `microteams-${VERSION}`;
 /**
  * The files whose NAMES never change, and which therefore may not be answered from cache without
  * asking. Flutter emits `main.dart.js` under that name for every build it will ever produce.
+ *
+ * Written root-relative on purpose, even though a deployed bundle moves this file (and the three
+ * paths below) to /app/ (see deploy/nginx.conf and site/): check-web.mjs registers and exercises
+ * THIS worker straight out of `flutter build web`, at root, before that move ever happens.
+ * package-zip rewrites these same four literal strings as it moves the file — see its comment.
  */
-const CODE = ["/app/", "/app/index.html", "/app/app.html", "/flutter_bootstrap.js", "/main.dart.js"];
+const CODE = ["/", "/index.html", "/app.html", "/flutter_bootstrap.js", "/main.dart.js"];
 
 /** What the app cannot start without. Everything else arrives through the fetch handler. */
 const SHELL = [
-  // "/app/" and "/app/index.html" are the multipath launcher (tool/launcher.mjs), not Flutter's
-  // document: the first request cannot be spread across lines, so it is small and does one job.
-  // "/app/app.html" is Flutter's own document, kept as the way to start without the launcher when
-  // the launcher itself is what somebody is debugging. All three moved out from root when the
-  // deployment put a marketing site at "/" — this worker's own scope is /app/ (it is served from
-  // /app/sw.js), which is exactly why it must not reach past that prefix for its own shell either.
-  "/app/",
-  "/app/index.html",
-  "/app/app.html",
+  // "/" and "/index.html" are the multipath launcher (tool/launcher.mjs), not Flutter's document:
+  // the first request cannot be spread across lines, so it is small and does one job. "/app.html"
+  // is Flutter's own document, kept as the way to start without the launcher when the launcher
+  // itself is what somebody is debugging.
+  "/",
+  "/index.html",
+  "/app.html",
   "/flutter.js",
   "/flutter_bootstrap.js",
   "/manifest.json",
@@ -124,7 +127,7 @@ self.addEventListener("fetch", (event) => {
   // The escape hatch and the version stamp always come from the network. The stamp especially: a
   // cached answer to "what is deployed?" is an answer about the past, which is the one thing it
   // must never be — and it is the answer the launcher decides with.
-  if (url.pathname === "/app/unregister.html" || url.pathname === "/version") {
+  if (url.pathname === "/unregister.html" || url.pathname === "/version") {
     return;
   }
 
@@ -138,8 +141,8 @@ self.addEventListener("fetch", (event) => {
         } catch (_) {
           const cache = await caches.open(CACHE);
           return (
-            (await cache.match("/app/index.html")) ??
-            (await cache.match("/app/")) ??
+            (await cache.match("/index.html")) ??
+            (await cache.match("/")) ??
             Response.error()
           );
         }
