@@ -59,13 +59,15 @@ async function fontFiles(dist) {
   }
 }
 
-/** The preload list, as the launcher wants it: absolute paths, sizes, and any condition. */
+/** The preload list, as the launcher wants it: document-relative paths, sizes, and any condition. */
 export async function preloadFor(dist) {
   const out = [];
   for (const entry of await candidates(dist)) {
     try {
       const { size } = await stat(path.join(dist, entry.file));
-      out.push({ url: `/${entry.file}`, bytes: size, ...(entry.when ? { when: entry.when } : {}) });
+      // Document-relative, not root-absolute: the launcher fetches these from wherever it is
+      // itself, and a bundle serves it from /app/ rather than "/". See tool/launcher.mjs's HEAD.
+      out.push({ url: `./${entry.file}`, bytes: size, ...(entry.when ? { when: entry.when } : {}) });
     } catch {
       // A build that does not contain it is a build that will not ask for it. Silence is right:
       // the engine ships variants that come and go between Flutter versions.

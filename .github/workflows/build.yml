@@ -426,31 +426,14 @@ jobs:
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
-          cp -r artifacts/web-dist/. "$STAGE/frontend/dist/"
-          # The app's own two entry documents and its service worker move to /app/ so the marketing
-          # site (site/, copied in below) can take "/" instead — see deploy/nginx.conf's header for
-          # the whole story. Everything else the web build produced (flutter_bootstrap.js,
-          # main.dart.js, the icons, manifest.json) stays at dist root exactly as build-web left it:
-          # nothing about them needed to move, since app.html/index.html reference them by absolute
-          # root path already.
-          mkdir -p "$STAGE/frontend/dist/app"
-          mv "$STAGE/frontend/dist/index.html" "$STAGE/frontend/dist/app.html" \
-             "$STAGE/frontend/dist/unregister.html" "$STAGE/frontend/dist/sw.js" \
-             "$STAGE/frontend/dist/app/"
-          # Both moved files still say "/sw.js", "/index.html", "/app.html", "/unregister.html" and
-          # bare "/" — written that way on purpose (see tool/launcher.mjs and web/sw.js) so
-          # check-web.mjs keeps testing the SAME strings `flutter build web` actually produced,
-          # rather than a build-time guess at where a bundle will eventually put them. This is the
-          # one place that guess stops being deferred: rewrite them now that /app/ is real.
-          sed -i 's#"/sw\.js"#"/app/sw.js"#' "$STAGE/frontend/dist/app/index.html"
-          sed -i \
-            -e 's#"/index\.html"#"/app/index.html"#g' \
-            -e 's#"/app\.html"#"/app/app.html"#g' \
-            -e 's#"/unregister\.html"#"/app/unregister.html"#g' \
-            -e 's#"/"#"/app/"#g' \
-            "$STAGE/frontend/dist/app/sw.js"
-          # site/README.md is a repo-only doc, not something to ship — everything else in site/ is.
-          find site -maxdepth 1 -type f ! -name README.md -exec cp {} "$STAGE/frontend/dist/" \;
+          # The app under /app/, the marketing site at "/", /version at the root. One definition of
+          # that layout, in app/tool/assemble-dist.mjs, because app/tool/check-bundle.sh opens THIS
+          # layout in a real browser behind the real deploy/nginx.conf — and a second, hand-rolled
+          # copy of it here would be a layout nothing had ever checked. That is precisely how T-093
+          # shipped. Pointing the app's two documents at /app/ is the one thing that assembler
+          # rewrites; everything else they reference is relative to that, and the worker reads its
+          # own scope.
+          node app/tool/assemble-dist.mjs artifacts/web-dist site "$STAGE/frontend/dist"
           # The installable clients, into the bundle that is actually deployed. Here rather than in
           # the web job because this is the moment the two halves meet, and it is the only place
           # that has both.
@@ -535,6 +518,48 @@ jobs:
           retention-days: 1
           name: microteams-deploy
           path: microteams-deploy
+
+  # The shipped bundle, behind the shipped gateway, in a real browser.
+  #
+  # build-web already opens the app in a browser — but at the ROOT, straight out of `flutter build
+  # web`, which is not where anybody is served it. T-093 lives exactly in that gap: the app moved
+  # under /app/, every HTTP status the new nginx returned was verified correct by hand on both :80
+  # and :443, and the app still opened onto go_router's "no routes for location: /app" error page,
+  # because a Flutter document's idea of where it is comes from its <base href> and nginx has no
+  # opinion about that. No status code, no console error and no page error said so — go_router
+  # catches a routing failure and renders its own page — so the only thing that could ever have
+  # caught it is a browser opening the real layout behind the real config and asking where the app
+  # ARRIVED. That is this job.
+  #
+  # It runs on the assembled bundle rather than on web-dist, because the assembly is half of what is
+  # being tested.
+  check-bundle:
+    name: the bundle, behind the real gateway, in a browser
+    needs: [package-zip]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v8
+        with:
+          name: microteams-deploy
+          path: microteams-deploy
+      - run: npm ci
+        working-directory: app
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      # The bundle already carries the assembled tree, so this serves it as-is rather than
+      # assembling a second one — what ships is what is opened.
+      - name: Open the shipped bundle behind deploy/nginx.conf
+        run: bash app/tool/check-bundle.sh
+        env:
+          CHECK_BUNDLE_DIST: microteams-deploy/frontend/dist
 
   # The one test that exercises this system the way it is actually used: the shipped bundle, plus a
   # real machine with the real connector on it. `test-compose` used to stop at "the containers report
@@ -793,7 +818,7 @@ jobs:
   # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs: [test-api, test-machinery, test-journeys]
+    needs: [test-api, check-bundle, test-machinery, test-journeys]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."

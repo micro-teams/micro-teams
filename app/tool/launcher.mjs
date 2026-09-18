@@ -61,7 +61,7 @@ const SPLASH = `<div id="mt-splash">
     <div id="mt-splash-ways">
       <a href="" onclick="location.reload();return false">try again</a>
       &nbsp;·&nbsp;
-      <a href="/unregister.html">clear this app&#39;s cache</a>
+      <a href="unregister.html">clear this app&#39;s cache</a>
     </div>
   </div>
 </div>
@@ -104,16 +104,35 @@ html[data-mt-ready="1"] #mt-splash { opacity: 0; pointer-events: none; }
   color: #f5f5f5; font: 400 14px system-ui, sans-serif; z-index: 2147483647; }
 </style>`;
 
-/** Everything Flutter's document carries that the launcher has to carry too. */
+/**
+ * Everything Flutter's document carries that the launcher has to carry too.
+ *
+ * The `<base href>` is where this document thinks it is, and Flutter reads it for BOTH halves of
+ * that question: flutter.js resolves the engine, the assets and the fonts against document.baseURI,
+ * and PathUrlStrategy strips it off the pathname to get the route. They have to agree, and T-093 is
+ * what disagreeing costs — a bundle served the app from /app/ while this said "/", so every asset
+ * loaded and go_router was handed the location "/app", which matches no route: the app opened onto
+ * its error page with every HTTP status in the deployment correct.
+ *
+ * It has to be ABSOLUTE. A relative "./" is tempting, because it would make the document work
+ * wherever it is put with nothing written down — but the browser resolves it against the DOCUMENT's
+ * URL, and this document is served for every route the app has. At /chats it would say "/", and at
+ * /chats/206 it would say "/chats/", and the app would look for its engine under /chats/. Deep
+ * links are not the edge case; they are how anybody shares anything.
+ *
+ * So it names the mount point, "/" here, and tool/assemble-dist.mjs rewrites it to whatever the
+ * deployment serves the app from. That rewrite is the ONE thing about the tree that has to know
+ * where it lands — everything else below is relative to it, and therefore follows for free.
+ */
 const HEAD = `<base href="/">
 <meta name="description" content="Chat with your team and the agents running on your machines.">
 <meta name="theme-color" content="#060606">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="MicroTeams">
-<link rel="apple-touch-icon" href="/icon-192.png">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="manifest" href="manifest.json">
 ${SPLASH_CSS}`;
 
 export async function build(dir) {
@@ -131,10 +150,19 @@ export async function build(dir) {
   }
   if (source.endsWith("index.html")) await rename(source, path.join(dir, "app.html"));
 
+  // Both documents have to carry a base, and the same one: this is the launcher's escape hatch, the
+  // way to start the app with the launcher taken out of the picture, so it is served from the same
+  // place and has to resolve the same way. Flutter writes "/" here by default and the launcher's
+  // HEAD matches it; tool/assemble-dist.mjs moves both together when a deployment mounts the app
+  // somewhere else.
+  if (!/<base href="\/">/.test(original)) {
+    throw new Error(`${source} has no <base href="/"> — did the build change, or --base-href?`);
+  }
+
   await writeFile(
     path.join(dir, "index.html"),
     buildLauncher({
-      appEntry: "/flutter_bootstrap.js",
+      appEntry: "./flutter_bootstrap.js",
       // Everything the first frame needs — code, engine, fonts — with the sizes the build measured,
       // so the percentage is a percentage of the whole wait rather than of one file out of ten
       // megabytes. See tool/manifest.mjs.
@@ -143,18 +171,21 @@ export async function build(dir) {
       // question about itself: every copy it holds is its own. On disagreement the launcher drops
       // the caches, the remembered responses and the worker, and reloads once into the new build.
       version,
+      // Root-absolute, and one of only two things here that is. /version answers "what is deployed?"
+      // about the DEPLOYMENT, not about the app: ops curl it by that name, the Dart client asks the
+      // origin for it (lib/src/common/server_version.dart), and it stays at the bundle root however
+      // the app itself is mounted — see tool/assemble-dist.mjs.
       versionUrl: "/version",
       // Where the app's own request cache lives. shared_preferences prefixes everything it writes
       // with "flutter." on the web; ours is mt:cache: under that. A remembered response from the
       // previous build may no longer mean what it says.
       clearOnUpdate: ["flutter.mt:cache:", "flutter.mt:lines:health"],
-      // Root here, deliberately, even though a deployed bundle serves this document — and sw.js —
-      // at /app/ (see deploy/nginx.conf and site/). check-web.mjs tests THIS build straight out of
-      // `flutter build web`, before that move ever happens: sw.js still lives at build/web/sw.js
-      // at this point, and a "/app/sw.js" registered here would 404 in that test with no bundle to
-      // blame it on. package-zip is what moves both this document and sw.js to /app/ together, and
-      // rewrites this exact registered path as part of doing so — see its own comment.
-      serviceWorker: "/sw.js",
+      // Relative, which also decides the worker's SCOPE: a worker controls the directory it was
+      // served from and below. Registered from /app/index.html it takes /app/ and leaves the
+      // marketing site at "/" alone, which is right — they are different things that happen to
+      // share an origin, and a worker answering the site's pages out of the app's cache is a bug
+      // waiting for its own incident number.
+      serviceWorker: "./sw.js",
       // Hand-written and free of imports, so "classic" — see web/sw.js. Registering a module worker
       // as classic fails quietly: the page works from the network and only the cache is never
       // filled.
@@ -163,6 +194,8 @@ export async function build(dir) {
       // what is baked in only has to be enough to start, and "wherever this page came from" always
       // is.
       registry: { lines: [{ id: "origin", url: "", transport: "same-origin", weight: 100 }] },
+      // The other root-absolute one, and for the same reason: /mt is the backend, at the origin,
+      // wherever the app is mounted.
       registryUrl: "/mt/lines",
       title: "MicroTeams",
       headHtml: HEAD,
