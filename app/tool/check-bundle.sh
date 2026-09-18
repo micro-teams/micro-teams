@@ -29,14 +29,23 @@ NET="mt-bundle-check-net"
 GATEWAY="mt-bundle-check-nginx"
 UPSTREAMS="mt-bundle-check-upstreams"
 
-WORK="$(mktemp -d)"
-cleanup() {
+# Docker leftovers from an interrupted run, cleared before starting and again on the way out. The
+# scratch directory is NOT part of this: it is made below, and a previous version of this script
+# called the whole cleanup upfront and deleted the directory it had just created. That survived
+# locally only because assembling recreated it on the way past, and failed in CI, where the bundle
+# arrives already assembled and nothing recreates anything.
+clear_containers() {
   docker rm -f "$GATEWAY" "$UPSTREAMS" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+}
+clear_containers
+
+WORK="$(mktemp -d)"
+cleanup() {
+  clear_containers
   rm -rf "$WORK"
 }
 trap cleanup EXIT
-cleanup
 
 # CI passes the tree the release workflow actually assembled, so what is opened here is the bundle
 # that ships rather than a second assembly of the same inputs. Locally there is no bundle yet, so
