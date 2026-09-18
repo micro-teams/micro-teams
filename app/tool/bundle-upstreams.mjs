@@ -77,7 +77,25 @@ createServer((req, res) => {
     case "/document":
       return json(res, 200, { documents: [], page });
     case "/lines":
-      return json(res, 200, { lines: [] });
+      // The registry the worker races over. MT_LINES names the extra origins; "" is always first,
+      // meaning the page's own. A deployment publishes these from application.multipath.lines —
+      // see ops/microteams/multipath-lines.md — and every field is spelled out on purpose: a null
+      // anywhere here makes the real client reject the whole registry and fall back to one line.
+      return json(res, 200, {
+        lines: [
+          { id: "origin", url: "", transport: "same-origin", weight: 100, foreignOrigin: false },
+          ...(process.env.MT_LINES ?? "")
+            .split(",")
+            .filter(Boolean)
+            .map((url, i) => ({
+              id: `line-${i + 1}`,
+              url,
+              transport: "direct",
+              weight: 90,
+              foreignOrigin: false,
+            })),
+        ],
+      });
     default:
       return json(res, 404, { message: `no fake for ${req.method} ${pathname}` });
   }

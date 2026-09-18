@@ -27,7 +27,15 @@ WEB_BUILD="${CHECK_BUNDLE_WEB:-$APP/build/web}"
 PORT="${CHECK_BUNDLE_PORT:-58090}"
 NET="mt-bundle-check-net"
 GATEWAY="mt-bundle-check-nginx"
+# A SECOND gateway, serving the same tree from its own port, so it is a genuinely different origin
+# to the browser — that is what makes it a line. Its own container because its access log is then
+# the evidence: if the worker raced, this is where the requests it did not need show up.
+GATEWAY2="mt-bundle-check-nginx-2"
 UPSTREAMS="mt-bundle-check-upstreams"
+PORT2="${CHECK_BUNDLE_PORT2:-$((${CHECK_BUNDLE_PORT:-58090} + 2))}"
+# And a line with nothing behind it, because a published line that is simply down must cost
+# redundancy and nothing else.
+PORT_DEAD="${CHECK_BUNDLE_PORT_DEAD:-$((${CHECK_BUNDLE_PORT:-58090} + 3))}"
 
 # Docker leftovers from an interrupted run, cleared before starting and again on the way out. The
 # scratch directory is NOT part of this: it is made below, and a previous version of this script
@@ -35,7 +43,7 @@ UPSTREAMS="mt-bundle-check-upstreams"
 # locally only because assembling recreated it on the way past, and failed in CI, where the bundle
 # arrives already assembled and nothing recreates anything.
 clear_containers() {
-  docker rm -f "$GATEWAY" "$UPSTREAMS" >/dev/null 2>&1 || true
+  docker rm -f "$GATEWAY" "$GATEWAY2" "$UPSTREAMS" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
 }
 clear_containers
@@ -68,10 +76,16 @@ docker network create "$NET" >/dev/null
 # container is the only thing a container name resolves to.
 docker run -d --name "$UPSTREAMS" --network "$NET" \
   --network-alias cheese-auth --network-alias backend --network-alias origin \
+  -e "MT_LINES=http://127.0.0.1:$PORT2,http://127.0.0.1:$PORT_DEAD" \
   -v "$HERE/bundle-upstreams.mjs:/bundle-upstreams.mjs:ro" \
   node:22-alpine node /bundle-upstreams.mjs >/dev/null
 
 docker run -d --name "$GATEWAY" --network "$NET" -p "$PORT:80" \
+  -v "$REPO/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "$SERVE:/usr/share/nginx/html:ro" \
+  nginx:1.27-alpine >/dev/null
+
+docker run -d --name "$GATEWAY2" --network "$NET" -p "$PORT2:80" \
   -v "$REPO/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$SERVE:/usr/share/nginx/html:ro" \
   nginx:1.27-alpine >/dev/null
@@ -91,6 +105,9 @@ wait_for_gateway() {
 wait_for_gateway
 
 export CHECK_BUNDLE_BASE="http://127.0.0.1:$PORT"
+export CHECK_BUNDLE_LINE2="http://127.0.0.1:$PORT2"
+export CHECK_BUNDLE_LINE2_CONTAINER="$GATEWAY2"
+export CHECK_BUNDLE_LINE_DEAD="http://127.0.0.1:$PORT_DEAD"
 node "$HERE/check-bundle.mjs"
 
 # ── and the one deploy where the worker's scope changes ───────────────────────────────────────
