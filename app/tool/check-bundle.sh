@@ -67,17 +67,51 @@ docker run -d --name "$GATEWAY" --network "$NET" -p "$PORT:80" \
   -v "$SERVE:/usr/share/nginx/html:ro" \
   nginx:1.27-alpine >/dev/null
 
-for _ in $(seq 1 30); do
-  # --noproxy: a proxy in the environment happily intercepts a loopback request and resets it,
-  # which reads as "the gateway never came up". Same trap as tool/check-web.sh.
-  curl -sf --noproxy '*' -o /dev/null "http://127.0.0.1:$PORT/" && break
-  sleep 1
-done
-
-if ! curl -sf --noproxy '*' -o /dev/null "http://127.0.0.1:$PORT/"; then
+wait_for_gateway() {
+  for _ in $(seq 1 30); do
+    # --noproxy: a proxy in the environment happily intercepts a loopback request and resets it,
+    # which reads as "the gateway never came up". Same trap as tool/check-web.sh.
+    curl -sf --noproxy '*' -o /dev/null "http://127.0.0.1:$PORT/" && return 0
+    sleep 1
+  done
   echo "the gateway never came up; its log:" >&2
   docker logs "$GATEWAY" >&2 || true
-  exit 1
-fi
+  return 1
+}
 
-CHECK_BUNDLE_BASE="http://127.0.0.1:$PORT" node "$HERE/check-bundle.mjs"
+wait_for_gateway
+
+export CHECK_BUNDLE_BASE="http://127.0.0.1:$PORT"
+node "$HERE/check-bundle.mjs"
+
+# ── and the one deploy where the worker's scope changes ───────────────────────────────────────
+#
+# Everybody currently carries a worker registered at "/", and a worker at a different scope does not
+# replace it — the launcher's version guard is what has to clear it. See tool/check-upgrade.mjs.
+#
+# The "before" tree is this same app served the old way: at the root, with its base pointed back at
+# "/" and its own build stamp, so the guard sees a genuine version change rather than a no-op.
+echo
+echo "== the upgrade from the deployment that is live today =="
+OLD="$WORK/old"
+cp -r "$SERVE/app" "$OLD"
+sed -i 's#<base href="/app/">#<base href="/">#' "$OLD/index.html" "$OLD/app.html"
+node "$HERE/fake-deploy.mjs" "$OLD" "was-live-$(date +%s)" >/dev/null
+export CHECK_UPGRADE_PROFILE="$WORK/profile"
+
+docker rm -f "$GATEWAY" >/dev/null 2>&1 || true
+docker run -d --name "$GATEWAY" --network "$NET" -p "$PORT:80" \
+  -v "$HERE/upgrade-from/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "$OLD:/usr/share/nginx/html:ro" \
+  nginx:1.27-alpine >/dev/null
+wait_for_gateway
+node "$HERE/check-upgrade.mjs" before
+
+# The deploy itself: the same origin, the same browser profile, a different gateway and tree.
+docker rm -f "$GATEWAY" >/dev/null 2>&1 || true
+docker run -d --name "$GATEWAY" --network "$NET" -p "$PORT:80" \
+  -v "$REPO/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "$SERVE:/usr/share/nginx/html:ro" \
+  nginx:1.27-alpine >/dev/null
+wait_for_gateway
+node "$HERE/check-upgrade.mjs" after
