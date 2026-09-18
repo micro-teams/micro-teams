@@ -15,7 +15,8 @@ forgotten; code does not.
 |---|---|
 | **`MicroTeams-API.yml`** | The single API contract. The backend's interfaces and the client's are both **generated** from it. |
 | **`backend/`** ("mt") | Kotlin / Spring Boot. Chat, teams, git-backed documents, machines, agents. |
-| **`app/`** | Flutter. The client: web today, Android / iOS / desktop from the same code. |
+| **`app/`** | Flutter. The client: web today, Android / iOS / desktop from the same code. Served at `/app/` in a deployment. |
+| **`site/`** | The marketing site at the deployment's root ("/") — plain HTML/CSS/JS, no build step, independent of `app/`. |
 | **`cli/`** | Go. Runs on a machine, hosts the agent's CLI, speaks the connector protocol. |
 | **cheese-auth** | A *separate* repo (`micro-teams/cheese-auth`, NestJS): registration, login, avatars. Runs as a prebuilt image in deployment; cloned as a sibling for local dev. Not part of this monorepo. |
 
@@ -60,7 +61,8 @@ itself, and chat — which owns "who is in this group" — calls it. Chat never 
 ```mermaid
 flowchart TD
     browser(["browser"]) -->|one public origin| nginx["nginx"]
-    nginx -->|"/"| app["app<br/>Flutter web · :8931 in dev"]
+    nginx -->|"/"| site["site<br/>static marketing pages"]
+    nginx -->|"/app"| app["app<br/>Flutter web · :8931 in dev"]
     nginx -->|"/api"| auth["cheese-auth<br/>NestJS · :8091"]
     nginx -->|"/mt"| mt["mt<br/>Kotlin / Spring · :8199"]
     cli["cli<br/>on your machine"] -->|WebSocket| mt

@@ -427,6 +427,30 @@ jobs:
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
           cp -r artifacts/web-dist/. "$STAGE/frontend/dist/"
+          # The app's own two entry documents and its service worker move to /app/ so the marketing
+          # site (site/, copied in below) can take "/" instead — see deploy/nginx.conf's header for
+          # the whole story. Everything else the web build produced (flutter_bootstrap.js,
+          # main.dart.js, the icons, manifest.json) stays at dist root exactly as build-web left it:
+          # nothing about them needed to move, since app.html/index.html reference them by absolute
+          # root path already.
+          mkdir -p "$STAGE/frontend/dist/app"
+          mv "$STAGE/frontend/dist/index.html" "$STAGE/frontend/dist/app.html" \
+             "$STAGE/frontend/dist/unregister.html" "$STAGE/frontend/dist/sw.js" \
+             "$STAGE/frontend/dist/app/"
+          # Both moved files still say "/sw.js", "/index.html", "/app.html", "/unregister.html" and
+          # bare "/" — written that way on purpose (see tool/launcher.mjs and web/sw.js) so
+          # check-web.mjs keeps testing the SAME strings `flutter build web` actually produced,
+          # rather than a build-time guess at where a bundle will eventually put them. This is the
+          # one place that guess stops being deferred: rewrite them now that /app/ is real.
+          sed -i 's#"/sw\.js"#"/app/sw.js"#' "$STAGE/frontend/dist/app/index.html"
+          sed -i \
+            -e 's#"/index\.html"#"/app/index.html"#g' \
+            -e 's#"/app\.html"#"/app/app.html"#g' \
+            -e 's#"/unregister\.html"#"/app/unregister.html"#g' \
+            -e 's#"/"#"/app/"#g' \
+            "$STAGE/frontend/dist/app/sw.js"
+          # site/README.md is a repo-only doc, not something to ship — everything else in site/ is.
+          find site -maxdepth 1 -type f ! -name README.md -exec cp {} "$STAGE/frontend/dist/" \;
           # The installable clients, into the bundle that is actually deployed. Here rather than in
           # the web job because this is the moment the two halves meet, and it is the only place
           # that has both.

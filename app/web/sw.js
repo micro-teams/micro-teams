@@ -42,6 +42,11 @@ const CACHE = `microteams-${VERSION}`;
 /**
  * The files whose NAMES never change, and which therefore may not be answered from cache without
  * asking. Flutter emits `main.dart.js` under that name for every build it will ever produce.
+ *
+ * Written root-relative on purpose, even though a deployed bundle moves this file (and the three
+ * paths below) to /app/ (see deploy/nginx.conf and site/): check-web.mjs registers and exercises
+ * THIS worker straight out of `flutter build web`, at root, before that move ever happens.
+ * package-zip rewrites these same four literal strings as it moves the file — see its comment.
  */
 const CODE = ["/", "/index.html", "/app.html", "/flutter_bootstrap.js", "/main.dart.js"];
 
