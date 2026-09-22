@@ -423,6 +423,22 @@ docker exec "$MACHINE_CT" bash -c "cat > /usr/local/bin/longsay <<'EOS'
 microteams api say --thread-id \$1 --text \"LONGREPLY-\$(python3 -c 'print(\"y\"*20000)')-END\"
 EOS
   chmod +x /usr/local/bin/longsay"
+if [ "$IS_PI" = 1 ]; then
+  # pi's twin of the expectation below: the same longsay call, on the OpenAI endpoint, in OpenAI
+  # shape. pi's chat calls all carry its tool list, so the JSON-path filter the Claude one needs
+  # (to dodge the title request) has no job to do here.
+  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
+    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
+{ "httpRequest": { "method": "POST", "path": "/v1/chat/completions" },
+"times": { "remainingTimes": 1, "unlimited": false },
+"priority": 20,
+"httpLlmResponse": { "provider": "OPENAI", "model": "mock-1",
+  "completion": { "text": "", "streaming": true, "stopReason": "tool_calls",
+    "toolCalls": [ { "id": "call_ci_long", "name": "bash",
+      "arguments": "{\"command\":\"longsay $THREAD_ID\",\"description\":\"long reply\"}" } ],
+    "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
+JSON
+else
 docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
   -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
 { "httpRequest": { "method": "POST", "path": "/v1/messages",
@@ -435,6 +451,7 @@ docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/e
       "arguments": "{\"command\":\"longsay $THREAD_ID\",\"description\":\"long reply\"}" } ],
     "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
 JSON
+fi
 curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"content":"say something long"}' >/dev/null
 for _ in $(seq 1 60); do

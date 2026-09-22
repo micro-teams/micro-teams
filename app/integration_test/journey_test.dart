@@ -163,11 +163,12 @@ void main() {
       // The picker defaults to the server's choice; this run's machine runs a different program,
       // so name the driver explicitly. The item paints the bare name — only the default one gets
       // its " (default)" suffix — so the text below is unambiguous.
-      await tap(
-        tester,
-        find.byType(DropdownButtonFormField<String>),
-        what: 'the driver picker',
+      // The dialog carries two DropdownButtonFormField<String>s — the machine picker above and
+      // the driver picker below — so find the driver one by its label rather than by type.
+      final picker = find.byWidgetPredicate(
+        (w) => w is DropdownButtonFormField<String> && w.decoration?.labelText == 'Driver',
       );
+      await tap(tester, picker, what: 'the driver picker');
       await tap(
         tester,
         find.widgetWithText(DropdownMenuItem<String>, agentDriver),
