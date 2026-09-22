@@ -18,6 +18,12 @@ import 'package:microteams/src/common/ui/theme.dart';
 /// something else entirely.
 const mailBase = String.fromEnvironment('MT_E2E_MAIL', defaultValue: '/mail');
 
+/// Which driver the open-agent dialog should select. Empty is the server's default — what the
+/// Claude legs exercise, the picker untouched; the pi leg names pi, because a machine whose program
+/// is pi has no business opening a Claude agent. Stable per build rather than per run, so a
+/// dart-define instead of a mail-sink parameter.
+const agentDriver = String.fromEnvironment('MT_E2E_DRIVER', defaultValue: '');
+
 /// What differs from one run to the next, fetched rather than compiled in.
 ///
 /// A `--dart-define` is baked into the binary at build time. That is fine for a build made for this

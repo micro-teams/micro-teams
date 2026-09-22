@@ -1,32 +1,56 @@
 #!/usr/bin/env bash
 #
-#  Description: Putting a real Claude Code on a machine container, and scripting what the model
+#  Description: Putting a real agent program on a machine container, and scripting what the model
 #               says back. Sourced by both harnesses that need it.
 #
 #               There is one copy because there is one answer. `.github/scripts/e2e.sh` drives the
 #               machinery with curl and `app/tool/e2e/run.sh` drives the whole product through the
-#               interface, but "install the agent's program and put a mock Anthropic API in front of
-#               it" is the same paragraph either way — and it was the reason a stand-in `claude`
-#               existed at all: a second implementation is cheaper to keep than to share, right up
-#               until the two drift.
+#               interface, but "install the agent's program and put a mock model in front of it" is
+#               the same paragraph either way — and it was the reason a stand-in `claude` existed
+#               at all: a second implementation is cheaper to keep than to share, right up until
+#               the two drift.
 #
-#               The callers provide: fail(), MACHINE_CT, MOCK_CT, NET, MACHINE_USER, and onmachine().
+#               Two programs play the agent: Claude Code, behind a mock Anthropic API, and pi,
+#               behind a mock OpenAI one. The install and the model scripting fork on the leg;
+#               everything else — the mock container, the wait, the verify — is shared.
 #
 #  Author(s):
 #      Nictheboy Li    <nictheboy@outlook.com>
 
-# Real Claude Code, pointed at a mock Anthropic API. API mode (a token + a base URL) is what keeps
-# this out of the OAuth flow entirely — no browser, no login, nothing to approve.
+# Real Claude Code or pi, pointed at a mock model API. API mode (a token + a base URL, or a config
+# file with one) is what keeps this out of the OAuth flow entirely — no browser, no login, nothing
+# to approve.
 install_agent_program() {
   local leg="$1"
   case "$leg" in
-    npm:*|installer) ;;
+    npm:*|installer|pi:*) ;;
     *) fail "unknown leg: $leg" ;;
   esac
 
   docker rm -f "$MOCK_CT" >/dev/null 2>&1 || true
   docker run -d --name "$MOCK_CT" --hostname "$MOCK_CT" --network "$NET" \
     mockserver/mockserver:mockserver-7.5.0 >/dev/null
+
+  if [ "${leg#pi:}" != "$leg" ]; then
+    # pi is an npm package like Claude's, but its model is a CONFIG FILE, not an environment
+    # variable — so the "write the environment" half of this function looks different, and the
+    # rest is the same: a pinned version from npm, or whatever a pre-built machine image already
+    # carries.
+    if docker exec "$MACHINE_CT" bash -lc 'command -v pi' >/dev/null 2>&1; then
+      echo -n "pi already on the machine: "; onmachine 'pi --version'
+      _write_pi_env
+      return 0
+    fi
+    _ensure_node
+    local attempt
+    for attempt in 1 2 3; do
+      docker exec "$MACHINE_CT" npm i -g "@earendil-works/pi-coding-agent@${leg#pi:}" >/dev/null 2>&1 && break
+      echo "  (pi install attempt $attempt failed, retrying)"; sleep $((attempt * 15))
+    done
+    _write_pi_env
+    echo -n "pi on the machine: "; onmachine 'pi --version' || fail "pi did not install"
+    return 0
+  fi
 
   # Already there? Then this machine was started from an image that has it, and installing again is
   # a download for nothing. That is the whole reason for this branch — it makes a pre-built machine
@@ -43,20 +67,9 @@ install_agent_program() {
     return 0
   fi
 
-  # Retried, and with a widening gap: these reach the public internet, and a registry blip should
-  # not be reported as a product failure. Three tries five seconds apart span fifteen seconds, and
-  # the wobbles actually seen here last minutes — all three land inside the same one and the run
-  # dies for a reason that has nothing to do with the product. Backing off covers a real outage
-  # without making a genuinely broken install slow to report.
-  local attempt
-  for attempt in 1 2 3; do
-    docker exec "$MACHINE_CT" bash -c "set -e
-      export DEBIAN_FRONTEND=noninteractive
-      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
-      apt-get install -y -qq nodejs >/dev/null" && break
-    echo "  (node install attempt $attempt failed, retrying)"; sleep $((attempt * 15))
-  done
+  _ensure_node
 
+  local attempt
   case "$leg" in
     npm:*) for attempt in 1 2 3; do
              docker exec "$MACHINE_CT" npm i -g "@anthropic-ai/claude-code@${leg#npm:}" >/dev/null 2>&1 && break
@@ -72,6 +85,23 @@ install_agent_program() {
   echo -n "claude on the machine: "; onmachine 'claude --version' || fail "Claude Code did not install"
 }
 
+# Node, installed the same way whichever program plays the agent. Retried, and with a widening gap:
+# these reach the public internet, and a registry blip should not be reported as a product failure.
+# Three tries five seconds apart span fifteen seconds, and the wobbles actually seen here last
+# minutes — all three land inside the same one and the run dies for a reason that has nothing to do
+# with the product. Backing off covers a real outage without making a genuinely broken install slow
+# to report.
+_ensure_node() {
+  local attempt
+  for attempt in 1 2 3; do
+    docker exec "$MACHINE_CT" bash -c "set -e
+      export DEBIAN_FRONTEND=noninteractive
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+      apt-get install -y -qq nodejs >/dev/null" && break
+    echo "  (node install attempt $attempt failed, retrying)"; sleep $((attempt * 15))
+  done
+}
+
 # The agent's program is launched through `bash -lc` by our driver, so the login shell is where its
 # environment has to come from — the same place a real deployment would put a proxy. Written every
 # time, including when the program came pre-installed, because the mock's address is this run's.
@@ -84,6 +114,20 @@ export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 EOF"
   onmachine 'mkdir -p ~/.claude && printf "{\"hasCompletedOnboarding\":true}" > ~/.claude.json'
+}
+
+# pi's twin of _write_anthropic_env. Claude's model is an environment variable; pi's is a config
+# file — one OpenAI-compatible provider pointed at the mock, in the machine user's own
+# ~/.pi/agent/models.json, exactly the place an operator's config lives. Written every time,
+# including when the program came pre-installed, because the mock's address is this run's.
+_write_pi_env() {
+  onmachine 'mkdir -p ~/.pi/agent && cat > ~/.pi/agent/models.json <<EOF
+{ "providers": { "cimock": { "name": "Mock OpenAI",
+    "baseUrl": "http://'$MOCK_CT':1080/v1", "api": "openai-completions", "apiKey": "mock",
+    "models": [ { "id": "mock-1", "name": "Mock 1", "input": ["text"],
+      "contextWindow": 100000, "maxTokens": 4096,
+      "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 } } ] } } }
+EOF'
 }
 
 # Called AFTER the machine has joined the network the mock is on — not at the end of the install,
@@ -129,6 +173,32 @@ JSON
 JSON
 }
 
+# The pi twin of script_model_reply: the same scripted reply, in OpenAI shape. pi asks one endpoint
+# for everything (its chat calls all carry the tool list), so no JSON-path matching is needed the
+# way Claude's title request required it.
+script_model_reply_pi() {
+  local thread_id="$1" reply="$2"
+  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
+    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<JSON
+{ "httpRequest": { "method": "POST", "path": "/v1/chat/completions" },
+  "times": { "remainingTimes": 1, "unlimited": false },
+  "priority": 10,
+  "httpLlmResponse": { "provider": "OPENAI", "model": "mock-1",
+    "completion": { "text": "", "streaming": true, "stopReason": "tool_calls",
+      "toolCalls": [ { "id": "call_ci_reply", "name": "bash",
+        "arguments": "{\"command\":\"microteams api say --thread-id $thread_id --text '$reply'\"}" } ],
+      "usage": { "inputTokens": 200, "outputTokens": 30 } } } }
+JSON
+  docker exec -i "$MACHINE_CT" curl -fsS -X PUT "http://$MOCK_CT:1080/mockserver/expectation" \
+    -H 'Content-Type: application/json' --data-binary @- >/dev/null <<'JSON'
+{ "httpRequest": { "method": "POST", "path": "/v1/chat/completions" },
+  "priority": 1,
+  "httpLlmResponse": { "provider": "OPENAI", "model": "mock-1",
+    "completion": { "text": "done", "streaming": true, "stopReason": "stop",
+                    "usage": { "inputTokens": 60, "outputTokens": 3 } } } }
+JSON
+}
+
 # Did the model ever receive a request whose body contains this?
 #
 # Asked with `verify` rather than by downloading the request log and grepping it: that log is over a
@@ -145,6 +215,17 @@ verify_model_saw() {
     -X PUT "http://$MOCK_CT:1080/mockserver/verify" -H 'Content-Type: application/json' \
     --data-binary @- <<VERIFY
 {"httpRequest": {"method":"POST","path":"/v1/messages",
+                 "body":{"type":"REGEX","regex":"[\\\\s\\\\S]*$1[\\\\s\\\\S]*"}},
+ "times": {"atLeast": 1}}
+VERIFY
+}
+
+# The pi twin of verify_model_saw, asking the same question of the OpenAI endpoint.
+verify_model_saw_pi() {
+  docker exec -i "$MACHINE_CT" curl -s -o /dev/null -w '%{http_code}' \
+    -X PUT "http://$MOCK_CT:1080/mockserver/verify" -H 'Content-Type: application/json' \
+    --data-binary @- <<VERIFY
+{"httpRequest": {"method":"POST","path":"/v1/chat/completions",
                  "body":{"type":"REGEX","regex":"[\\\\s\\\\S]*$1[\\\\s\\\\S]*"}},
  "times": {"atLeast": 1}}
 VERIFY

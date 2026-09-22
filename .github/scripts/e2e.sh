@@ -20,11 +20,11 @@
 # So this boots the bundle a customer would deploy, spins a plain Debian container as a machine (the
 # closest thing to a VM that CI can afford), installs the connector FROM THAT BUNDLE, enrolls it
 # through the real approval flow, opens an agent on it, and asserts the message actually arrives in
-# the program's terminal. The agent's program is the real Claude Code, in front of a mock Anthropic
-# API — so there is no AI anywhere in the loop, and nothing here depends on what a model decides to
-# say.
+# the program's terminal. The agent's program is the real Claude Code or the real pi, in front of a
+# mock model API — so there is no AI anywhere in the loop, and nothing here depends on what a model
+# decides to say.
 #
-# One argument selects which Claude Code, which is also what the CI matrix varies:
+# One argument selects which program, which is also what the CI matrix varies:
 #
 #   npm:<version>   real Claude Code at a PINNED version. This is where determinism comes from:
 #                   nothing about it can change without somebody changing the number, so when this
@@ -32,6 +32,8 @@
 #   installer       real Claude Code, latest. Advisory in CI: when Anthropic ships a UI change this
 #                   is the leg that tells us, and that is intelligence rather than a reason to block
 #                   a merge.
+#   pi:<version>    real pi at a PINNED version, in front of a mock OpenAI API — the same contract
+#                   as the pinned Claude leg: it can only go red when we change something.
 #
 # There used to be a third, `fake`: a shell script pretending to be Claude, kept as "the
 # deterministic baseline". It is gone. Pinning already buys determinism, and the stand-in cost a
@@ -44,7 +46,7 @@
 # `microteams api say`, so the reply travels the whole way back into the thread — applet, pty, tmux,
 # connector, backend.
 #
-# Usage: e2e.sh [npm:<version>|installer]   (run from an unpacked bundle directory)
+# Usage: e2e.sh [npm:<version>|installer|pi:<version>]   (run from an unpacked bundle directory)
 set -euo pipefail
 
 # Installing the agent's program and scripting the model are shared with app/tool/e2e/run.sh — see
@@ -53,6 +55,11 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-leg.sh"
 
 LEG="${1:-npm:2.1.220}"
+# Which program plays the agent, said once here and used by the assertions below: the open-agent
+# request (pi is not the server's default driver), the prompt the machine must reach, and which of
+# the shared model-scripting functions in agent-leg.sh to call.
+IS_PI=0
+case "$LEG" in pi:*) IS_PI=1; PROG_NAME="pi" ;; *) PROG_NAME="Claude Code" ;; esac
 MACHINE_CT=microteams-testmachine
 MOCK_CT=microteams-testmock
 # Claude Code refuses --dangerously-skip-permissions as root, and our own driver omits the flag
@@ -171,8 +178,10 @@ pass "machine is online"
 
 # --- an agent ---------------------------------------------------------------------------------
 step "open an agent on it"
+AGENT_DRIVER_JSON=""
+[ "$IS_PI" = 1 ] && AGENT_DRIVER_JSON=",\"driver\":\"pi\""
 OPENED="$(curl -fsS -X POST "$MT/agent" -H "$AUTH" -H 'Content-Type: application/json' \
-  -d "{\"machineId\":\"$MACHINE_ID\",\"teamId\":$TEAM_ID,\"nickname\":\"CI Agent\"}")"
+  -d "{\"machineId\":\"$MACHINE_ID\",\"teamId\":$TEAM_ID,\"nickname\":\"CI Agent\"$AGENT_DRIVER_JSON}")"
 AGENT_ID="$(printf '%s' "$OPENED" | json "d['agentUserId']")"
 SID="$(printf '%s' "$OPENED" | json "d['sid']")"
 [ -n "$AGENT_ID" ] && [ -n "$SID" ] || fail "open-agent did not return an agent + screen: $OPENED"
@@ -214,15 +223,20 @@ pass "tmux session $SID is live"
 # showing its prompt. Typing into a terminal that is still painting is a real way to lose a message
 # (see T-064), so this waits.
 {
-  step "Claude Code reaches its prompt"
+  step "$PROG_NAME reaches its prompt"
+  # Each program's idle prompt has its own shape, and this waits on the program's, not the applet's
+  # mirrored status: what matters is that the program has finished its gates and is showing its
+  # prompt. Claude's is the "? for shortcuts" line; pi's is the "escape interrupt" hint that sits
+  # under its input box.
+  if [ "$IS_PI" = 1 ]; then READY_RE='escape interrupt|! bash'; else READY_RE='for shortcuts|for agents'; fi
   for _ in $(seq 1 60); do
     PANE="$(mtmux capture-pane -p -t "$SID" 2>/dev/null || true)"
-    printf '%s' "$PANE" | grep -qE 'for shortcuts|for agents' && { READY=1; break; }
-    printf '%s' "$PANE" | grep -q 'Pane is dead' && { echo "$PANE"; fail "Claude Code exited during startup"; }
+    printf '%s' "$PANE" | grep -qE "$READY_RE" && { READY=1; break; }
+    printf '%s' "$PANE" | grep -q 'Pane is dead' && { echo "$PANE"; fail "$PROG_NAME exited during startup"; }
     sleep 2
   done
-  [ "${READY:-0}" = "1" ] || { mtmux capture-pane -p -t "$SID" || true; fail "Claude Code never reached its prompt"; }
-  pass "Claude Code is at its prompt"
+  [ "${READY:-0}" = "1" ] || { mtmux capture-pane -p -t "$SID" || true; fail "$PROG_NAME never reached its prompt"; }
+  pass "$PROG_NAME is at its prompt"
 }
 
 step "a chat message reaches the agent"
@@ -235,7 +249,7 @@ THREAD_ID="$(curl -fsS -X POST "$MT/chat" -H "$AUTH" -H 'Content-Type: applicati
 round_trip() {
   MARKER="ci-marker-$1-$RANDOM"
   REPLY="pong-$MARKER"
-  script_model_reply "$THREAD_ID" "$REPLY"
+  if [ "$IS_PI" = 1 ]; then script_model_reply_pi "$THREAD_ID" "$REPLY"; else script_model_reply "$THREAD_ID" "$REPLY"; fi
 
   HEARD=0
   curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
@@ -387,9 +401,8 @@ open('/tmp/e2e-long.json', 'w').write(json.dumps({'content': body}))"
 curl -fsS -X POST "$MT/chat/$THREAD_ID/messages" -H "$AUTH" -H 'Content-Type: application/json' \
   --data-binary @/tmp/e2e-long.json >/dev/null
 for _ in $(seq 1 90); do
-  if [ "$(verify_model_saw TAIL-MARKER-OK)" = "202" ]; then
-    LONG_IN=1; break
-  fi
+  if [ "$IS_PI" = 1 ]; then SAW="$(verify_model_saw_pi TAIL-MARKER-OK)"; else SAW="$(verify_model_saw TAIL-MARKER-OK)"; fi
+  [ "$SAW" = "202" ] && { LONG_IN=1; break; }
   sleep 2
 done
 [ "${LONG_IN:-0}" = "1" ] || {
