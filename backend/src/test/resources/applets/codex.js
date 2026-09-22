@@ -46,6 +46,34 @@
     for (let i = 0; i < Math.abs(target - current); i++) write(step);
     return "moved";
   }
+  function readCursorOptions(screen) {
+    const lines = screen.split("\n").map(clean);
+    const cursor = lines.findIndex((l) => /^\s*[❯>]\s+\S/.test(l));
+    if (cursor < 0) return [];
+    const isItem = (line) => line.trim() !== "" && !/Enter to (confirm|continue)|Esc to (cancel|exit)/i.test(line);
+    let first = cursor;
+    while (first - 1 >= 0 && isItem(lines[first - 1])) first--;
+    let last = cursor;
+    while (last + 1 < lines.length && isItem(lines[last + 1])) last++;
+    return lines.slice(first, last + 1).map((line, i) => ({
+      opt: { n: i + 1, label: line.replace(/^\s*[❯>]?\s*/, "").trim() },
+      selected: first + i === cursor
+    }));
+  }
+  function chooseNearCursorByLabel(write, screen, want) {
+    const options = readCursorOptions(screen);
+    if (options.length === 0) return "no-list";
+    const target = options.findIndex((o) => want.test(o.opt.label));
+    if (target < 0) return "absent";
+    const current = options.findIndex((o) => o.selected);
+    if (current === target) {
+      write(ENTER);
+      return "confirmed";
+    }
+    const step = target > current ? DOWN : UP;
+    for (let i = 0; i < Math.abs(target - current); i++) write(step);
+    return "moved";
+  }
 
   // src/engine/driver.ts
   function tail(screen, n) {
@@ -124,7 +152,9 @@
           frame,
           write: (d) => term.write(d),
           choose: (want) => {
-            chooseByLabel((d) => term.write(d), screen, want);
+            if (chooseByLabel((d) => term.write(d), screen, want) === "absent") {
+              chooseNearCursorByLabel((d) => term.write(d), screen, want);
+            }
           }
         };
         const up = typeof gate.when === "function" ? gate.when(gctx) : gate.when.test(screen);

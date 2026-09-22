@@ -19,6 +19,6 @@
     "typescript": "^5.6.0"
   },
   "dependencies": {
-    "@micro-teams/connector-applets": "0.1.8"
+    "@micro-teams/connector-applets": "0.1.9"
   }
 }
