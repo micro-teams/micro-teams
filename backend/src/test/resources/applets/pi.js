@@ -213,44 +213,21 @@
     });
   }
 
-  // src/drivers/codex.ts
-  var OPERATOR_PROMPT = "__MT_OPERATOR_PROMPT__";
-  var sentOperatorPrompt = false;
+  // src/drivers/pi.ts
   defineDriver({
-    name: "codex",
-    version: 2,
-    gates: [
-      {
-        // "Do you trust the contents of this directory?" on a fresh cwd. The default is "Yes,
-        // continue" with "Press enter to continue", so a bare Enter answers it.
-        name: "directory trust",
-        when: /Do you trust the contents/i,
-        every: 1,
-        act: (c) => c.write(ENTER)
-      }
-    ],
+    name: "pi",
+    version: 1,
     observe: (screen) => {
       const tail2 = tail(screen, 16).split("\n");
       const tailStr = tail2.join("\n");
       if (/Pane is dead \(status/.test(tailStr)) return { kind: "dead" };
-      const working = /esc to interrupt/i.test(tailStr);
-      const hasUI = /(^|\n)\s*›/.test(tailStr) || /·\s+\S/.test(tailStr) || tail2.filter((l) => l.trim()).length > 3;
+      const working = /[⠁-⣿]/.test(tailStr) && /\bWorking\b/.test(tailStr);
+      const hasUI = /\d+(\.\d+)?%\/\d+[kKmM]?\s*\(/.test(tailStr) || tail2.filter((l) => l.trim()).length > 3;
       return { kind: "open", working, hasUI };
     },
-    // "Working (6s · esc to interrupt)". Codex's footer carries no token count.
-    progress: (ctx) => {
-      const m = ctx.tail.match(/Working\s*\(([^)]*)\)/i);
-      if (!m) return null;
-      const tm = m[1].match(/(?:\d+h\s*)?(?:\d+m\s*)?\d+s|\d+m\b/);
-      return tm ? { elapsed: tm[0].replace(/\s+/g, "") } : null;
-    },
-    beforeSay: (text) => {
-      if (sentOperatorPrompt || OPERATOR_PROMPT.slice(0, 5) === "__MT_") return text;
-      sentOperatorPrompt = true;
-      return OPERATOR_PROMPT + "\n\n" + text;
-    },
-    // Codex in full-auto never puts a choice dialog up, and nothing scrolls it away from the bottom
-    // that the engine needs to undo.
-    keepAtBottom: false
+    // pi paints no per-turn elapsed or token count — the context line above is cumulative, and
+    // pulling it out as "this turn's tokens" would report a number that goes backwards. Honest null,
+    // as the codex declaration does for what its footer does not carry.
+    progress: () => null
   });
 })();

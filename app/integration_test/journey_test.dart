@@ -159,6 +159,23 @@ void main() {
       find.widgetWithText(TextField, 'the server names it if you do not'),
       agentName,
     );
+    if (agentDriver.isNotEmpty) {
+      // The picker defaults to the server's choice; this run's machine runs a different program,
+      // so name the driver explicitly. The item paints the bare name — only the default one gets
+      // its " (default)" suffix — so the text below is unambiguous.
+      // The dialog carries two DropdownButtonFormField<String>s (machine above, driver below), so
+      // pick the driver one by its label text, which only it carries.
+      final picker = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Driver',
+      );
+      await tap(tester, picker, what: 'the driver picker');
+      await tap(
+        tester,
+        find.widgetWithText(DropdownMenuItem<String>, agentDriver),
+        what: "the '$agentDriver' item",
+      );
+    }
     await tap(
       tester,
       find.widgetWithText(FilledButton, 'Open'),

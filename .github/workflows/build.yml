@@ -595,6 +595,8 @@ jobs:
         include:
           - leg: npm:2.1.220
             experimental: false
+          - leg: pi:0.87.0
+            experimental: false
           - leg: installer
             experimental: true
     continue-on-error: ${{ matrix.experimental }}

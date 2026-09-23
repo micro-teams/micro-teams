@@ -46,6 +46,34 @@
     for (let i = 0; i < Math.abs(target - current); i++) write(step);
     return "moved";
   }
+  function readCursorOptions(screen) {
+    const lines = screen.split("\n").map(clean);
+    const cursor = lines.findIndex((l) => /^\s*[❯>]\s+\S/.test(l));
+    if (cursor < 0) return [];
+    const isItem = (line) => line.trim() !== "" && !/Enter to (confirm|continue)|Esc to (cancel|exit)/i.test(line);
+    let first = cursor;
+    while (first - 1 >= 0 && isItem(lines[first - 1])) first--;
+    let last = cursor;
+    while (last + 1 < lines.length && isItem(lines[last + 1])) last++;
+    return lines.slice(first, last + 1).map((line, i) => ({
+      opt: { n: i + 1, label: line.replace(/^\s*[❯>]?\s*/, "").trim() },
+      selected: first + i === cursor
+    }));
+  }
+  function chooseNearCursorByLabel(write, screen, want) {
+    const options = readCursorOptions(screen);
+    if (options.length === 0) return "no-list";
+    const target = options.findIndex((o) => want.test(o.opt.label));
+    if (target < 0) return "absent";
+    const current = options.findIndex((o) => o.selected);
+    if (current === target) {
+      write(ENTER);
+      return "confirmed";
+    }
+    const step = target > current ? DOWN : UP;
+    for (let i = 0; i < Math.abs(target - current); i++) write(step);
+    return "moved";
+  }
 
   // src/engine/driver.ts
   function tail(screen, n) {
@@ -124,7 +152,9 @@
           frame,
           write: (d) => term.write(d),
           choose: (want) => {
-            chooseByLabel((d) => term.write(d), screen, want);
+            if (chooseByLabel((d) => term.write(d), screen, want) === "absent") {
+              chooseNearCursorByLabel((d) => term.write(d), screen, want);
+            }
           }
         };
         const up = typeof gate.when === "function" ? gate.when(gctx) : gate.when.test(screen);
@@ -237,15 +267,28 @@
   }
   defineDriver({
     name: "claude",
-    version: 15,
+    version: 16,
     gates: [
       {
-        // The folder-trust gate on a fresh cwd. Wording varies by version, and the default option is
-        // the safe one ("Enter to confirm"), so a bare Enter is right. Every frame: it is idempotent.
+        // The folder-trust gate on a fresh cwd. Wording varies by version, and so does the SHAPE.
+        //
+        // It used to be answered with a bare Enter, on the belief that the default was the safe
+        // option. Newer Claude Code paints it as an unnumbered list with the cursor on "No, exit" —
+        // so that Enter quit Claude Code, and the pane died three seconds after launch. Every agent
+        // on a folder it had not been trusted with before was dead on arrival.
+        //
+        // So: pick by LABEL, never by position, in whichever shape this version uses. A bare Enter
+        // is left only for the shape that has no cursor to move at all.
         name: "folder trust",
         when: /I trust this folder|created or one you trust|Do you trust/i,
         every: 1,
-        act: (c) => c.write(ENTER)
+        act: (c) => {
+          if (!/[❯>]\s+\S/.test(c.screen)) {
+            c.write(ENTER);
+            return;
+          }
+          c.choose(/i trust this folder|yes,?\s*proceed/i);
+        }
       },
       {
         // The bypass-permissions consent, shown the first time Claude Code is started with
@@ -364,9 +407,17 @@
       // imagined top of the list, which is the bug that made it press "No, exit".)
       choose: (n) => {
         const want = parseInt(String(n), 10) || 1;
-        const opt = readOptions(host.term.read()).find((o) => o.opt.n === want);
+        const screen = host.term.read();
+        const numbered = readOptions(screen);
+        const options = numbered.length > 0 ? numbered : readCursorOptions(screen);
+        const opt = options.find((o) => o.opt.n === want);
         if (!opt) return false;
-        chooseByLabel((d) => host.term.write(d), host.term.read(), new RegExp(escapeRe(opt.opt.label)));
+        const label = new RegExp(escapeRe(opt.opt.label));
+        if (numbered.length > 0) {
+          chooseByLabel((d) => host.term.write(d), screen, label);
+        } else {
+          chooseNearCursorByLabel((d) => host.term.write(d), screen, label);
+        }
         return true;
       },
       // Two writes, not one: the command text and its submit, the same way a person sends it.

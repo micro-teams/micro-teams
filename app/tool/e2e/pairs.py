@@ -28,10 +28,11 @@ import json
 # assumptions the web leg could not, because a wide window makes all three true.
 CLIENTS = ["web", "android"]
 
-# What plays the agent's program on the machine, same meaning as in .github/scripts/e2e.sh. Both are
-# the real Claude Code: the pinned one is where determinism comes from — nothing about it can change
-# without somebody changing the number.
-ENVIRONMENTS = ["npm:2.1.220", "installer"]
+# What plays the agent's program on the machine, same meaning as in .github/scripts/e2e.sh. The
+# pinned ones are where determinism comes from — nothing about them can change without somebody
+# changing the number. Two programs: Claude Code (pinned, and latest as the advisory leg) and pi
+# (pinned).
+ENVIRONMENTS = ["npm:2.1.220", "installer", "pi:0.87.0"]
 
 
 def pairs(clients=None, environments=None):

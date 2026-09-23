@@ -13,7 +13,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 mkdirSync('dist', { recursive: true })
 
-for (const name of ['claude', 'codex']) {
+for (const name of ['claude', 'codex', 'pi']) {
   const from = require.resolve(`@micro-teams/connector-applets/dist/${name}.js`)
   copyFileSync(from, `dist/${name}.js`)
   console.log(`screen driver: ${name}.js <- @micro-teams/connector-applets`)

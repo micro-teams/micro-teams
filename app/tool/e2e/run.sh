@@ -59,6 +59,11 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+# Which driver the journey's open-agent dialog should pick. Empty means "the server's default",
+# which is what the Claude legs want — they must exercise the default path, the one a person gets
+# without touching the picker. The pi leg names pi explicitly: a machine whose program is pi has no
+# business opening a Claude agent.
+case "$LEG" in pi:*) LEG_DRIVER="pi" ;; *) LEG_DRIVER="" ;; esac
 [ -n "$BUNDLE" ] || { echo "--bundle <dir> is required" >&2; exit 2; }
 BUNDLE="$(cd "$BUNDLE" && pwd)"
 [ -f "$BUNDLE/docker-compose.yml" ] || { echo "$BUNDLE is not a deployment bundle" >&2; exit 2; }
@@ -337,7 +342,7 @@ if [ "$JOURNEY" = "full" ]; then
   docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc '$HOME/.local/bin/microteams --version' \
     >/dev/null || fail "the bundled connector does not run"
 
-  # The agent's program: the real Claude Code, in front of a mock Anthropic API. Shared with the
+  # The agent's program: the real Claude Code or pi, in front of a mock model API. Shared with the
   # machinery e2e — see .github/scripts/agent-leg.sh for why there is one copy of this.
   onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
   install_agent_program "$LEG"
@@ -475,6 +480,7 @@ $GATEWAY_PORT/$MAIL_PORT — build the APK for these ports, or let this run use 
       defines=(
         --dart-define=MT_ORIGIN="http://10.0.2.2:$GATEWAY_PORT"
         --dart-define=MT_E2E_MAIL="http://10.0.2.2:$MAIL_PORT"
+        --dart-define=MT_E2E_DRIVER="$LEG_DRIVER"
       )
     fi
     ( timeout "${MT_E2E_DRIVE_TIMEOUT:-1500}" flutter drive \
@@ -498,7 +504,7 @@ $GATEWAY_PORT/$MAIL_PORT — build the APK for these ports, or let this run use 
     --browser-name=chrome \
     --driver-port="$DRIVER_PORT" \
     --web-port="$FLUTTER_PORT" \
-    --dart-define=MT_E2E_MAIL=/mail ${MT_E2E_EXTRA_DEFINES:-} \
+    --dart-define=MT_E2E_MAIL=/mail --dart-define=MT_E2E_DRIVER="$LEG_DRIVER" ${MT_E2E_EXTRA_DEFINES:-} \
     --headless ) &
   local drive_pid=$!
 
@@ -537,9 +543,8 @@ if [ "$JOURNEY" = "full" ]; then
   step "the message reached the model on the machine"
   heard=0
   for _ in $(seq 1 60); do
-    if [ "$(verify_model_saw "e2e-marker-$RUN_ID")" = "202" ]; then
-      heard=1; break
-    fi
+    if [ "$LEG_DRIVER" = "pi" ]; then SAW="$(verify_model_saw_pi "e2e-marker-$RUN_ID")"; else SAW="$(verify_model_saw "e2e-marker-$RUN_ID")"; fi
+    [ "$SAW" = "202" ] && { heard=1; break; }
     sleep 2
   done
   [ "$heard" = "1" ] || {
