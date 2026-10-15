@@ -9,6 +9,6 @@
     "check:web": "bash tool/check-web.sh"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "playwright": "1.64.0"
   }
 }
