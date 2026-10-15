@@ -16,7 +16,7 @@ enum class ApproveTypeDTO(@get:JsonValue val value: kotlin.String) {
         fun forValue(value: kotlin.String): ApproveTypeDTO {
             return values().firstOrNull { it -> it.value == value }
                 ?: throw IllegalArgumentException(
-                    "Unexpected value '$value' for enum 'ApproveTypeDTO'"
+                    "Unexpected value '$value' for enum 'ApproveTypeDTO'",
                 )
         }
     }

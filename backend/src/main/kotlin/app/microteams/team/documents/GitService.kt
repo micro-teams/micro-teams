@@ -227,7 +227,7 @@ class GitService {
                                     mode = tw.fileMode.toString(),
                                     type = if (tw.isSubtree) "tree" else "blob",
                                     commitSha = head.name,
-                                )
+                                ),
                             )
                         }
                     }

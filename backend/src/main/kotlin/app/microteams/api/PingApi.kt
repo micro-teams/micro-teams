@@ -31,7 +31,7 @@ interface PingApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = Ping200ResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )

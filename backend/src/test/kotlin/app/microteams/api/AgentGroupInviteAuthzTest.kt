@@ -88,7 +88,7 @@ constructor(
         machineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12)
         machineToken = "tok-" + UUID.randomUUID().toString().replace("-", "")
         machineRepository.save(
-            Machine(machineId = machineId, name = "authz-host", token = machineToken)
+            Machine(machineId = machineId, name = "authz-host", token = machineToken),
         )
         teamMachineRepository.save(TeamMachine(machineId = machineId, teamId = teamId))
 
@@ -105,7 +105,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Rin"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Rin"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -128,7 +130,7 @@ constructor(
                 post("/chat")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"title":"pwn","memberIds":[$agentUserId]}""")
+                    .content("""{"title":"pwn","memberIds":[$agentUserId]}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -144,7 +146,7 @@ constructor(
                 post("/chat/$threadId/members")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"userId":$agentUserId}""")
+                    .content("""{"userId":$agentUserId}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -160,7 +162,7 @@ constructor(
                 post("/chat/$threadId/members")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"userId":$agentUserId}""")
+                    .content("""{"userId":$agentUserId}"""),
             )
             .andExpect(status().isNoContent)
     }
@@ -175,7 +177,7 @@ constructor(
                 post("/chat/$threadId/members")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"userId":${owner.userId}}""")
+                    .content("""{"userId":${owner.userId}}"""),
             )
             .andExpect(status().isNoContent)
     }
@@ -189,7 +191,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $token")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -203,7 +205,7 @@ constructor(
                     post("/chat")
                         .header("Authorization", "Bearer $token")
                         .contentType("application/json")
-                        .content(body)
+                        .content(body),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()

@@ -76,7 +76,7 @@ class WebConfig(
                 "from must be nameable, and the same-origin line (url \"\") cannot name it. " +
                 "Either give every line an explicit url in application.multipath.lines, or set " +
                 "application.cors-origin to your public origin (e.g. https://microteams.app). " +
-                "Without it, every credentialed request racing to another line is refused by CORS."
+                "Without it, every credentialed request racing to another line is refused by CORS.",
         )
     }
 

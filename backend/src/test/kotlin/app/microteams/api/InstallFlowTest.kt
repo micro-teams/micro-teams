@@ -65,7 +65,7 @@ class InstallFlowTest @Autowired constructor(private val mockMvc: MockMvc) {
                 .perform(
                     get("/install.sh")
                         .header("X-Forwarded-Proto", "https")
-                        .header("X-Forwarded-Host", "teams.example.test")
+                        .header("X-Forwarded-Host", "teams.example.test"),
                 )
                 .andExpect(status().isOk)
                 .andExpect(content().contentTypeCompatibleWith("text/x-shellscript"))

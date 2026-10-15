@@ -56,7 +56,7 @@ data class AgentDTO(
     @field:Valid
     @Schema(
         description =
-            "Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens). Opaque to the machine layer; the UI reads what it recognises. "
+            "Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens). Opaque to the machine layer; the UI reads what it recognises. ",
     )
     @param:JsonProperty("vars")
     @get:JsonProperty("vars")

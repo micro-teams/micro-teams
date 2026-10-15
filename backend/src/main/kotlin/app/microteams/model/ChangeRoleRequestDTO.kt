@@ -10,7 +10,7 @@ data class ChangeRoleRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("role", required = true)
     @get:JsonProperty("role", required = true)
-    val role: ChangeRoleRequestDTO.Role
+    val role: ChangeRoleRequestDTO.Role,
 ) {
 
     /** Values: OWNER,ADMIN,MEMBER */

@@ -47,9 +47,9 @@ class ViewerPumpTest {
             // anywhere near the write, this would hang and the test would time out.
             val done = CountDownLatch(1)
             Thread {
-                    repeat(100) { pump.offer("more".toByteArray()) }
-                    done.countDown()
-                }
+                repeat(100) { pump.offer("more".toByteArray()) }
+                done.countDown()
+            }
                 .start()
             assertTrue(done.await(2, TimeUnit.SECONDS), "offer() blocked behind a stuck write")
         } finally {

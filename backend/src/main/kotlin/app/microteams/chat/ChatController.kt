@@ -114,7 +114,7 @@ class ChatController(
 
     @Guard("create-chat", "chat_thread")
     override fun createThread(
-        @AuthInfo("createThread") createThreadRequestDTO: CreateThreadRequestDTO?
+        @AuthInfo("createThread") createThreadRequestDTO: CreateThreadRequestDTO?,
     ): ResponseEntity<ThreadDTO> {
         val body = createThreadRequestDTO ?: return ResponseEntity.badRequest().build()
         val userId = authenticationService.getCurrentUserId()
@@ -123,7 +123,7 @@ class ChatController(
 
     @Guard("query-chat", "chat_thread")
     override fun getThread(
-        @PathVariable("id") @ResourceId id: Long
+        @PathVariable("id") @ResourceId id: Long,
     ): ResponseEntity<ThreadDetailDTO> = ResponseEntity.ok(threadService.getThread(id))
 
     @Guard("rename-chat", "chat_thread")
@@ -159,7 +159,7 @@ class ChatController(
 
     @Guard("enumerate-chat-members", "chat_thread")
     override fun listThreadMembers(
-        @PathVariable("id") @ResourceId id: Long
+        @PathVariable("id") @ResourceId id: Long,
     ): ResponseEntity<List<ThreadMemberDTO>> = ResponseEntity.ok(threadService.listMembers(id))
 
     @Guard("add-chat-member", "chat_thread")

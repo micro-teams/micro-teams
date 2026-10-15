@@ -38,7 +38,7 @@ interface MachineApi {
                     responseCode = "200",
                     description = "Approved",
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -53,7 +53,7 @@ interface MachineApi {
         @Parameter(description = "", required = true)
         @Valid
         @RequestBody
-        approveEnrollmentRequestDTO: ApproveEnrollmentRequestDTO
+        approveEnrollmentRequestDTO: ApproveEnrollmentRequestDTO,
     ): ResponseEntity<MachineDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -63,7 +63,10 @@ interface MachineApi {
         summary = "Forget the machine entirely (revokes its token; it must re-enroll)",
         operationId = "forgetMachine",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Forgotten")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Forgotten"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -72,7 +75,7 @@ interface MachineApi {
         value = [PATH_FORGET_MACHINE],
     )
     fun forgetMachine(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
     ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -88,7 +91,7 @@ interface MachineApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -99,7 +102,7 @@ interface MachineApi {
         produces = ["application/json"],
     )
     fun getMachine(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
     ): ResponseEntity<MachineDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -117,7 +120,7 @@ interface MachineApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = ListMachinesResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -161,10 +164,10 @@ interface MachineApi {
                     content =
                         [
                             Content(
-                                schema = Schema(implementation = PollEnrollmentResponseDTO::class)
-                            )
+                                schema = Schema(implementation = PollEnrollmentResponseDTO::class),
+                            ),
                         ],
-                )
+                ),
             ],
     )
     @RequestMapping(
@@ -178,7 +181,7 @@ interface MachineApi {
         @Parameter(description = "", required = true)
         @Valid
         @RequestBody
-        pollEnrollmentRequestDTO: PollEnrollmentRequestDTO
+        pollEnrollmentRequestDTO: PollEnrollmentRequestDTO,
     ): ResponseEntity<PollEnrollmentResponseDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -194,7 +197,7 @@ interface MachineApi {
                     responseCode = "200",
                     description = "Renamed",
                     content = [Content(schema = Schema(implementation = MachineDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -228,10 +231,10 @@ interface MachineApi {
                     content =
                         [
                             Content(
-                                schema = Schema(implementation = StartEnrollmentResponseDTO::class)
-                            )
+                                schema = Schema(implementation = StartEnrollmentResponseDTO::class),
+                            ),
                         ],
-                )
+                ),
             ],
     )
     @RequestMapping(
@@ -245,7 +248,7 @@ interface MachineApi {
         @Parameter(description = "", required = true)
         @Valid
         @RequestBody
-        startEnrollmentRequestDTO: StartEnrollmentRequestDTO
+        startEnrollmentRequestDTO: StartEnrollmentRequestDTO,
     ): ResponseEntity<StartEnrollmentResponseDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }

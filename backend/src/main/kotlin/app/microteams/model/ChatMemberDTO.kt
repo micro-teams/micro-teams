@@ -26,7 +26,7 @@ data class ChatMemberDTO(
     val avatarId: kotlin.Int? = null,
     @Schema(
         description =
-            "Whether this member is an agent. Answered only when the request asked for it (queryIsMemberAgent=true); null means the question was not asked, which is NOT the same as false. "
+            "Whether this member is an agent. Answered only when the request asked for it (queryIsMemberAgent=true); null means the question was not asked, which is NOT the same as false. ",
     )
     @param:JsonProperty("isAgent")
     @get:JsonProperty("isAgent")

@@ -78,7 +78,7 @@ constructor(
                 cwd = null,
                 driver = "claude",
                 createdAt = LocalDateTime.now(),
-            )
+            ),
         )
     }
 
@@ -89,7 +89,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $teamMemberToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -114,7 +114,7 @@ constructor(
                 put("/agent/$agentUserId/keepalive")
                     .header("Authorization", "Bearer $teamMemberToken")
                     .contentType("application/json")
-                    .content("""{"enabled":true,"intervalSeconds":2400}""")
+                    .content("""{"enabled":true,"intervalSeconds":2400}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.keepalive.enabled").value(true))
@@ -141,14 +141,14 @@ constructor(
                 cwd = null,
                 driver = "claude",
                 createdAt = LocalDateTime.now(),
-            )
+            ),
         )
         mockMvc
             .perform(
                 put("/agent/${fresh.userId}/keepalive")
                     .header("Authorization", "Bearer $teamMemberToken")
                     .contentType("application/json")
-                    .content("""{"enabled":true}""")
+                    .content("""{"enabled":true}"""),
             )
             .andExpect(status().isBadRequest)
     }
@@ -162,7 +162,7 @@ constructor(
                 put("/agent/$agentUserId/keepalive")
                     .header("Authorization", "Bearer $teamMemberToken")
                     .contentType("application/json")
-                    .content("""{"enabled":false}""")
+                    .content("""{"enabled":false}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.keepalive.enabled").value(false))
@@ -179,7 +179,7 @@ constructor(
                 put("/agent/$agentUserId/keepalive")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"enabled":true,"intervalSeconds":2400}""")
+                    .content("""{"enabled":true,"intervalSeconds":2400}"""),
             )
             .andExpect(status().isForbidden)
     }

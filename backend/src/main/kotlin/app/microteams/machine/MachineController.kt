@@ -112,17 +112,17 @@ class MachineController(
 
     @NoAuth
     override fun startEnrollment(
-        startEnrollmentRequestDTO: StartEnrollmentRequestDTO
+        startEnrollmentRequestDTO: StartEnrollmentRequestDTO,
     ): ResponseEntity<StartEnrollmentResponseDTO> {
         val code = machineService.start(startEnrollmentRequestDTO.name)
         return ResponseEntity.ok(
-            StartEnrollmentResponseDTO(code = code, approveUrl = approveUrl(code))
+            StartEnrollmentResponseDTO(code = code, approveUrl = approveUrl(code)),
         )
     }
 
     @NoAuth
     override fun pollEnrollment(
-        pollEnrollmentRequestDTO: PollEnrollmentRequestDTO
+        pollEnrollmentRequestDTO: PollEnrollmentRequestDTO,
     ): ResponseEntity<PollEnrollmentResponseDTO> {
         val result = machineService.poll(pollEnrollmentRequestDTO.code)
         return ResponseEntity.ok(
@@ -130,18 +130,18 @@ class MachineController(
                 status = result.status,
                 machineId = result.machineId,
                 token = result.token,
-            )
+            ),
         )
     }
 
     @Guard("approve-enrollment", "machine")
     override fun approveEnrollment(
-        @AuthInfo("approve") approveEnrollmentRequestDTO: ApproveEnrollmentRequestDTO
+        @AuthInfo("approve") approveEnrollmentRequestDTO: ApproveEnrollmentRequestDTO,
     ): ResponseEntity<MachineDTO> =
         ResponseEntity.ok(
             machineService
                 .approve(approveEnrollmentRequestDTO.code, approveEnrollmentRequestDTO.teamIds)
-                .toDTO()
+                .toDTO(),
         )
 
     // -- the machines -------------------------------------------------------
@@ -165,13 +165,13 @@ class MachineController(
                         hasPrev = false,
                         hasMore = all.size > page.size,
                     ),
-            )
+            ),
         )
     }
 
     @Guard("query-machine", "machine")
     override fun getMachine(
-        @PathVariable("id") @AuthInfo("machineId") id: String
+        @PathVariable("id") @AuthInfo("machineId") id: String,
     ): ResponseEntity<MachineDTO> = ResponseEntity.ok(machineService.get(id).toDTO())
 
     @Guard("rename-machine", "machine")
@@ -183,7 +183,7 @@ class MachineController(
 
     @Guard("forget-machine", "machine")
     override fun forgetMachine(
-        @PathVariable("id") @AuthInfo("machineId") id: String
+        @PathVariable("id") @AuthInfo("machineId") id: String,
     ): ResponseEntity<Unit> {
         machineService.forget(id)
         return ResponseEntity(HttpStatus.NO_CONTENT)

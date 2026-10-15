@@ -8,5 +8,5 @@ data class MoveDocumentRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("newPath", required = true)
     @get:JsonProperty("newPath", required = true)
-    val newPath: kotlin.String
+    val newPath: kotlin.String,
 ) {}

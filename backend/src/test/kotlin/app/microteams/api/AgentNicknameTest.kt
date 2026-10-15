@@ -84,7 +84,7 @@ constructor(
                 cwd = null,
                 driver = "claude",
                 createdAt = LocalDateTime.now(),
-            )
+            ),
         )
     }
 
@@ -95,7 +95,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $teamMemberToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -124,7 +124,7 @@ constructor(
                 put("/agent/$agentUserId/nickname")
                     .header("Authorization", "Bearer $teamMemberToken")
                     .contentType("application/json")
-                    .content("""{"nickname":"$newNickname"}""")
+                    .content("""{"nickname":"$newNickname"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.nickname").value(newNickname))
@@ -145,7 +145,7 @@ constructor(
                 put("/agent/$agentUserId/nickname")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"nickname":"hostile rename"}""")
+                    .content("""{"nickname":"hostile rename"}"""),
             )
             .andExpect(status().isForbidden)
     }

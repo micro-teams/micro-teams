@@ -37,14 +37,14 @@ data class OpenAgentRequestDTO(
     val driver: kotlin.String? = null,
     @Schema(
         description =
-            "Opaque driver session id to open the agent with. When omitted the server mints one. Supplying it (together with a matching cwd and resume=true) resumes a prior session. "
+            "Opaque driver session id to open the agent with. When omitted the server mints one. Supplying it (together with a matching cwd and resume=true) resumes a prior session. ",
     )
     @param:JsonProperty("sessionId")
     @get:JsonProperty("sessionId")
     val sessionId: kotlin.String? = null,
     @Schema(
         description =
-            "Resume the given sessionId's prior transcript instead of starting it fresh. Only meaningful together with sessionId; the driver decides what resuming means. "
+            "Resume the given sessionId's prior transcript instead of starting it fresh. Only meaningful together with sessionId; the driver decides what resuming means. ",
     )
     @param:JsonProperty("resume")
     @get:JsonProperty("resume")

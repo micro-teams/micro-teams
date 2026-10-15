@@ -178,7 +178,7 @@ class HubMachine(val machineId: String) {
             sendLock.withLock { transport?.sendJson(msg) }
         } catch (e: IllegalStateException) {
             logger.warn(
-                "dropped a send to a machine whose control-link session was already closed: ${e.message}"
+                "dropped a send to a machine whose control-link session was already closed: ${e.message}",
             )
         }
     }
@@ -338,7 +338,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 rows = rows,
                 source = appletSource,
                 env = env?.ifEmpty { null },
-            )
+            ),
         )
         return screen
     }
@@ -385,7 +385,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 source = appletSource,
                 adopt = true,
                 env = env?.ifEmpty { null },
-            )
+            ),
         )
         // The reconnecting CLI is a fresh process (its old one either exited or, on a machine
         // reboot, tmux and everything above it are gone) — it remembers no `screen.subscribe`
@@ -441,7 +441,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 rows = rows,
                 source = appletSource,
                 env = env?.ifEmpty { null },
-            )
+            ),
         )
         screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
         markScreen(sid, ScreenState.STARTING)
@@ -553,7 +553,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 cwd = cwd,
                 env = env?.ifEmpty { null },
                 stdin = stdin,
-            )
+            ),
         )
         try {
             return fut.get(timeoutSeconds + 5, TimeUnit.SECONDS)
@@ -622,7 +622,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                     t = "screen.input",
                     sid = sid,
                     data = Base64.getEncoder().encodeToString(data),
-                )
+                ),
             )
     }
 
@@ -692,7 +692,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                             stderr = m.stderr ?: "",
                             exit = m.exit ?: 0,
                             truncated = m.truncated ?: false,
-                        )
+                        ),
                     )
                 }
             }
@@ -754,7 +754,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 id = m.id,
                 value = value,
                 error = error.ifEmpty { null },
-            )
+            ),
         )
     }
 

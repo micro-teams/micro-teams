@@ -8,5 +8,5 @@ data class RenameMachineRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("name", required = true)
     @get:JsonProperty("name", required = true)
-    val name: kotlin.String
+    val name: kotlin.String,
 ) {}

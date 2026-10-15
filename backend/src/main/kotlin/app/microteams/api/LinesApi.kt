@@ -31,7 +31,7 @@ interface LinesApi {
                     responseCode = "200",
                     description = "The line registry",
                     content = [Content(schema = Schema(implementation = LineRegistryDTO::class))],
-                )
+                ),
             ],
     )
     @RequestMapping(

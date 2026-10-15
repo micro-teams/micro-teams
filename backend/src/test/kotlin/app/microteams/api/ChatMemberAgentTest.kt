@@ -101,7 +101,7 @@ constructor(
                 cwd = null,
                 driver = "claude",
                 createdAt = LocalDateTime.now(),
-            )
+            ),
         )
     }
 
@@ -112,7 +112,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -127,8 +127,8 @@ constructor(
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
                         .content(
-                            """{"title":"$title","memberIds":${memberIds.joinToString(",", "[", "]")}}"""
-                        )
+                            """{"title":"$title","memberIds":${memberIds.joinToString(",", "[", "]")}}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -142,7 +142,7 @@ constructor(
                 .andExpect(status().isOk)
                 .andReturn()
                 .response
-                .contentAsString
+                .contentAsString,
         )
 
     private fun membersOf(body: JSONObject, chatId: IdType): Map<IdType, JSONObject> {

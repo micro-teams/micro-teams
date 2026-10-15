@@ -338,7 +338,7 @@ class AgentService(
                 intro = "AI agent"
                 avatar = Avatar().also { it.id = 1 }
                 this.user = user
-            }
+            },
         )
         return user.id!!.toLong()
     }

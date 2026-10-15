@@ -56,7 +56,7 @@ class RoleBasedAuthLogicService(
         val role =
             (customLogicData as? Map<*, *>)?.get("role") as? String
                 ?: throw RuntimeException(
-                    "Role not found in customLogicData. This is ether a bug or a malicious attack."
+                    "Role not found in customLogicData. This is ether a bug or a malicious attack.",
                 )
         val authorization = rolePermissionService.getAuthorizationForUserWithRole(userId, role)
         try {

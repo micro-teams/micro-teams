@@ -95,7 +95,7 @@ class CustomAuthLogics {
             val result = parserRunner.run(expression)
             if (result.hasErrors()) {
                 throw RuntimeException(
-                    "Failed to parse custom auth logic expression: '$expression'. Details: ${ErrorUtils.printParseErrors(result.parseErrors)}"
+                    "Failed to parse custom auth logic expression: '$expression'. Details: ${ErrorUtils.printParseErrors(result.parseErrors)}",
                 )
             }
             root = result.parseTreeRoot.getValue()
@@ -176,7 +176,7 @@ open class CustomAuthLogicsExpressionParser : BaseParser<CustomAuthLogicsExpress
                                 CustomAuthLogicsAndNode(
                                     pop(1) as CustomAuthLogicsExpressionNode,
                                     pop() as CustomAuthLogicsExpressionNode,
-                                )
+                                ),
                             ),
                         ),
                         Sequence(
@@ -186,10 +186,10 @@ open class CustomAuthLogicsExpressionParser : BaseParser<CustomAuthLogicsExpress
                                 CustomAuthLogicsOrNode(
                                     pop(1) as CustomAuthLogicsExpressionNode,
                                     pop() as CustomAuthLogicsExpressionNode,
-                                )
+                                ),
                             ),
                         ),
-                    )
+                    ),
                 ),
             ),
             NotExpression(),
@@ -214,7 +214,7 @@ open class CustomAuthLogicsExpressionParser : BaseParser<CustomAuthLogicsExpress
                         CharRange('A', 'Z'),
                         CharRange('0', '9'),
                         AnyOf("-_"),
-                    )
+                    ),
                 ),
             ),
             push(CustomAuthLogicsVariableNode(match())),

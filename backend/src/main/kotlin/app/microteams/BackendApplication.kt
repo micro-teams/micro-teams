@@ -41,7 +41,7 @@ import org.springframework.scheduling.annotation.EnableScheduling
             org.springframework.context.annotation.ComponentScan.Filter(
                 type = org.springframework.context.annotation.FilterType.REGEX,
                 pattern = ["app\\.microteams\\.ops\\..*"],
-            )
+            ),
         ],
 )
 @EnableConfigurationProperties(ApplicationConfig::class, LineRegistryProperties::class)

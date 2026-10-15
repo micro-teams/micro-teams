@@ -40,7 +40,7 @@ data class ThreadMemberDTO(
     val joinedAt: java.time.OffsetDateTime,
     @Schema(
         description =
-            "The member's display name, carried here so a thread view can paint its members without a second lookup (ChatMember carries the same for the chat list). "
+            "The member's display name, carried here so a thread view can paint its members without a second lookup (ChatMember carries the same for the chat list). ",
     )
     @param:JsonProperty("nickname")
     @get:JsonProperty("nickname")

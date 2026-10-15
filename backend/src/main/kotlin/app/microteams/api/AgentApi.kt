@@ -35,7 +35,10 @@ interface AgentApi {
         summary = "Close an agent and its screen",
         operationId = "closeAgent",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Closed")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Closed"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -44,7 +47,7 @@ interface AgentApi {
         value = [PATH_CLOSE_AGENT],
     )
     fun closeAgent(
-        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
     ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -61,7 +64,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "A short-lived agent user token",
                     content = [Content(schema = Schema(implementation = AgentTokenDTO::class))],
-                )
+                ),
             ],
     )
     @RequestMapping(
@@ -87,7 +90,7 @@ interface AgentApi {
                     description = "The team git remote and a credential for it",
                     content =
                         [Content(schema = Schema(implementation = AgentGitWorkspaceDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -113,7 +116,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = AgentDriversDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -140,7 +143,7 @@ interface AgentApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = ListAgentsResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -194,7 +197,7 @@ interface AgentApi {
                     responseCode = "201",
                     description = "Opened",
                     content = [Content(schema = Schema(implementation = OpenedAgentDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -209,7 +212,7 @@ interface AgentApi {
         @Parameter(description = "", required = true)
         @Valid
         @RequestBody
-        openAgentRequestDTO: OpenAgentRequestDTO
+        openAgentRequestDTO: OpenAgentRequestDTO,
     ): ResponseEntity<OpenedAgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -226,7 +229,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "Rebooted",
                     content = [Content(schema = Schema(implementation = OpenedAgentDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -237,7 +240,7 @@ interface AgentApi {
         produces = ["application/json"],
     )
     fun rebootAgent(
-        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
     ): ResponseEntity<OpenedAgentDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -254,7 +257,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "Updated — the agent as it now reads",
                     content = [Content(schema = Schema(implementation = AgentDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -287,7 +290,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "Updated — the agent as it now reads",
                     content = [Content(schema = Schema(implementation = AgentDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -320,7 +323,7 @@ interface AgentApi {
                     responseCode = "200",
                     description = "Updated — the agent as it now reads",
                     content = [Content(schema = Schema(implementation = AgentDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )

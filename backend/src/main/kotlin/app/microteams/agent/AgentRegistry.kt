@@ -48,7 +48,7 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
                 ) {
                     agent.tell(threadId, speaker, content)
                 }
-            }
+            },
         )
     }
 

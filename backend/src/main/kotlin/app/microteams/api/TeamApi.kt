@@ -37,7 +37,10 @@ interface TeamApi {
         summary = "Add a member to a team (admin+)",
         operationId = "addTeamMember",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Added")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Added"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -61,7 +64,10 @@ interface TeamApi {
         summary = "Associate a machine with this team. The model is symmetric and owner-less.",
         operationId = "bindTeamMachine",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Bound")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Bound"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -85,7 +91,10 @@ interface TeamApi {
         summary = "Change a member's role (admin+)",
         operationId = "changeMemberRole",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Role changed")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Role changed"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -116,7 +125,7 @@ interface TeamApi {
                     responseCode = "201",
                     description = "Created",
                     content = [Content(schema = Schema(implementation = TeamDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -131,7 +140,7 @@ interface TeamApi {
         @Parameter(description = "")
         @Valid
         @RequestBody(required = false)
-        createTeamRequestDTO: CreateTeamRequestDTO?
+        createTeamRequestDTO: CreateTeamRequestDTO?,
     ): ResponseEntity<TeamDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -141,7 +150,10 @@ interface TeamApi {
         summary = "Delete a file or folder",
         operationId = "deleteDocument",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Deleted")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Deleted"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -165,7 +177,10 @@ interface TeamApi {
         summary = "Delete a team (owner only)",
         operationId = "deleteTeam",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Deleted")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Deleted"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -174,7 +189,7 @@ interface TeamApi {
         value = [PATH_DELETE_TEAM],
     )
     fun deleteTeam(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -191,7 +206,7 @@ interface TeamApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -241,7 +256,7 @@ interface TeamApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = TeamDetailDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -252,7 +267,7 @@ interface TeamApi {
         produces = ["application/json"],
     )
     fun getTeam(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<TeamDetailDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -272,11 +287,11 @@ interface TeamApi {
                             Content(
                                 array =
                                     ArraySchema(
-                                        schema = Schema(implementation = TeamMemberDTO::class)
-                                    )
-                            )
+                                        schema = Schema(implementation = TeamMemberDTO::class),
+                                    ),
+                            ),
                         ],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -287,7 +302,7 @@ interface TeamApi {
         produces = ["application/json"],
     )
     fun listTeamMembers(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<List<TeamMemberDTO>> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -304,7 +319,7 @@ interface TeamApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = ListTeamsResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -342,7 +357,7 @@ interface TeamApi {
                     responseCode = "200",
                     description = "Moved",
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -373,7 +388,10 @@ interface TeamApi {
         summary = "Remove a member from a team (admin+)",
         operationId = "removeTeamMember",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Removed")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Removed"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -399,7 +417,7 @@ interface TeamApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = TeamDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -425,7 +443,10 @@ interface TeamApi {
         summary = "Disassociate a machine from this team",
         operationId = "unbindTeamMachine",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Unbound")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Unbound"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -453,7 +474,7 @@ interface TeamApi {
                     responseCode = "200",
                     description = "Written",
                     content = [Content(schema = Schema(implementation = DocNodeDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )

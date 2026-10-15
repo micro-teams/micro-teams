@@ -84,7 +84,7 @@ constructor(
 
     private fun nextFrame(collector: Collector) =
         objectMapper.readTree(
-            collector.frames.poll(5, TimeUnit.SECONDS) ?: error("no frame in time")
+            collector.frames.poll(5, TimeUnit.SECONDS) ?: error("no frame in time"),
         )
 
     @Test
@@ -133,9 +133,9 @@ constructor(
                         "id" to "c1",
                         "name" to "screenReady",
                         "args" to emptyList<Any>(),
-                    )
-                )
-            )
+                    ),
+                ),
+            ),
         )
         val result = nextFrame(collector)
         assertEquals("rpc.result", result["t"].asText())
@@ -151,9 +151,9 @@ constructor(
                         "sid" to screen.sid,
                         "name" to "status",
                         "value" to "busy",
-                    )
-                )
-            )
+                    ),
+                ),
+            ),
         )
         var mirrored: Any? = null
         repeat(50) {

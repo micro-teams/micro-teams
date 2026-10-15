@@ -17,7 +17,7 @@ import org.springframework.data.jpa.repository.JpaRepository
             UniqueConstraint(
                 name = "uq_message_client_token",
                 columnNames = ["thread_id", "sender_id", "client_token"],
-            )
+            ),
         ],
 )
 open class MessageEntity : BaseEntity() {

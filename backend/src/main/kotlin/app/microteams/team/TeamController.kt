@@ -70,7 +70,7 @@ class TeamController(
 
     @Guard("create-team", "team")
     override fun createTeam(
-        @Valid @RequestBody(required = false) dto: CreateTeamRequestDTO?
+        @Valid @RequestBody(required = false) dto: CreateTeamRequestDTO?,
     ): ResponseEntity<TeamDTO> {
         val name = dto?.name ?: return ResponseEntity.badRequest().build()
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -94,7 +94,7 @@ class TeamController(
 
     @Guard("query-team", "team")
     override fun getTeam(
-        @PathVariable("id") @ResourceId id: IdType
+        @PathVariable("id") @ResourceId id: IdType,
     ): ResponseEntity<TeamDetailDTO> = ResponseEntity.ok(teamService.getTeamDetail(id))
 
     @Guard("rename-team", "team")
@@ -114,7 +114,7 @@ class TeamController(
 
     @Guard("enumerate-team-members", "team")
     override fun listTeamMembers(
-        @PathVariable("id") @ResourceId id: IdType
+        @PathVariable("id") @ResourceId id: IdType,
     ): ResponseEntity<List<TeamMemberDTO>> = ResponseEntity.ok(teamService.listMembers(id))
 
     @Guard("add-team-member", "team")
@@ -191,7 +191,7 @@ class TeamController(
     ): ResponseEntity<DocNodeDTO> {
         checkPath(path)
         return ResponseEntity.ok(
-            documentService.getDocument(id, path, recursive, content, history, diff)
+            documentService.getDocument(id, path, recursive, content, history, diff),
         )
     }
 
@@ -204,7 +204,7 @@ class TeamController(
         checkPath(path)
         requirePath(path)
         return ResponseEntity.ok(
-            documentService.writeDocument(id, path, body ?: "", currentUserId())
+            documentService.writeDocument(id, path, body ?: "", currentUserId()),
         )
     }
 
@@ -219,7 +219,7 @@ class TeamController(
         checkPath(moveDocumentRequestDTO.newPath)
         requirePath(moveDocumentRequestDTO.newPath)
         return ResponseEntity.ok(
-            documentService.moveDocument(id, path, moveDocumentRequestDTO.newPath, currentUserId())
+            documentService.moveDocument(id, path, moveDocumentRequestDTO.newPath, currentUserId()),
         )
     }
 

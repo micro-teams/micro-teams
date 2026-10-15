@@ -54,7 +54,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/chat")
                         .header("Authorization", "Bearer $token")
                         .contentType("application/json")
-                        .content("""{"title":"retry safety"}""")
+                        .content("""{"title":"retry safety"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -72,7 +72,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/chat/$threadId/messages")
                         .header("Authorization", "Bearer $token")
                         .contentType("application/json")
-                        .content(body)
+                        .content(body),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -84,12 +84,12 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 mockMvc
                     .perform(
                         get("/chat/$threadId/messages?page_size=100")
-                            .header("Authorization", "Bearer $token")
+                            .header("Authorization", "Bearer $token"),
                     )
                     .andExpect(status().isOk)
                     .andReturn()
                     .response
-                    .contentAsString
+                    .contentAsString,
             )
             .getJSONArray("messages")
             .length()

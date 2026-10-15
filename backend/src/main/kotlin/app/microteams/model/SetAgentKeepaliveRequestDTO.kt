@@ -16,7 +16,7 @@ data class SetAgentKeepaliveRequestDTO(
     val enabled: kotlin.Boolean,
     @Schema(
         description =
-            "Seconds between keepalive touches. Required (and must be positive) when enabling; the interval should sit comfortably under the Claude Code cache TTL (~1h) so the cache never lapses between touches. Ignored when disabling. "
+            "Seconds between keepalive touches. Required (and must be positive) when enabling; the interval should sit comfortably under the Claude Code cache TTL (~1h) so the cache never lapses between touches. Ignored when disabling. ",
     )
     @param:JsonProperty("intervalSeconds")
     @get:JsonProperty("intervalSeconds")

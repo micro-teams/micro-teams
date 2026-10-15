@@ -10,5 +10,5 @@ data class LineRegistryDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("lines", required = true)
     @get:JsonProperty("lines", required = true)
-    val lines: kotlin.collections.List<LineDTO>
+    val lines: kotlin.collections.List<LineDTO>,
 ) {}

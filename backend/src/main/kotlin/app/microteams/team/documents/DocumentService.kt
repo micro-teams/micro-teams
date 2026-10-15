@@ -111,7 +111,7 @@ class DocumentService(private val gitService: GitService) {
             val slash = e.path.indexOf('/')
             if (slash < 0) {
                 files.add(
-                    DocNodeDTO(join(prefix, e.path), isFolder = false, commitSha = e.commitSha)
+                    DocNodeDTO(join(prefix, e.path), isFolder = false, commitSha = e.commitSha),
                 )
             } else {
                 val dirName = e.path.substring(0, slash)

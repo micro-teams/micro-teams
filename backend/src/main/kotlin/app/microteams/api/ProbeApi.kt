@@ -29,7 +29,7 @@ interface ProbeApi {
                 ApiResponse(
                     responseCode = "204",
                     description = "The line works. There is no body, on purpose.",
-                )
+                ),
             ],
     )
     @RequestMapping(

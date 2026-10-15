@@ -93,7 +93,7 @@ class AuthorizationService(
         if (applicationConfig.warnAuditFailure)
             logger.warn(
                 "Operation denied: '$action' on resource (resourceType: '$resourceType', resourceId: $resourceId, authInfo: $authInfo)." +
-                    " UserId: ${authorization.userId}. Authorization: $authorization"
+                    " UserId: ${authorization.userId}. Authorization: $authorization",
             )
         throw PermissionDeniedError(action, resourceType, resourceId, authInfo)
     }
@@ -190,7 +190,7 @@ class AuthorizationService(
         if (payload.signedAt > System.currentTimeMillis())
             throw RuntimeException(
                 "The token is valid, but it was signed in the future." +
-                    " This is a timezone bug or a malicious attack."
+                    " This is a timezone bug or a malicious attack.",
             )
 
         return payload.authorization

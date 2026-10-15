@@ -70,7 +70,7 @@ class ConnectorWebSocketConfig {
         // attach, and the viewer works exactly as before.
         preflight:
             org.springframework.beans.factory.ObjectProvider<
-                app.microteams.machine.screen.ScreenAttachPreflight
+                app.microteams.machine.screen.ScreenAttachPreflight,
             >,
     ): ViewerHandler = ViewerHandler(hub, objectMapper, preflight.getIfAvailable())
 
