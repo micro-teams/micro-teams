@@ -85,12 +85,12 @@ class ConnectorController(
     ): ResponseEntity<Resource> {
         if (target !in targets) {
             throw ConnectorArtifactNotFoundError(
-                "unknown target: $target (expected <os>-<arch>, e.g. linux-amd64)"
+                "unknown target: $target (expected <os>-<arch>, e.g. linux-amd64)",
             )
         }
         if (artifact !in artifacts) {
             throw ConnectorArtifactNotFoundError(
-                "unknown artifact: $artifact (expected one of ${artifacts.sorted()})"
+                "unknown artifact: $artifact (expected one of ${artifacts.sorted()})",
             )
         }
         val base = Path.of(binariesDir).toAbsolutePath().normalize()

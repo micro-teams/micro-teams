@@ -37,14 +37,14 @@ data class LineDTO(
     val transport: kotlin.String? = null,
     @Schema(
         description =
-            "Static preference, higher first. Only breaks ties between lines that measure the same: a hand-set number goes stale and a measurement does not. "
+            "Static preference, higher first. Only breaks ties between lines that measure the same: a hand-set number goes stale and a measurement does not. ",
     )
     @param:JsonProperty("weight")
     @get:JsonProperty("weight")
     val weight: kotlin.Int? = null,
     @Schema(
         description =
-            "True when this line is not under our own domain -- a free proxy that cannot be CNAME'd. It needs SameSite=None and explicit CORS, and is a fallback with reduced capability. "
+            "True when this line is not under our own domain -- a free proxy that cannot be CNAME'd. It needs SameSite=None and explicit CORS, and is a fallback with reduced capability. ",
     )
     @param:JsonProperty("foreignOrigin")
     @get:JsonProperty("foreignOrigin")

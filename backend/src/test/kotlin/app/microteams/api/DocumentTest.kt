@@ -59,7 +59,9 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/team")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""{"name":"Docs Team ${floor(Math.random() * 1e10).toLong()}"}""")
+                        .content(
+                            """{"name":"Docs Team ${floor(Math.random() * 1e10).toLong()}"}""",
+                        ),
                 )
                 .andReturn()
         teamId = JSONObject(response.response.contentAsString).getLong("id")
@@ -80,7 +82,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                         .header("Authorization", "Bearer $ownerToken")
                         .param("path", "notes/hello.md")
                         .contentType(MediaType.TEXT_PLAIN)
-                        .content("# Hello")
+                        .content("# Hello"),
                 )
                 .andExpect(status().isOk)
                 .andExpect(jsonPath("$.path").value("notes/hello.md"))
@@ -165,7 +167,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     .header("Authorization", "Bearer $ownerToken")
                     .param("path", "notes/hello.md")
                     .contentType(MediaType.TEXT_PLAIN)
-                    .content("# Updated")
+                    .content("# Updated"),
             )
             .andExpect(status().isOk)
         mockMvc
@@ -186,7 +188,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     .header("Authorization", "Bearer $ownerToken")
                     .param("path", "notes/hello.md")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"newPath":"notes/renamed.md"}""")
+                    .content("""{"newPath":"notes/renamed.md"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.path").value("notes/renamed.md"))
@@ -221,7 +223,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     .header("Authorization", "Bearer $strangerToken")
                     .param("path", "evil.md")
                     .contentType(MediaType.TEXT_PLAIN)
-                    .content("nope")
+                    .content("nope"),
             )
             .andExpect(status().isForbidden)
     }
@@ -239,7 +241,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
             .perform(
                 delete(docs())
                     .header("Authorization", "Bearer $ownerToken")
-                    .param("path", "notes/renamed.md")
+                    .param("path", "notes/renamed.md"),
             )
             .andExpect(status().isNoContent)
         // the only file is gone, so the root has no children.

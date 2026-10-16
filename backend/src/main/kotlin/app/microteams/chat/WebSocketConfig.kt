@@ -82,7 +82,7 @@ class WebSocketConfig(private val authorizationService: AuthorizationService) :
                         wsHandler: WebSocketHandler,
                         exception: Exception?,
                     ) {}
-                }
+                },
             )
     }
 }

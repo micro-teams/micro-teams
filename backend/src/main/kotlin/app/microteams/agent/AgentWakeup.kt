@@ -132,7 +132,7 @@ class AgentWakeup(
                 if (value == STATUS_DEAD)
                     hub.markScreen(screen.sid, ScreenState.DEAD, "pane is dead")
                 else hub.markScreen(screen.sid, ScreenState.LIVE)
-            }
+            },
         )
     }
 

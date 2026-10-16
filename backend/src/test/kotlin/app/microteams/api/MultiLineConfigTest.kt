@@ -48,7 +48,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
             "application.multipath.lines[1].url=https://cf.mt.example.app",
             "application.multipath.lines[1].transport=wss",
             "application.multipath.lines[1].weight=90",
-        ]
+        ],
 )
 class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
 
@@ -73,7 +73,7 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
             .perform(
                 options("/chat")
                     .header("Origin", "https://cf.mt.example.app")
-                    .header("Access-Control-Request-Method", "GET")
+                    .header("Access-Control-Request-Method", "GET"),
             )
             .andExpect(status().isOk)
             .andExpect(header().string("Access-Control-Allow-Origin", "https://cf.mt.example.app"))
@@ -124,11 +124,11 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
                     .header("Origin", "https://microteams.example.app")
                     .header("X-Forwarded-Host", "cf.mt.example.app")
                     .header("X-Forwarded-Proto", "https")
-                    .header("Access-Control-Request-Method", "GET")
+                    .header("Access-Control-Request-Method", "GET"),
             )
             .andExpect(status().isOk)
             .andExpect(
-                header().string("Access-Control-Allow-Origin", "https://microteams.example.app")
+                header().string("Access-Control-Allow-Origin", "https://microteams.example.app"),
             )
     }
 
@@ -155,7 +155,7 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
             .perform(
                 options("/chat")
                     .header("Origin", "https://not-our-line.example")
-                    .header("Access-Control-Request-Method", "GET")
+                    .header("Access-Control-Request-Method", "GET"),
             )
             .andExpect(status().isForbidden)
     }
@@ -164,14 +164,14 @@ class MultiLineConfigTest @Autowired constructor(private val mockMvc: MockMvc) {
     fun aMalformedRegistryStopsTheApplication() {
         val withPath =
             LineRegistryProperties(
-                listOf(LineRegistryProperties.Line(id = "cf", url = "https://cf.example/api"))
+                listOf(LineRegistryProperties.Line(id = "cf", url = "https://cf.example/api")),
             )
         val duplicate =
             LineRegistryProperties(
                 listOf(
                     LineRegistryProperties.Line(id = "cf", url = "https://a.example"),
                     LineRegistryProperties.Line(id = "cf", url = "https://b.example"),
-                )
+                ),
             )
 
         assertEquals(

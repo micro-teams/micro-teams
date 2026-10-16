@@ -65,7 +65,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/chat")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""{"title":"Design chat"}""")
+                        .content("""{"title":"Design chat"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andExpect(jsonPath("$.id").isNumber)
@@ -84,7 +84,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/chat")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"bogus","memberIds":[999999999]}""")
+                    .content("""{"title":"bogus","memberIds":[999999999]}"""),
             )
             .andExpect(status().isBadRequest)
     }
@@ -130,7 +130,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/chat/$threadId/members")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"userId":${member.userId},"role":"MEMBER"}""")
+                    .content("""{"userId":${member.userId},"role":"MEMBER"}"""),
             )
             .andExpect(status().isNoContent)
         mockMvc
@@ -155,7 +155,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/chat/$threadId/members")
                     .header("Authorization", "Bearer $memberToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}""")
+                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -168,7 +168,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $memberToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"content":"hello team"}""")
+                    .content("""{"content":"hello team"}"""),
             )
             .andExpect(status().isCreated)
             .andExpect(jsonPath("$.content").value("hello team"))
@@ -197,7 +197,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/chat/$threadId/messages")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""{"content":"$c"}""")
+                        .content("""{"content":"$c"}"""),
                 )
                 .andExpect(status().isCreated)
         }
@@ -205,7 +205,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
             .perform(
                 get("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $ownerToken")
-                    .param("page_size", "3")
+                    .param("page_size", "3"),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.messages.length()").value(3))
@@ -222,7 +222,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $strangerToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"content":"intruder"}""")
+                    .content("""{"content":"intruder"}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -235,7 +235,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/chat/$threadId")
                     .header("Authorization", "Bearer $memberToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"nope"}""")
+                    .content("""{"title":"nope"}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -248,7 +248,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/chat/$threadId")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"Design chat (renamed)"}""")
+                    .content("""{"title":"Design chat (renamed)"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.title").value("Design chat (renamed)"))
@@ -262,7 +262,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/chat/$threadId/members/${member.userId}")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"role":"ADMIN"}""")
+                    .content("""{"role":"ADMIN"}"""),
             )
             .andExpect(status().isNoContent)
         mockMvc
@@ -270,7 +270,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/chat/$threadId")
                     .header("Authorization", "Bearer $memberToken")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"Design chat (by admin)"}""")
+                    .content("""{"title":"Design chat (by admin)"}"""),
             )
             .andExpect(status().isOk)
     }

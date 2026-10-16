@@ -72,7 +72,7 @@ class TeamService(
     fun createTeam(name: String, ownerId: IdType): TeamDTO {
         val team = teamRepository.save(Team(name = name))
         teamMemberRepository.save(
-            TeamMember(teamId = team.id!!, userId = ownerId, role = TeamMemberRole.OWNER)
+            TeamMember(teamId = team.id!!, userId = ownerId, role = TeamMemberRole.OWNER),
         )
         gitService.initBareRepo(team.id!!)
         return team.toTeamDTO()

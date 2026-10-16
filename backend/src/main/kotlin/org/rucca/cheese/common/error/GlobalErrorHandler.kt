@@ -73,7 +73,7 @@ class GlobalErrorHandler {
     @ExceptionHandler(MissingServletRequestParameterException::class)
     @ResponseBody
     fun handleMissingServletRequestParameterException(
-        e: MissingServletRequestParameterException
+        e: MissingServletRequestParameterException,
     ): ResponseEntity<BaseError> {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(BadRequestError(e.message))
     }
@@ -81,7 +81,7 @@ class GlobalErrorHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
     @ResponseBody
     fun handleMethodArgumentTypeMismatchException(
-        e: MethodArgumentTypeMismatchException
+        e: MethodArgumentTypeMismatchException,
     ): ResponseEntity<BaseError> {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(BadRequestError(e.message ?: "Method argument type mismatch"))
@@ -90,11 +90,13 @@ class GlobalErrorHandler {
     @ExceptionHandler(HttpMessageConversionException::class)
     @ResponseBody
     fun handleHttpMessageConversionException(
-        e: HttpMessageConversionException
+        e: HttpMessageConversionException,
     ): ResponseEntity<BaseError> {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(
-                BadRequestError(e.message ?: "Invalid request caused http message conversion error")
+                BadRequestError(
+                    e.message ?: "Invalid request caused http message conversion error",
+                ),
             )
     }
 

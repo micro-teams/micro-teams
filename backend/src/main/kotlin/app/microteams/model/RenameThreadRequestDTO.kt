@@ -8,5 +8,5 @@ data class RenameThreadRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("title", required = true)
     @get:JsonProperty("title", required = true)
-    val title: kotlin.String
+    val title: kotlin.String,
 ) {}

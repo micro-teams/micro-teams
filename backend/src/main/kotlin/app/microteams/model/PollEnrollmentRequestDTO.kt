@@ -8,5 +8,5 @@ data class PollEnrollmentRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("code", required = true)
     @get:JsonProperty("code", required = true)
-    val code: kotlin.String
+    val code: kotlin.String,
 ) {}

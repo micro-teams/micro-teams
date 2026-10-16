@@ -20,7 +20,7 @@ interface ThreadRepository : JpaRepository<ThreadEntity, Long> {
         JOIN ThreadMemberEntity m ON m.threadId = t.id
         WHERE m.userId = :userId
         ORDER BY t.updatedAt DESC
-    """
+    """,
     )
     fun threadsForUser(userId: Long): List<ThreadEntity>
 }

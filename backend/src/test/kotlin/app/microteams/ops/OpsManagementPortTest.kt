@@ -58,7 +58,7 @@ constructor(private val machineRepository: app.microteams.machine.enrollment.Mac
                 machineId = id,
                 name = "test box",
                 token = UUID.randomUUID().toString(),
-            )
+            ),
         )
 
         val response = get(opsPort, "/ops/machines", TOKEN)
@@ -103,7 +103,7 @@ constructor(private val machineRepository: app.microteams.machine.enrollment.Mac
                 machineId = id,
                 name = "offline box",
                 token = UUID.randomUUID().toString(),
-            )
+            ),
         )
 
         val response = post(opsPort, "/ops/machines/$id/update", TOKEN)

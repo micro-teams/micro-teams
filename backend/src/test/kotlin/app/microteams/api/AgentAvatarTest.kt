@@ -89,7 +89,7 @@ constructor(
                 cwd = null,
                 driver = "claude",
                 createdAt = LocalDateTime.now(),
-            )
+            ),
         )
     }
 
@@ -120,7 +120,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $teamMemberToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -156,7 +156,7 @@ constructor(
                 put("/agent/$agentUserId/avatar")
                     .header("Authorization", "Bearer $teamMemberToken")
                     .contentType("application/json")
-                    .content("""{"avatarId":$someAvatarId}""")
+                    .content("""{"avatarId":$someAvatarId}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.avatarId").value(someAvatarId))
@@ -177,7 +177,7 @@ constructor(
                 put("/agent/$agentUserId/avatar")
                     .header("Authorization", "Bearer $outsiderToken")
                     .contentType("application/json")
-                    .content("""{"avatarId":$someAvatarId}""")
+                    .content("""{"avatarId":$someAvatarId}"""),
             )
             .andExpect(status().isForbidden)
     }

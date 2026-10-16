@@ -103,7 +103,7 @@ constructor(
         machineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12)
         machineToken = "tok-" + UUID.randomUUID().toString().replace("-", "")
         machineRepository.save(
-            Machine(machineId = machineId, name = "wakeup-host", token = machineToken)
+            Machine(machineId = machineId, name = "wakeup-host", token = machineToken),
         )
         teamMachineRepository.save(TeamMachine(machineId = machineId, teamId = teamId))
 
@@ -118,7 +118,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Wik"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Wik"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -133,7 +135,7 @@ constructor(
                     post("/chat")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"title":"wakeup","memberIds":[$agentUserId]}""")
+                        .content("""{"title":"wakeup","memberIds":[$agentUserId]}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -147,7 +149,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -194,7 +196,7 @@ constructor(
     private fun reportReady() =
         send(
             """{"t":"rpc.call","sid":"$sid","id":"c1","name":"screenReady",""" +
-                """"args":[{"driver":"claude"}]}"""
+                """"args":[{"driver":"claude"}]}""",
         )
 
     /**
@@ -217,7 +219,7 @@ constructor(
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $humanToken")
                     .contentType("application/json")
-                    .content("""{"content":"are you still with us?"}""")
+                    .content("""{"content":"are you still with us?"}"""),
             )
             .andExpect(status().isCreated)
 
@@ -264,7 +266,7 @@ constructor(
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $humanToken")
                     .contentType("application/json")
-                    .content("""{"content":"and again?"}""")
+                    .content("""{"content":"and again?"}"""),
             )
             .andExpect(status().isCreated)
         assertTrue(
@@ -299,7 +301,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Vue"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Vue"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -348,8 +352,8 @@ constructor(
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
                         .content(
-                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Lost"}"""
-                        )
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Lost"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()

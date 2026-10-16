@@ -11,5 +11,5 @@ data class SetAgentAvatarRequestDTO(
     )
     @param:JsonProperty("avatarId", required = true)
     @get:JsonProperty("avatarId", required = true)
-    val avatarId: kotlin.Int
+    val avatarId: kotlin.Int,
 ) {}

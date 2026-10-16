@@ -66,7 +66,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $token")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()

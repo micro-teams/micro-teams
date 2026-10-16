@@ -42,7 +42,7 @@ data class MessageDTO(
     val editedAt: java.time.OffsetDateTime? = null,
     @Schema(
         description =
-            "Echoed back when the caller supplied one, so a client can recognise its own pending message in the one returned (and in a later poll) rather than guessing by content. "
+            "Echoed back when the caller supplied one, so a client can recognise its own pending message in the one returned (and in a later poll) rather than guessing by content. ",
     )
     @param:JsonProperty("clientToken")
     @get:JsonProperty("clientToken")

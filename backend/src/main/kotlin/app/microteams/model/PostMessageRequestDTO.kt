@@ -19,7 +19,7 @@ data class PostMessageRequestDTO(
     @get:Size(max = 64)
     @Schema(
         description =
-            "A caller-generated id for THIS message, so the send can be retried safely. Posting the same token again in the same thread does not create a second message: the one already stored is returned. A client that retries after a lost response needs this; one that never retries may omit it. "
+            "A caller-generated id for THIS message, so the send can be retried safely. Posting the same token again in the same thread does not create a second message: the one already stored is returned. A client that retries after a lost response needs this; one that never retries may omit it. ",
     )
     @param:JsonProperty("clientToken")
     @get:JsonProperty("clientToken")

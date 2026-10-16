@@ -36,7 +36,10 @@ interface ChatApi {
         summary = "Add a member to a thread (admin+)",
         operationId = "addThreadMember",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Added")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Added"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -60,7 +63,10 @@ interface ChatApi {
         summary = "Change a thread member's role (owner only)",
         operationId = "changeThreadMemberRole",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Role changed")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Role changed"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -91,7 +97,7 @@ interface ChatApi {
                     responseCode = "201",
                     description = "Created",
                     content = [Content(schema = Schema(implementation = ThreadDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -106,7 +112,7 @@ interface ChatApi {
         @Parameter(description = "")
         @Valid
         @RequestBody(required = false)
-        createThreadRequestDTO: CreateThreadRequestDTO?
+        createThreadRequestDTO: CreateThreadRequestDTO?,
     ): ResponseEntity<ThreadDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -116,7 +122,10 @@ interface ChatApi {
         summary = "Dissolve a thread (owner only)",
         operationId = "dissolveThread",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Dissolved")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Dissolved"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -125,7 +134,7 @@ interface ChatApi {
         value = [PATH_DISSOLVE_THREAD],
     )
     fun dissolveThread(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -141,7 +150,7 @@ interface ChatApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = ThreadDetailDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -152,7 +161,7 @@ interface ChatApi {
         produces = ["application/json"],
     )
     fun getThread(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<ThreadDetailDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -170,7 +179,7 @@ interface ChatApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = ListChatsResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -213,7 +222,7 @@ interface ChatApi {
                     description = "OK",
                     content =
                         [Content(schema = Schema(implementation = ListMessagesResponseDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -252,11 +261,11 @@ interface ChatApi {
                             Content(
                                 array =
                                     ArraySchema(
-                                        schema = Schema(implementation = ThreadMemberDTO::class)
-                                    )
-                            )
+                                        schema = Schema(implementation = ThreadMemberDTO::class),
+                                    ),
+                            ),
                         ],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -267,7 +276,7 @@ interface ChatApi {
         produces = ["application/json"],
     )
     fun listThreadMembers(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<List<ThreadMemberDTO>> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
@@ -283,7 +292,7 @@ interface ChatApi {
                     responseCode = "201",
                     description = "Created",
                     content = [Content(schema = Schema(implementation = MessageDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
@@ -309,7 +318,10 @@ interface ChatApi {
         summary = "Remove a member from a thread (admin+)",
         operationId = "removeThreadMember",
         description = """""",
-        responses = [ApiResponse(responseCode = "204", description = "Removed")],
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Removed"),
+            ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )
     @RequestMapping(
@@ -335,7 +347,7 @@ interface ChatApi {
                     responseCode = "200",
                     description = "OK",
                     content = [Content(schema = Schema(implementation = ThreadDTO::class))],
-                )
+                ),
             ],
         security = [SecurityRequirement(name = "bearerAuth")],
     )

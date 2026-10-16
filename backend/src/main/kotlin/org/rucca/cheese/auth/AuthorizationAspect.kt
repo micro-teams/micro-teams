@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component
 class AuthorizationAspect(private val authorizationService: AuthorizationService) {
     @Before(
         "@within(org.springframework.web.bind.annotation.RestController) || " +
-            "@within(org.springframework.stereotype.Controller)"
+            "@within(org.springframework.stereotype.Controller)",
     )
     fun checkAuthorization(joinPoint: JoinPoint) {
         if (joinPoint.target.javaClass.name.startsWith("org.springframework.boot")) {

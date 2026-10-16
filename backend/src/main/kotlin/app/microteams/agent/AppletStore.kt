@@ -37,6 +37,6 @@ class AppletStore(@Value("\${application.applets-dir:}") private val appletsDir:
         read(name)
             ?: error(
                 "applet '$name' not found: set application.applets-dir to the mounted applets " +
-                    "directory, or ensure the classpath fallback is present"
+                    "directory, or ensure the classpath fallback is present",
             )
 }

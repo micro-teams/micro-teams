@@ -70,7 +70,7 @@ class ThreadService(
                 .threadsForUser(userId)
                 .map { it.toChatSummaryDTO() }
                 .sortedWith(
-                    compareByDescending<ChatSummaryDTO> { it.updatedAt }.thenByDescending { it.id }
+                    compareByDescending<ChatSummaryDTO> { it.updatedAt }.thenByDescending { it.id },
                 )
         val (page, pageInfo) =
             PageHelper.pageFromAll(summaries, pageStart, pageSize, { it.id }, null)
@@ -140,7 +140,7 @@ class ThreadService(
                 threadId = t.id
                 this.userId = userId
                 role = ThreadMemberRole.OWNER
-            }
+            },
         )
         body.memberIds?.forEach { mid ->
             if (mid != userId)
@@ -149,7 +149,7 @@ class ThreadService(
                         threadId = t.id
                         this.userId = mid
                         role = ThreadMemberRole.MEMBER
-                    }
+                    },
                 )
         }
         // A new thread has no messages, so nothing has "moved" and the message event that normally
@@ -198,7 +198,7 @@ class ThreadService(
                     this.threadId = threadId
                     this.userId = userId
                     this.role = role
-                }
+                },
             )
         }
         announceMembership(threadId)

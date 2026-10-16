@@ -117,7 +117,7 @@ class MachineService(
                 machineId = UUID.randomUUID().toString().replace("-", "").take(12),
                 name = entry.machineName,
                 token = randomToken(24),
-            )
+            ),
         )
 
     private fun liveCode(codeValue: String): MachineAuthCode {

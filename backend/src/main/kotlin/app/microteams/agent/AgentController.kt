@@ -243,7 +243,7 @@ class AgentController(
                         hasPrev = false,
                         hasMore = agents.size > page.size,
                     ),
-            )
+            ),
         )
     }
 
@@ -304,14 +304,14 @@ class AgentController(
             AgentDriversDTO(
                 drivers = agentService.driverNames(),
                 defaultDriver = agentService.defaultDriverName,
-            )
+            ),
         )
 
     // -- lifecycle ----------------------------------------------------------
 
     @Guard("open-agent", "agent")
     override fun openAgent(
-        @AuthInfo("open") openAgentRequestDTO: OpenAgentRequestDTO
+        @AuthInfo("open") openAgentRequestDTO: OpenAgentRequestDTO,
     ): ResponseEntity<OpenedAgentDTO> {
         val opened =
             agentService.openAgent(
@@ -334,7 +334,7 @@ class AgentController(
      */
     @Guard("reboot-agent", "agent")
     override fun rebootAgent(
-        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
     ): ResponseEntity<OpenedAgentDTO> {
         return ResponseEntity.ok(agentService.rebootAgent(userId).toDTO())
     }
@@ -361,7 +361,7 @@ class AgentController(
         agentProfileService.setAvatar(userId, setAgentAvatarRequestDTO.avatarId)
         val viewerAuth = authorizationService.currentAuthorization()
         return ResponseEntity.ok(
-            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth),
         )
     }
 
@@ -379,7 +379,7 @@ class AgentController(
         agentProfileService.setNickname(userId, setAgentNicknameRequestDTO.nickname)
         val viewerAuth = authorizationService.currentAuthorization()
         return ResponseEntity.ok(
-            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth),
         )
     }
 
@@ -400,13 +400,13 @@ class AgentController(
         )
         val viewerAuth = authorizationService.currentAuthorization()
         return ResponseEntity.ok(
-            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth)
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth),
         )
     }
 
     @Guard("close-agent", "agent")
     override fun closeAgent(
-        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
     ): ResponseEntity<Unit> {
         agentService.closeAgent(userId)
         return ResponseEntity(HttpStatus.NO_CONTENT)
@@ -457,7 +457,7 @@ class AgentController(
                 ?: throw BadRequestError("caller is not an active agent")
         val minted = agentTokenService.mint(auth.userId)
         return ResponseEntity.ok(
-            AgentGitWorkspaceDTO(gitUrl = gitUrl, token = minted.token, teamId = teamId)
+            AgentGitWorkspaceDTO(gitUrl = gitUrl, token = minted.token, teamId = teamId),
         )
     }
 }

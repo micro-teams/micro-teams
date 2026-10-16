@@ -74,7 +74,7 @@ class UpdatesWebSocketConfig {
 
     @Bean
     fun updatesWsHandlerMapping(
-        updatesWsRequestHandler: WebSocketHttpRequestHandler
+        updatesWsRequestHandler: WebSocketHttpRequestHandler,
     ): HandlerMapping {
         val mapping = SimpleUrlHandlerMapping()
         mapping.order = -1

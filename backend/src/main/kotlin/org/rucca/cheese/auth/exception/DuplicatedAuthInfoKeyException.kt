@@ -6,5 +6,5 @@ class DuplicatedAuthInfoKeyException(
     duplicatedKey: String,
 ) :
     RuntimeException(
-        "Duplicated AuthInfo annotation key '$duplicatedKey' in $controllerName.$methodName"
+        "Duplicated AuthInfo annotation key '$duplicatedKey' in $controllerName.$methodName",
     )

@@ -20,7 +20,7 @@ class OwnerIds {
     fun register(resourceType: String, ownerIdProvider: OwnerIdProvider) {
         if (ownerIdProviders.containsKey(resourceType)) {
             throw RuntimeException(
-                "Owner ID provider for resource type $resourceType is already registered."
+                "Owner ID provider for resource type $resourceType is already registered.",
             )
         }
         ownerIdProviders[resourceType] = ownerIdProvider

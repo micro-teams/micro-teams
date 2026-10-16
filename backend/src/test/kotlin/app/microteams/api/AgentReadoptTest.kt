@@ -92,7 +92,7 @@ constructor(
         machineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12)
         machineToken = "tok-" + UUID.randomUUID().toString().replace("-", "")
         machineRepository.save(
-            Machine(machineId = machineId, name = "readopt-host", token = machineToken)
+            Machine(machineId = machineId, name = "readopt-host", token = machineToken),
         )
         teamMachineRepository.save(TeamMachine(machineId = machineId, teamId = teamId))
     }
@@ -104,7 +104,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -152,7 +152,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Hot"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Hot"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -208,8 +210,8 @@ constructor(
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
                         .content(
-                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Ghost"}"""
-                        )
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Ghost"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()

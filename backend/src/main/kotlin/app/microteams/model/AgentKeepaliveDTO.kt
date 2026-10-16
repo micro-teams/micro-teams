@@ -15,7 +15,7 @@ data class AgentKeepaliveDTO(
     @get:JsonProperty("enabled", required = true)
     val enabled: kotlin.Boolean,
     @Schema(
-        description = "Seconds between keepalive touches; present when a schedule has been set."
+        description = "Seconds between keepalive touches; present when a schedule has been set.",
     )
     @param:JsonProperty("intervalSeconds")
     @get:JsonProperty("intervalSeconds")

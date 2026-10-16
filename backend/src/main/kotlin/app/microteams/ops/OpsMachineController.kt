@@ -122,7 +122,7 @@ class OpsMachineController(
                     mapOf(
                         "error" to "an update was already requested for this machine",
                         "requestedAt" to previous.at.toString(),
-                    )
+                    ),
                 )
         }
         val before = hub.buildOf(id)
@@ -142,7 +142,7 @@ class OpsMachineController(
                 note =
                     "The machine was asked to update. Whether it did is only knowable by looking: " +
                         "watch it drop, reconnect, and report a build. GET /ops/machines.",
-            )
+            ),
         )
     }
 }

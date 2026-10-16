@@ -65,7 +65,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/team")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -80,13 +80,13 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 .perform(
                     post("/machine/enroll/start")
                         .contentType("application/json")
-                        .content("""{"name":"my-laptop"}""")
+                        .content("""{"name":"my-laptop"}"""),
                 )
                 .andExpect(status().isOk)
                 .andExpect(jsonPath("$.code").isNotEmpty)
                 .andExpect(
                     jsonPath("$.approveUrl")
-                        .value(org.hamcrest.Matchers.containsString("/connect?code="))
+                        .value(org.hamcrest.Matchers.containsString("/connect?code=")),
                 )
                 .andReturn()
         enrollCode = JSONObject(res.response.contentAsString).getString("code")
@@ -99,7 +99,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
             .perform(
                 post("/machine/enroll/poll")
                     .contentType("application/json")
-                    .content("""{"code":"$enrollCode"}""")
+                    .content("""{"code":"$enrollCode"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("pending"))
@@ -114,7 +114,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/machine/enroll/approve")
                     .header("Authorization", "Bearer $strangerToken")
                     .contentType("application/json")
-                    .content("""{"code":"$enrollCode","teamIds":[$team1]}""")
+                    .content("""{"code":"$enrollCode","teamIds":[$team1]}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -128,7 +128,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/machine/enroll/approve")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType("application/json")
-                        .content("""{"code":"$enrollCode","teamIds":[$team1]}""")
+                        .content("""{"code":"$enrollCode","teamIds":[$team1]}"""),
                 )
                 .andExpect(status().isOk)
                 .andExpect(jsonPath("$.id").isNotEmpty)
@@ -145,7 +145,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
             .perform(
                 post("/machine/enroll/poll")
                     .contentType("application/json")
-                    .content("""{"code":"$enrollCode"}""")
+                    .content("""{"code":"$enrollCode"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("approved"))
@@ -177,7 +177,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/machine/$machineId")
                     .header("Authorization", "Bearer $strangerToken")
                     .contentType("application/json")
-                    .content("""{"name":"hacked"}""")
+                    .content("""{"name":"hacked"}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -190,7 +190,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/machine/$machineId")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"name":"workstation"}""")
+                    .content("""{"name":"workstation"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.name").value("workstation"))
@@ -204,7 +204,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/team/$team2/machine")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"machineId":"$machineId"}""")
+                    .content("""{"machineId":"$machineId"}"""),
             )
             .andExpect(status().isNoContent)
         mockMvc
@@ -223,7 +223,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
         mockMvc
             .perform(
                 delete("/team/$team1/machine/$machineId")
-                    .header("Authorization", "Bearer $ownerToken")
+                    .header("Authorization", "Bearer $ownerToken"),
             )
             .andExpect(status().isNoContent)
         mockMvc
@@ -248,7 +248,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
         mockMvc
             .perform(
                 delete("/team/$team2/machine/$machineId")
-                    .header("Authorization", "Bearer $ownerToken")
+                    .header("Authorization", "Bearer $ownerToken"),
             )
             .andExpect(status().isNoContent)
         mockMvc

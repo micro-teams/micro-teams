@@ -48,7 +48,8 @@ class OpsSurfaceTest @Autowired constructor(private val mockMvc: MockMvc) {
     fun `the ops update action does not exist on the public application either`() {
         mockMvc
             .perform(
-                post("/ops/machines/anything/update").header("X-Ops-Token", "a-real-operator-token")
+                post("/ops/machines/anything/update")
+                    .header("X-Ops-Token", "a-real-operator-token"),
             )
             .andExpect(status().isNotFound)
     }

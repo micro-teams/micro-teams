@@ -91,7 +91,7 @@ constructor(
         machineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12)
         machineToken = "tok-" + UUID.randomUUID().toString().replace("-", "")
         machineRepository.save(
-            Machine(machineId = machineId, name = "loop-host", token = machineToken)
+            Machine(machineId = machineId, name = "loop-host", token = machineToken),
         )
         teamMachineRepository.save(TeamMachine(machineId = machineId, teamId = teamId))
     }
@@ -103,7 +103,7 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"name":"$name"}""")
+                        .content("""{"name":"$name"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -167,7 +167,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Rin"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Rin"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -205,8 +207,8 @@ constructor(
         session.sendMessage(
             TextMessage(
                 """{"t":"rpc.call","sid":"${sidOf(openRes.response.contentAsString)}","id":"r1",""" +
-                    """"name":"screenReady","args":[{"driver":"claude"}]}"""
-            )
+                    """"name":"screenReady","args":[{"driver":"claude"}]}""",
+            ),
         )
 
         // form the group: a thread with the human (owner) and the agent as a member
@@ -216,7 +218,7 @@ constructor(
                     post("/chat")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"title":"standup","memberIds":[$agentUserId]}""")
+                        .content("""{"title":"standup","memberIds":[$agentUserId]}"""),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -228,7 +230,7 @@ constructor(
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $humanToken")
                     .contentType("application/json")
-                    .content("""{"content":"hey agent, are you there?"}""")
+                    .content("""{"content":"hey agent, are you there?"}"""),
             )
             .andExpect(status().isCreated)
         val say = awaitFrame(collector, "rpc.call")
@@ -246,7 +248,7 @@ constructor(
                 .perform(
                     post("/agent/token")
                         .header("X-Microteams-Session", machineToken)
-                        .header("X-Microteams-Screen", screenToken)
+                        .header("X-Microteams-Screen", screenToken),
                 )
                 .andExpect(status().isOk)
                 .andReturn()
@@ -269,7 +271,7 @@ constructor(
                 post("/chat/$threadId/messages")
                     .header("Authorization", "Bearer $agentToken")
                     .contentType("application/json")
-                    .content("""{"content":"yes! reporting in."}""")
+                    .content("""{"content":"yes! reporting in."}"""),
             )
             .andExpect(status().isCreated)
             .andExpect(jsonPath("$.senderId").value(agentUserId))
@@ -281,7 +283,7 @@ constructor(
             .andExpect(status().isOk)
             .andExpect(
                 jsonPath("$.messages[?(@.senderId == $agentUserId)].content")
-                    .value(org.hamcrest.Matchers.hasItem("yes! reporting in."))
+                    .value(org.hamcrest.Matchers.hasItem("yes! reporting in.")),
             )
 
         session.close()
@@ -352,8 +354,8 @@ constructor(
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
                         .content(
-                            """{"machineId":"$machineId","teamId":$teamId,"sessionId":"$sessionId","resume":true}"""
-                        )
+                            """{"machineId":"$machineId","teamId":$teamId,"sessionId":"$sessionId","resume":true}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -385,7 +387,9 @@ constructor(
                     post("/agent")
                         .header("Authorization", "Bearer $humanToken")
                         .contentType("application/json")
-                        .content("""{"machineId":"$machineId","teamId":$teamId,"nickname":"Reb"}""")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"Reb"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -400,7 +404,8 @@ constructor(
         val rebootRes =
             mockMvc
                 .perform(
-                    post("/agent/$agentUserId/reboot").header("Authorization", "Bearer $humanToken")
+                    post("/agent/$agentUserId/reboot")
+                        .header("Authorization", "Bearer $humanToken"),
                 )
                 .andExpect(status().isOk)
                 .andExpect(jsonPath("$.agentUserId").value(agentUserId))

@@ -8,5 +8,5 @@ data class StartEnrollmentRequestDTO(
     @Schema(description = "The machine's self-reported hostname")
     @param:JsonProperty("name")
     @get:JsonProperty("name")
-    val name: kotlin.String? = null
+    val name: kotlin.String? = null,
 ) {}

@@ -64,7 +64,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/team")
                         .header("Authorization", "Bearer $ownerToken")
                         .contentType("application/json")
-                        .content("""{"name":"$teamName"}""")
+                        .content("""{"name":"$teamName"}"""),
                 )
                 .andExpect(status().isCreated)
                 .andExpect(jsonPath("$.id").isNumber)
@@ -104,19 +104,19 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
         // caller is OWNER of the team → OWNER filter keeps it, MEMBER filter drops it.
         mockMvc
             .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "OWNER")
+                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "OWNER"),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.teams[0].id").value(teamId))
         mockMvc
             .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "MEMBER")
+                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "MEMBER"),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.teams.length()").value(0))
         mockMvc
             .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "BOGUS")
+                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "BOGUS"),
             )
             .andExpect(status().isBadRequest)
     }
@@ -143,7 +143,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/team/$teamId/members")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"userId":${member.userId},"role":"MEMBER"}""")
+                    .content("""{"userId":${member.userId},"role":"MEMBER"}"""),
             )
             .andExpect(status().isNoContent)
         mockMvc
@@ -169,7 +169,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 post("/team/$teamId/members")
                     .header("Authorization", "Bearer $memberToken")
                     .contentType("application/json")
-                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}""")
+                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
             )
             .andExpect(status().isForbidden)
     }
@@ -182,7 +182,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/team/$teamId/members/${member.userId}")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"role":"ADMIN"}""")
+                    .content("""{"role":"ADMIN"}"""),
             )
             .andExpect(status().isNoContent)
     }
@@ -196,14 +196,14 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                     post("/team/$teamId/members")
                         .header("Authorization", "Bearer $memberToken")
                         .contentType("application/json")
-                        .content("""{"userId":${stranger.userId},"role":"MEMBER"}""")
+                        .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
                 )
                 .andExpect(status().isNoContent)
         fun removeStranger() =
             mockMvc
                 .perform(
                     delete("/team/$teamId/members/${stranger.userId}")
-                        .header("Authorization", "Bearer $ownerToken")
+                        .header("Authorization", "Bearer $ownerToken"),
                 )
                 .andExpect(status().isNoContent)
         fun memberCount(expected: Int) =
@@ -232,7 +232,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 patch("/team/$teamId")
                     .header("Authorization", "Bearer $ownerToken")
                     .contentType("application/json")
-                    .content("""{"name":"$teamName (renamed)"}""")
+                    .content("""{"name":"$teamName (renamed)"}"""),
             )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.name").value("$teamName (renamed)"))

@@ -93,7 +93,7 @@ class AgentTokenService(
                                     ownedByUser = agentUserId,
                                     types = listOf("user"),
                                 ),
-                        )
+                        ),
                     ),
             )
         return sign(TokenPayload(authorization, signedAt = now, validUntil = validUntil))
