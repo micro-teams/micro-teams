@@ -5,7 +5,7 @@
   "description": "The applets shipped into the microteams CLI host: one screen applet per agent driver (Claude Code, Codex) and one that defines the `microteams api` command tree. Authored in TypeScript against the generated API client, bundled to goja-compatible JS.",
   "type": "module",
   "scripts": {
-    "codegen": "openapi-generator-cli generate -i ../MicroTeams-API.yml -g typescript-fetch -o src/api --additional-properties=supportsES6=true,withoutRuntimeChecks=true,prefixParameterInterfaces=true",
+    "codegen": "openapi-generator-cli generate -i ../MicroTeams-API.yml -g typescript-fetch -o src/api --additional-properties=supportsES6=true,withoutRuntimeChecks=true,prefixParameterInterfaces=true,modelPropertyNaming=original,paramNaming=original && openapi-generator-cli generate -i ../MicroTeams-API.yml -g openapi -o build/spec && node scripts/gen-ops.mjs",
     "typecheck": "tsc --noEmit",
     "build:cli": "esbuild src/cli/index.ts --bundle --format=iife --target=es2016 --outfile=dist/cli.js --legal-comments=none",
     "copy": "node scripts/copy-to-backend.mjs",

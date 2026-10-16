@@ -1,0 +1,134 @@
+// Generates src/api/ops.ts: one typed entry per operation in MicroTeams-API.yml, so every backend
+// call the CLI makes goes through `call('<operationId>', params)` and is checked against the
+// contract at `npm run typecheck`.
+//
+// Why a table of our own on top of the typescript-fetch client: that client is async and built on
+// fetch, and the goja host's `microteams.http` is synchronous. So the generated *classes* are no use
+// to us, but their *types* are exactly what we want. This script reads the JSON copy of the spec
+// (codegen emits it with `-g openapi`) for what to send, and points each operation at the request-
+// parameter interface and response model the generator already wrote. A renamed path, field or
+// parameter then breaks the build instead of an agent at runtime.
+
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const root = join(here, '..')
+const spec = JSON.parse(readFileSync(join(root, 'build/spec/openapi.json'), 'utf8'))
+
+// Every interface the generator declared, by name — so we name a params type only if it exists.
+// Interface name -> its property names, so the body's key is read off the generated type rather
+// than guessed from the generator's naming rules.
+const declared = new Map()
+for (const f of readdirSync(join(root, 'src/api/apis'))) {
+  const src = readFileSync(join(root, 'src/api/apis', f), 'utf8')
+  for (const m of src.matchAll(/export interface (\w+) \{([^}]*)\}/g))
+    declared.set(m[1], [...m[2].matchAll(/^\s*(\w+)\??:/gm)].map((x) => x[1]))
+}
+
+// Models the TS generator actually wrote. An inline response schema (ping's) gets a name in the
+// JSON spec but no TS model, so it is typed `unknown` rather than as a type that does not exist.
+const modelFiles = new Set()
+for (const f of readdirSync(join(root, 'src/api/models'))) {
+  const src = readFileSync(join(root, 'src/api/models', f), 'utf8')
+  for (const m of src.matchAll(/export (?:interface|type|const) (\w+)/g)) modelFiles.add(m[1])
+}
+
+const cap = (s) => s[0].toUpperCase() + s.slice(1)
+const refName = (schema) => (schema && schema.$ref ? schema.$ref.split('/').pop() : null)
+
+function tsType(schema) {
+  if (!schema) return 'void'
+  const ref = refName(schema)
+  if (ref) return modelFiles.has(ref) ? ref : 'unknown'
+  if (schema.type === 'array') return `Array<${tsType(schema.items)}>`
+  if (schema.type === 'string') return 'string'
+  if (schema.type === 'integer' || schema.type === 'number') return 'number'
+  if (schema.type === 'boolean') return 'boolean'
+  return 'unknown'
+}
+
+const ops = []
+const models = new Set()
+for (const [path, item] of Object.entries(spec.paths)) {
+  for (const [method, op] of Object.entries(item)) {
+    if (!op || !op.operationId) continue
+    const id = op.operationId
+    const tag = cap((op.tags && op.tags[0]) || 'default')
+    const params = (op.parameters || []).map((p) => (p.$ref ? resolve(p.$ref) : p))
+    const pathParams = params.filter((p) => p.in === 'path').map((p) => p.name)
+    const queryParams = params.filter((p) => p.in === 'query').map((p) => p.name)
+
+    const content = (op.requestBody && op.requestBody.content) || {}
+    const bodyType = Object.keys(content)[0] || null
+
+    const ok = Object.entries(op.responses).find(([code]) => /^2/.test(code))
+    const okContent = ok && ok[1].content && ok[1].content['application/json']
+    const result = okContent ? tsType(okContent.schema) : 'void'
+    for (const m of result.match(/[A-Z]\w+/g) || []) if (m !== 'Array') models.add(m)
+
+    let paramsType = '{}'
+    for (const candidate of [`${tag}Api${cap(id)}Request`, `${tag}Api${cap(id)}OperationRequest`]) {
+      if (declared.has(candidate)) paramsType = candidate
+    }
+    if (paramsType === '{}' && (pathParams.length || queryParams.length || bodyType))
+      throw new Error(`no generated request interface for ${id} (looked for ${tag}Api${cap(id)}[Operation]Request)`)
+    // The body is the one property of the request interface that is neither a path nor a query
+    // parameter. Exactly one, or the contract and this script disagree about the operation.
+    let bodyKey = null
+    if (bodyType) {
+      const rest = declared.get(paramsType).filter((k) => !pathParams.includes(k) && !queryParams.includes(k))
+      if (rest.length !== 1) throw new Error(`${id}: cannot tell the body key from ${paramsType} (${rest})`)
+      bodyKey = rest[0]
+    }
+
+    ops.push({ id, method: method.toUpperCase(), path, pathParams, queryParams, bodyKey, bodyType, paramsType, result })
+  }
+}
+
+function resolve(ref) {
+  return ref.split('/').slice(1).reduce((o, k) => o[k], spec)
+}
+
+ops.sort((a, b) => a.id.localeCompare(b.id))
+const paramTypes = [...new Set(ops.map((o) => o.paramsType).filter((t) => t !== '{}'))].sort()
+
+const out = `// GENERATED by scripts/gen-ops.mjs from MicroTeams-API.yml — do not edit.
+import type {
+${[...paramTypes].map((t) => `  ${t},`).join('\n')}
+} from './apis'
+import type {
+${[...models].sort().map((t) => `  ${t},`).join('\n')}
+} from './models'
+
+export interface OpSpec {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  path: string
+  pathParams: string[]
+  queryParams: string[]
+  bodyKey: string | null
+  bodyType: string | null
+}
+
+export const OPS = {
+${ops
+  .map(
+    (o) =>
+      `  ${o.id}: { method: '${o.method}', path: '${o.path}', pathParams: ${JSON.stringify(o.pathParams)}, queryParams: ${JSON.stringify(o.queryParams)}, bodyKey: ${JSON.stringify(o.bodyKey)}, bodyType: ${JSON.stringify(o.bodyType)} },`,
+  )
+  .join('\n')}
+} as const satisfies Record<string, OpSpec>
+
+export type OpId = keyof typeof OPS
+
+export interface OpParams {
+${ops.map((o) => `  ${o.id}: ${o.paramsType}`).join('\n')}
+}
+
+export interface OpResult {
+${ops.map((o) => `  ${o.id}: ${o.result}`).join('\n')}
+}
+`
+writeFileSync(join(root, 'src/api/ops.ts'), out)
+console.log(`gen-ops: ${ops.length} operations`)

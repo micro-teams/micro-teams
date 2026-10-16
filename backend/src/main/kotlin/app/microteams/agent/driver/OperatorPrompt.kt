@@ -24,9 +24,11 @@ object OperatorPrompt {
         Your working directory is your team's shared document tree, a git repository. Run
         `microteams api docs sync` once at the start to fetch the latest, then read and edit files
         here with your normal tools. To let the team see your changes, run
-        `microteams api docs add -m '<what changed>'` to record them and then
+        `microteams api docs add --message '<what changed>'` to record them and then
         `microteams api docs sync` to publish and pull others' updates.
         `microteams api docs status` shows what you have changed but not yet recorded.
+        Every other thing the app can do is under `microteams api` too (chat, docs, team, agent,
+        machine); `microteams api <group> --help` lists what each can do.
         """
             .trimIndent()
 }
