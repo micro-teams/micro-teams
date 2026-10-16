@@ -1,6 +1,6 @@
 /// The web end of `microteams link auto-connect`.
 ///
-/// The CLI prints `${origin}/connect?code=…` for a human to open; this page reads that code, lets
+/// The CLI prints `${origin}/app/connect?code=…` for a human to open; this page reads that code, lets
 /// the signed-in human pick which of their teams the new machine should serve, and approves it.
 /// There is no preview endpoint — approving IS the flow — so this page's whole job is: read the
 /// code, collect team ids, call, say what happened.

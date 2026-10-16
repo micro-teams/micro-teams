@@ -86,7 +86,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 .andExpect(jsonPath("$.code").isNotEmpty)
                 .andExpect(
                     jsonPath("$.approveUrl")
-                        .value(org.hamcrest.Matchers.containsString("/connect?code=")),
+                        .value(org.hamcrest.Matchers.containsString("/app/connect?code=")),
                 )
                 .andReturn()
         enrollCode = JSONObject(res.response.contentAsString).getString("code")

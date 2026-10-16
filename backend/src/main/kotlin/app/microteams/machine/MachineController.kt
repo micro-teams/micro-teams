@@ -200,12 +200,13 @@ class MachineController(
 
     private fun approveUrl(code: String): String {
         // Prefer proxy-forwarded host/proto (we sit behind nginx), fall back to the request's own.
-        // The CLI prints this URL for the human to approve at.
+        // The CLI prints this URL for the human to approve at. The web app lives under /app/ (see
+        // deploy/nginx.conf), so the page is /app/connect — a bare /connect is a 404.
         val request =
             (org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()
                     as org.springframework.web.context.request.ServletRequestAttributes)
                 .request
-        return "${origin(request)}/connect?code=$code"
+        return "${origin(request)}/app/connect?code=$code"
     }
 
     private fun origin(request: HttpServletRequest): String {
