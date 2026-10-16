@@ -31,6 +31,7 @@
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
+import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 
 const BASE = process.env.CHECK_BUNDLE_BASE ?? "http://127.0.0.1:58090";
@@ -201,6 +202,63 @@ async function openApp(url, { waitForUrl } = {}) {
     return { status: response.status, text: (await response.text()).trim() };
   });
   check("/version is still at the origin root", version.status === 200 && version.text.length > 0, version.text);
+  await context.close();
+}
+
+// ── The worker races every published line ─────────────────────────────────────────────────────
+//
+// The engine, the assets and the fonts are fetched by the browser rather than by Dart, so the
+// page's own redundant transport never sees them and they all go over one origin — which, measured
+// against production, is the slowest of the six lines published there. The worker is the only place
+// that can intercept them, and it now sends each one to every line at once and takes the first
+// answer.
+//
+// Two things have to be true and neither is visible from the page: that a second line is really
+// used, and that a line which is simply DOWN costs nothing. The evidence for the first is the
+// second gateway's own access log — it is a separate container serving the same tree, so anything
+// in its log got there because the worker asked it. The dead line is a port with nothing behind it.
+if (process.env.CHECK_BUNDLE_LINE2 && process.env.CHECK_BUNDLE_LINE2_CONTAINER) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("console", (m) => {
+    if (m.type() === "error" && !isExpectedNoise(m.text())) errors.push(m.text());
+  });
+
+  // First load registers the worker; it cannot race what it is not yet controlling. The reload is
+  // the load under test, and it is also the honest one: this is what every visitor gets after a
+  // deploy has emptied their cache.
+  await page.goto(BASE + "/app/", { waitUntil: "load" });
+  const controlling = await page
+    .waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 60000 })
+    .then(() => true)
+    .catch(() => false);
+  check("the worker takes control before the race can happen", controlling);
+
+  await page.reload({ waitUntil: "load" });
+  const painted = await page
+    .waitForFunction(() => document.documentElement.dataset.mtReady === "1", null, { timeout: 90000 })
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForURL("**/app/chats", { timeout: 20000 }).catch(() => {});
+
+  // The dead line is published the whole time. If a line that never answers could hold up the race,
+  // this is where it would show.
+  check("the app still starts with a dead line published", painted);
+  check("and still routes", page.url() === BASE + "/app/chats", page.url());
+  check("no page errors while racing", errors.length === 0, errors.slice(0, 3).join(" | "));
+
+  const log = execFileSync("docker", ["logs", process.env.CHECK_BUNDLE_LINE2_CONTAINER], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const served = log.split("\n").filter((line) => line.includes("GET /app/"));
+  check(
+    "the second line really served the app's files",
+    served.length > 0,
+    served.length ? `${served.length} requests reached it` : "nothing reached it",
+  );
   await context.close();
 }
 
