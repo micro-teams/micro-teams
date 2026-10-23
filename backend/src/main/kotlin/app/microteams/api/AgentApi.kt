@@ -7,6 +7,7 @@ package app.microteams.api
 import app.microteams.model.AgentDTO
 import app.microteams.model.AgentDriversDTO
 import app.microteams.model.AgentGitWorkspaceDTO
+import app.microteams.model.AgentLlmSettingsDTO
 import app.microteams.model.AgentTokenDTO
 import app.microteams.model.ListAgentsResponseDTO
 import app.microteams.model.OpenAgentRequestDTO
@@ -314,6 +315,39 @@ interface AgentApi {
     @Operation(
         tags = ["agent"],
         summary =
+            "Set which model API this agent uses: a DeepSeek API key (optionally with a DeepSeek-compatible base URL), or a custom OpenAI- or Anthropic-compatible endpoint, plus the model to select. Used by drivers that take a model API from MicroTeams (today: dsh). The API key is write-only: it is never returned, only reported as set. The setting reaches the agent's program through its screen environment, so it takes effect on the agent's next start (reboot it to apply now). ",
+        operationId = "setAgentLlm",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "Updated -- the agent as it now reads",
+                    content = [Content(schema = Schema(implementation = AgentDTO::class))],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.PUT],
+        // "/agent/{userId}/llm"
+        value = [PATH_SET_AGENT_LLM],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun setAgentLlm(
+        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
+        @Parameter(description = "", required = true)
+        @Valid
+        @RequestBody
+        agentLlmSettingsDTO: AgentLlmSettingsDTO,
+    ): ResponseEntity<AgentDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["agent"],
+        summary =
             "Set an agent's nickname — rename it. Renaming an agent is changing its profile nickname, which is the part a human cannot do directly: the identity service lets a user change only their own profile, so the server performs the change as the agent itself. The agent's avatar and intro are preserved (identity replaces the whole profile), so only the name changes. ",
         operationId = "setAgentNickname",
         description = """""",
@@ -355,6 +389,7 @@ interface AgentApi {
         const val PATH_REBOOT_AGENT: String = "/agent/{userId}/reboot"
         const val PATH_SET_AGENT_AVATAR: String = "/agent/{userId}/avatar"
         const val PATH_SET_AGENT_KEEPALIVE: String = "/agent/{userId}/keepalive"
+        const val PATH_SET_AGENT_LLM: String = "/agent/{userId}/llm"
         const val PATH_SET_AGENT_NICKNAME: String = "/agent/{userId}/nickname"
     }
 }

@@ -85,6 +85,7 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
     String? nickname,
     String? driver,
     String? cwd,
+    AgentLlmSettings? llm,
   }) async {
     final response = await ref
         .read(mtClientProvider)
@@ -96,6 +97,10 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
             nickname: (nickname ?? '').trim().isEmpty ? null : nickname!.trim(),
             driver: (driver ?? '').trim().isEmpty ? null : driver!.trim(),
             cwd: (cwd ?? '').trim().isEmpty ? null : cwd!.trim(),
+            // "The machine's own configuration" is the absence of a setting, not a setting.
+            llm: llm?.provider == AgentLlmSettingsProviderEnum.none
+                ? null
+                : llm,
           ),
         );
     ref.invalidateSelf();
@@ -160,6 +165,22 @@ class AgentsController extends AsyncNotifier<TeamFleet> {
             intervalSeconds: intervalSeconds,
           ),
         );
+    ref.invalidateSelf();
+  }
+
+  /// Set which model API the agent's program uses (dsh). The key in [settings] is write-only:
+  /// null keeps the stored one, empty removes it. It applies when the agent next starts.
+  Future<void> setLlm(Agent agent, AgentLlmSettings settings) async {
+    await ref
+        .read(mtClientProvider)
+        .agent
+        .setAgentLlm(userId: agent.userId, agentLlmSettings: settings);
+    ref.invalidateSelf();
+  }
+
+  /// Restart the agent's program, continuing the same session — how a changed setting applies.
+  Future<void> reboot(Agent agent) async {
+    await ref.read(mtClientProvider).agent.rebootAgent(userId: agent.userId);
     ref.invalidateSelf();
   }
 

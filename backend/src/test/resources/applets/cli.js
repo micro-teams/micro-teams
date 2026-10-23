@@ -64,6 +64,7 @@
     renameThread: { method: "PATCH", path: "/chat/{id}", pathParams: ["id"], queryParams: [], bodyKey: "RenameThreadRequest", bodyType: "application/json" },
     setAgentAvatar: { method: "PUT", path: "/agent/{userId}/avatar", pathParams: ["userId"], queryParams: [], bodyKey: "SetAgentAvatarRequest", bodyType: "application/json" },
     setAgentKeepalive: { method: "PUT", path: "/agent/{userId}/keepalive", pathParams: ["userId"], queryParams: [], bodyKey: "SetAgentKeepaliveRequest", bodyType: "application/json" },
+    setAgentLlm: { method: "PUT", path: "/agent/{userId}/llm", pathParams: ["userId"], queryParams: [], bodyKey: "AgentLlmSettings", bodyType: "application/json" },
     setAgentNickname: { method: "PUT", path: "/agent/{userId}/nickname", pathParams: ["userId"], queryParams: [], bodyKey: "SetAgentNicknameRequest", bodyType: "application/json" },
     startEnrollment: { method: "POST", path: "/machine/enroll/start", pathParams: [], queryParams: [], bodyKey: "StartEnrollmentRequest", bodyType: "application/json" },
     unbindTeamMachine: { method: "DELETE", path: "/team/{id}/machine/{machineId}", pathParams: ["id", "machineId"], queryParams: [], bodyKey: null, bodyType: null },
@@ -809,6 +810,49 @@
 
   // src/cli/agent.ts
   var AGENT = { name: "user-id", type: "int", required: true, help: "the agent's user id" };
+  function llmFlags(prefix) {
+    return [
+      { name: prefix + "provider", type: "string", help: "deepseek, custom, or none (remove the setting)" },
+      { name: prefix + "api", type: "string", help: "custom only: openai-completions, openai-responses or anthropic-messages" },
+      { name: prefix + "base-url", type: "string", help: "the endpoint (required for custom; optional for deepseek)" },
+      { name: prefix + "model", type: "string", help: "the model id to use (required for custom)" },
+      { name: prefix + "api-key-file", type: "string", help: "read the API key from this file" },
+      { name: prefix + "api-key-env", type: "string", help: "read the API key from this environment variable" },
+      { name: prefix + "clear-api-key", type: "bool", help: "remove the stored API key" }
+    ];
+  }
+  function readSecret(how, where) {
+    const r = how === "file" ? microteams.exec("cat", [where]) : microteams.exec("printenv", [where]);
+    const v = r.stdout.trim();
+    if (r.code !== 0 || v === "") throw new Error(how === "file" ? `cannot read an API key from ${where}` : `$${where} is not set`);
+    return v;
+  }
+  function llmSettings(ctx, prefix) {
+    const provider = str(ctx, prefix + "provider");
+    if (provider == null) return void 0;
+    let apiKey;
+    const file = str(ctx, prefix + "api-key-file");
+    const env = str(ctx, prefix + "api-key-env");
+    if (file != null) apiKey = readSecret("file", file);
+    else if (env != null) apiKey = readSecret("env", env);
+    else if (ctx.flags[prefix + "clear-api-key"] === true) apiKey = "";
+    return {
+      provider,
+      api: str(ctx, prefix + "api"),
+      baseUrl: str(ctx, prefix + "base-url"),
+      model: str(ctx, prefix + "model"),
+      apiKey
+    };
+  }
+  function llmLine(llm) {
+    if (!llm) return "model API: the machine's own configuration";
+    const parts = [llm.provider];
+    if (llm.api) parts.push(llm.api);
+    if (llm.baseUrl) parts.push(llm.baseUrl);
+    if (llm.model) parts.push("model " + llm.model);
+    parts.push(llm.hasApiKey ? "key set" : "no key");
+    return "model API: " + parts.join(" \xB7 ");
+  }
   var list3 = {
     name: "list",
     short: "List agents, optionally only those of a team, a machine or a group chat",
@@ -859,6 +903,7 @@
       if (a.machineId) microteams.print(`machine ${a.machineId}${a.sid ? " \xB7 screen " + a.sid : ""}`);
       if (a.driver) microteams.print(`driver ${a.driver}`);
       if (a.keepalive) microteams.print(`keepalive ${JSON.stringify(a.keepalive)}`);
+      microteams.print(llmLine(a.llm));
     }
   };
   var open = {
@@ -869,7 +914,8 @@
       { name: "team", type: "string", required: true, help: "the team it works for (id or name)" },
       { name: "nickname", type: "string", help: "its display name" },
       { name: "driver", type: "string", help: "which program drives it (see `agent drivers`)" },
-      { name: "cwd", type: "string", help: "its working directory on the machine (default: a private docs checkout)" }
+      { name: "cwd", type: "string", help: "its working directory on the machine (default: a private docs checkout)" },
+      ...llmFlags("llm-")
     ],
     run: (ctx) => {
       const opened = call("openAgent", {
@@ -878,7 +924,8 @@
           teamId: teamId(need(ctx, "team")),
           nickname: str(ctx, "nickname"),
           driver: str(ctx, "driver"),
-          cwd: str(ctx, "cwd")
+          cwd: str(ctx, "cwd"),
+          llm: llmSettings(ctx, "llm-")
         }
       });
       done(`opened agent #${opened.agentUserId} on ${opened.machineId} (screen ${opened.sid})`);
@@ -939,6 +986,20 @@
       done(`agent #${a.userId} keepalive: ${JSON.stringify((_a = a.keepalive) != null ? _a : {})}`);
     }
   };
+  var setLlm = {
+    name: "set-llm",
+    short: "Set the model API an agent's program uses (dsh): provider, endpoint, model, key",
+    long: "Send the whole setting each time; the stored key is kept unless --api-key-file, --api-key-env\nor --clear-api-key says otherwise. It reaches the program on its next start, so reboot the\nagent to apply it now.\n\nExamples:\n  agent set-llm --user-id 42 --provider deepseek --api-key-file ~/deepseek.key\n  agent set-llm --user-id 42 --provider custom --api openai-completions \\\n      --base-url https://gateway.example/v1 --model my-model --api-key-env GATEWAY_KEY\n  agent set-llm --user-id 42 --provider none",
+    flags: [AGENT, ...llmFlags("")],
+    run: (ctx) => {
+      const settings = llmSettings(ctx, "");
+      if (!settings) throw new Error("--provider is required (deepseek, custom, or none)");
+      const userId = Number(need(ctx, "user-id"));
+      const a = call("setAgentLlm", { userId, AgentLlmSettings: settings });
+      done(`agent #${a.userId}: ${llmLine(a.llm)}`);
+      done(`(applies on its next start: microteams api agent reboot --user-id ${a.userId})`);
+    }
+  };
   var drivers = {
     name: "drivers",
     short: "Which programs can drive an agent, and the default",
@@ -951,8 +1012,8 @@
   };
   microteams.command({
     name: "agent",
-    short: "Agents: list, show, open, close, reboot, rename, avatar, keepalive, drivers",
-    commands: [list3, show4, open, close, reboot, rename3, setAvatar, keepalive, drivers]
+    short: "Agents: list, show, open, close, reboot, rename, avatar, keepalive, model API, drivers",
+    commands: [list3, show4, open, close, reboot, rename3, setAvatar, keepalive, setLlm, drivers]
   });
 
   // src/cli/machine.ts

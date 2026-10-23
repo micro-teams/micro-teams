@@ -56,6 +56,7 @@ class AgentController(
     private val agentService: AgentService,
     private val agentProfileService: AgentProfileService,
     private val agentKeepaliveService: AgentKeepaliveService,
+    private val agentLlmService: AgentLlmService,
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
     private val attribution: AgentAttribution,
@@ -295,6 +296,17 @@ class AgentController(
                 agentKeepaliveService.get(uid)?.let {
                     AgentKeepaliveDTO(enabled = it.enabled, intervalSeconds = it.intervalSeconds)
                 },
+            // Never the key: whether one is set is all anybody, the agent included, gets back.
+            llm =
+                agentLlmService.get(uid)?.let {
+                    AgentLlmDTO(
+                        provider = AgentLlmDTO.Provider.forValue(it.provider),
+                        api = it.api,
+                        baseUrl = it.baseUrl,
+                        model = it.model,
+                        hasApiKey = it.apiKey != null,
+                    )
+                },
         )
     }
 
@@ -322,6 +334,7 @@ class AgentController(
                 driverName = openAgentRequestDTO.driver,
                 sessionId = openAgentRequestDTO.sessionId,
                 resume = openAgentRequestDTO.resume ?: false,
+                llm = openAgentRequestDTO.llm?.toChange(),
             )
         return ResponseEntity(opened.toDTO(), HttpStatus.CREATED)
     }
@@ -403,6 +416,32 @@ class AgentController(
             toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth),
         )
     }
+
+    /**
+     * Set which model API the agent's program uses (drivers that take one from MicroTeams: dsh).
+     * Same team-membership rule as the other manage-an-existing-agent actions. The key is
+     * write-only; the change reaches the program at its next start, so the caller reboots to apply.
+     */
+    @Guard("change-agent-llm", "agent")
+    override fun setAgentLlm(
+        @PathVariable("userId") @AuthInfo("agentUserId") userId: Long,
+        agentLlmSettingsDTO: AgentLlmSettingsDTO,
+    ): ResponseEntity<AgentDTO> {
+        agentLlmService.set(userId, agentLlmSettingsDTO.toChange())
+        val viewerAuth = authorizationService.currentAuthorization()
+        return ResponseEntity.ok(
+            toDTO(userId, agentRegistry.get(userId) as? ScreenAgent, viewerAuth),
+        )
+    }
+
+    private fun AgentLlmSettingsDTO.toChange() =
+        AgentLlmChange(
+            provider = provider.value,
+            api = api?.value,
+            baseUrl = baseUrl,
+            model = model,
+            apiKey = apiKey,
+        )
 
     @Guard("close-agent", "agent")
     override fun closeAgent(

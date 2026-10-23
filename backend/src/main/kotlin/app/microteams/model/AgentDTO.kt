@@ -19,6 +19,7 @@ import javax.validation.Valid
  * @param vars Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens). Opaque
  *   to the machine layer; the UI reads what it recognises.
  * @param keepalive
+ * @param llm
  */
 data class AgentDTO(
     @Schema(required = true, description = "")
@@ -66,4 +67,9 @@ data class AgentDTO(
     @param:JsonProperty("keepalive")
     @get:JsonProperty("keepalive")
     val keepalive: AgentKeepaliveDTO? = null,
+    @field:Valid
+    @Schema(description = "")
+    @param:JsonProperty("llm")
+    @get:JsonProperty("llm")
+    val llm: AgentLlmDTO? = null,
 ) {}

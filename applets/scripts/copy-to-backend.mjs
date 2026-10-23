@@ -10,6 +10,7 @@ const copies = [
   ['dist/claude.js', '../backend/src/test/resources/applets/claude.js'],
   ['dist/codex.js', '../backend/src/test/resources/applets/codex.js'],
   ['dist/pi.js', '../backend/src/test/resources/applets/pi.js'],
+  ['dist/dsh.js', '../backend/src/test/resources/applets/dsh.js'],
 ]
 
 for (const [from, to] of copies) {
