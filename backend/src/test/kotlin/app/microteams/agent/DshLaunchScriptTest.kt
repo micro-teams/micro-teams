@@ -26,7 +26,34 @@ class DshLaunchScriptTest {
     /**
      * Run the driver's command with [env]; returns (argv after `acp-screen`, env dump, state dir).
      */
-    private fun launch(env: Map<String, String>): Triple<List<String>, Map<String, String>, File> {
+    private lateinit var dshPath: String
+
+    /**
+     * A stand-in `dsh` that answers --version with [version], at MICROTEAMS_DSH so the lookup is
+     * deterministic whatever the host has installed.
+     */
+    private fun standInDsh(bin: File, version: String): String =
+        File(bin, "dsh")
+            .apply {
+                val answer = File(bin, "dsh.version").apply { writeText(version + "\n") }
+                writeText("#!/bin/bash\n[ \"\$1\" = --version ] && cat '${answer.path}'\n")
+                setExecutable(true)
+            }
+            .path
+
+    private fun launch(
+        env: Map<String, String>,
+        dshVersion: String = "0.2.1-rc.2",
+    ): Triple<List<String>, Map<String, String>, File> {
+        val (code, log, result) = run(env, dshVersion)
+        assertEquals(0, code, "launch failed: $log")
+        return result!!
+    }
+
+    private fun run(
+        env: Map<String, String>,
+        dshVersion: String,
+    ): Triple<Int, String, Triple<List<String>, Map<String, String>, File>?> {
         val tmp = Files.createTempDirectory("dsh-launch").toFile()
         val bin = File(tmp, "bin").apply { mkdirs() }
         val out = File(tmp, "out")
@@ -42,17 +69,20 @@ class DshLaunchScriptTest {
         // the
         // same way: through this HOME's profile.
         File(tmp, ".bash_profile").writeText("export PATH='${bin.path}':\"\$PATH\"\n")
+        dshPath = standInDsh(bin, dshVersion)
         val state = File(tmp, "state")
         val pb = ProcessBuilder(driver.command("sess-1", File(tmp, "work").path, resume = false))
         pb.environment().apply {
             put("HOME", tmp.path)
             put("XDG_STATE_HOME", state.path)
+            put("MICROTEAMS_DSH", dshPath)
             listOf("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL").forEach { remove(it) }
             putAll(env)
         }
         val p = pb.redirectErrorStream(true).start()
         val log = p.inputStream.bufferedReader().readText()
-        assertEquals(0, p.waitFor(), "launch failed: $log")
+        val code = p.waitFor()
+        if (code != 0) return Triple(code, log, null)
         val argv = File("${out.path}.argv").readLines()
         val dumped =
             File("${out.path}.env")
@@ -64,14 +94,14 @@ class DshLaunchScriptTest {
                         ?.let { line.substring(0, it) to line.substring(it + 1) }
                 }
                 .toMap()
-        return Triple(argv, dumped, state)
+        return Triple(0, log, Triple(argv, dumped, state))
     }
 
     @Test
     fun withNoSettingDshUsesTheMachinesOwnConfiguration() {
         val (argv, env, _) = launch(emptyMap())
         assertEquals(
-            listOf("acp-screen", "--session", "sess-1", "--", "dsh", "--profile", "acp"),
+            listOf("acp-screen", "--session", "sess-1", "--", dshPath, "--profile", "acp"),
             argv,
         )
         assertFalse(env.containsKey("DEEPSEEK_API_KEY"))
@@ -100,7 +130,7 @@ class DshLaunchScriptTest {
                 "--model",
                 "deepseek-v4-pro",
                 "--",
-                "dsh",
+                dshPath,
                 "--profile",
                 "acp",
             ),
@@ -134,5 +164,14 @@ class DshLaunchScriptTest {
         assertFalse(yaml.contains("sk-secret-123"), "the key was written into the overlay")
         assertEquals("sk-secret-123", env["MICROTEAMS_LLM_API_KEY"])
         assertFalse(env.containsKey("DEEPSEEK_API_KEY"))
+    }
+
+    /** A different program called dsh (Debian/Arch "Distributed Shell") is named, not run. */
+    @Test
+    fun anUnrelatedDshIsRefusedWithAMessage() {
+        val (code, log, _) = run(emptyMap(), "Distributed Shell / Dancer's shell version 0.25.10")
+        assertEquals(127, code)
+        assertTrue(log.contains("is a different program"), log)
+        assertTrue(log.contains("npm i -g @deepseek-ai/dsh"), log)
     }
 }
