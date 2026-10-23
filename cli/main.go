@@ -18,6 +18,7 @@ import (
 
 	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/commandapplet"
+	"github.com/micro-teams/microteams/cli/internal/acpscreen"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
 	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/lines"
@@ -53,6 +54,8 @@ func main() {
 	for _, c := range daemoncmd.Commands() {
 		root.AddCommand(c)
 	}
+	// The terminal front end for ACP agents (dsh), run inside an agent screen by the dsh driver.
+	root.AddCommand(acpscreen.Command(version))
 
 	apiCmd := &cobra.Command{
 		Use:   "api",
