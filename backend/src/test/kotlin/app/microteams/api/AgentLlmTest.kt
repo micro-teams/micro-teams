@@ -67,7 +67,9 @@ constructor(
                     post("/team")
                         .header("Authorization", "Bearer $memberToken")
                         .contentType("application/json")
-                        .content("""{"name":"Agent LLM ${UUID.randomUUID().toString().take(6)}"}"""),
+                        .content(
+                            """{"name":"Agent LLM ${UUID.randomUUID().toString().take(6)}"}""",
+                        ),
                 )
                 .andExpect(status().isCreated)
                 .andReturn()
@@ -98,7 +100,9 @@ constructor(
 
     private fun agentView(): String =
         mockMvc
-            .perform(get("/agent?userId=$agentUserId").header("Authorization", "Bearer $memberToken"))
+            .perform(
+                get("/agent?userId=$agentUserId").header("Authorization", "Bearer $memberToken"),
+            )
             .andExpect(status().isOk)
             .andReturn()
             .response
@@ -147,7 +151,9 @@ constructor(
     fun aCustomEndpointIsValidated() {
         putLlm("""{"provider":"custom","api":"openai-completions","model":"m"}""")
             .andExpect(status().isBadRequest)
-        putLlm("""{"provider":"custom","api":"openai-completions","baseUrl":"ftp://x/v1","model":"m"}""")
+        putLlm(
+                """{"provider":"custom","api":"openai-completions","baseUrl":"ftp://x/v1","model":"m"}""",
+            )
             .andExpect(status().isBadRequest)
         putLlm("""{"provider":"custom","baseUrl":"https://gw.example/v1","model":"m"}""")
             .andExpect(status().isBadRequest)
@@ -177,7 +183,9 @@ constructor(
     @Test
     @Order(5)
     fun providerNoneRemovesTheSetting() {
-        putLlm("""{"provider":"none"}""").andExpect(status().isOk).andExpect(jsonPath("$.llm").doesNotExist())
+        putLlm("""{"provider":"none"}""")
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.llm").doesNotExist())
         assertTrue(agentLlmService.screenEnv(agentUserId).isEmpty())
     }
 }

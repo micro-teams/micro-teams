@@ -23,7 +23,9 @@ import org.junit.jupiter.api.Test
 class DshLaunchScriptTest {
     private val driver = DshDriver(AppletStore(""))
 
-    /** Run the driver's command with [env]; returns (argv after `acp-screen`, env dump, state dir). */
+    /**
+     * Run the driver's command with [env]; returns (argv after `acp-screen`, env dump, state dir).
+     */
     private fun launch(env: Map<String, String>): Triple<List<String>, Map<String, String>, File> {
         val tmp = Files.createTempDirectory("dsh-launch").toFile()
         val bin = File(tmp, "bin").apply { mkdirs() }
@@ -36,7 +38,8 @@ class DshLaunchScriptTest {
             setExecutable(true)
         }
         // The command is `bash -lc`, and a login shell rebuilds PATH from the profile — the way the
-        // real `microteams` (in ~/.local/bin) is found on a machine. So the stand-in goes on PATH the
+        // real `microteams` (in ~/.local/bin) is found on a machine. So the stand-in goes on PATH
+        // the
         // same way: through this HOME's profile.
         File(tmp, ".bash_profile").writeText("export PATH='${bin.path}':\"\$PATH\"\n")
         val state = File(tmp, "state")
@@ -52,16 +55,25 @@ class DshLaunchScriptTest {
         assertEquals(0, p.waitFor(), "launch failed: $log")
         val argv = File("${out.path}.argv").readLines()
         val dumped =
-            File("${out.path}.env").readLines().mapNotNull { line ->
-                line.indexOf('=').takeIf { it > 0 }?.let { line.substring(0, it) to line.substring(it + 1) }
-            }.toMap()
+            File("${out.path}.env")
+                .readLines()
+                .mapNotNull { line ->
+                    line
+                        .indexOf('=')
+                        .takeIf { it > 0 }
+                        ?.let { line.substring(0, it) to line.substring(it + 1) }
+                }
+                .toMap()
         return Triple(argv, dumped, state)
     }
 
     @Test
     fun withNoSettingDshUsesTheMachinesOwnConfiguration() {
         val (argv, env, _) = launch(emptyMap())
-        assertEquals(listOf("acp-screen", "--session", "sess-1", "--", "dsh", "--profile", "acp"), argv)
+        assertEquals(
+            listOf("acp-screen", "--session", "sess-1", "--", "dsh", "--profile", "acp"),
+            argv,
+        )
         assertFalse(env.containsKey("DEEPSEEK_API_KEY"))
         // `env` prints one variable per line, so only the prompt's first line is in the dump.
         assertTrue(env["MICROTEAMS_OPERATOR_PROMPT"]!!.startsWith("You are an autonomous agent"))
@@ -81,7 +93,17 @@ class DshLaunchScriptTest {
         assertEquals("sk-abc", env["DEEPSEEK_API_KEY"])
         assertEquals("https://ds.example", env["DEEPSEEK_BASE_URL"])
         assertEquals(
-            listOf("acp-screen", "--session", "sess-1", "--model", "deepseek-v4-pro", "--", "dsh", "--profile", "acp"),
+            listOf(
+                "acp-screen",
+                "--session",
+                "sess-1",
+                "--model",
+                "deepseek-v4-pro",
+                "--",
+                "dsh",
+                "--profile",
+                "acp",
+            ),
             argv,
         )
     }
@@ -100,7 +122,10 @@ class DshLaunchScriptTest {
                 ),
             )
         val patch = File(state, "microteams/acp/sess-1.dsh-patch.yml")
-        assertEquals(listOf("--patch", patch.path), argv.subList(argv.indexOf("acp") + 1, argv.size))
+        assertEquals(
+            listOf("--patch", patch.path),
+            argv.subList(argv.indexOf("acp") + 1, argv.size),
+        )
         val yaml = patch.readText()
         assertTrue(yaml.contains("apiKeyEnv: MICROTEAMS_LLM_API_KEY"), yaml)
         assertTrue(yaml.contains("api: \"openai-completions\""), yaml)
