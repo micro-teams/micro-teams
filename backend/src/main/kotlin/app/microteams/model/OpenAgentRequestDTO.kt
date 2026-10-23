@@ -2,6 +2,7 @@ package app.microteams.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import io.swagger.v3.oas.annotations.media.Schema
+import javax.validation.Valid
 
 /**
  * @param machineId
@@ -13,6 +14,7 @@ import io.swagger.v3.oas.annotations.media.Schema
  *   one. Supplying it (together with a matching cwd and resume=true) resumes a prior session.
  * @param resume Resume the given sessionId's prior transcript instead of starting it fresh. Only
  *   meaningful together with sessionId; the driver decides what resuming means.
+ * @param llm
  */
 data class OpenAgentRequestDTO(
     @Schema(required = true, description = "")
@@ -49,4 +51,9 @@ data class OpenAgentRequestDTO(
     @param:JsonProperty("resume")
     @get:JsonProperty("resume")
     val resume: kotlin.Boolean? = false,
+    @field:Valid
+    @Schema(description = "")
+    @param:JsonProperty("llm")
+    @get:JsonProperty("llm")
+    val llm: AgentLlmSettingsDTO? = null,
 ) {}

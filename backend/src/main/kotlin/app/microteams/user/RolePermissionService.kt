@@ -286,6 +286,14 @@ class RolePermissionService {
                         authorizedResource = AuthorizedResource(types = listOf("agent")),
                         customLogic = "is-member-of-agent-team",
                     ),
+                    // PUT /agent/{userId}/llm — the agent's model API (key write-only). A setting
+                    // on
+                    // an existing agent, so the same team-membership rule as keepalive.
+                    Permission(
+                        authorizedActions = listOf("change-agent-llm"),
+                        authorizedResource = AuthorizedResource(types = listOf("agent")),
+                        customLogic = "is-member-of-agent-team",
+                    ),
                 ),
         )
     }

@@ -1055,6 +1055,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Agent"
+  /agent/{userId}/llm:
+    put:
+      tags: [agent]
+      operationId: setAgentLlm
+      summary: >
+        Set which model API this agent uses: a DeepSeek API key (optionally with a
+        DeepSeek-compatible base URL), or a custom OpenAI- or Anthropic-compatible endpoint, plus the
+        model to select. Used by drivers that take a model API from MicroTeams (today: dsh). The API
+        key is write-only: it is never returned, only reported as set. The setting reaches the
+        agent's program through its screen environment, so it takes effect on the agent's next
+        start (reboot it to apply now).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLlmSettings"
+      responses:
+        "200":
+          description: Updated -- the agent as it now reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
   /agent/token:
     post:
       tags: [agent]
@@ -1279,6 +1310,51 @@ components:
             Seconds between keepalive touches. Required (and must be positive) when enabling; the
             interval should sit comfortably under the Claude Code cache TTL (~1h) so the cache never
             lapses between touches. Ignored when disabling.
+
+    AgentLlmSettings:
+      type: object
+      description: >
+        The model API an agent uses. Send the whole setting each time; apiKey is the one exception:
+        omitted keeps the stored key, an empty string removes it. provider "none" clears the
+        setting, so the program falls back to whatever its machine is configured with.
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [none, deepseek, custom]
+          description: >
+            deepseek -- DeepSeek's API (baseUrl optional, for a DeepSeek-compatible endpoint);
+            custom -- any endpoint speaking one of the protocols in api.
+        api:
+          type: string
+          enum: [openai-completions, openai-responses, anthropic-messages]
+          description: The protocol a custom endpoint speaks. Required for custom.
+        baseUrl:
+          type: string
+          description: The endpoint, e.g. https://gateway.example/v1. Required for custom.
+        model:
+          type: string
+          description: The model id to select. Required for custom; optional for deepseek.
+        apiKey:
+          type: string
+          description: Write-only. Omit to keep the stored key; empty string to remove it.
+
+    AgentLlm:
+      type: object
+      description: An agent's model API setting as anyone may read it -- never the key itself.
+      required: [provider, hasApiKey]
+      properties:
+        provider:
+          type: string
+          enum: [deepseek, custom]
+        api:
+          type: string
+        baseUrl:
+          type: string
+        model:
+          type: string
+        hasApiKey:
+          type: boolean
 
     AgentKeepalive:
       type: object
@@ -1792,6 +1868,8 @@ components:
           additionalProperties: true
         keepalive:
           $ref: "#/components/schemas/AgentKeepalive"
+        llm:
+          $ref: "#/components/schemas/AgentLlm"
 
     OpenAgentRequest:
       type: object
@@ -1820,6 +1898,8 @@ components:
           description: >
             Resume the given sessionId's prior transcript instead of starting it fresh. Only
             meaningful together with sessionId; the driver decides what resuming means.
+        llm:
+          $ref: "#/components/schemas/AgentLlmSettings"
 
     AgentDrivers:
       type: object

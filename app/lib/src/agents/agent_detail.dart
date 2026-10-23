@@ -15,6 +15,7 @@ import '../common/ui/change_avatar.dart';
 import '../common/ui/editable_name.dart';
 import '../common/ui/online_dot.dart';
 import 'agents_controller.dart';
+import 'model_api.dart';
 import '../common/ui/app_dialog.dart';
 import '../common/ui/facts.dart';
 
@@ -231,6 +232,18 @@ class AgentDetail extends ConsumerWidget {
                 ),
                 const SizedBox(height: 20),
                 _Keepalive(agent: live),
+                // Only for drivers that take their model API from MicroTeams (dsh); for the others
+                // the field would be a setting that silently does nothing.
+                if (live.driver == 'dsh' || live.llm != null) ...[
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Model API'),
+                    subtitle: Text(modelApiSummary(live.llm)),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: () => showModelApiDialog(context, live),
+                  ),
+                ],
                 const SizedBox(height: 20),
                 FilledButton.icon(
                   onPressed: actions.onChat,

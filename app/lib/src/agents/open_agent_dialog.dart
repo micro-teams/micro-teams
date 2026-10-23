@@ -17,6 +17,7 @@ import 'package:mt_api/mt_api.dart';
 
 import '../common/team_scope.dart';
 import 'agents_controller.dart';
+import 'model_api.dart';
 import '../common/ui/app_dialog.dart';
 
 /// Shows the form. Returns the opened agent, or null if it was dismissed.
@@ -42,6 +43,7 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
   final _cwd = TextEditingController();
   String? _machineId;
   String? _driver;
+  AgentLlmSettings? _llm;
   bool _busy = false;
   String? _error;
 
@@ -81,6 +83,9 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
     return '~/.local/share/microteams/agents/$name';
   }
 
+  bool get _isDsh =>
+      (_driver ?? ref.read(driversProvider).value?.defaultDriver) == 'dsh';
+
   Future<void> _submit() async {
     final machineId = _machineId;
     final team = ref.read(currentTeamProvider);
@@ -101,6 +106,7 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
             nickname: _nickname.text,
             driver: _driver,
             cwd: _cwd.text,
+            llm: _isDsh ? _llm : null,
           );
       if (mounted) Navigator.pop(context, opened);
     } catch (e) {
@@ -186,6 +192,11 @@ class _OpenAgentDialogState extends ConsumerState<OpenAgentDialog> {
                   ],
                   onChanged: (name) => setState(() => _driver = name),
                 ),
+              // dsh takes its model API from here; the other drivers from their machine.
+              if (driver == 'dsh') ...[
+                const SizedBox(height: 12),
+                ModelApiFields(onChanged: (s) => _llm = s),
+              ],
               const SizedBox(height: 12),
               TextField(
                 controller: _cwd,

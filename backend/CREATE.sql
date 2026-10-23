@@ -92,6 +92,18 @@ CREATE
 
 CREATE
     TABLE
+        microteams.agent_llm(
+            agent_user_id BIGINT NOT NULL,
+            provider VARCHAR(16) NOT NULL,
+            api VARCHAR(32),
+            model VARCHAR(256),
+            base_url VARCHAR(512),
+            api_key VARCHAR(1024),
+            PRIMARY KEY(agent_user_id)
+        );
+
+CREATE
+    TABLE
         microteams.agent_screen(
             agent_user_id BIGINT NOT NULL,
             created_at TIMESTAMP(6) NOT NULL,

@@ -22,6 +22,8 @@
 
 package app.microteams.agent.screen
 
+import app.microteams.agent.AgentLlmChange
+import app.microteams.agent.AgentLlmService
 import app.microteams.agent.AgentRegistry
 import app.microteams.agent.AgentWakeup
 import app.microteams.agent.driver.AgentDriver
@@ -65,6 +67,7 @@ class AgentService(
     private val agentScreens: AgentScreens,
     private val userRepository: UserRepository,
     private val userProfileRepository: UserProfileRepository,
+    private val agentLlmService: AgentLlmService,
     drivers: List<AgentDriver>,
     // Fallback MICROTEAMS_API, used only for a machine that connected without reporting its own
     // endpoint (an older CLI). Normally the origin comes from the machine's live connection, so the
@@ -118,6 +121,9 @@ class AgentService(
         // resume=true to continue that session's prior transcript from [cwd].
         sessionId: String? = null,
         resume: Boolean = false,
+        // The model API this agent's program should use (drivers that take one from MicroTeams).
+        // Stored before the first launch, so the very first screen already carries it.
+        llm: AgentLlmChange? = null,
     ): OpenedAgent {
         if (!teamMachineService.servesTeam(machineId, teamId)) {
             throw BadRequestError("machine is not associated with team $teamId")
@@ -128,7 +134,10 @@ class AgentService(
         val wanted = driverName ?: defaultDriver
         val driver = driversByName[wanted] ?: throw BadRequestError("unknown driver: $wanted")
 
+        // Validated before anything is created, so a bad setting does not leave a half-made agent.
+        llm?.let { agentLlmService.validate(it) }
         val agentUserId = createAgentUser(nickname)
+        llm?.let { agentLlmService.set(agentUserId, it) }
         // The agent must be a member of the team it works for, or it cannot even read its own
         // team's document tree: read/write-document and the git remote are all gated by
         // is-team-member.
@@ -264,7 +273,7 @@ class AgentService(
         sessionId: String,
         resume: Boolean,
     ): OpenedAgent {
-        val env = screenEnv(machineId, teamId)
+        val env = screenEnv(machineId, teamId) + agentLlmService.screenEnv(agentUserId)
         val screen =
             hub.openScreen(
                 machineId = machineId,
@@ -306,6 +315,9 @@ class AgentService(
         // Closed on purpose: forget the wake-up's bookkeeping too, so nothing queued for it is
         // typed at some later agent and its death is never treated as one worth reviving.
         agentWakeup.forget(agentUserId)
+        // Its model API key goes with it: nothing should hold a credential for an agent that is
+        // gone.
+        agentLlmService.forget(agentUserId)
     }
 
     /**

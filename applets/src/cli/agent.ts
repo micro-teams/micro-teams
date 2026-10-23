@@ -2,10 +2,62 @@
 // machine, closing and rebooting it, and its name, avatar and keepalive. Who may do which is the
 // server's call (lifecycle actions need membership of the agent's team).
 
+import type { AgentLlm, AgentLlmSettings } from '../api'
 import { call } from '../runtime'
 import { JSON_FLAG, done, int, limit, machineId, moreHint, need, str, teamId, wantsJson } from './util'
 
 const AGENT: CommandFlag = { name: 'user-id', type: 'int', required: true, help: "the agent's user id" }
+
+// The model API an agent's program uses (drivers that take one from MicroTeams: dsh). The key is
+// never a flag value: a flag lands in shell history and in an agent's transcript, so it is read
+// from a file or an environment variable instead, and the server never gives it back.
+function llmFlags(prefix: string): CommandFlag[] {
+  return [
+    { name: prefix + 'provider', type: 'string', help: 'deepseek, custom, or none (remove the setting)' },
+    { name: prefix + 'api', type: 'string', help: 'custom only: openai-completions, openai-responses or anthropic-messages' },
+    { name: prefix + 'base-url', type: 'string', help: 'the endpoint (required for custom; optional for deepseek)' },
+    { name: prefix + 'model', type: 'string', help: 'the model id to use (required for custom)' },
+    { name: prefix + 'api-key-file', type: 'string', help: 'read the API key from this file' },
+    { name: prefix + 'api-key-env', type: 'string', help: 'read the API key from this environment variable' },
+    { name: prefix + 'clear-api-key', type: 'bool', help: 'remove the stored API key' },
+  ]
+}
+
+function readSecret(how: 'file' | 'env', where: string): string {
+  const r = how === 'file' ? microteams.exec('cat', [where]) : microteams.exec('printenv', [where])
+  const v = r.stdout.trim()
+  if (r.code !== 0 || v === '') throw new Error(how === 'file' ? `cannot read an API key from ${where}` : `$${where} is not set`)
+  return v
+}
+
+/** The setting the flags describe, or undefined when no provider flag was given. */
+function llmSettings(ctx: CommandContext, prefix: string): AgentLlmSettings | undefined {
+  const provider = str(ctx, prefix + 'provider')
+  if (provider == null) return undefined
+  let apiKey: string | undefined
+  const file = str(ctx, prefix + 'api-key-file')
+  const env = str(ctx, prefix + 'api-key-env')
+  if (file != null) apiKey = readSecret('file', file)
+  else if (env != null) apiKey = readSecret('env', env)
+  else if (ctx.flags[prefix + 'clear-api-key'] === true) apiKey = ''
+  return {
+    provider: provider as AgentLlmSettings['provider'],
+    api: str(ctx, prefix + 'api') as AgentLlmSettings['api'],
+    baseUrl: str(ctx, prefix + 'base-url'),
+    model: str(ctx, prefix + 'model'),
+    apiKey,
+  }
+}
+
+function llmLine(llm: AgentLlm | undefined): string {
+  if (!llm) return 'model API: the machine\'s own configuration'
+  const parts: string[] = [llm.provider]
+  if (llm.api) parts.push(llm.api)
+  if (llm.baseUrl) parts.push(llm.baseUrl)
+  if (llm.model) parts.push('model ' + llm.model)
+  parts.push(llm.hasApiKey ? 'key set' : 'no key')
+  return 'model API: ' + parts.join(' · ')
+}
 
 const list: CommandSpec = {
   name: 'list',
@@ -56,6 +108,7 @@ const show: CommandSpec = {
     if (a.machineId) microteams.print(`machine ${a.machineId}${a.sid ? ' · screen ' + a.sid : ''}`)
     if (a.driver) microteams.print(`driver ${a.driver}`)
     if (a.keepalive) microteams.print(`keepalive ${JSON.stringify(a.keepalive)}`)
+    microteams.print(llmLine(a.llm))
   },
 }
 
@@ -68,6 +121,7 @@ const open: CommandSpec = {
     { name: 'nickname', type: 'string', help: 'its display name' },
     { name: 'driver', type: 'string', help: 'which program drives it (see `agent drivers`)' },
     { name: 'cwd', type: 'string', help: 'its working directory on the machine (default: a private docs checkout)' },
+    ...llmFlags('llm-'),
   ],
   run: (ctx) => {
     const opened = call('openAgent', {
@@ -77,6 +131,7 @@ const open: CommandSpec = {
         nickname: str(ctx, 'nickname'),
         driver: str(ctx, 'driver'),
         cwd: str(ctx, 'cwd'),
+        llm: llmSettings(ctx, 'llm-'),
       },
     })
     // Not the screen token: it is a credential, and it has no use to whoever ran this.
@@ -143,6 +198,29 @@ const keepalive: CommandSpec = {
   },
 }
 
+const setLlm: CommandSpec = {
+  name: 'set-llm',
+  short: "Set the model API an agent's program uses (dsh): provider, endpoint, model, key",
+  long:
+    'Send the whole setting each time; the stored key is kept unless --api-key-file, --api-key-env\n' +
+    'or --clear-api-key says otherwise. It reaches the program on its next start, so reboot the\n' +
+    'agent to apply it now.\n\n' +
+    'Examples:\n' +
+    '  agent set-llm --user-id 42 --provider deepseek --api-key-file ~/deepseek.key\n' +
+    '  agent set-llm --user-id 42 --provider custom --api openai-completions \\\n' +
+    '      --base-url https://gateway.example/v1 --model my-model --api-key-env GATEWAY_KEY\n' +
+    '  agent set-llm --user-id 42 --provider none',
+  flags: [AGENT, ...llmFlags('')],
+  run: (ctx) => {
+    const settings = llmSettings(ctx, '')
+    if (!settings) throw new Error('--provider is required (deepseek, custom, or none)')
+    const userId = Number(need(ctx, 'user-id'))
+    const a = call('setAgentLlm', { userId, AgentLlmSettings: settings })
+    done(`agent #${a.userId}: ${llmLine(a.llm)}`)
+    done(`(applies on its next start: microteams api agent reboot --user-id ${a.userId})`)
+  },
+}
+
 const drivers: CommandSpec = {
   name: 'drivers',
   short: 'Which programs can drive an agent, and the default',
@@ -156,6 +234,6 @@ const drivers: CommandSpec = {
 
 microteams.command({
   name: 'agent',
-  short: 'Agents: list, show, open, close, reboot, rename, avatar, keepalive, drivers',
-  commands: [list, show, open, close, reboot, rename, setAvatar, keepalive, drivers],
+  short: 'Agents: list, show, open, close, reboot, rename, avatar, keepalive, model API, drivers',
+  commands: [list, show, open, close, reboot, rename, setAvatar, keepalive, setLlm, drivers],
 })
