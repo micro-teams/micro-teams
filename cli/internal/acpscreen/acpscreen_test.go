@@ -16,16 +16,17 @@ import (
 // records every prompt it receives, and on each prompt plays a short scripted turn — a message,
 // a tool call that needs permission, the tool's result — before ending the turn.
 type fakeAgent struct {
-	t       *testing.T
-	in      *bufio.Scanner // what the client sends
-	out     io.Writer
-	mu      sync.Mutex
-	prompts []string
-	methods []string
-	release chan struct{} // closed to let a prompt finish (nil: finish at once)
-	exit    chan string
-	nextID  int
-	answers map[int]chan json.RawMessage
+	t          *testing.T
+	in         *bufio.Scanner // what the client sends
+	out        io.Writer
+	mu         sync.Mutex
+	prompts    []string
+	methods    []string
+	setOptions []string
+	release    chan struct{} // closed to let a prompt finish (nil: finish at once)
+	exit       chan string
+	nextID     int
+	answers    map[int]chan json.RawMessage
 }
 
 func startFake(t *testing.T, release chan struct{}) (*fakeAgent, Agent) {
@@ -95,11 +96,22 @@ func (f *fakeAgent) loop() {
 		case "session/new":
 			reply(map[string]any{"sessionId": "acp-1", "configOptions": []map[string]any{{
 				"id": "model", "category": "model", "currentValue": `["deepseek-official","deepseek-v4-flash"]`,
-				"options": []map[string]any{{"group": "deepseek-official", "options": []map[string]string{
-					{"value": `["deepseek-official","deepseek-v4-flash"]`, "name": "deepseek-v4-flash"}}}},
+				"options": []map[string]any{
+					{"group": "deepseek-official", "options": []map[string]string{
+						{"value": `["deepseek-official","deepseek-v4-flash"]`, "name": "deepseek-v4-flash"}}},
+					{"group": "custom", "options": []map[string]string{
+						{"value": `["custom","my-model"]`, "name": "My Model"}}},
+				},
 			}}})
 		case "session/resume":
 			reply(map[string]any{})
+		case "session/set_config_option":
+			f.mu.Lock()
+			f.setOptions = append(f.setOptions, string(m.Params))
+			f.mu.Unlock()
+			reply(map[string]any{"configOptions": []map[string]any{{
+				"id": "model", "category": "model", "currentValue": `["custom","my-model"]`,
+				"options": []map[string]string{{"value": `["custom","my-model"]`, "name": "My Model"}}}}})
 		case "session/cancel":
 		case "session/prompt":
 			var p struct {
@@ -290,5 +302,39 @@ func TestInputParserPasteSplitAcrossReads(t *testing.T) {
 	want := []string{"line one\nline two", "typeD"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("submitted %q, want %q", got, want)
+	}
+}
+
+func TestModelFlagSelectsTheModelByID(t *testing.T) {
+	fake, agent := startFake(t, nil)
+	inR, _ := io.Pipe()
+	out := &syncWriter{}
+	go func() {
+		_ = Run(Options{Session: "mt-4", StateDir: t.TempDir(), In: inR, Out: out, Model: "my-model"}, agent)
+	}()
+	waitFor(t, "the model to be selected", func() bool { return strings.Contains(out.lastLine(), "My Model") })
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.setOptions) != 1 || !strings.Contains(fake.setOptions[0], `"configId":"model"`) ||
+		!strings.Contains(fake.setOptions[0], `[\"custom\",\"my-model\"]`) {
+		t.Fatalf("set_config_option calls = %v, want one selecting [\"custom\",\"my-model\"]", fake.setOptions)
+	}
+}
+
+func TestUnknownModelKeepsTheCurrentOne(t *testing.T) {
+	fake, agent := startFake(t, nil)
+	inR, _ := io.Pipe()
+	out := &syncWriter{}
+	go func() {
+		_ = Run(Options{Session: "mt-5", StateDir: t.TempDir(), In: inR, Out: out, Model: "nope"}, agent)
+	}()
+	waitFor(t, "ready", func() bool { return strings.Contains(out.lastLine(), "○ ready") })
+	if !strings.Contains(out.String(), "model nope is not offered") || !strings.Contains(out.lastLine(), "deepseek-v4-flash") {
+		t.Fatalf("screen:\n%s", out.String())
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.setOptions) != 0 {
+		t.Fatalf("set_config_option was called for an unknown model: %v", fake.setOptions)
 	}
 }

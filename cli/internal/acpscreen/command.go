@@ -15,7 +15,7 @@ import (
 
 // Command is `microteams acp-screen --session <id> -- <agent command…>`.
 func Command(version string) *cobra.Command {
-	var session, operatorFile, wireLog string
+	var session, operatorFile, wireLog, model string
 	c := &cobra.Command{
 		Use:   "acp-screen --session <id> -- <agent command> [args…]",
 		Short: "Run an ACP agent (e.g. dsh --profile acp) with a terminal transcript, inside an agent screen",
@@ -93,6 +93,7 @@ func Command(version string) *cobra.Command {
 				Width:          width,
 				WireLog:        log,
 				Version:        version,
+				Model:          model,
 			}, Agent{
 				Stdin:  stdin,
 				Stdout: stdout,
@@ -109,6 +110,7 @@ func Command(version string) *cobra.Command {
 	}
 	c.Flags().StringVar(&session, "session", "", "this screen's session id; the ACP session is stored and resumed under it")
 	c.Flags().StringVar(&operatorFile, "operator-prompt-file", "", "file holding the operator prompt for a new session")
+	c.Flags().StringVar(&model, "model", "", "select this model (id or display name) once the session is open")
 	c.Flags().StringVar(&wireLog, "wire-log", "", "append the full JSON-RPC stream to this file (debugging)")
 	return c
 }

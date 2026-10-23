@@ -36,6 +36,7 @@ type Options struct {
 	Out            io.Writer
 	Width          int
 	WireLog        io.Writer // the full JSON-RPC stream, or nil
+	Model          string    // select this model (by its id or display name) once the session is open
 	Version        string
 }
 
@@ -44,6 +45,7 @@ type runner struct {
 	scr       *screen
 	conn      *conn
 	sessionID string
+	options   json.RawMessage // the session's configOptions, as last reported
 
 	mu       sync.Mutex
 	pendKind string // the update kind being accumulated (message / thought)
@@ -91,6 +93,9 @@ func Run(opt Options, agent Agent) error {
 	operator, err := r.openSession()
 	if err != nil {
 		return fail(err)
+	}
+	if opt.Model != "" {
+		r.selectModel(opt.Model)
 	}
 
 	events := make(chan inputEvent, 64)
@@ -193,6 +198,7 @@ func (r *runner) openSession() (string, error) {
 		}, &resumed)
 		if err == nil {
 			r.sessionID = stored.SessionID
+			r.options = resumed.ConfigOptions
 			if m := modelLabel(resumed.ConfigOptions); m != "" {
 				r.scr.setModel(m)
 			}
@@ -212,6 +218,7 @@ func (r *runner) openSession() (string, error) {
 		return "", errors.New("session/new returned no sessionId")
 	}
 	r.sessionID = created.SessionID
+	r.options = created.ConfigOptions
 	if m := modelLabel(created.ConfigOptions); m != "" {
 		r.scr.setModel(m)
 	}
@@ -512,6 +519,77 @@ func optionName(options []json.RawMessage, value string) string {
 		}
 		if name := optionName(opt.Options, value); name != "" {
 			return name
+		}
+	}
+	return ""
+}
+
+// selectModel switches the session to the model named by want — a model id or its display name —
+// through session/set_config_option. A model the agent does not offer is reported on screen and
+// the session keeps its current model rather than failing to start.
+func (r *runner) selectModel(want string) {
+	configID, value := modelValue(r.options, want)
+	if value == "" {
+		r.scr.line(red + "· model " + want + " is not offered by this agent; keeping " + modelLabel(r.options) + reset)
+		return
+	}
+	var res struct {
+		ConfigOptions json.RawMessage `json:"configOptions"`
+	}
+	if err := r.conn.call("session/set_config_option", map[string]any{
+		"sessionId": r.sessionID, "configId": configID, "value": value,
+	}, &res); err != nil {
+		r.scr.line(red + "· could not select model " + want + ": " + err.Error() + reset)
+		return
+	}
+	if len(res.ConfigOptions) > 0 {
+		r.options = res.ConfigOptions
+	}
+	if m := modelLabel(r.options); m != "" {
+		r.scr.setModel(m)
+	} else {
+		r.scr.setModel(want)
+	}
+}
+
+// modelValue finds, in the model option's choices, the value whose name or value is want. dsh's
+// values are opaque JSON pairs like ["provider","model-id"], so a value ending in "want" also
+// matches, and the model id alone is enough to pick it.
+func modelValue(raw json.RawMessage, want string) (configID, value string) {
+	var opts []struct {
+		ID       string            `json:"id"`
+		Category string            `json:"category"`
+		Options  []json.RawMessage `json:"options"`
+	}
+	if json.Unmarshal(raw, &opts) != nil {
+		return "", ""
+	}
+	for _, o := range opts {
+		if o.ID != "model" && o.Category != "model" {
+			continue
+		}
+		if v := findChoice(o.Options, want); v != "" {
+			return o.ID, v
+		}
+	}
+	return "", ""
+}
+
+func findChoice(options []json.RawMessage, want string) string {
+	for _, raw := range options {
+		var c struct {
+			Value   string            `json:"value"`
+			Name    string            `json:"name"`
+			Options []json.RawMessage `json:"options"`
+		}
+		if json.Unmarshal(raw, &c) != nil {
+			continue
+		}
+		if c.Value != "" && (c.Name == want || c.Value == want || strings.HasSuffix(c.Value, `"`+want+`"]`)) {
+			return c.Value
+		}
+		if v := findChoice(c.Options, want); v != "" {
+			return v
 		}
 	}
 	return ""
