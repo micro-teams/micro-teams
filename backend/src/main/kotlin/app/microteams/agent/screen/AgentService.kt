@@ -225,7 +225,7 @@ class AgentService(
                 sid = row.sid,
                 command = command,
                 appletSource = driver.appletSource,
-                env = screenEnv(row.machineId, row.teamId),
+                env = screenEnv(row.machineId, row.teamId, agentUserId),
             )
         if (!respawned) {
             rebootAgent(agentUserId) // no live screen to respawn — open a new one for this session
@@ -250,13 +250,21 @@ class AgentService(
      * config token, but injecting is robust to a machine whose default CLI config points
      * elsewhere).
      */
-    private fun screenEnv(machineId: String, teamId: IdType?): Map<String, String> = buildMap {
+    private fun screenEnv(
+        machineId: String,
+        teamId: IdType?,
+        agentUserId: IdType,
+    ): Map<String, String> = buildMap {
         // The endpoint this machine reached us on (it reported it when it connected), so its
         // screens call back on a URL that works for them; the config value is only a fallback.
         put("MICROTEAMS_API", hub.originOf(machineId) ?: connectorOrigin)
         machineService.tokenOf(machineId)?.let { put("MICROTEAMS_TOKEN", it) }
         // The team the agent works for, so the applet's `docs` commands know which tree to sync.
         put("MICROTEAMS_TEAM", teamId.toString())
+        // The agent's model API (dsh). Here, in the one function every launch path calls — open,
+        // reboot AND the in-place wake — because the wake used to build its own environment
+        // without it, and an agent woken by a chat message came back with no key.
+        putAll(agentLlmService.screenEnv(agentUserId))
     }
 
     /**
@@ -273,7 +281,7 @@ class AgentService(
         sessionId: String,
         resume: Boolean,
     ): OpenedAgent {
-        val env = screenEnv(machineId, teamId) + agentLlmService.screenEnv(agentUserId)
+        val env = screenEnv(machineId, teamId, agentUserId)
         val screen =
             hub.openScreen(
                 machineId = machineId,

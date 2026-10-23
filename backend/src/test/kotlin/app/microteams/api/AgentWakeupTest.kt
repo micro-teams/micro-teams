@@ -23,6 +23,8 @@
 
 package app.microteams.api
 
+import app.microteams.agent.AgentLlmChange
+import app.microteams.agent.AgentLlmService
 import app.microteams.agent.AgentRegistry
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
@@ -72,6 +74,7 @@ constructor(
     private val agentRegistry: AgentRegistry,
     private val machineRepository: MachineRepository,
     private val teamMachineRepository: TeamMachineRepository,
+    private val agentLlmService: AgentLlmService,
 ) {
     @LocalServerPort private var port: Int = 0
 
@@ -206,6 +209,17 @@ constructor(
     @Test
     @Order(1)
     fun aMessageToADeadAgentWakesItAndIsDeliveredAfterwards() {
+        // A model API set after the agent opened: the wake must carry it like a fresh launch does.
+        agentLlmService.set(
+            agentUserId,
+            AgentLlmChange(
+                provider = "deepseek",
+                api = null,
+                baseUrl = null,
+                model = null,
+                apiKey = "sk-wake",
+            ),
+        )
         reportDead()
         Thread.sleep(300) // let the push land
         assertEquals(
@@ -230,6 +244,11 @@ constructor(
         assertEquals(sid, respawn.getString("sid"), "waking respawns the screen in place")
         assertEquals(screenToken, respawn.getString("screen"), "the screen token survives a wake")
         assertFalse(respawn.optBoolean("adopt", false), "a wake spawns, it does not adopt")
+        assertEquals(
+            "sk-wake",
+            respawn.getJSONObject("env").optString("MICROTEAMS_LLM_API_KEY"),
+            "a woken screen must get the agent's model API key, as an opened one does",
+        )
         assertTrue(
             respawn.getJSONArray("command").getString(2).contains("--resume"),
             "the woken program must continue the same session, not start a blank one",
