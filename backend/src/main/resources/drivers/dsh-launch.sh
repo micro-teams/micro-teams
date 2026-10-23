@@ -36,4 +36,23 @@ custom)
   set -- --patch "$_mtp"
   ;;
 esac
-exec microteams acp-screen --session "$_mtsid" ${MICROTEAMS_LLM_MODEL:+--model "$MICROTEAMS_LLM_MODEL"} -- dsh --profile acp "$@"
+# Find DeepSeek Harness. The name `dsh` is not unique: Debian and Arch both ship an unrelated
+# "Distributed Shell" as `dsh`, and with that first on PATH the agent dies with an EOF nobody can
+# read. Harness answers `--version` with a bare version number; anything else is not it.
+_mtdsh=""
+for _mtc in "${MICROTEAMS_DSH:-}" "$(npm prefix -g 2>/dev/null)/bin/dsh" "$(command -v dsh 2>/dev/null)"; do
+  [ -n "$_mtc" ] && [ -x "$_mtc" ] || continue
+  if "$_mtc" --version 2>/dev/null | head -n 1 | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
+    _mtdsh="$_mtc"
+    break
+  fi
+done
+if [ -z "$_mtdsh" ]; then
+  echo "DeepSeek Harness (dsh) is not installed on this machine."
+  if _mto="$(command -v dsh 2>/dev/null)"; then
+    echo "The dsh on PATH ($_mto) is a different program: $("$_mto" --version 2>&1 | head -n 1)"
+  fi
+  echo "Install it with: npm i -g @deepseek-ai/dsh   (or set MICROTEAMS_DSH to its path)"
+  exit 127
+fi
+exec microteams acp-screen --session "$_mtsid" ${MICROTEAMS_LLM_MODEL:+--model "$MICROTEAMS_LLM_MODEL"} -- "$_mtdsh" --profile acp "$@"
