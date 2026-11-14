@@ -149,7 +149,7 @@ cd backend && ./mvnw install
 ```
 
 The tests are integration tests and need Postgres + cheese-auth up — that is the point, not a
-smell (`backend/CLAUDE.md` §8). `install` also regenerates `backend/CREATE.sql` from the live
+smell (`backend/README.md` §8). `install` also regenerates `backend/CREATE.sql` from the live
 entities, so it needs a reachable DB too.
 
 ```sh
@@ -222,7 +222,7 @@ to a group, and talk to it. Click its avatar anywhere to watch its live terminal
 
 - **The permission table is the authorization model.** `RolePermissionService` has to read as
   *the* answer to "who may do what": no service checks permissions, and no rule exists outside
-  it. `backend/CLAUDE.md` §5.
+  it. `backend/README.md` §5.
 - **`./mvnw clean` after moving/renaming/deleting Kotlin sources.** `target/classes` keeps stale
   `.class` files and the compiler resolves against them, producing impossible errors.
 - **Generated code is never hand-edited**, on either side — it is overwritten on every build.
@@ -242,8 +242,8 @@ Nothing here can be built or tested from the root. `app/` needs `bash tool/codeg
 `packages/mt_api` is generated from the contract and gitignored, so a fresh clone has no package to
 resolve against — then `flutter test`. `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
 `applets/` is `npm ci` (it needs `NODE_AUTH_TOKEN` with `read:packages`, see `applets/.npmrc`) then
-`npm run build`. `backend/` and `cli/` have their own conventions in `backend/CLAUDE.md` and
-`cli/CLAUDE.md`.
+`npm run build`. `backend/` and `cli/` have their own conventions in `backend/README.md` and
+`cli/README.md`. The rules every agent working here follows are in `AGENTS.md`.
 
 ### Which test to write
 
