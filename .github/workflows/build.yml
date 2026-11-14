@@ -102,10 +102,9 @@ jobs:
 
   # The backend's own tests. They are integration tests — every one of them talks to a real Postgres
   # and the real cheese-auth service — so they bring their dependencies up themselves rather than
-  # borrowing the packaging job's runner. What survives here is meant to shrink: the rules that show
-  # up as something a person can do are moving into the journeys, and this suite keeps the ones with
-  # no picture in the product (an ops endpoint that must not appear on the public port, a bare repo
-  # made twice, anything that needs exact timing).
+  # borrowing the packaging job's runner. What belongs here is what has no picture in the product
+  # (an ops endpoint that must not appear on the public port, a bare repo made twice, anything that
+  # needs exact timing).
   test-api:
     runs-on: ubuntu-latest
     permissions:
@@ -145,134 +144,6 @@ jobs:
           else
             echo "No uncommitted changes."
           fi
-
-  # The web client. It is the ONLY frontend now — frontend/ (React + Vite) is gone, because one
-  # person maintaining two implementations of the same product maintains neither.
-  # The app is built in three jobs rather than one, and the reason is arithmetic: the Android build
-  # is three and a half minutes of the seven, and it has nothing to do with the web build. Run side
-  # by side they cost the longer of the two; run in sequence they cost the sum.
-  #
-  #   build-android   the installable client
-  #   build-web       the web build, and every check that gates a merge
-  #   assemble-web    the two put together: the clients dropped into the bundle, then stamped
-  #
-  # The stamping happens last, in one place, so what /version says and what is in the bundle cannot
-  # disagree.
-  build-android:
-    runs-on: ubuntu-latest
-    # At the job, not at the step: a step's own `if` cannot see env declared on that same step, and
-    # it can never see the secrets context at all. Empty when this repository has no key.
-    env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/flutter-app
-
-      # Gradle downloads a great deal on a cold machine and almost nothing on a warm one.
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
-          restore-keys: gradle-${{ runner.os }}-
-
-      - name: Write the release key, if this repository has one
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
-        working-directory: app
-        run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/microteams-release.p12
-          cat > android/key.properties <<PROPS
-          storeFile=microteams-release.p12
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          keyPassword=$ANDROID_KEYSTORE_PASSWORD
-          PROPS
-          echo "MT_APK_SIGNED=release" >> "$GITHUB_ENV"
-
-      # arm64 only for now: every phone sold in years is arm64, and another architecture is one more
-      # entry in the manifest rather than a change to any code.
-      - name: Build the Android client
-        working-directory: app
-        run: |
-          flutter build apk --release --split-per-abi --target-platform android-arm64 \
-            --build-name="${MT_VERSION%%-*}" --build-number="$MT_BUILD_NUMBER" \
-            --dart-define=MT_VERSION=$MT_VERSION \
-            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
-
-      # Collected into one flat directory before upload, so the artifact's shape is something this
-      # workflow decided rather than something it inherits: given two paths, the artifact's root
-      # becomes their common ancestor, and the packages end up several directories deeper than
-      # whoever downloads them expects.
-      #
-      # How it was signed travels with them: the assembling job writes it into clients.json, and a
-      # debug-signed package cannot be replaced in place by a properly signed one later.
-      - name: Collect what gets published
-        run: |
-          mkdir -p out
-          cp app/build/app/outputs/flutter-apk/*.apk out/
-          echo "${MT_APK_SIGNED:-debug}" > out/signed.txt
-
-      - uses: actions/upload-artifact@v7
-        with:
-          retention-days: 7
-          name: android-apk
-          path: out
-
-  build-web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/flutter-app
-
-      - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver
-      - run: flutter analyze
-      - run: flutter test
-      - run: |
-          flutter build web --release --no-web-resources-cdn \
-            --dart-define=MT_VERSION=$MT_VERSION \
-            --dart-define=MT_BUILT_AT=$MT_BUILT_AT
-
-      - run: npm ci
-
-      # The browsers are a fixed download for a pinned version of Playwright, which is exactly what
-      # a cache is for.
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
-
-      # The half of this that no unit test can reach: whether the app actually paints, whether the
-      # worker registers and stores the engine, whether a second visit works with the network off,
-      # and whether the escape hatch clears it all. The React build passed every unit test it had
-      # and did not start offline; that is why its check existed, and why this one replaces it.
-      #
-      # The bundle is finished here — launcher, stamp and all. The installable clients are dropped
-      # in later, by the job that assembles the deployment, because nothing in the stamping reads
-      # them: the version comes from VERSION and the commit, and the launcher preloads code, engine
-      # and fonts. Waiting for the Android build before stamping would put four minutes back into
-      # the critical path for no reason.
-      # The icons are generated from branding/logo.svg rather than committed by hand, so a change to
-      # the mark cannot leave a stale favicon behind. Before the build copies web/ into the bundle.
-      - name: Check the built app in a real browser
-        run: |
-          npx playwright install --with-deps chromium
-          node tool/icons.mjs
-          node tool/launcher.mjs build/web
-          node tool/make-sw.mjs build/web
-          bash tool/check-web.sh
-
-      - name: Upload the web build
-        uses: actions/upload-artifact@v7
-        with:
-          retention-days: 1
-          name: web-dist
-          path: app/build/web
 
   build-applet:
     runs-on: ubuntu-latest
@@ -399,15 +270,10 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-origin, build-web, build-android, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-origin, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # For tool/add-clients.mjs below. It imports nothing outside the repository, so there is no
-      # install step to go with it.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -426,33 +292,11 @@ jobs:
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
-          # The app under /app/, the marketing site at "/", /version at the root. One definition of
-          # that layout, in app/tool/assemble-dist.mjs, because app/tool/check-bundle.sh opens THIS
-          # layout in a real browser behind the real deploy/nginx.conf — and a second, hand-rolled
-          # copy of it here would be a layout nothing had ever checked. That is precisely how T-093
-          # shipped. Pointing the app's two documents at /app/ is the one thing that assembler
-          # rewrites; everything else they reference is relative to that, and the worker reads its
-          # own scope.
-          node app/tool/assemble-dist.mjs artifacts/web-dist site "$STAGE/frontend/dist"
-          # The installable clients, into the bundle that is actually deployed. Here rather than in
-          # the web job because this is the moment the two halves meet, and it is the only place
-          # that has both.
-          MT_VERSION="$(cat VERSION)-${GITHUB_SHA::7}" \
-          MT_APK_SIGNED="$(cat artifacts/android-apk/signed.txt 2>/dev/null || echo debug)" \
-            node app/tool/add-clients.mjs "$STAGE/frontend/dist" artifacts/android-apk
-          # And that they are really there: a bundle that advertises a client it does not carry is
-          # a download button that 404s.
-          node -e '
-            const fs = require("node:fs");
-            const root = process.argv[1];
-            const manifest = JSON.parse(fs.readFileSync(root + "/downloads/clients.json", "utf8"));
-            if (!manifest.clients.length) throw new Error("no clients in the bundle");
-            for (const client of manifest.clients) {
-              const size = fs.statSync(root + client.url).size;
-              if (size !== client.bytes) throw new Error(client.url + " is " + size + ", manifest says " + client.bytes);
-              console.log(client.url, size, client.signed + "-signed");
-            }
-          ' "$STAGE/frontend/dist"
+          # The marketing site at "/" and /version at the root. The bundle carries no client: the
+          # client is being rebuilt, and until it lands /app/ has nothing to serve.
+          mkdir -p "$STAGE/frontend/dist"
+          find site -maxdepth 1 -type f ! -name README.md -exec cp {} "$STAGE/frontend/dist/" \;
+          echo "$(cat VERSION)-${GITHUB_SHA::7}" > "$STAGE/frontend/dist/version"
           cp artifacts/applets/*.js "$STAGE/applets/"
           chmod +x "$STAGE/gen-env.sh"
           # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
@@ -498,18 +342,7 @@ jobs:
             echo "pinned $ref -> ${ref}@${digest}"
           done
           echo "== pinned images =="; grep -nE '^[[:space:]]*image:' "$COMPOSE"
-          # Three levels deep, which is where the interesting files are — but the web app's own
-          # trees are deeper than that, and a listing that silently stops short reads as "these
-          # files are missing". So the deep ones get a line saying how much is down there.
-          echo "== bundle contents =="; find "$STAGE" -maxdepth 3 -type f | sort
-          echo "== and below that =="
-          for deep in frontend/dist/assets frontend/dist/canvaskit frontend/dist/downloads; do
-            [ -d "$STAGE/$deep" ] || continue
-            printf '%s: %s files, %s\n' "$deep" \
-              "$(find "$STAGE/$deep" -type f | wc -l)" \
-              "$(du -sh "$STAGE/$deep" | cut -f1)"
-          done
-          find "$STAGE/frontend/dist/downloads" -type f 2>/dev/null | sort
+          echo "== bundle contents =="; find "$STAGE" -type f | sort
       # Upload the bundle DIRECTORY, not a pre-made zip: actions/upload-artifact already zips what it
       # receives, so uploading a .zip would nest it (download → microteams-deploy.zip → the real zip).
       # Uploading the dir means the downloaded artifact zip IS the bundle, one layer.
@@ -518,48 +351,6 @@ jobs:
           retention-days: 1
           name: microteams-deploy
           path: microteams-deploy
-
-  # The shipped bundle, behind the shipped gateway, in a real browser.
-  #
-  # build-web already opens the app in a browser — but at the ROOT, straight out of `flutter build
-  # web`, which is not where anybody is served it. T-093 lives exactly in that gap: the app moved
-  # under /app/, every HTTP status the new nginx returned was verified correct by hand on both :80
-  # and :443, and the app still opened onto go_router's "no routes for location: /app" error page,
-  # because a Flutter document's idea of where it is comes from its <base href> and nginx has no
-  # opinion about that. No status code, no console error and no page error said so — go_router
-  # catches a routing failure and renders its own page — so the only thing that could ever have
-  # caught it is a browser opening the real layout behind the real config and asking where the app
-  # ARRIVED. That is this job.
-  #
-  # It runs on the assembled bundle rather than on web-dist, because the assembly is half of what is
-  # being tested.
-  check-bundle:
-    name: the bundle, behind the real gateway, in a browser
-    needs: [package-zip]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - uses: actions/download-artifact@v8
-        with:
-          name: microteams-deploy
-          path: microteams-deploy
-      - run: npm ci
-        working-directory: app
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
-      - run: npx playwright install --with-deps chromium
-        working-directory: app
-      # The bundle already carries the assembled tree, so this serves it as-is rather than
-      # assembling a second one — what ships is what is opened.
-      - name: Open the shipped bundle behind deploy/nginx.conf
-        run: bash app/tool/check-bundle.sh
-        env:
-          CHECK_BUNDLE_DIST: microteams-deploy/frontend/dist
 
   # The one test that exercises this system the way it is actually used: the shipped bundle, plus a
   # real machine with the real connector on it. `test-compose` used to stop at "the containers report
@@ -583,8 +374,8 @@ jobs:
   # goes red, the fix belongs in the applet, and the pinned leg is what says whether we broke it.
   # The machinery, without anybody using it: the connector, its private tmux, the applet, and the
   # path a message takes into a program's stdin — driven by curl, with no client in the picture.
-  # It is NOT the whole product end to end; test-journeys is, and this one is deliberately the layer
-  # underneath, where a failure means the plumbing broke rather than the interface.
+  # It is NOT the whole product end to end: it is deliberately the layer underneath the client, where
+  # a failure means the plumbing broke rather than the interface.
   test-machinery:
     name: machinery (connector, tmux, a message into stdin)
     needs: [package-zip]
@@ -649,170 +440,10 @@ jobs:
         working-directory: microteams-deploy
         run: docker compose down
 
-  # How many journey runs, and which: a pairing of client sides against machine environments, so that
-  # everything is covered in max(clients, environments) runs. The function lives in the repo
-  # (app/tool/e2e/pairs.py) rather than in this file, because adding a client should be one line in a
-  # list — not a matrix somebody has to recompute by hand and can quietly get wrong.
-  plan-journeys:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.pairs.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-      - id: pairs
-        run: echo "matrix=$(python3 app/tool/e2e/pairs.py --json)" >> "$GITHUB_OUTPUT"
-      - run: python3 app/tool/e2e/pairs.py
-
-  # The journey: the same bundle, driven through the interface a person uses.
-  #
-  # This is the other half of test-machinery. That one proves the plumbing works by driving the API
-  # with curl; this one proves a PERSON can reach it — every step goes through the real client, in a real
-  # browser, against the deployment we ship. See todo/microteams/testing-e2e.md.
-  #
-  # One journey, not one per half: each run signs up, works in the app, brings a machine in and puts
-  # an agent on it. Splitting the halves into separate jobs would cost clients + environments runs
-  # where the pairing above costs max(clients, environments). When a run fails, which step broke is
-  # answered by the trace the journey prints, not by the name of the job.
-  test-journeys:
-    needs: [package-zip, plan-journeys]
-    runs-on: ubuntu-latest
-    # A leg that hangs is a leg that never reports. Without this the first android run sat in
-    # `adb wait-for-device` for an hour and three quarters and would have gone on to six, which is
-    # the default — and a job nobody can wait for is one people learn to ignore.
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan-journeys.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/flutter-app
-      # Deliberately NOT in the workspace. A running deployment writes app_data/ as the users inside
-      # its containers, and anything that later walks the workspace — the pub cache's own post-job
-      # step, for one — then trips over directories it may not read. Keeping the bundle in the
-      # runner's temp keeps the checkout exactly as checked out.
-      - uses: actions/download-artifact@v8
-        with:
-          name: microteams-deploy
-          path: ${{ runner.temp }}/microteams-deploy
-      # The runner image ships Chrome and a matching ChromeDriver; the fallback is for images that
-      # do not, and for anybody running this workflow somewhere else.
-      - name: Make sure there is a chromedriver
-        if: matrix.client == 'web'
-        run: |
-          command -v chromedriver && exit 0
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq chromium-driver
-
-      # --- the android leg -------------------------------------------------------------------
-      # Written out rather than taken from an action, because every line of it was established by
-      # running it: this is the same sequence that took the journey from red to green on a real
-      # machine, and an action would be a dependency between us and a thing we already know.
-      #
-      # The udev rule is not optional. /dev/kvm exists on this runner and is owned by root, so the
-      # emulator falls back to software rendering and takes long enough that the journey's own
-      # timeout kills it — reported as "the app never reached the test", which is a sentence about
-      # nothing.
-      - name: Let the emulator use KVM
-        if: matrix.client == 'android'
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      # Gradle is the whole cost of this leg from cold. The key is the lockfile and the wrapper,
-      # so a run that changes neither downloads nothing.
-      - uses: actions/cache@v6
-        if: matrix.client == 'android'
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-journey-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
-          restore-keys: gradle-journey-${{ runner.os }}-
-      - name: An emulator, booted
-        if: matrix.client == 'android'
-        env:
-          ANDROID_HOME: ${{ github.workspace }}/android-sdk
-          # Named, not left to the default. `avdmanager` and `emulator` each work out where AVDs
-          # live from their own list of environment variables, and on this runner they disagreed:
-          # the AVD was created and the emulator then said `Unknown AVD name [mt-e2e]`, having
-          # looked in $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd and $HOME/.android/avd. Saying it
-          # once, for both, is what makes that impossible.
-          ANDROID_AVD_HOME: ${{ github.workspace }}/avd
-        run: |
-          set -e
-          mkdir -p "$ANDROID_AVD_HOME"
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          curl -fsSL -o /tmp/cmdtools.zip \
-            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q -o /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            platform-tools emulator "system-images;android-30;default;x86_64" \
-            "platforms;android-36" "build-tools;36.0.0" >/dev/null
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
-            -n mt-e2e -k "system-images;android-30;default;x86_64" -d pixel_5
-          # And check it is really there before booting anything: `create avd` exiting 0 is not the
-          # same as an AVD the emulator can find, and the difference cost a run.
-          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx mt-e2e || {
-            echo "the AVD was created but the emulator cannot see it:"
-            "$ANDROID_HOME/emulator/emulator" -list-avds
-            ls -la "$ANDROID_AVD_HOME"
-            exit 1
-          }
-          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          nohup "$ANDROID_HOME/emulator/emulator" -avd mt-e2e -no-window -no-audio \
-            -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data \
-            > /tmp/emulator.log 2>&1 &
-          # Bounded, all of it. `adb wait-for-device` blocks FOREVER when no device ever appears,
-          # which is exactly what a broken boot looks like, and the job then hangs with nothing on
-          # screen to say why. Every wait here has an end, and the end prints the emulator's own log.
-          if ! timeout 300 "$ANDROID_HOME/platform-tools/adb" wait-for-device; then
-            echo "no device appeared in five minutes — the emulator's own log:"
-            tail -80 /tmp/emulator.log
-            exit 1
-          fi
-          booted=
-          for _ in $(seq 1 60); do
-            [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed \
-                 2>/dev/null | tr -d '\r')" = "1" ] && { booted=1; break; }
-            sleep 5
-          done
-          if [ -z "$booted" ]; then
-            echo "the device is there but never finished booting — the emulator's own log:"
-            tail -80 /tmp/emulator.log
-            exit 1
-          fi
-          "$ANDROID_HOME/platform-tools/adb" devices
-
-      - name: "A person's journey, end to end (${{ matrix.client }} + ${{ matrix.leg }})"
-        working-directory: app
-        run: |
-          bash tool/e2e/run.sh \
-            --bundle "${{ runner.temp }}/microteams-deploy" \
-            --client "${{ matrix.client }}" \
-            --leg "${{ matrix.leg }}"
-      - name: Dump logs on failure
-        if: failure()
-        working-directory: ${{ runner.temp }}/microteams-deploy
-        run: docker compose logs --no-color --tail 200
-      - name: What the emulator said, on failure
-        if: failure() && matrix.client == 'android'
-        run: tail -100 /tmp/emulator.log || true
-      - name: Tear down
-        if: always()
-        working-directory: ${{ runner.temp }}/microteams-deploy
-        run: docker compose down -v
-
   # One check to require in branch protection: it succeeds only when every job above did (a job with
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
-  # The three leaves, and nothing else: package-zip already needs every build, and both test jobs
-  # already need package-zip, so naming those here would only repeat what the graph says. A job
+  # The leaves, and nothing else: package-zip already needs every build, and the test job already
+  # needs package-zip, so naming those here would only repeat what the graph says. A job
   # whose dependency fails is skipped rather than failed, and a skipped need is not a success — so
   # this still cannot go green over a broken build.
   #
@@ -820,7 +451,7 @@ jobs:
   # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs: [test-api, check-bundle, test-machinery, test-journeys]
+    needs: [test-api, test-machinery]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."
