@@ -84,6 +84,13 @@ async function openApp(url, { waitForUrl } = {}) {
 {
   const context = await browser.newContext();
   const page = await context.newPage();
+  // Everything the site shows comes from this origin. A page that loads an image from somebody
+  // else waits on somebody else: when that host stops answering, the page never finishes loading
+  // for a visitor, and every navigation here times out.
+  const elsewhere = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith(BASE + "/")) elsewhere.push(r.url());
+  });
   const response = await page.goto(BASE + "/", { waitUntil: "load" });
   check("the marketing site answers /", response?.status() === 200, String(response?.status()));
   const heading = await page.textContent("h1").catch(() => null);
@@ -106,6 +113,7 @@ async function openApp(url, { waitForUrl } = {}) {
   // genuine 404 rather than a document that boots an application nobody asked for.
   const missing = await page.goto(BASE + "/no-such-page", { waitUntil: "load" });
   check("an unknown path at the root is a real 404", missing?.status() === 404, String(missing?.status()));
+  check("the site loads nothing from another origin", elsewhere.length === 0, elsewhere.join(" ") || "none");
   await context.close();
 }
 
