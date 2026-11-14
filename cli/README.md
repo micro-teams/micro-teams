@@ -7,8 +7,8 @@
 [micro-connector](https://github.com/micro-teams/micro-connector), the connector shared with the
 other products built on the same idea: the terminal, the applet runtime, screen lifecycle, both
 transports, enrolment, credentials, self-update and the service install are all library. What is
-here is what makes this connector *MicroTeams* rather than something else — six packages, about
-1,200 lines.
+here is what makes this connector *MicroTeams* rather than something else (see _What is actually
+in this directory_).
 
 The binary is still self-contained: it depends on nothing but a `tmux` and a POSIX pty.
 
@@ -121,13 +121,85 @@ internal/daemoncmd  the human-facing commands, and how they speak
 internal/host       assembles a connector out of the library, plus MicroTeams' own three
                     decisions: the state file, what updating means, and the bargain that keeps
                     agents alive across an update
+internal/lines      which network paths to the backend exist
+internal/netcfg     this machine's own network settings (its proxy)
+internal/hostlog    one log file, wherever the init system put the process
+internal/acpscreen  `microteams acp-screen`: a terminal front end for agents that speak ACP
 internal/mtbrand    which product this is — and that agents here are ordinary users, so a screen
                     exchanges its token for the user's rather than borrowing the machine's
 internal/state      how many screens are live, so a disconnect can warn before killing work
 internal/ui         terminal output
 ```
 
-Everything else comes from `github.com/micro-teams/micro-connector/cli`, pinned in `go.mod`.
+Everything else comes from `github.com/micro-teams/micro-connector/cli`, pinned in `go.mod`. A
+change to the terminal, the applet runtime, screen lifecycle, the transports, the wire protocol,
+enrolment, config, credentials, self-update or the service install belongs in that repository —
+where an end-to-end test drives a real coding agent — and arrives here by bumping the dependency.
+
+## Conventions
+
+### The Go host is business-agnostic; features live in applets
+
+**The binary provides only generic primitives. Every specific feature is implemented in an
+applet** (server-supplied JavaScript). The two applet surfaces:
+
+- **Screen applets** (`claude.js`, `codex.js`, …) drive a program in a terminal with the
+  primitives described under _The model_. They are published from micro-connector as
+  `@micro-teams/connector-applets`, because understanding what a coding agent paints on a terminal
+  is the expensive part and it goes stale with every release of that agent.
+- **The CLI applet** (`applets/src/cli/` → `cli.js`) defines the `microteams api` command tree.
+  Primitives: `microteams.command` (declare a command), `microteams.http` (one **authenticated**
+  backend call — the agent-token exchange is the connector's job, never the applet's),
+  `microteams.exec` (run a subprocess: `exec(name, args, {cwd})` → `{code, stdout, stderr}`),
+  `microteams.fs` (sandboxed file IO), `microteams.print`.
+
+This is a hard rule because in production the binary must be **near-frozen**. A feature ships by
+updating the **server-side applet** and reaches every machine at once — no `microteams update`, no
+binary redistribution, no version skew. A feature that needs a new Go binding has to be rolled out
+to every connected machine, which is exactly the friction this architecture exists to remove.
+
+When adding an agent-facing feature:
+
+1. Implement it in the applet (`applets/`), using the existing primitives.
+2. If a primitive is *genuinely* missing, add a **general** capability — never a
+   business-specific binding. `microteams.exec` taking a `cwd` option is right; a
+   `microteams.gitPush()` is wrong. Adding a general primitive is a rare, deliberate event.
+3. The backend is **not** bound by this rule — the server is meant to evolve. Prefer putting new
+   logic in the applet + backend and leaving the Go host untouched.
+
+Worked example (the document-tree git flow): the applet runs `git` via `microteams.exec`
+(`git -C <dir>` for the working copy, `-c http.extraHeader="Authorization: Bearer <jwt>"` for
+auth) and gets `{gitUrl, token}` from a small **backend** endpoint via `microteams.http`. No Go
+change. The agent's JWT is sealed inside the connector's credential layer and never handed to
+applet JS, so a `git` subprocess, which authenticates outside `microteams.http`, gets its
+credential from the backend, not from a new host binding.
+
+### The command tree
+
+`auth`, `link`, `status`, `run`, `update`, `uninstall` and `api` are lifecycle, not features.
+**Stopping the service kills every session on the machine**, so a command that only wants the
+connector to reconsider something is never built on stop/start. `link retest` is the worked
+example: it signals the running process instead, and refuses to signal one that predates the
+handler, because SIGHUP to a process that ignores it is a kill.
+
+### The wire protocol is frozen
+
+Both ends must agree, and machines are never upgraded in lockstep with the server. Extend
+additively; never break.
+
+### Style and tests
+
+- `gofmt` before committing.
+- The module path is `github.com/micro-teams/microteams/cli`; the binary is `microteams`.
+- Unix only (Linux/macOS); Windows is intentionally excluded (`syscall.SIGUSR2`).
+- Tests are table/httptest style, next to the code. The connector's own tests — including the ones
+  that drive a real tmux and a real coding agent — live in micro-connector; a change to this
+  directory is verified by `.github/scripts/e2e.sh`, which builds the shipped bundle and puts a
+  machine through it.
+- **A test never touches the live tmux socket.** The socket is a stable per-user path by design,
+  so a test that builds a screen manager without redirecting `TMPDIR` drives whatever connector is
+  running as that user, and killing its server at the end of the test kills every agent on the
+  machine — with no error, exactly as if tmux had died on its own.
 
 ## The consumer
 
