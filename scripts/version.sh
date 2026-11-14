@@ -25,7 +25,6 @@ cd "$ROOT"
 VERSION_FILE="$ROOT/VERSION"
 POM="$ROOT/backend/pom.xml"
 API="$ROOT/MicroTeams-API.yml"
-APP_PUBSPEC="$ROOT/app/pubspec.yaml"
 APPLETS_PKG="$ROOT/applets/package.json"
 README="$ROOT/README.md"
 
@@ -43,7 +42,6 @@ if [[ $# -eq 0 ]]; then
   echo "as found in each file:"
   printf '  %-28s %s\n' "backend/pom.xml"        "$(perl -0777 -ne 'print "$1\n" if /<artifactId>backend<\/artifactId>\s*<version>([^<]+)<\/version>/' "$POM")"
   printf '  %-28s %s\n' "MicroTeams-API.yml"     "$(perl -ne 'print "$1\n" if /^  version:\s*"?([^"\n]+)"?/' "$API")"
-  printf '  %-28s %s\n' "app/pubspec.yaml"       "$(perl -ne 'print "$1\n" if /^version:\s*(\S+)/' "$APP_PUBSPEC")"
   printf '  %-28s %s\n' "applets/package.json"   "$(node -p "require('$APPLETS_PKG').version")"
   echo
   echo "independent (NOT touched by this script):"
@@ -75,12 +73,7 @@ perl -i -pe "s{^(  version:\s*).*}{\${1}\"$api_ver\"}" "$API"
 # 4. applets/package.json — set top-level .version via node (leaves the rest untouched)
 node -e "const f='$APPLETS_PKG';const p=require(f);p.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
 
-# 5. app/pubspec.yaml — the `version:` line at column 0, which is the app's own and not a
-#    dependency constraint. app/package.json carries the same number for the browser checks.
-perl -i -pe "s{^version:\s*\S+}{version: $new}" "$APP_PUBSPEC"
-node -e "const f='$ROOT/app/package.json';const p=require(f);p.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
-
-# 6. README — the example run command references the built jar (backend-<version>.jar)
+# 5. README — the example run command references the built jar (backend-<version>.jar)
 perl -i -pe "s{(microteams|backend)-[0-9]+\.[0-9]+\.[0-9]+\.jar}{backend-$new.jar}g" "$README"
 
 echo "done. verifying:"

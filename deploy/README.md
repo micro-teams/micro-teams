@@ -18,8 +18,8 @@ origin/origin.jar      the MultiPath origin: the server end of the substrate. Cl
                        splicing each exchange back into nginx — so a request that arrived over a
                        line lands exactly where the same request over plain HTTP lands. Nothing
                        else in the stack knows more than one path to it exists.
-frontend/dist/         the built web client (static, domain-independent) — a Flutter build
-                       since 0.1.16; the directory name is unchanged so upgrades in place still work
+frontend/dist/         the marketing site at /, the built web client under /app/ (static,
+                       domain-independent), /version, and the installable clients under /downloads/
 applets/               cli.js + claude.js (mounted into the backend, swappable)
 connector/             the CLI distribution served to fresh machines: per-target dirs each
                        holding the `microteams` binary + a static `tmux` (Linux only — see below)
@@ -310,13 +310,6 @@ network.
 ## Notes
 
 - **Secrets** live only in `.env` (chmod 600), generated locally, never committed.
-- **The web client caches itself.** It registers a service worker, so a browser that has visited
-  once starts from disk and works offline. That is deliberate, and it has one consequence worth
-  knowing before someone reports it as a bug: after an upgrade a tab that is already open keeps the
-  old build until it is reloaded. If a browser ever gets stuck on a stale copy, open
-  `https://<your-domain>/unregister.html` — it unregisters the worker and deletes its caches, and
-  the next visit downloads the new build. That URL is the answer to give over the phone.
-
 - **Upgrading**: replace `backend/backend.jar`, `frontend/dist/`, or `applets/` with a newer build
   and `docker compose up -d` again (applets can even be swapped without touching the jar). Replace
   files **in place** — overwrite the jar, and for a directory like `frontend/dist/` clear its
@@ -335,20 +328,3 @@ network.
   backend re-adopts them when the machine reconnects — so upgrading the jar doesn't kill running
   agents. Connected machines self-update their own connector via `microteams update`.
 - **Images** are digest-pinned in `docker-compose.yml`; to move to newer bases, update the digests.
-
-## 部署之后，确认它真的部署了
-
-Service Worker 只在**自己的字节变了**的时候才会被替换。所以一次「新文件 + 旧 sw.js」的部署是
-隐形的：worker 不更新、activate 不跑、缓存不清，每个访问者继续运行 worker 当初缓存的那一版。
-从外面看没有任何异常——文件是新的，站点是活的，应用是旧的。
-
-这不是假设。2026-08-21 线上就是 16:41 的 `main.dart.js` 配 15:21 的 `sw.js`，唯一的症状是
-「部署了，但什么都没变」。
-
-```sh
-node app/tool/verify-deploy.mjs https://microteams.app
-```
-
-它检查两件事：worker 里写死的版本和实际提供的文件哈希是否一致，以及入口文件（`/`、`sw.js`、
-`main.dart.js`——这三个名字都不带内容哈希）是不是被 HTTP 缓存扣着。任何一条不过，这次部署就是
-坏的，重新完整发一次。
