@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef2f8"/>
+      <stop offset="1" stop-color="#dde5f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="500" fill="url(#bg)"/>
+  <!-- chat window -->
+  <rect x="90" y="50" width="640" height="400" rx="14" fill="#ffffff"/>
+  <rect x="90" y="50" width="640" height="54" rx="14" fill="#2c3e50"/>
+  <rect x="90" y="90" width="640" height="14" fill="#2c3e50"/>
+  <circle cx="122" cy="77" r="7" fill="#e74c3c"/>
+  <circle cx="146" cy="77" r="7" fill="#f1c40f"/>
+  <circle cx="170" cy="77" r="7" fill="#2ecc71"/>
+  <rect x="300" y="70" width="220" height="14" rx="7" fill="#5d7a96"/>
+  <!-- message from a person -->
+  <rect x="120" y="132" width="44" height="44" rx="8" fill="#4e6ef2"/>
+  <rect x="180" y="134" width="300" height="46" rx="8" fill="#eef1f5"/>
+  <rect x="198" y="150" width="230" height="12" rx="6" fill="#b9c3cf"/>
+  <!-- message from the agent, with its working ring -->
+  <circle cx="142" cy="236" r="31" fill="none" stroke="#7c3aed" stroke-width="3" opacity="0.7"/>
+  <rect x="120" y="214" width="44" height="44" rx="8" fill="#7c3aed"/>
+  <rect x="131" y="228" width="22" height="16" rx="4" fill="#ffffff"/>
+  <circle cx="137" cy="236" r="2.5" fill="#7c3aed"/>
+  <circle cx="147" cy="236" r="2.5" fill="#7c3aed"/>
+  <rect x="180" y="216" width="400" height="96" rx="8" fill="#eef1f5"/>
+  <rect x="198" y="234" width="340" height="12" rx="6" fill="#b9c3cf"/>
+  <rect x="198" y="256" width="280" height="12" rx="6" fill="#b9c3cf"/>
+  <rect x="198" y="282" width="190" height="16" rx="4" fill="#2c3e50"/>
+  <!-- my own message -->
+  <rect x="410" y="336" width="240" height="46" rx="8" fill="#95ec69"/>
+  <rect x="428" y="352" width="170" height="12" rx="6" fill="#5aa43c"/>
+  <rect x="666" y="336" width="44" height="44" rx="8" fill="#12b76a"/>
+  <!-- composer -->
+  <rect x="110" y="400" width="510" height="36" rx="6" fill="none" stroke="#d5dbe3" stroke-width="2"/>
+  <rect x="632" y="400" width="78" height="36" rx="6" fill="#07c160"/>
+  <!-- shared document -->
+  <rect x="770" y="90" width="340" height="320" rx="14" fill="#ffffff"/>
+  <rect x="770" y="90" width="340" height="54" rx="14" fill="#34495e"/>
+  <rect x="770" y="130" width="340" height="14" fill="#34495e"/>
+  <rect x="796" y="111" width="120" height="12" rx="6" fill="#8ea3b8"/>
+  <rect x="796" y="172" width="200" height="16" rx="5" fill="#2c3e50"/>
+  <rect x="796" y="206" width="288" height="10" rx="5" fill="#c9d1db"/>
+  <rect x="796" y="228" width="262" height="10" rx="5" fill="#c9d1db"/>
+  <rect x="796" y="250" width="276" height="10" rx="5" fill="#c9d1db"/>
+  <rect x="790" y="276" width="300" height="30" rx="4" fill="#e6f6ec"/>
+  <rect x="804" y="286" width="220" height="10" rx="5" fill="#27ae60"/>
+  <rect x="796" y="324" width="250" height="10" rx="5" fill="#c9d1db"/>
+  <rect x="796" y="346" width="200" height="10" rx="5" fill="#c9d1db"/>
+  <!-- the link between the agent and the document -->
+  <path d="M580 264 C 680 264, 690 290, 790 290" fill="none" stroke="#7c3aed" stroke-width="3" stroke-dasharray="8 8"/>
+</svg>
