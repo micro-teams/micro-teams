@@ -2,11 +2,9 @@
 # The machinery under the product: the shipped bundle, a real machine, a real agent, one real
 # message — driven by curl, with no client in the picture.
 #
-# It used to be called the full-stack test, and it is not: nothing here touches the interface a
-# person uses, so it cannot tell you whether they can reach any of it. That is what the journeys do
-# (app/integration_test/, run by app/tool/e2e/run.sh). This script is the layer underneath, and the
-# division is worth keeping: when this is red the plumbing broke; when a journey is red the product
-# did.
+# It is not a full-stack test: nothing here touches the interface a person uses, so it cannot tell
+# you whether they can reach any of it. It is the layer underneath the client, and when it is red the
+# plumbing broke.
 #
 # What this covers that nothing else does. The unit and integration tests exercise the backend with a
 # FAKE machine (a WebSocket client in the test JVM), and `test-compose` only proved the containers
@@ -49,8 +47,7 @@
 # Usage: e2e.sh [npm:<version>|installer|pi:<version>]   (run from an unpacked bundle directory)
 set -euo pipefail
 
-# Installing the agent's program and scripting the model are shared with app/tool/e2e/run.sh — see
-# that file for why there is one copy rather than two.
+# Installing the agent's program and scripting the model live in agent-leg.sh, beside this file.
 # shellcheck source=agent-leg.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-leg.sh"
 
