@@ -27,6 +27,20 @@ export class WebdriverioDriver implements Driver {
     return this.browser.$(`android=new UiSelector().resourceId("${id}")`);
   }
 
+  /**
+   * The element with this id, scrolled into view first when it is not on screen: UiAutomator sees
+   * only what is drawn, and a long form (registering) runs past the bottom of a phone.
+   */
+  private async shown(id: string, timeoutMs = 15_000) {
+    const el = await this.byId(id);
+    if (!(await el.isDisplayed().catch(() => false))) {
+      const scroll = `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId("${id}"))`;
+      await (await this.browser.$(scroll)).isExisting().catch(() => false);
+    }
+    await el.waitForDisplayed({ timeout: timeoutMs });
+    return el;
+  }
+
   async open() {
     this.b = await remote({
       hostname: "127.0.0.1",
@@ -45,16 +59,14 @@ export class WebdriverioDriver implements Driver {
   }
 
   async fill(id: string, text: string) {
-    const el = await this.byId(id);
-    await el.waitForDisplayed({ timeout: 15_000 });
+    const el = await this.shown(id);
     await el.clearValue();
     await el.setValue(text);
   }
 
   async tap(id: string) {
     if (await this.browser.isKeyboardShown()) await this.browser.hideKeyboard();
-    const el = await this.byId(id);
-    await el.waitForDisplayed({ timeout: 15_000 });
+    const el = await this.shown(id);
     await el.click();
   }
 

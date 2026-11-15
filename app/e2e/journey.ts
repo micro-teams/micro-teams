@@ -111,6 +111,7 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   if (p.server !== null) {
     await d.tap("settings");
     await d.fill("server", p.server);
+    await d.tap("settings");
   }
   await d.tap("go-register");
   await d.fill("email", email);
