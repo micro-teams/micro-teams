@@ -12,7 +12,7 @@
  *   remove(userId), dissolve() } — a conversation's title and members, owners first, and what an
  *   owner or admin can do to it; title(me) is the stored title, or the other people's names when
  *   there is none. Each action refetches the conversation and the chat list.
- * useCreateChat() → create(title) → the new thread's id.
+ * useCreateChat() → create(title, memberIds?) → the new thread's id. parseMemberIds(raw) — "12, 34 56" as ids.
  * chatTitle(chat, me) — a group by its title, a one-to-one by the other person.
  *
  * Example:
@@ -189,11 +189,19 @@ export function useCreateChat() {
   const { mt } = useSession();
   const queries = useQueryClient();
   const m = useMutation({
-    mutationFn: async (title: string) => {
-      const { data } = await mt!.POST("/chat", { body: { title } });
+    mutationFn: async ({ title, memberIds }: { title: string; memberIds: number[] }) => {
+      const { data } = await mt!.POST("/chat", { body: { title, memberIds } });
       return data!.id;
     },
     onSuccess: () => queries.invalidateQueries({ queryKey: ["chats"] }),
   });
-  return m.mutateAsync;
+  return (title: string, memberIds: number[] = []) => m.mutateAsync({ title, memberIds });
+}
+
+/** "12, 34 56" as ids. Anything that is not a number is dropped: a stray comma is not worth refusing. */
+export function parseMemberIds(raw: string): number[] {
+  return raw
+    .split(/[\s,，]+/)
+    .map((p) => Number(p.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
 }

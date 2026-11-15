@@ -4,7 +4,8 @@
  *
  * <ChatsScreen /> — the "chats" section's root frame. A row opens its conversation with open(),
  *   so it lands beside the list in a wide window and on top of it on a phone. "new" asks for a
- *   title, makes the conversation and opens it; if the server refuses, its message is shown.
+ *   title and optional member ids, makes the conversation and opens it; a refusal is shown in the
+ *   dialog, which stays open.
  *
  * Example: routes={{ chats: ChatsScreen, ... }}
  *
@@ -16,15 +17,51 @@
 import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { chatTitle, ChatSummary, useChats, useCreateChat } from "../../data/chats";
+import { chatTitle, ChatSummary, parseMemberIds, useChats, useCreateChat } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar, MemberGrid } from "../../ui/Avatar";
-import { useAsk } from "../../ui/Dialog";
-import { Button, Header, Pressy, Txt } from "../../ui/kit";
-import { TextPrompt } from "../../ui/prompts";
+import { DialogActions, useAsk } from "../../ui/Dialog";
+import { Button, Field, Header, Pressy, Txt } from "../../ui/kit";
 import { colors, metrics } from "../../ui/theme";
 import { listTime } from "./time";
+
+/**
+ * "New chat": a title, and optionally who else is in it, by user id — there is no user search, and
+ * more people can be added from the chat's info page. The dialog makes the chat itself, so a
+ * refusal is shown where it was asked for and the form stays filled; it answers with the new id.
+ */
+function NewChatForm({ create, done }: { create: (title: string, members: number[]) => Promise<number>; done: (id: number) => void }) {
+  const [title, setTitle] = useState("");
+  const [members, setMembers] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!title.trim()) return setError("give it a title");
+    setBusy(true);
+    setError(null);
+    try {
+      done(await create(title.trim(), parseMemberIds(members)));
+    } catch (e) {
+      setError(`could not start the chat: ${e instanceof Error ? e.message : String(e)}`);
+      setBusy(false);
+    }
+  };
+  return (
+    <View style={styles.form}>
+      <Field testID="new-chat-title" value={title} onChangeText={setTitle} placeholder="title — general" autoFocus onSubmitEditing={submit} />
+      <Field testID="new-chat-members" value={members} onChangeText={setMembers} placeholder="member ids (optional) — 12, 34, 56" keyboardType="numbers-and-punctuation" />
+      {error ? (
+        <Txt testID="error" style={{ color: colors.danger }}>
+          {error}
+        </Txt>
+      ) : null}
+      <DialogActions>
+        <Button kind="text" testID="new-chat-create" label="create" busy={busy} onPress={submit} />
+      </DialogActions>
+    </View>
+  );
+}
 
 function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; dense: boolean; onPress: () => void }) {
   const others = chat.members.filter((m) => m.userId !== me);
@@ -63,26 +100,17 @@ export function ChatsScreen() {
   const create = useCreateChat();
   const ask = useAsk();
   const [width, setWidth] = useState(0);
-  const [refused, setRefused] = useState<string | null>(null);
   const dense = width > 0 && width < metrics.readingColumn;
 
   const newChat = async () => {
-    const title = await ask<string>("new chat", (done) => <TextPrompt testID="new-chat-title" okTestID="new-chat-create" placeholder="title" action="create" done={done} />);
-    if (!title?.trim()) return;
-    try {
-      setRefused(null);
-      const id = await create(title.trim());
-      open(self, "thread", { id });
-    } catch (e) {
-      setRefused(e instanceof Error ? e.message : String(e));
-    }
+    const id = await ask<number>("new chat", (done) => <NewChatForm create={create} done={done} />);
+    if (id !== null) open(self, "thread", { id });
   };
 
   return (
     <View style={styles.root} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <Header title="chats" actions={<Button kind="text" testID="new-chat" label="new" onPress={newChat} />} />
       {error ? <Txt style={styles.notice}>{String(error)}</Txt> : null}
-      {refused ? <Txt testID="error" style={styles.notice}>{`could not start the chat: ${refused}`}</Txt> : null}
       <FlashList
         data={chats}
         keyExtractor={(c) => String(c.id)}
@@ -103,4 +131,5 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontWeight: "500", marginRight: 8 },
   preview: { marginTop: 2 },
   notice: { textAlign: "center", padding: 24 },
+  form: { gap: 12 },
 });
