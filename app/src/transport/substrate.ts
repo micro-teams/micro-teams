@@ -56,6 +56,7 @@ export class Substrate {
         this.client = c;
         this.dialling = false;
         this.lastError = null;
+        console.log(`multipath: substrate up over ${this.lines.join(", ")}`);
       },
       (e: unknown) => {
         this.dialling = false;
@@ -70,7 +71,14 @@ export class Substrate {
     const client = this.live();
     if (!client) return globalThis.fetch(input, init);
     const request = input instanceof Request && !init ? input : new Request(input, init);
-    return client.fetch(SERVICE, request);
+    const started = Date.now();
+    return client.fetch(SERVICE, request).then(
+      (res) => res,
+      (e: unknown) => {
+        console.warn(`multipath: ${request.method} ${request.url} failed after ${Date.now() - started} ms: ${String(e)}`);
+        throw e;
+      },
+    );
   };
 
   stats(): LinkStat[] {
