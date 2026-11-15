@@ -33,15 +33,23 @@ export class WebdriverioDriver implements Driver {
    */
   private async shown(id: string, timeoutMs = 15_000) {
     const el = await this.byId(id);
-    // Scroll the page down a step at a time until it appears, or the page stops moving.
+    // Swipe the page up a step at a time (a finger, not an API: what a person does) until it appears.
     for (let i = 0; i < 6 && !(await el.isDisplayed().catch(() => false)); i++) {
       const page = await this.browser.$("android=new UiSelector().scrollable(true)");
       if (!(await page.isExisting())) break;
       if (await this.browser.isKeyboardShown()) await this.browser.hideKeyboard();
-      const moved = await this.browser
-        .execute("mobile: scrollGesture", { elementId: page.elementId, direction: "down", percent: 0.6 })
-        .catch(() => false);
-      if (!moved) break;
+      const { x, y } = await page.getLocation();
+      const { width, height } = await page.getSize();
+      const cx = Math.round(x + width / 2);
+      await this.browser
+        .action("pointer", { parameters: { pointerType: "touch" } })
+        .move({ x: cx, y: Math.round(y + height * 0.75) })
+        .down()
+        .pause(100)
+        .move({ x: cx, y: Math.round(y + height * 0.3), duration: 400 })
+        .pause(100)
+        .up()
+        .perform();
     }
     await el.waitForDisplayed({ timeout: timeoutMs });
     return el;

@@ -594,6 +594,9 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
+          # A phone's screen rather than the default 320×640: what people hold, and what the
+          # layouts are judged on.
+          profile: pixel_6
           disable-animations: true
           script: adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (RUN="a$GITHUB_RUN_ID" npx tsx run.ts android http://10.0.2.2 || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1))
       - name: What went wrong
