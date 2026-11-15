@@ -24,8 +24,9 @@
  */
 import { createContext, ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions } from "react-native";
-import { guardHistory, isWeb, onBack } from "../platform/platform";
+import { guardHistory, isWeb, onBack, takeLink } from "../platform/platform";
 import { WIDE } from "../ui/theme";
+import { navFromLink } from "./links";
 import * as S from "./stack";
 
 type Api = {
@@ -46,7 +47,10 @@ const NavCtx = createContext<Api | null>(null);
 const FrameCtx = createContext<S.Frame | null>(null);
 
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [nav, setNav] = useState(() => S.initialNav());
+  const [nav, setNav] = useState(() => {
+    const link = takeLink();
+    return (link && navFromLink(link.path, link.query)) ?? S.initialNav();
+  });
   const wide = useWindowDimensions().width >= WIDE;
   // The latest Nav, for the back handlers, which must answer synchronously whether they popped.
   const navRef = useRef(nav);

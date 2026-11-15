@@ -8,6 +8,9 @@
  *   button. handler returns whether it consumed the press (false lets Android leave the app).
  * guardHistory() — on the web, put one history entry up for the next browser-back to consume; a
  *   no-op on a phone.
+ * takeLink() → { path, query } | null — on the web, the address the page was opened at, relative to
+ *   where the app is served (null at the app's own root), and the address bar is put back to that
+ *   root: the link has been read, and the app's state is the stack from now on. Null on a phone.
  *
  * Example:
  *   useEffect(() => onBack(() => pop()), [pop]);
@@ -31,6 +34,16 @@ export function onBack(handler: () => boolean): () => void {
   }
   const sub = BackHandler.addEventListener("hardwareBackPress", handler);
   return () => sub.remove();
+}
+
+export function takeLink(): { path: string; query: Record<string, string> } | null {
+  if (!isWeb) return null;
+  const base = `${process.env.EXPO_BASE_URL ?? ""}/`;
+  const { pathname, search } = window.location;
+  const path = pathname.startsWith(base) ? pathname.slice(base.length) : "";
+  if (!path || path === "index.html") return null;
+  window.history.replaceState(null, "", base);
+  return { path, query: Object.fromEntries(new URLSearchParams(search)) };
 }
 
 export function guardHistory() {

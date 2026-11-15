@@ -11,6 +11,8 @@
  * useMachineActions() → { rename(machine, name), bind(machineId, teamId), unbind(machine,
  *   teamId), forget(machine) } — forget de-registers the machine for every team.
  * useDrivers() → { drivers, defaultDriver } — which drivers this deployment runs.
+ * useApproveMachine() → approve(code, teamIds) — enrols the machine waiting with that one-time code
+ *   into those teams; resolves with the machine.
  * useAllMachines() → every machine this person has, in any team: what "add device" can reuse.
  *
  * Example: const { agents } = useFleet(team); const { chatWith } = useAgentActions(team);
@@ -73,6 +75,17 @@ export function useAllMachines() {
     queryFn: async () => (await mt!.GET("/machine", { params: { query: { page_size: 100 } } })).data?.machines ?? [],
   });
   return q.data ?? [];
+}
+
+export function useApproveMachine() {
+  const { mt } = useSession();
+  const queries = useQueryClient();
+  return async (code: string, teamIds: number[]): Promise<Machine> => {
+    const { data } = await mt!.POST("/machine/enroll/approve", { body: { code, teamIds } });
+    await Promise.all([queries.invalidateQueries({ queryKey: ["fleet"] }), queries.invalidateQueries({ queryKey: ["machines"] })]);
+    if (!data) throw new Error("the server approved the machine but did not say which");
+    return data;
+  };
 }
 
 export function useMachineActions() {
