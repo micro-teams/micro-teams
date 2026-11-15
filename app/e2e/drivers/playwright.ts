@@ -1,6 +1,7 @@
 /*
  * The web Driver: Chromium through Playwright, at a phone's size, elements found by the
- * data-testid react-native-web renders for a testID.
+ * data-testid react-native-web renders for a testID. Only what is visible counts: every frame of
+ * every stack stays mounted, hidden, so the same id or text is usually also somewhere off screen.
  *
  * new PlaywrightDriver(url) — opens url on open(). Console errors, failed requests and HTTP errors
  *   are recorded and returned by dump().
@@ -35,12 +36,16 @@ export class PlaywrightDriver implements Driver {
     await this.p.goto(this.url);
   }
 
+  private id(id: string) {
+    return this.p.getByTestId(id).filter({ visible: true }).first();
+  }
+
   async fill(id: string, text: string) {
-    await this.p.getByTestId(id).fill(text);
+    await this.id(id).fill(text);
   }
 
   async tap(id: string) {
-    await this.p.getByTestId(id).click();
+    await this.id(id).click();
   }
 
   async back() {
@@ -48,15 +53,15 @@ export class PlaywrightDriver implements Driver {
   }
 
   async waitFor(id: string, timeoutMs = 15_000) {
-    await this.p.getByTestId(id).first().waitFor({ state: "visible", timeout: timeoutMs });
+    await this.id(id).waitFor({ state: "visible", timeout: timeoutMs });
   }
 
   async waitForText(text: string, timeoutMs = 15_000) {
-    await this.p.getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: timeoutMs });
+    await this.p.getByText(text, { exact: true }).filter({ visible: true }).first().waitFor({ state: "visible", timeout: timeoutMs });
   }
 
   async waitGone(id: string, timeoutMs = 15_000) {
-    await this.p.getByTestId(id).first().waitFor({ state: "hidden", timeout: timeoutMs });
+    await this.id(id).waitFor({ state: "hidden", timeout: timeoutMs });
   }
 
   async dump() {
