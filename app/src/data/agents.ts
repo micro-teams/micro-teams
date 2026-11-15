@@ -4,9 +4,14 @@
  * useFleet(teamId) → { machines, agents, machineName(id), loaded, error } — refetched when the
  *   team's topic moves, answering its digest with "machines:online machines:agents".
  * useAgent(teamId, userId) → the agent from that team's fleet, or undefined once it has gone.
- * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent) } — chatWith
- *   finds the one-to-one conversation with the agent, or starts one, and resolves with its id.
- *   Every action refetches the fleet and asks presence again.
+ * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent), open(form) } —
+ *   chatWith finds the one-to-one conversation with the agent, or starts one, and resolves with its
+ *   id; open starts an agent on a machine (empty fields let the server decide) and resolves with
+ *   the new agent's user id. Every action refetches the fleet and asks presence again.
+ * useMachineActions() → { rename(machine, name), bind(machineId, teamId), unbind(machine,
+ *   teamId), forget(machine) } — forget de-registers the machine for every team.
+ * useDrivers() → { drivers, defaultDriver } — which drivers this deployment runs.
+ * useAllMachines() → every machine this person has, in any team: what "add device" can reuse.
  *
  * Example: const { agents } = useFleet(team); const { chatWith } = useAgentActions(team);
  */
@@ -49,6 +54,42 @@ export function useFleet(teamId: number | null) {
   };
 }
 
+export function useDrivers() {
+  const { mt } = useSession();
+  const q = useQuery({
+    queryKey: ["drivers"],
+    enabled: !!mt,
+    staleTime: Infinity,
+    queryFn: async () => (await mt!.GET("/agent/drivers", {})).data ?? { drivers: [], defaultDriver: "" },
+  });
+  return q.data ?? { drivers: [], defaultDriver: "" };
+}
+
+export function useAllMachines() {
+  const { mt } = useSession();
+  const q = useQuery({
+    queryKey: ["machines"],
+    enabled: !!mt,
+    queryFn: async () => (await mt!.GET("/machine", { params: { query: { page_size: 100 } } })).data?.machines ?? [],
+  });
+  return q.data ?? [];
+}
+
+export function useMachineActions() {
+  const { mt } = useSession();
+  const queries = useQueryClient();
+  const after = async (call: Promise<unknown>) => {
+    await call;
+    await Promise.all([queries.invalidateQueries({ queryKey: ["fleet"] }), queries.invalidateQueries({ queryKey: ["machines"] })]);
+  };
+  return {
+    rename: (m: Machine, name: string) => after(mt!.PATCH("/machine/{id}", { params: { path: { id: m.id } }, body: { name: name.trim() } })),
+    bind: (machineId: string, team: number) => after(mt!.POST("/team/{id}/machine", { params: { path: { id: team } }, body: { machineId } })),
+    unbind: (m: Machine, team: number) => after(mt!.DELETE("/team/{id}/machine/{machineId}", { params: { path: { id: team, machineId: m.id } } })),
+    forget: (m: Machine) => after(mt!.DELETE("/machine/{id}", { params: { path: { id: m.id } } })),
+  };
+}
+
 export function useAgent(teamId: number | null, userId: number) {
   return useFleet(teamId).agents.find((a) => a.userId === userId);
 }
@@ -66,6 +107,16 @@ export function useAgentActions(teamId: number | null) {
     rename: (agent: FleetAgent, nickname: string) =>
       after(mt!.PUT("/agent/{userId}/nickname", { params: { path: { userId: agent.userId } }, body: { nickname: nickname.trim() } })),
     close: (agent: FleetAgent) => after(mt!.DELETE("/agent/{userId}", { params: { path: { userId: agent.userId } } })),
+    open: async (form: { machineId: string; nickname?: string; driver?: string; cwd?: string }): Promise<number> => {
+      const blank = (v?: string) => (v?.trim() ? v.trim() : undefined);
+      const { data } = await after(
+        mt!.POST("/agent", {
+          body: { machineId: form.machineId, teamId: teamId!, nickname: blank(form.nickname), driver: blank(form.driver), cwd: blank(form.cwd), resume: false },
+        }),
+      );
+      if (!data) throw new Error("the server opened an agent but did not say which");
+      return data.agentUserId;
+    },
     chatWith: async (agent: FleetAgent): Promise<number> => {
       const { data } = await mt!.GET("/chat", { params: { query: { page_size: 100 } } });
       const existing = (data?.chats ?? []).find((c) => c.members.length === 2 && c.members.some((m) => m.userId === agent.userId));

@@ -20,6 +20,7 @@ import { DocDiffScreen, DocHistoryScreen } from "./src/features/docs/DocHistoryS
 import { DocScreen } from "./src/features/docs/DocScreen";
 import { DocsScreen } from "./src/features/docs/DocsScreen";
 import { AgentsScreen } from "./src/features/agents/AgentsScreen";
+import { MachineScreen } from "./src/features/agents/MachineScreen";
 import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
 import { TeamScreen, TeamsScreen } from "./src/features/teams/TeamsScreen";
@@ -43,6 +44,7 @@ export const routes = {
   docDiff: DocDiffScreen,
   agents: AgentsScreen,
   agent: AgentScreen,
+  machine: MachineScreen,
   me: MeScreen,
   dialog: DialogFrame,
   screen: ScreenFrame,
