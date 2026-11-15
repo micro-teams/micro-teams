@@ -6,7 +6,7 @@
  *   and an emulator with the app installed. tap() puts the keyboard away first, as a person does
  *   before reaching for a button it covers.
  *
- * Example: await journey(new WebdriverioDriver({ appPackage: "app.microteams", appActivity: ".MainActivity" }), params);
+ * Example: await journey(new WebdriverioDriver({ appPackage: "app.microteams.microteams", appActivity: ".MainActivity" }), params);
  */
 import { remote } from "webdriverio";
 import type { Driver } from "../journey";

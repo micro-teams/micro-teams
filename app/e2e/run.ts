@@ -19,7 +19,7 @@ const run = process.env.RUN ?? String(Date.now());
 const driver =
   client === "web"
     ? new PlaywrightDriver(where)
-    : new WebdriverioDriver({ appPackage: "app.microteams", appActivity: ".MainActivity" });
+    : new WebdriverioDriver({ appPackage: "app.microteams.microteams", appActivity: ".MainActivity" });
 
 const started = Date.now();
 journey(driver, { server: client === "web" ? null : where, api, mail, run }).then(

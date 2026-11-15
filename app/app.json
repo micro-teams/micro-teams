@@ -7,7 +7,7 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
     "android": {
-      "package": "app.microteams",
+      "package": "app.microteams.microteams",
       "edgeToEdgeEnabled": true
     },
     "ios": {
@@ -31,7 +31,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "./plugins/release-signing"
     ]
   }
 }
