@@ -9,7 +9,8 @@
  *   so a sign-in right after it goes to the server just chosen.
  * Connection — the same, outside React: one per server, holding the session and the clients.
  *   subscribe(listener) and current() let React read the session; adoptLines() asks the
- *   deployment for its lines once.
+ *   deployment for its lines once. Nothing is fetched or dialled before somebody signs in, so a
+ *   client that is about to be pointed at another server never talks to the default one.
  * defaultServer — what a native client offers before anybody has chosen one.
  *
  * Example: const { mt, user } = useSession(); const { data } = await mt!.GET("/chat", {});
@@ -135,7 +136,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [conn, setConn] = useState(() => new Connection(pageOrigin() ?? storage.get(SERVER_KEY) ?? defaultServer, queries));
   const session = useSyncExternalStore(conn.subscribe, conn.current);
 
-  useEffect(() => conn.adoptLines(), [conn]);
+  const signedIn = session !== null;
+  useEffect(() => {
+    if (signedIn) conn.adoptLines();
+  }, [conn, signedIn]);
 
   // A process the OS suspended cannot know whether its links survived; dial again on return.
   useEffect(() => {

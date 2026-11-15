@@ -4,7 +4,7 @@
  *
  * <ChatsScreen /> — the "chats" section's root frame. A row opens its conversation with open(),
  *   so it lands beside the list in a wide window and on top of it on a phone. "new" asks for a
- *   title, makes the conversation and opens it.
+ *   title, makes the conversation and opens it; if the server refuses, its message is shown.
  *
  * Example: routes={{ chats: ChatsScreen, ... }}
  *
@@ -74,19 +74,26 @@ export function ChatsScreen() {
   const create = useCreateChat();
   const ask = useAsk();
   const [width, setWidth] = useState(0);
+  const [refused, setRefused] = useState<string | null>(null);
   const dense = width > 0 && width < metrics.readingColumn;
 
   const newChat = async () => {
     const title = await ask<string>("new chat", (done) => <NewChatForm done={done} />);
     if (!title?.trim()) return;
-    const id = await create(title.trim());
-    open(self, "thread", { id });
+    try {
+      setRefused(null);
+      const id = await create(title.trim());
+      open(self, "thread", { id });
+    } catch (e) {
+      setRefused(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
     <View style={styles.root} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <Header title="chats" actions={<Button kind="text" testID="new-chat" label="new" onPress={newChat} />} />
       {error ? <Txt style={styles.notice}>{String(error)}</Txt> : null}
+      {refused ? <Txt testID="error" style={styles.notice}>{`could not start the chat: ${refused}`}</Txt> : null}
       <FlashList
         data={chats}
         keyExtractor={(c) => String(c.id)}
