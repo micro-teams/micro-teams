@@ -5,7 +5,7 @@
  *   team's topic moves, answering its digest with "machines:online machines:agents".
  * useAgent(teamId, userId) → the agent from that team's fleet, or undefined once it has gone.
  * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent), open(form),
- *   keepalive(agent, enabled, minutes) } —
+ *   keepalive(agent, enabled, minutes), setLlm(agent, settings), reboot(agent) } —
  *   chatWith finds the one-to-one conversation with the agent, or starts one, and resolves with its
  *   id; open starts an agent on a machine (empty fields let the server decide) and resolves with
  *   the new agent's user id. Every action refetches the fleet and asks presence again.
@@ -25,6 +25,7 @@ import { useTopic } from "./topics";
 
 export type Machine = Schema["Machine"];
 export type FleetAgent = Schema["Agent"];
+export type LlmSettings = Schema["AgentLlmSettings"];
 
 export const teamTopic = (id: number) => `team:${id}`;
 
@@ -127,12 +128,23 @@ export function useAgentActions(teamId: number | null) {
           body: { enabled, intervalSeconds: Math.round(minutes * 60) },
         }),
       ),
+    setLlm: (agent: FleetAgent, settings: LlmSettings) =>
+      after(mt!.PUT("/agent/{userId}/llm", { params: { path: { userId: agent.userId } }, body: settings })),
+    reboot: (agent: FleetAgent) => after(mt!.POST("/agent/{userId}/reboot", { params: { path: { userId: agent.userId } } })),
     close: (agent: FleetAgent) => after(mt!.DELETE("/agent/{userId}", { params: { path: { userId: agent.userId } } })),
-    open: async (form: { machineId: string; nickname?: string; driver?: string; cwd?: string }): Promise<number> => {
+    open: async (form: { machineId: string; nickname?: string; driver?: string; cwd?: string; llm?: LlmSettings }): Promise<number> => {
       const blank = (v?: string) => (v?.trim() ? v.trim() : undefined);
       const { data } = await after(
         mt!.POST("/agent", {
-          body: { machineId: form.machineId, teamId: teamId!, nickname: blank(form.nickname), driver: blank(form.driver), cwd: blank(form.cwd), resume: false },
+          body: {
+            machineId: form.machineId,
+            teamId: teamId!,
+            nickname: blank(form.nickname),
+            driver: blank(form.driver),
+            cwd: blank(form.cwd),
+            resume: false,
+            llm: form.llm && form.llm.provider !== "none" ? form.llm : undefined,
+          },
         }),
       );
       if (!data) throw new Error("the server opened an agent but did not say which");

@@ -7,20 +7,23 @@
  *   commands to run on it; the link the second prints is approved in the app. done(machineId)
  *   answers with the machine to add, or done(null) when finished.
  * <OpenAgent machines done /> — "open agent": which machine (one that serves the team and is
- *   online), and optionally a name, a driver and a working directory. Every empty field means "let
+ *   online), and optionally a name, a driver, a working directory and — for dsh, which takes it
+ *   from MicroTeams — a model API. Every empty field means "let
  *   the server decide", and the placeholders say what it will decide; the drivers are the
  *   deployment's own list.
  *
  * Example: const machineId = await ask<string | null>("add a device", (done) => <AddDevice team={3} done={done} />);
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useAllMachines, useDrivers, type Machine } from "../../data/agents";
+import { useAllMachines, useDrivers, type LlmSettings, type Machine } from "../../data/agents";
 import { useSession } from "../../data/session";
 import { DialogActions } from "../../ui/Dialog";
-import { Button, Field, Pressy, Txt } from "../../ui/kit";
+import { Choices } from "../../ui/Choices";
+import { Button, Field, Txt } from "../../ui/kit";
 import { OnlineDot } from "../../ui/ListRow";
 import { colors, fonts } from "../../ui/theme";
+import { ModelApiFields } from "./ModelApi";
 
 function Command({ text }: { text: string }) {
   return (
@@ -69,13 +72,15 @@ export function AddDevice({ team, done }: { team: number; done: (machineId: stri
   );
 }
 
-export type OpenForm = { machineId: string; nickname: string; driver: string; cwd: string };
+export type OpenForm = { machineId: string; nickname: string; driver: string; cwd: string; llm?: LlmSettings };
 
 export function OpenAgent({ machines, done }: { machines: Machine[]; done: (form: OpenForm) => void }) {
   const { drivers, defaultDriver } = useDrivers();
   const usable = machines.filter((m) => m.online);
   const [form, setForm] = useState<OpenForm>({ machineId: usable[0]?.id ?? "", nickname: "", driver: "", cwd: "" });
-  const set = (k: keyof OpenForm) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: "machineId" | "nickname" | "driver" | "cwd") => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setLlm = useCallback((llm: LlmSettings) => setForm((f) => ({ ...f, llm })), []);
+  const driver = form.driver || defaultDriver;
   if (!usable.length) {
     return (
       <>
@@ -91,31 +96,18 @@ export function OpenAgent({ machines, done }: { machines: Machine[]; done: (form
       <Txt variant="label" muted>
         machine
       </Txt>
-      <View style={styles.choices}>
-        {usable.map((m) => (
-          <Pressy key={m.id} testID={`open-on-${m.id}`} onPress={() => set("machineId")(m.id)} style={[styles.choice, form.machineId === m.id && styles.chosen]}>
-            <Txt style={form.machineId === m.id ? { color: colors.brand } : undefined}>{m.name}</Txt>
-          </Pressy>
-        ))}
-      </View>
+      <Choices testIDPrefix="open-on" value={form.machineId} onChange={set("machineId")} options={usable.map((m) => ({ value: m.id, label: m.name }))} />
       <Field testID="open-name" value={form.nickname} onChangeText={set("nickname")} placeholder="name — the server names it if you do not" />
       {drivers.length > 0 && (
         <>
           <Txt variant="label" muted>
             driver
           </Txt>
-          <View style={styles.choices}>
-            {drivers.map((d) => {
-              const chosen = (form.driver || defaultDriver) === d;
-              return (
-                <Pressy key={d} testID={`driver-${d}`} onPress={() => set("driver")(d)} style={[styles.choice, chosen && styles.chosen]}>
-                  <Txt style={chosen ? { color: colors.brand } : undefined}>{d === defaultDriver ? `${d} (default)` : d}</Txt>
-                </Pressy>
-              );
-            })}
-          </View>
+          <Choices testIDPrefix="driver" value={driver} onChange={set("driver")} options={drivers.map((d) => ({ value: d, label: d === defaultDriver ? `${d} (default)` : d }))} />
         </>
       )}
+      {/* dsh takes its model API from here; the other drivers from their machine. */}
+      {driver === "dsh" && <ModelApiFields onChange={setLlm} />}
       <Field testID="open-cwd" value={form.cwd} onChangeText={set("cwd")} placeholder="working directory — the connector's default if empty" autoCapitalize="none" />
       <DialogActions>
         <Button kind="text" testID="open-agent-ok" label="open" onPress={() => done(form)} disabled={!form.machineId} />
@@ -131,7 +123,4 @@ const styles = StyleSheet.create({
   spare: { flexDirection: "row", alignItems: "center", gap: 8 },
   grow: { flex: 1 },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: 8 },
-  choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  choice: { borderWidth: 1, borderColor: colors.line, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
-  chosen: { borderColor: colors.brand },
 });

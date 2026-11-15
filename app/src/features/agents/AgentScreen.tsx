@@ -11,16 +11,18 @@
  */
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { useAgent, useAgentActions, useFleet, type FleetAgent } from "../../data/agents";
+import { MaterialIcons } from "@expo/vector-icons";
+import { useAgent, useAgentActions, useFleet, type FleetAgent, type LlmSettings } from "../../data/agents";
 import { isWorking } from "../../data/presence";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
 import { Button, Field, Header, Txt } from "../../ui/kit";
-import { OnlineDot } from "../../ui/ListRow";
+import { ListRow, OnlineDot } from "../../ui/ListRow";
 import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
+import { ModelApiEditor, modelApiSummary } from "./ModelApi";
 
 function Fact({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
@@ -98,6 +100,12 @@ export function AgentScreen() {
     const nickname = await ask<string>("rename agent", (done) => <TextPrompt testID="agent-name" initial={agent?.nickname ?? ""} action="rename" done={done} />);
     if (nickname?.trim()) await guard(() => actions.rename(agent!, nickname));
   };
+  const editLlm = async () => {
+    const settings = await ask<LlmSettings>("Model API", (done) => <ModelApiEditor agent={agent!} done={done} />);
+    if (!settings || !(await guard(() => actions.setLlm(agent!, settings)))) return;
+    const restart = await ask<boolean>("saved", (done) => <Confirm text="It applies when the agent restarts." action="restart now" done={done} />);
+    if (restart) await guard(() => actions.reboot(agent!));
+  };
   const close = async () => {
     const ok = await ask<boolean>(`close ${name}?`, (done) => (
       <Confirm text="The agent stops and its session ends. Its conversations stay." action="close" done={done} />
@@ -132,6 +140,20 @@ export function AgentScreen() {
             <Fact label="machine" value={fleet.machineName(agent.machineId)} />
             <Fact label="model" value={agent.llm ? [agent.llm.provider, agent.llm.model].filter(Boolean).join(" · ") : null} />
           </View>
+          {/* Only for the drivers that take their model API from MicroTeams; the others read the machine's. */}
+          {(agent.driver === "dsh" || agent.llm) && (
+            <ListRow
+              testID="agent-llm"
+              leading={<MaterialIcons name="api" size={22} color={colors.inkMuted} />}
+              title="Model API"
+              subtitle={
+                <Txt variant="small" muted numberOfLines={2}>
+                  {modelApiSummary(agent.llm)}
+                </Txt>
+              }
+              onPress={editLlm}
+            />
+          )}
           <Keepalive agent={agent} apply={(on, min) => guard(() => actions.keepalive(agent, on, min))} />
           <View style={styles.actions}>
             <Button testID="agent-chat" label="chat with agent" onPress={chat} />
