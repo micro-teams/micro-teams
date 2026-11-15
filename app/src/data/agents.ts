@@ -4,7 +4,8 @@
  * useFleet(teamId) → { machines, agents, machineName(id), loaded, error } — refetched when the
  *   team's topic moves, answering its digest with "machines:online machines:agents".
  * useAgent(teamId, userId) → the agent from that team's fleet, or undefined once it has gone.
- * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent), open(form) } —
+ * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent), open(form),
+ *   keepalive(agent, enabled, minutes) } —
  *   chatWith finds the one-to-one conversation with the agent, or starts one, and resolves with its
  *   id; open starts an agent on a machine (empty fields let the server decide) and resolves with
  *   the new agent's user id. Every action refetches the fleet and asks presence again.
@@ -119,6 +120,13 @@ export function useAgentActions(teamId: number | null) {
   return {
     rename: (agent: FleetAgent, nickname: string) =>
       after(mt!.PUT("/agent/{userId}/nickname", { params: { path: { userId: agent.userId } }, body: { nickname: nickname.trim() } })),
+    keepalive: (agent: FleetAgent, enabled: boolean, minutes: number) =>
+      after(
+        mt!.PUT("/agent/{userId}/keepalive", {
+          params: { path: { userId: agent.userId } },
+          body: { enabled, intervalSeconds: Math.round(minutes * 60) },
+        }),
+      ),
     close: (agent: FleetAgent) => after(mt!.DELETE("/agent/{userId}", { params: { path: { userId: agent.userId } } })),
     open: async (form: { machineId: string; nickname?: string; driver?: string; cwd?: string }): Promise<number> => {
       const blank = (v?: string) => (v?.trim() ? v.trim() : undefined);

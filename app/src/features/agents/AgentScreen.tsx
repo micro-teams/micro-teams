@@ -9,13 +9,14 @@
  *
  * Example: open(self, "agent", { team: 3, userId: 42 })
  */
-import { ScrollView, StyleSheet, View } from "react-native";
-import { useAgent, useAgentActions } from "../../data/agents";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useAgent, useAgentActions, useFleet, type FleetAgent } from "../../data/agents";
 import { isWorking } from "../../data/presence";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
-import { Button, Header, Txt } from "../../ui/kit";
+import { Button, Field, Header, Txt } from "../../ui/kit";
 import { OnlineDot } from "../../ui/ListRow";
 import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors } from "../../ui/theme";
@@ -35,11 +36,48 @@ function Fact({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
+/**
+ * The cache keepalive: what it buys is not liveness but the driver's prefix cache not expiring, so
+ * an idle agent's context never has to be rebuilt — a rebuild costs a large slice of the account's
+ * quota, which is why a person sees this switch. Minutes here, seconds on the wire; 40 by default,
+ * comfortably inside the cache's hour. Unbounded on purpose: the TTL is the driver's, not ours.
+ */
+function Keepalive({ agent, apply }: { agent: FleetAgent; apply: (enabled: boolean, minutes: number) => Promise<unknown> }) {
+  const current = agent.keepalive?.intervalSeconds ? Math.round(agent.keepalive.intervalSeconds / 60) : null;
+  const [minutes, setMinutes] = useState(String(current ?? 40));
+  const enabled = !!agent.keepalive?.enabled;
+  const value = Number(minutes);
+  const valid = Number.isFinite(value) && value > 0;
+  return (
+    <View style={styles.keepalive}>
+      <Pressable testID="keepalive-toggle" onPress={() => valid && apply(!enabled, value)} style={styles.toggleRow}>
+        <View style={[styles.toggle, enabled && styles.toggleOn]}>
+          <View style={[styles.knob, enabled && styles.knobOn]} />
+        </View>
+        <View style={styles.grow}>
+          <Txt>keep its cache warm</Txt>
+          <Txt variant="small" muted>
+            {enabled ? `a nudge every ${current ?? value} min while it is idle` : "off — an idle agent's cache may expire"}
+          </Txt>
+        </View>
+      </Pressable>
+      <View style={styles.toggleRow}>
+        <Field testID="keepalive-minutes" value={minutes} onChangeText={setMinutes} keyboardType="number-pad" style={styles.minutes} />
+        <Txt muted style={styles.grow}>
+          minutes
+        </Txt>
+        <Button kind="text" testID="keepalive-apply" label="apply" disabled={!valid || (enabled && value === current)} onPress={() => apply(true, value)} />
+      </View>
+    </View>
+  );
+}
+
 export function AgentScreen() {
   const self = useFrame();
   const { team, userId } = self.params as { team: number | null; userId: number };
   const { backFor, push, popTo } = useNav();
   const agent = useAgent(team, userId);
+  const fleet = useFleet(team);
   const actions = useAgentActions(team);
   const ask = useAsk();
   const toast = useToast();
@@ -91,9 +129,10 @@ export function AgentScreen() {
           <View>
             <Fact label="user id" value={String(agent.userId)} />
             <Fact label="driver" value={agent.driver} />
-            <Fact label="machine" value={agent.machineId} />
+            <Fact label="machine" value={fleet.machineName(agent.machineId)} />
             <Fact label="model" value={agent.llm ? [agent.llm.provider, agent.llm.model].filter(Boolean).join(" · ") : null} />
           </View>
+          <Keepalive agent={agent} apply={(on, min) => guard(() => actions.keepalive(agent, on, min))} />
           <View style={styles.actions}>
             <Button testID="agent-chat" label="chat with agent" onPress={chat} />
             {agent.online && agent.sid ? (
@@ -119,4 +158,12 @@ const styles = StyleSheet.create({
   factValue: { flex: 1 },
   actions: { gap: 8, alignItems: "flex-start" },
   notice: { textAlign: "center", padding: 24 },
+  keepalive: { borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 12, gap: 10 },
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  grow: { flex: 1 },
+  toggle: { width: 40, height: 22, borderRadius: 11, backgroundColor: colors.line, padding: 2 },
+  toggleOn: { backgroundColor: colors.brand },
+  knob: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.ink },
+  knobOn: { transform: [{ translateX: 18 }] },
+  minutes: { width: 72 },
 });
