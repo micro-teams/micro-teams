@@ -27,7 +27,13 @@ because that is the only origin whose httpOnly refresh cookie it can use.
       nav/        the display stack (stack.ts), its React binding, and the shell that draws it
       ui/         the theme and the shared controls: Avatar, Dialog, Header, Button, Field
       features/   the screens, one directory per section
-      platform/   the only place that asks which platform it is on, and local storage
+      platform/   the only place that asks which platform it is on, local storage, and the
+                  service worker's registration
+    worker/       the web build's service worker (sw.ts): keeps the app offline, and fetches what
+                  the browser itself asks for over the substrate; built into sw.js by
+                  tool/build-worker.mjs (`npm run build:web` exports the bundle and builds it)
+    public/       copied into the web build as is: unregister.html, the way out of a stuck cache
+    e2e/          the journey, driven by Playwright on the web and Appium on Android
 
 Rules held by code rather than by memory (eslint.config.js):
 

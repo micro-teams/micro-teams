@@ -64,6 +64,38 @@ export class PlaywrightDriver implements Driver {
     await this.id(id).waitFor({ state: "hidden", timeout: timeoutMs });
   }
 
+  /**
+   * The service worker, checked from the page: it controls the page after a reload, it has sent
+   * requests over the substrate, and the app opens with the network gone, showing the element with
+   * this id. Returns its stats.
+   */
+  async checkWorker(shownId: string) {
+    const stats = () =>
+      this.p.evaluate(async () => {
+        const reg = await navigator.serviceWorker.ready;
+        return new Promise<{ build: string; lines: string[]; routed: number; direct: number }>((resolve) => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (e) => resolve(e.data);
+          reg.active!.postMessage({ type: "stats" }, [channel.port2]);
+        });
+      });
+    await stats();
+    await this.p.reload();
+    await this.id(shownId).waitFor({ state: "visible", timeout: 15_000 });
+    const controlled = await this.p.evaluate(() => !!navigator.serviceWorker.controller);
+    if (!controlled) throw new Error("the service worker does not control the page after a reload");
+    const online = await stats();
+    if (!online.routed) throw new Error(`nothing went over the substrate: ${JSON.stringify(online)}`);
+    await this.p.context().setOffline(true);
+    try {
+      await this.p.reload();
+      await this.id(shownId).waitFor({ state: "visible", timeout: 15_000 });
+    } finally {
+      await this.p.context().setOffline(false);
+    }
+    return online;
+  }
+
   async dump() {
     await this.p.screenshot({ path: "failure.png" }).catch(() => {});
     const text = await this.p.evaluate(() => document.body.innerText).catch((e: unknown) => String(e));

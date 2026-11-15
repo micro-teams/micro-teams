@@ -7,14 +7,15 @@
     "codegen": "openapi-typescript ../MicroTeams-API.yml -o src/api/schema.d.ts",
     "web": "expo start --web",
     "android": "expo run:android",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
     "lint": "eslint .",
-    "test": "jest"
+    "test": "jest",
+    "build:web": "expo export --platform web --output-dir web-dist && node tool/build-worker.mjs web-dist"
   },
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
     "@expo/vector-icons": "^15.0.2",
-    "@micro-teams/multipath": "0.2.0-rc.6-fix-ts-chunked-responses.199",
+    "@micro-teams/multipath": "0.2.0-rc.6-feat-ts-line-router.201",
     "@shopify/flash-list": "2.3.2",
     "@tanstack/react-query": "^5.107.1",
     "expo": "~58.0.25",
@@ -39,6 +40,7 @@
   "devDependencies": {
     "@types/jest": "30.0.0",
     "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~58.0.4",
     "jest": "~30.5.2",

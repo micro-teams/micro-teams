@@ -169,7 +169,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      - run: npx expo export --platform web --output-dir web-dist
+      - run: npm run build:web
       - uses: actions/upload-artifact@v7
         with:
           retention-days: 1

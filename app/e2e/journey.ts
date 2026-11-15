@@ -7,7 +7,8 @@
  *   touching anything (the updates socket), renames the chat from its info page and comes back to
  *   find the conversation under the new name, finds a team made elsewhere in the agents section,
  *   writes a document in that team's docs and finds its commit in the history, opens a dialog and
- *   closes it with back, and signs out.
+ *   closes it with back, and signs out; on the web it then checks the service worker (it routes
+ *   over the substrate, and the app opens offline).
  *   Returns how long each step took, in ms.
  * Driver — what a journey needs from a client: drivers/playwright.ts for the web build,
  *   drivers/webdriverio.ts for the Android build through Appium.
@@ -39,6 +40,9 @@ export interface Driver {
   waitForText(text: string, timeoutMs?: number): Promise<void>;
   /** Wait until no element with this testID is on screen. */
   waitGone(id: string, timeoutMs?: number): Promise<void>;
+  /** The web only: the service worker controls the page, routes over the substrate, and keeps the
+   * app openable offline (showing shownId); resolves with what it says about itself. */
+  checkWorker?(shownId: string): Promise<unknown>;
   /** What is on screen and what went wrong, for a failed run; also saves failure.png. */
   dump(): Promise<string>;
   close(): Promise<void>;
@@ -187,6 +191,11 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   await d.tap("confirm-sign-out");
   await d.waitFor("go-register", 30_000);
   lap("dialog and sign out");
+
+  if (d.checkWorker) {
+    console.log(`  worker: ${JSON.stringify(await d.checkWorker("go-register"))}`);
+    lap("worker, and offline");
+  }
 
   await d.close();
   return timings;
