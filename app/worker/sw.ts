@@ -6,9 +6,9 @@
  * precaches) and SHELL (those files, relative to where the worker is) filled in; registered by
  * src/platform/worker.web.ts.
  *
- * What it keeps. The document, the entry script, its stylesheets and the favicon are precached on
- * install, because nothing starts without them; everything else is cached as it is fetched. The
- * document is asked for first and answered from the cache only when that fails, because its name
+ * What it keeps. The document, the entry script, its stylesheets, the favicon and the manifest are
+ * precached on install, because nothing starts without them; everything else is cached as it is
+ * fetched. The document is asked for first and answered from the cache only when that fails, because its name
  * never changes and a cached copy of it would hide a deploy; everything else carries a content hash
  * in its name and is answered from the cache first. A new build is a new cache, and the old one is
  * deleted when the new worker activates — which, without skipWaiting, is only once no page is using

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- resizes-content: a phone browser shrinks the page when its keyboard opens, so the composer
+         sits on the keyboard instead of under it. viewport-fit=cover: the app draws to the edges
+         and keeps clear of them itself (safe-area insets). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="description" content="Chat with your team and the agents running on your machines." />
+    <!-- The app's colour from the first byte, so there is no white flash before the first frame. -->
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="MicroTeams" />
+    <!-- Absolute, because this document is served for every route under /app/ (app.json's
+         experiments.baseUrl); a relative path would resolve against /app/chats/ and miss. -->
+    <link rel="apple-touch-icon" href="/app/icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="/app/favicon.svg" />
+    <link rel="manifest" href="/app/manifest.json" />
+    <title>MicroTeams</title>
+    <style id="expo-reset">
+      html, body { margin: 0; padding: 0; height: 100%; background: #000; }
+      body { overflow: hidden; }
+      #root { display: flex; height: 100%; flex: 1; }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
