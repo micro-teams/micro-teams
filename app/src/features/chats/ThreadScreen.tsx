@@ -7,11 +7,16 @@
  *
  * Example: open(self, "thread", { id: 5 })
  *
- * The soft keyboard does not move the conversation. The composer rides up with the keyboard on its
- * own; the list keeps its height and is given the keyboard's height as extra room to scroll into,
- * so nothing on screen moves while the keyboard opens and the newest messages can still be dragged
- * up above it. The send button is stretched to the field's height rather than given the same number,
- * so the two agree on screen whatever the field's padding comes to.
+ * The soft keyboard moves the conversation in exactly one of two ways. Scrolled to the newest
+ * message, the messages rise with the composer, frame for frame, with nothing shifting between
+ * them; scrolled anywhere else, they do not move at all and the keyboard's height is added as room
+ * to scroll into. The composer sits directly on the keyboard: the bottom safe area it stood on
+ * while the keyboard was closed is under the keyboard now, so both lift by the keyboard's height
+ * less that inset. The send button is stretched to the field's height rather than given the same
+ * number, so the two agree on screen whatever the field's padding comes to.
+ *
+ * The list is shown once its first page is laid out: until every row is measured it may still
+ * re-anchor at the bottom, and that settling is not something a reader should watch.
  *
  * Bubbles are WeChat's: own on the right in green, others on the left in grey with their face
  * beside, a name above in groups, a time between messages more than five minutes apart, at most
@@ -21,6 +26,7 @@ import { FlashList } from "@shopify/flash-list";
 import { forwardRef, useState } from "react";
 import { ScrollViewProps, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Message, useThread, useThreadInfo } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -30,7 +36,8 @@ import { colors, fonts, metrics } from "../../ui/theme";
 import { needsSeparator, separatorTime } from "./time";
 
 const ChatScroll = forwardRef<never, ScrollViewProps>(function ChatScroll(props, ref) {
-  return <KeyboardChatScrollView ref={ref} {...props} keyboardLiftBehavior="never" />;
+  const { bottom } = useSafeAreaInsets();
+  return <KeyboardChatScrollView ref={ref} {...props} keyboardLiftBehavior="whenAtEnd" offset={bottom} />;
 });
 
 type Member = { userId: number; nickname?: string; avatarId?: number };
@@ -80,6 +87,8 @@ export function ThreadScreen() {
   const thread = useThread(id);
   const info = useThreadInfo(id);
   const [draft, setDraft] = useState("");
+  const [laidOut, setLaidOut] = useState(false);
+  const { bottom } = useSafeAreaInsets();
   const members: Member[] = info.members;
   const title = info.title(user?.id);
 
@@ -97,7 +106,10 @@ export function ThreadScreen() {
   return (
     <View style={styles.root}>
       <Header title={title} onBack={backFor(self)} />
+      {thread.loaded && (
       <FlashList
+        style={!laidOut && thread.messages.length > 0 && styles.hidden}
+        onLoad={() => setLaidOut(true)}
         data={thread.messages}
         keyExtractor={(m) => String(m.id)}
         renderScrollComponent={ChatScroll}
@@ -125,7 +137,9 @@ export function ThreadScreen() {
           <Row item={item} prev={thread.messages[index - 1]} me={user?.id} members={members} group={members.length > 2} />
         )}
       />
-      <KeyboardStickyView>
+      )}
+      {!thread.loaded && <View style={styles.fill} />}
+      <KeyboardStickyView offset={{ closed: 0, opened: bottom }}>
         <View style={styles.composer}>
           <TextInput
             testID="composer"
@@ -146,6 +160,8 @@ export function ThreadScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.page },
+  hidden: { opacity: 0 },
+  fill: { flex: 1 },
   edge: { textAlign: "center", paddingVertical: 16 },
   separator: { textAlign: "center", paddingVertical: 8 },
   row: { flexDirection: "row", paddingHorizontal: 10, paddingVertical: 3, gap: 8 },

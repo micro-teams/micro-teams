@@ -4,8 +4,9 @@
  * useChats() → { chats, loadMore(), hasMore, loading, error, refresh() } — every page of the
  *   caller's conversations, most recent activity first. loadMore() fetches the next page; it is a
  *   no-op while one is in flight or when there is none.
- * useThread(id) → { messages, pending, loadOlder(), hasOlder, loadingOlder, error, send(text) } —
- *   one conversation, oldest first, with what the caller sent but the server has not stored yet.
+ * useThread(id) → { messages, loaded, pending, loadOlder(), hasOlder, loadingOlder, error, send(text) }
+ *   — one conversation, oldest first, with what the caller sent but the server has not stored yet;
+ *   loaded turns true once the newest page has arrived.
  * useThreadInfo(id) → { title(me), members } — a conversation's title and members; title(me) is
  *   the stored title, or the other people's names when there is none.
  * useCreateChat() → create(title) → the new thread's id.
@@ -73,6 +74,7 @@ function token() {
 export function useThread(id: number) {
   const { mt } = useSession();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [older, setOlder] = useState<number | null | undefined>(undefined);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [pending, setPending] = useState<Pending[]>([]);
@@ -89,6 +91,7 @@ export function useThread(id: number) {
         const stored = new Set(data.messages.map((m) => m.clientToken));
         setPending((p) => p.filter((x) => !stored.has(x.clientToken)));
         if (first) setOlder(data.page.has_more ? (data.page.next_start ?? null) : null);
+        setLoaded(true);
         first = false;
         setError(null);
       } catch (e) {
@@ -138,6 +141,7 @@ export function useThread(id: number) {
 
   return {
     messages,
+    loaded,
     pending,
     loadOlder,
     hasOlder: older !== null,

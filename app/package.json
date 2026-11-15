@@ -14,7 +14,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
     "@expo/vector-icons": "^15.0.2",
-    "@micro-teams/multipath": "0.2.0-rc.6-fix-ts-chunked-responses.195",
+    "@micro-teams/multipath": "0.2.0-rc.6-fix-ts-chunked-responses.197",
     "@shopify/flash-list": "2.3.2",
     "@tanstack/react-query": "^5.107.1",
     "expo": "~58.0.25",

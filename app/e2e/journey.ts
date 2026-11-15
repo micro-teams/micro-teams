@@ -66,7 +66,8 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   };
 
   const email = `e2e-${p.run}@example.com`;
-  const said = `hello ${p.run}`;
+  // Not ASCII on purpose: a transport that decodes text as Latin-1 shows this as mojibake.
+  const said = `你好 ${p.run}`;
 
   await d.open();
   await d.tap("go-register");
