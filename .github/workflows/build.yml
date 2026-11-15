@@ -572,6 +572,9 @@ jobs:
         working-directory: app/e2e
         run: |
           npx playwright install --with-deps chromium
+          # Is everything where it is served (the site at /, the app under /app/, deep links, the
+          # worker's scope, /version)? Then the journey through the app.
+          npx tsx bundle.ts http://localhost
           RUN="w$GITHUB_RUN_ID" npx tsx run.ts web http://localhost/app/
       - name: Let the emulator use KVM
         if: matrix.client == 'android'
