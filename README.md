@@ -15,6 +15,7 @@ forgotten; code does not.
 |---|---|
 | **`MicroTeams-API.yml`** | The single API contract. The backend's interfaces and the client's are both **generated** from it. |
 | **`backend/`** ("mt") | Kotlin / Spring Boot. Chat, teams, git-backed documents, machines, agents. |
+| **`app/`** | TypeScript, Expo / React Native. The client: web (served at `/app/`), Android and iOS from one codebase. |
 | **`site/`** | The marketing site at the deployment's root ("/") — plain HTML/CSS/JS, no build step. |
 | **`cli/`** | Go. Runs on a machine, hosts the agent's CLI, speaks the connector protocol. |
 | **`applets/`** | TypeScript, bundled for the CLI's embedded JS runtime: the `microteams api` command tree (the agents' frontend) and the screen drivers. Served by the backend, fetched by the CLI on demand. |

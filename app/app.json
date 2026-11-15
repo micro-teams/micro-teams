@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "MicroTeams",
+    "slug": "microteams",
+    "version": "0.1.19",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
+    "android": {
+      "package": "app.microteams",
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "app.microteams"
+    },
+    "web": {
+      "output": "single",
+      "bundler": "metro"
+    },
+    "experiments": {
+      "baseUrl": "/app"
+    },
+    "plugins": ["expo-font", "expo-image", "expo-status-bar"]
+  }
+}

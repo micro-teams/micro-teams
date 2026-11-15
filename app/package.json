@@ -1,0 +1,54 @@
+{
+  "name": "microteams-app",
+  "version": "0.1.19",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "codegen": "openapi-typescript ../MicroTeams-API.yml -o src/api/schema.d.ts",
+    "web": "expo start --web",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~58.0.17",
+    "@expo/vector-icons": "^15.0.2",
+    "@micro-teams/multipath": "^0.2.0-rc.6",
+    "@shopify/flash-list": "2.3.2",
+    "@tanstack/react-query": "^5.107.1",
+    "expo": "~58.0.25",
+    "expo-font": "~58.0.12",
+    "expo-image": "~58.0.18",
+    "expo-status-bar": "~58.0.5",
+    "openapi-fetch": "^0.17.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-native": "^0.88.1",
+    "react-native-keyboard-controller": "1.22.7",
+    "react-native-mmkv": "^4.3.2",
+    "react-native-nitro-modules": "^0.37.2",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-web": "^0.21.4",
+    "react-native-worklets": "0.13.0"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/react": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "jest": "~30.5.2",
+    "jest-expo": "~58.0.14",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  },
+  "jest": {
+    "preset": "jest-expo"
+  }
+}
