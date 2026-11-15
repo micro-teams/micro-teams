@@ -6,7 +6,8 @@
  *   something in it, sees it stored, sees a message posted from outside the app arrive without
  *   touching anything (the updates socket), renames the chat from its info page and comes back to
  *   find the conversation under the new name, finds a team made elsewhere in the agents section,
- *   opens a dialog and closes it with back, and signs out.
+ *   writes a document in that team's docs and finds its commit in the history, opens a dialog and
+ *   closes it with back, and signs out.
  *   Returns how long each step took, in ms.
  * Driver — what a journey needs from a client: drivers/playwright.ts for the web build,
  *   drivers/webdriverio.ts for the Android build through Appium.
@@ -155,6 +156,25 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   await d.waitForText(team, 15_000);
   await d.waitForText("no agents running", 15_000);
   lap("agents of a team");
+
+  const heading = `计划 ${p.run}`;
+  await d.tap("destination-docs");
+  await d.tap("doc-root-menu");
+  await d.tap("doc-action-file");
+  await d.fill("doc-name", "plan.md");
+  await d.tap("doc-name-ok");
+  await d.waitFor("doc-view", 15_000);
+  await d.tap("doc-edit");
+  await d.fill("doc-editor", `# ${heading}`);
+  await d.tap("doc-save");
+  await d.waitForText(heading, 15_000);
+  await d.tap("doc-history");
+  await d.waitForText("history · plan.md");
+  await d.back();
+  await d.waitFor("doc-view");
+  await d.back();
+  await d.waitFor("doc-plan.md");
+  lap("write a document");
 
   // Back closes the dialog, not the page under it.
   await d.tap("destination-me");

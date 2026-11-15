@@ -16,11 +16,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SignIn } from "./src/features/auth/SignIn";
 import { ChatsScreen } from "./src/features/chats/ChatsScreen";
 import { AgentScreen } from "./src/features/agents/AgentScreen";
+import { DocDiffScreen, DocHistoryScreen } from "./src/features/docs/DocHistoryScreen";
+import { DocScreen } from "./src/features/docs/DocScreen";
+import { DocsScreen } from "./src/features/docs/DocsScreen";
 import { AgentsScreen } from "./src/features/agents/AgentsScreen";
 import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
 import { MeScreen } from "./src/features/me/MeScreen";
-import { notBuilt } from "./src/features/NotBuilt";
 import { SessionProvider, useSession } from "./src/data/session";
 import { NavProvider } from "./src/nav/NavProvider";
 import { Shell } from "./src/nav/Shell";
@@ -33,7 +35,10 @@ export const routes = {
   chats: ChatsScreen,
   thread: ThreadScreen,
   threadInfo: ThreadInfoScreen,
-  docs: notBuilt("docs"),
+  docs: DocsScreen,
+  doc: DocScreen,
+  docHistory: DocHistoryScreen,
+  docDiff: DocDiffScreen,
   agents: AgentsScreen,
   agent: AgentScreen,
   me: MeScreen,
