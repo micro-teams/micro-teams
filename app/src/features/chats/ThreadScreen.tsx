@@ -3,7 +3,7 @@
  *
  * <ThreadScreen /> — drawn for a "thread" frame; reads { id } from the frame. Scrolling up to the
  *   top loads the page before; the top of the list always says what it is doing (loading, more
- *   above, or the beginning).
+ *   above, or the beginning). The header's info button pushes the conversation's info frame.
  *
  * Example: open(self, "thread", { id: 5 })
  *
@@ -25,6 +25,7 @@
  * beside, a name above in groups, a time between messages more than five minutes apart, at most
  * 72% of the reading column.
  */
+import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { forwardRef, useState } from "react";
 import { Pressable, ScrollViewProps, StyleSheet, TextInput, View } from "react-native";
@@ -119,7 +120,7 @@ function PendingRow({ pending, onRetry, onRemove }: { pending: Pending; onRetry:
 export function ThreadScreen() {
   const self = useFrame();
   const id = self.params.id as number;
-  const { backFor } = useNav();
+  const { backFor, push } = useNav();
   const { user } = useSession();
   const thread = useThread(id);
   const info = useThreadInfo(id);
@@ -142,7 +143,15 @@ export function ThreadScreen() {
 
   return (
     <View style={styles.root}>
-      <Header title={title} onBack={backFor(self)} />
+      <Header
+        title={title}
+        onBack={backFor(self)}
+        actions={
+          <Pressable testID="chat-info" accessibilityLabel="chat info" hitSlop={10} onPress={() => push("threadInfo", "detail", { id, threadKey: self.key })}>
+            <MaterialIcons name="info-outline" size={22} color={colors.ink} />
+          </Pressable>
+        }
+      />
       {thread.loaded && (
       <FlashList
         style={!laidOut && thread.messages.length > 0 && styles.hidden}

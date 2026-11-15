@@ -4,7 +4,8 @@
  *
  * journey(driver, params) — signs up (reading the code from the mail sink), starts a chat, says
  *   something in it, sees it stored, sees a message posted from outside the app arrive without
- *   touching anything (the updates socket), opens a dialog and closes it with back, and signs out.
+ *   touching anything (the updates socket), renames the chat from its info page and comes back to
+ *   find the conversation under the new name, opens a dialog and closes it with back, and signs out.
  *   Returns how long each step took, in ms.
  * Driver — what a journey needs from a client: drivers/playwright.ts for the web build,
  *   drivers/webdriverio.ts for the Android build through Appium.
@@ -127,6 +128,17 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   await postFromOutside(p.api, username, password, title, fromOutside);
   await d.waitForText(fromOutside, 15_000);
   lap("arrives live");
+
+  const renamed = `renamed ${p.run}`;
+  await d.tap("chat-info");
+  await d.tap("rename-chat");
+  await d.fill("rename", renamed);
+  await d.tap("rename-ok");
+  await d.waitForText(renamed, 15_000);
+  await d.back();
+  await d.waitFor("composer");
+  await d.waitForText(renamed, 15_000);
+  lap("rename from info");
 
   // Back closes the dialog, not the page under it.
   await d.back();

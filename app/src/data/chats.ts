@@ -8,8 +8,10 @@
  *   retry(token), discard(token) } — one conversation, oldest first; loaded turns true once the
  *   newest page has arrived. Sending goes through the conversation's Outbox (data/outbox.ts):
  *   pending is what it still owes, retry sends one again now, discard gives its text back.
- * useThreadInfo(id) → { title(me), members } — a conversation's title and members; title(me) is
- *   the stored title, or the other people's names when there is none.
+ * useThreadInfo(id) → { title(me), storedTitle, members, roleOf(userId), rename(title), add(userId),
+ *   remove(userId), dissolve() } — a conversation's title and members, owners first, and what an
+ *   owner or admin can do to it; title(me) is the stored title, or the other people's names when
+ *   there is none. Each action refetches the conversation and the chat list.
  * useCreateChat() → create(title) → the new thread's id.
  * chatTitle(chat, me) — a group by its title, a one-to-one by the other person.
  *
@@ -160,9 +162,21 @@ export function useThreadInfo(id: number) {
     queryKey: ["thread", id],
     queryFn: async () => (await mt!.GET("/chat/{id}", { params: { path: { id } } })).data!,
   });
-  const members: ThreadMember[] = q.data?.members ?? [];
+  const rank = { OWNER: 0, ADMIN: 1, MEMBER: 2 } as const;
+  const members: ThreadMember[] = [...(q.data?.members ?? [])].sort((a, b) => rank[a.role] - rank[b.role]);
+  const queries = useQueryClient();
+  const after = async (call: Promise<unknown>) => {
+    await call;
+    await Promise.all([queries.invalidateQueries({ queryKey: ["thread", id] }), queries.invalidateQueries({ queryKey: ["chats"] })]);
+  };
   return {
     members,
+    storedTitle: q.data?.thread.title ?? "",
+    roleOf: (userId: number | undefined) => members.find((m) => m.userId === userId)?.role,
+    rename: (title: string) => after(mt!.PATCH("/chat/{id}", { params: { path: { id } }, body: { title } })),
+    add: (userId: number) => after(mt!.POST("/chat/{id}/members", { params: { path: { id } }, body: { userId } })),
+    remove: (userId: number) => after(mt!.DELETE("/chat/{id}/members/{userId}", { params: { path: { id, userId } } })),
+    dissolve: () => after(mt!.DELETE("/chat/{id}", { params: { path: { id } } })),
     title: (me: number | undefined) => {
       if (q.data?.thread.title) return q.data.thread.title;
       const others = members.filter((m) => m.userId !== me);
