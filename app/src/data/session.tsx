@@ -7,9 +7,11 @@
  *   sendSignUpCode(email), signOut(), setServer(origin) } — user and mt are null while signed out.
  *   Every action throws the server's own message. setServer returns the new server's Connection,
  *   so a sign-in right after it goes to the server just chosen.
- * Connection — the same, outside React: one per server, holding the session and the clients.
- *   subscribe(listener) and current() let React read the session; adoptLines() asks the
- *   deployment for its lines once. Nothing is fetched or dialled before somebody signs in, so a
+ * Connection — the same, outside React: one per server, holding the session, the clients and the
+ *   updates socket. subscribe(listener) and current() let React read the session; adoptLines()
+ *   asks the deployment for its lines once; updates is the UpdatesStore topics are watched in.
+ *   The socket runs while somebody is signed in and is dialled again when the app comes back to
+ *   the foreground. Nothing is fetched or dialled before somebody signs in, so a
  *   client that is about to be pointed at another server never talks to the default one.
  * defaultServer — what a native client offers before anybody has chosen one.
  *
@@ -30,6 +32,8 @@ import { createMtClient, type MtClient } from "../api/client";
 import { pageOrigin } from "../platform/platform";
 import { storage } from "../platform/storage";
 import { Substrate } from "../transport/substrate";
+import { UpdatesSocket } from "../transport/updates/socket";
+import { UpdatesStore } from "../transport/updates/store";
 
 export const defaultServer = process.env.EXPO_PUBLIC_DEFAULT_SERVER || "https://microteams.app";
 
@@ -41,6 +45,8 @@ type SignUpForm = { username: string; password: string; email: string; code: str
 export class Connection {
   readonly substrate: Substrate;
   readonly mt: MtClient;
+  readonly updates = new UpdatesStore();
+  private socket: UpdatesSocket | null = null;
   private session: auth.Session | null = storage.getJson<auth.Session>(SESSION_KEY);
   private readonly listeners = new Set<() => void>();
 
@@ -83,6 +89,27 @@ export class Connection {
     this.listeners.forEach((l) => l());
   }
 
+  startSocket() {
+    if (this.socket || !this.session) return;
+    this.socket = new UpdatesSocket({
+      store: this.updates,
+      path: () => `/mt/updates?token=${encodeURIComponent(this.session?.accessToken ?? "")}`,
+      open: this.substrate.openSocket,
+    });
+    this.socket.start();
+  }
+
+  stopSocket() {
+    this.socket?.close();
+    this.socket = null;
+  }
+
+  /** The app came back to the foreground: links and socket may be silently dead. */
+  resumed() {
+    this.substrate.reset();
+    this.socket?.resumed();
+  }
+
   async signIn(username: string, password: string) {
     this.adopt(await auth.login(this.origin, username, password));
   }
@@ -119,6 +146,7 @@ export class Connection {
 
 type Value = {
   origin: string;
+  updates: UpdatesStore;
   user: auth.AuthUser | null;
   mt: MtClient | null;
   substrate: Substrate;
@@ -138,19 +166,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signedIn = session !== null;
   useEffect(() => {
-    if (signedIn) conn.adoptLines();
+    if (!signedIn) return;
+    conn.adoptLines();
+    conn.startSocket();
+    return () => conn.stopSocket();
   }, [conn, signedIn]);
 
   // A process the OS suspended cannot know whether its links survived; dial again on return.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") conn.substrate.reset();
+      if (state === "active") conn.resumed();
     });
     return () => sub.remove();
   }, [conn]);
 
   const value: Value = {
     origin: conn.origin,
+    updates: conn.updates,
     user: session?.user ?? null,
     mt: session ? conn.mt : null,
     substrate: conn.substrate,

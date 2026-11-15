@@ -17,9 +17,11 @@
  *   const { chats, loadMore } = useChats();
  *   <FlashList data={chats} onEndReached={loadMore} ... />
  *
- * Pages are fetched by cursor, and the newest page of a conversation is fetched again every few
- * seconds and folded in by id: what it covers comes from the server, what it no longer covers
- * (older history the reader scrolled up to) is kept.
+ * Pages are fetched by cursor. The list and a conversation are fetched again when the updates
+ * socket says their topic moved (and once on every reconnect and return to the foreground), and
+ * they answer the server's periodic digest with what they hold. A conversation's newest page is
+ * folded in by id: what it covers comes from the server, what it no longer covers (older history
+ * the reader scrolled up to) is kept.
  */
 import type { Message } from "./merge";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,6 +29,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Schema } from "../api/client";
 import { mergeNewest, mergeOlder } from "./merge";
 import { Outbox, type Pending } from "./outbox";
+import { chatsTopic, threadDigest, threadTopic, useTopic } from "./topics";
 import { useSession } from "./session";
 
 export type ChatSummary = Schema["ChatSummary"];
@@ -35,7 +38,6 @@ export type { Pending } from "./outbox";
 
 const CHATS_PAGE = 50;
 const MESSAGES_PAGE = 100;
-const NEWEST_EVERY_MS = 3000;
 
 export function chatTitle(chat: ChatSummary, me: number | undefined): string {
   if (chat.title) return chat.title;
@@ -44,7 +46,7 @@ export function chatTitle(chat: ChatSummary, me: number | undefined): string {
 }
 
 export function useChats() {
-  const { mt } = useSession();
+  const { mt, user } = useSession();
   const q = useInfiniteQuery({
     queryKey: ["chats"],
     initialPageParam: undefined as number | undefined,
@@ -55,8 +57,11 @@ export function useChats() {
       return data!;
     },
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_start : undefined),
-    refetchInterval: 10_000,
   });
+  // The server digests the number of conversations, which only the whole list can answer.
+  useTopic(user ? chatsTopic(user.id) : null, () => q.refetch(), () =>
+    q.data && !q.hasNextPage ? String(q.data.pages.reduce((n, p) => n + p.chats.length, 0)) : null,
+  );
   return {
     chats: q.data?.pages.flatMap((p) => p.chats) ?? [],
     loadMore: () => {
@@ -94,30 +99,27 @@ export function useThread(id: number) {
   const [pending, setPending] = useState<readonly Pending[]>(() => outbox.pending);
   useEffect(() => () => outbox.dispose(), [outbox]);
 
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let alive = true;
-    let first = true;
-    const tick = async () => {
+    (async () => {
       try {
         const { data } = await mt!.GET("/chat/{id}/messages", { params: { path: { id }, query: { page_size: MESSAGES_PAGE } } });
         if (!alive || !data) return;
         setMessages((held) => mergeNewest(held, data.messages));
         outbox.reconcile(data.messages);
-        if (first) setOlder(data.page.has_more ? (data.page.next_start ?? null) : null);
+        setOlder((o) => (o === undefined ? (data.page.has_more ? (data.page.next_start ?? null) : null) : o));
         setLoaded(true);
-        first = false;
         setError(null);
       } catch (e) {
         if (alive) setError(e);
       }
-    };
-    tick();
-    const t = setInterval(tick, NEWEST_EVERY_MS);
+    })();
     return () => {
       alive = false;
-      clearInterval(t);
     };
-  }, [mt, id, outbox]);
+  }, [mt, id, outbox, tick]);
+  useTopic(threadTopic(id), () => setTick((n) => n + 1), () => (loaded ? threadDigest(messages, MESSAGES_PAGE) : null));
 
   const loadOlder = async () => {
     if (older == null || loadingOlder) return;

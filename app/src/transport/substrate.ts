@@ -7,6 +7,8 @@
  * substrate.fetch(input, init) — fetch(), over the substrate when one is up, directly otherwise.
  *   Never waits for a dial: until one completes, requests go out the ordinary way.
  * substrate.stats() — each line's health, for the lines panel; error() — why the last dial failed.
+ * substrate.openSocket(path) → Wire — a WebSocket to the origin: a stream over the substrate,
+ *   waiting for a dial in flight, or directly when the dial failed; the UpdatesSocket's open().
  * substrate.linesInUse() — the line list the next dial uses.
  * substrate.reset() — drop the client; the next request dials again (the app came back from the
  *   background and the old links may be silently dead).
@@ -19,6 +21,7 @@
  */
 import { Client, type LinkStat } from "@micro-teams/multipath";
 import { storage } from "../platform/storage";
+import type { Wire } from "./updates/socket";
 
 const SERVICE = "app";
 
@@ -33,7 +36,6 @@ function asWebSocket(url: string) {
 export class Substrate {
   private lines: string[];
   private client: Client | null = null;
-  private dialling = false;
   private lastError: string | null = null;
 
   constructor(private readonly origin: string) {
@@ -48,23 +50,34 @@ export class Substrate {
     this.reset();
   }
 
+  private dial: Promise<Client | null> | null = null;
+
+  /** The client if one is up; otherwise starts a dial (once) and returns null. */
   private live(): Client | null {
-    if (this.client || this.dialling) return this.client;
-    this.dialling = true;
-    Client.dial(this.lines.map(asWebSocket)).then(
+    if (!this.client && !this.dial) this.dialled();
+    return this.client;
+  }
+
+  /** The client, waiting for a dial in flight; null when it failed. */
+  private dialled(): Promise<Client | null> {
+    if (this.client) return Promise.resolve(this.client);
+    if (this.dial) return this.dial;
+    const lines = this.lines;
+    this.dial = Client.dial(lines.map(asWebSocket)).then(
       (c) => {
         this.client = c;
-        this.dialling = false;
         this.lastError = null;
-        console.log(`multipath: substrate up over ${this.lines.join(", ")}`);
+        console.log(`multipath: substrate up over ${lines.join(", ")}`);
+        return c;
       },
       (e: unknown) => {
-        this.dialling = false;
+        this.dial = null;
         this.lastError = e instanceof Error ? e.message : String(e);
-        console.warn(`multipath: no substrate over ${this.lines.join(", ")}, sending directly: ${this.lastError}`);
+        console.warn(`multipath: no substrate over ${lines.join(", ")}, sending directly: ${this.lastError}`);
+        return null;
       },
     );
-    return null;
+    return this.dial;
   }
 
   fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -79,6 +92,52 @@ export class Substrate {
         throw e;
       },
     );
+  };
+
+  openSocket = (path: string): Wire => {
+    type Inner = { send(t: string): void; close(): void };
+    let inner: Inner | null = null;
+    let dropped = false;
+    const wire: Wire = {
+      send: (text) => {
+        if (!inner) throw new Error("socket not open yet");
+        inner.send(text);
+      },
+      close: () => {
+        dropped = true;
+        inner?.close();
+      },
+      onopen: null,
+      onmessage: null,
+      onclose: null,
+      onerror: null,
+    };
+    const adopt = (ws: Inner & Omit<Wire, "send" | "close">, opened: boolean) => {
+      if (dropped) {
+        ws.close();
+        return;
+      }
+      inner = ws;
+      ws.onmessage = (ev) => wire.onmessage?.(ev);
+      ws.onclose = () => wire.onclose?.();
+      ws.onerror = (e) => wire.onerror?.(e);
+      if (opened) wire.onopen?.();
+      else ws.onopen = () => wire.onopen?.();
+    };
+    // Over the substrate once it is up — waiting for a dial in flight rather than racing it.
+    this.dialled().then(async (client) => {
+      if (client) {
+        try {
+          adopt((await client.openWebSocket(SERVICE, path)) as unknown as Inner & Omit<Wire, "send" | "close">, true);
+        } catch (e) {
+          wire.onerror?.(e);
+        }
+        return;
+      }
+      console.warn(`multipath: no substrate, opening ${path.split("?")[0]} directly`);
+      adopt(new WebSocket(asWebSocket(this.origin) + path) as unknown as Inner & Omit<Wire, "send" | "close">, false);
+    });
+    return wire;
   };
 
   stats(): LinkStat[] {
@@ -96,5 +155,6 @@ export class Substrate {
   reset() {
     this.client?.close();
     this.client = null;
+    this.dial = null;
   }
 }
