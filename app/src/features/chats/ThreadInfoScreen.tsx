@@ -12,40 +12,16 @@
  * something asks first, and a refusal from the server is shown, never swallowed.
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useThreadInfo } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
-import { DialogActions, useAsk } from "../../ui/Dialog";
-import { Button, Field, Header, Txt } from "../../ui/kit";
+import { useAsk } from "../../ui/Dialog";
+import { Button, Header, Txt } from "../../ui/kit";
+import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
-
-function TextForm({ initial, action, done, testID, numeric }: { initial: string; action: string; done: (v: string) => void; testID: string; numeric?: boolean }) {
-  const [value, setValue] = useState(initial);
-  return (
-    <>
-      <Field testID={testID} value={value} onChangeText={setValue} autoFocus keyboardType={numeric ? "number-pad" : "default"} onSubmitEditing={() => done(value)} />
-      <DialogActions>
-        <Button kind="text" testID={`${testID}-ok`} label={action} onPress={() => done(value)} disabled={!value.trim()} />
-      </DialogActions>
-    </>
-  );
-}
-
-function Confirm({ text, action, done }: { text: string; action: string; done: (ok: boolean) => void }) {
-  return (
-    <>
-      <Txt muted>{text}</Txt>
-      <DialogActions>
-        <Button kind="text" label="cancel" onPress={() => done(false)} />
-        <Button kind="text" testID="confirm" label={action} onPress={() => done(true)} />
-      </DialogActions>
-    </>
-  );
-}
 
 export function ThreadInfoScreen() {
   const self = useFrame();
@@ -69,13 +45,13 @@ export function ThreadInfoScreen() {
   };
 
   const add = async () => {
-    const raw = await ask<string>("add someone", (done) => <TextForm testID="add-member" initial="" action="add" numeric done={done} />);
+    const raw = await ask<string>("add someone", (done) => <TextPrompt testID="add-member" initial="" action="add" numeric done={done} />);
     const userId = Number((raw ?? "").trim());
     if (raw && Number.isInteger(userId) && userId > 0) await guard(() => info.add(userId));
   };
 
   const rename = async () => {
-    const title = await ask<string>("rename chat", (done) => <TextForm testID="rename" initial={info.storedTitle} action="rename" done={done} />);
+    const title = await ask<string>("rename chat", (done) => <TextPrompt testID="rename" initial={info.storedTitle} action="rename" done={done} />);
     if (title?.trim()) await guard(() => info.rename(title.trim()));
   };
 

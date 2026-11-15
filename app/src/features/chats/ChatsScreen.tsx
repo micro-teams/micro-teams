@@ -20,22 +20,11 @@ import { chatTitle, ChatSummary, useChats, useCreateChat } from "../../data/chat
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar, MemberGrid } from "../../ui/Avatar";
-import { DialogActions, useAsk } from "../../ui/Dialog";
-import { Button, Field, Header, Pressy, Txt } from "../../ui/kit";
+import { useAsk } from "../../ui/Dialog";
+import { Button, Header, Pressy, Txt } from "../../ui/kit";
+import { TextPrompt } from "../../ui/prompts";
 import { colors, metrics } from "../../ui/theme";
 import { listTime } from "./time";
-
-function NewChatForm({ done }: { done: (title: string) => void }) {
-  const [title, setTitle] = useState("");
-  return (
-    <>
-      <Field testID="new-chat-title" value={title} onChangeText={setTitle} placeholder="title" autoFocus onSubmitEditing={() => done(title)} />
-      <DialogActions>
-        <Button kind="text" testID="new-chat-create" label="create" onPress={() => done(title)} disabled={!title.trim()} />
-      </DialogActions>
-    </>
-  );
-}
 
 function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; dense: boolean; onPress: () => void }) {
   const others = chat.members.filter((m) => m.userId !== me);
@@ -78,7 +67,7 @@ export function ChatsScreen() {
   const dense = width > 0 && width < metrics.readingColumn;
 
   const newChat = async () => {
-    const title = await ask<string>("new chat", (done) => <NewChatForm done={done} />);
+    const title = await ask<string>("new chat", (done) => <TextPrompt testID="new-chat-title" okTestID="new-chat-create" placeholder="title" action="create" done={done} />);
     if (!title?.trim()) return;
     try {
       setRefused(null);

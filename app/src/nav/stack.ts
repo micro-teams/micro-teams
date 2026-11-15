@@ -59,8 +59,11 @@ export function stackKey(section: Section, team: number | null): string {
   return TEAM_SCOPED.has(section) ? `${section}@${team ?? "none"}` : section;
 }
 
-function rootOf(section: Section): Frame {
-  return frame(section, "list");
+/** A stack's root: a section's list, with the team it lists for in a team-scoped section. Its key
+ * is fixed, so a root drawn before its stack was ever touched is the same frame afterwards. */
+function rootOf(section: Section, team: number | null): Frame {
+  const key = stackKey(section, team);
+  return { key: `root:${key}`, route: section, kind: "list", params: TEAM_SCOPED.has(section) ? { team } : {} };
 }
 
 export function initialNav(section: Section = "chats"): Nav {
@@ -68,7 +71,7 @@ export function initialNav(section: Section = "chats"): Nav {
 }
 
 export function stackOf(nav: Nav): Frame[] {
-  return nav.stacks[stackKey(nav.section, nav.team)] ?? [rootOf(nav.section)];
+  return nav.stacks[stackKey(nav.section, nav.team)] ?? [rootOf(nav.section, nav.team)];
 }
 
 export function top(nav: Nav): Frame {

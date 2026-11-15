@@ -15,6 +15,8 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SignIn } from "./src/features/auth/SignIn";
 import { ChatsScreen } from "./src/features/chats/ChatsScreen";
+import { AgentScreen } from "./src/features/agents/AgentScreen";
+import { AgentsScreen } from "./src/features/agents/AgentsScreen";
 import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
 import { MeScreen } from "./src/features/me/MeScreen";
@@ -32,7 +34,8 @@ export const routes = {
   thread: ThreadScreen,
   threadInfo: ThreadInfoScreen,
   docs: notBuilt("docs"),
-  agents: notBuilt("agents"),
+  agents: AgentsScreen,
+  agent: AgentScreen,
   me: MeScreen,
   dialog: DialogFrame,
 };

@@ -5,15 +5,17 @@
  * journey(driver, params) — signs up (reading the code from the mail sink), starts a chat, says
  *   something in it, sees it stored, sees a message posted from outside the app arrive without
  *   touching anything (the updates socket), renames the chat from its info page and comes back to
- *   find the conversation under the new name, opens a dialog and closes it with back, and signs out.
+ *   find the conversation under the new name, finds a team made elsewhere in the agents section,
+ *   opens a dialog and closes it with back, and signs out.
  *   Returns how long each step took, in ms.
  * Driver — what a journey needs from a client: drivers/playwright.ts for the web build,
  *   drivers/webdriverio.ts for the Android build through Appium.
  * Params — the server to type in (null keeps the client's own), the stack as the machine running
  *   the journey reaches it, where the mail sink answers, and a suffix that makes this run's names
  *   unique.
- * postFromOutside(api, username, password, title, text) — signs in over HTTP and posts text into
- *   the conversation with that title, as another client of the same person would.
+ * outside(api, username, password) → { post(title, text), createTeam(name) } — signs in over HTTP
+ *   and acts as another client of the same person would: posts into the conversation with that
+ *   title, or makes a team.
  * codeFromMail(mail, email) — the sign-up code cheese-auth mailed to that address.
  *
  * Example: await journey(new PlaywrightDriver("http://localhost/app/"), { server: null, mail, run });
@@ -61,7 +63,7 @@ export async function codeFromMail(mail: string, email: string): Promise<string>
   throw new Error(`no code was mailed to ${email} within 60s`);
 }
 
-export async function postFromOutside(api: string, username: string, password: string, title: string, text: string) {
+export async function outside(api: string, username: string, password: string) {
   const login = await fetch(`${api}/api/users/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -69,17 +71,21 @@ export async function postFromOutside(api: string, username: string, password: s
   });
   const token = ((await login.json()) as { data: { accessToken: string } }).data.accessToken;
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  const list = (await (await fetch(`${api}/mt/chat?page_size=50`, { headers: auth })).json()) as {
-    chats: { id: number; title: string }[];
+  const send = async (path: string, body: unknown) => {
+    const res = await fetch(`${api}/mt${path}`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`POST ${path} from outside: HTTP ${res.status}`);
   };
-  const chat = list.chats.find((c) => c.title === title);
-  if (!chat) throw new Error(`no conversation titled "${title}"`);
-  const res = await fetch(`${api}/mt/chat/${chat.id}/messages`, {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ content: text }),
-  });
-  if (!res.ok) throw new Error(`posting from outside: HTTP ${res.status}`);
+  return {
+    post: async (title: string, text: string) => {
+      const list = (await (await fetch(`${api}/mt/chat?page_size=50`, { headers: auth })).json()) as {
+        chats: { id: number; title: string }[];
+      };
+      const chat = list.chats.find((c) => c.title === title);
+      if (!chat) throw new Error(`no conversation titled "${title}"`);
+      await send(`/chat/${chat.id}/messages`, { content: text });
+    },
+    createTeam: (name: string) => send("/team", { name }),
+  };
 }
 
 export async function journey(d: Driver, p: Params): Promise<Record<string, number>> {
@@ -125,7 +131,8 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
 
   // Nothing polls: this appears only because the updates socket said the conversation moved.
   const fromOutside = `外面 ${p.run}`;
-  await postFromOutside(p.api, username, password, title, fromOutside);
+  const elsewhere = await outside(p.api, username, password);
+  await elsewhere.post(title, fromOutside);
   await d.waitForText(fromOutside, 15_000);
   lap("arrives live");
 
@@ -140,8 +147,16 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   await d.waitForText(renamed, 15_000);
   lap("rename from info");
 
-  // Back closes the dialog, not the page under it.
+  // A team made elsewhere is the one the agents section looks at: the only one there is.
+  const team = `team ${p.run}`;
+  await elsewhere.createTeam(team);
   await d.back();
+  await d.tap("destination-agents");
+  await d.waitForText(team, 15_000);
+  await d.waitForText("no agents running", 15_000);
+  lap("agents of a team");
+
+  // Back closes the dialog, not the page under it.
   await d.tap("destination-me");
   await d.tap("sign-out");
   await d.waitFor("dialog");
