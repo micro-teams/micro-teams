@@ -18,16 +18,20 @@
  * The list is shown once its first page is laid out: until every row is measured it may still
  * re-anchor at the bottom, and that settling is not something a reader should watch.
  *
+ * A message on its way is drawn at once, faded, with "sending…" under it; one that has failed several
+ * times says why and offers retry and remove, and removing puts its text back in the composer.
+ *
  * Bubbles are WeChat's: own on the right in green, others on the left in grey with their face
  * beside, a name above in groups, a time between messages more than five minutes apart, at most
  * 72% of the reading column.
  */
 import { FlashList } from "@shopify/flash-list";
 import { forwardRef, useState } from "react";
-import { ScrollViewProps, StyleSheet, TextInput, View } from "react-native";
+import { Pressable, ScrollViewProps, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Message, useThread, useThreadInfo } from "../../data/chats";
+import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
+import { isStuck } from "../../data/outbox";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
@@ -79,6 +83,39 @@ function Row({ item, prev, me, members, group }: { item: Message; prev?: Message
   );
 }
 
+function PendingRow({ pending, onRetry, onRemove }: { pending: Pending; onRetry: () => void; onRemove: () => void }) {
+  const stuck = isStuck(pending);
+  return (
+    <View testID="pending-message" style={[styles.row, styles.rowMine]}>
+      <View style={styles.faceSpace} />
+      <View style={[styles.column, { alignItems: "flex-end" }]}>
+        <Bubble text={pending.content} mine faded={!stuck} />
+        {stuck ? (
+          <View style={styles.stuck}>
+            <Txt variant="label" style={{ color: colors.danger }}>
+              {pending.lastError ? `not sent: ${pending.lastError}` : "not sent"}
+            </Txt>
+            <Pressable testID="retry" onPress={onRetry}>
+              <Txt variant="label" style={styles.action}>
+                retry
+              </Txt>
+            </Pressable>
+            <Pressable testID="remove" onPress={onRemove}>
+              <Txt variant="label" style={styles.action}>
+                remove
+              </Txt>
+            </Pressable>
+          </View>
+        ) : (
+          <Txt variant="label" muted>
+            sending…
+          </Txt>
+        )}
+      </View>
+    </View>
+  );
+}
+
 export function ThreadScreen() {
   const self = useFrame();
   const id = self.params.id as number;
@@ -120,15 +157,12 @@ export function ThreadScreen() {
         ListFooterComponent={
           <>
             {thread.pending.map((p) => (
-              <View key={p.clientToken} testID="pending-message" style={[styles.row, styles.rowMine]}>
-                <View style={styles.faceSpace} />
-                <View style={[styles.column, { alignItems: "flex-end" }]}>
-                  <Bubble text={p.content} mine faded />
-                  <Txt variant="label" muted>
-                    sending…
-                  </Txt>
-                </View>
-              </View>
+              <PendingRow
+                key={p.clientToken}
+                pending={p}
+                onRetry={() => thread.retry(p.clientToken)}
+                onRemove={() => setDraft(thread.discard(p.clientToken) ?? "")}
+              />
             ))}
             {thread.error ? <Txt style={styles.error}>{String(thread.error)}</Txt> : null}
           </>
@@ -176,6 +210,8 @@ const styles = StyleSheet.create({
   },
   tail: { position: "absolute", top: 12, width: 8, height: 8, transform: [{ rotate: "45deg" }] },
   error: { color: colors.danger, textAlign: "center", padding: 8 },
+  stuck: { flexDirection: "row", gap: 8, marginTop: 2 },
+  action: { color: colors.danger, textDecorationLine: "underline" },
   composer: {
     flexDirection: "row",
     alignItems: "stretch",

@@ -4,9 +4,10 @@
  * useChats() → { chats, loadMore(), hasMore, loading, error, refresh() } — every page of the
  *   caller's conversations, most recent activity first. loadMore() fetches the next page; it is a
  *   no-op while one is in flight or when there is none.
- * useThread(id) → { messages, loaded, pending, loadOlder(), hasOlder, loadingOlder, error, send(text) }
- *   — one conversation, oldest first, with what the caller sent but the server has not stored yet;
- *   loaded turns true once the newest page has arrived.
+ * useThread(id) → { messages, loaded, pending, loadOlder(), hasOlder, loadingOlder, error, send(text),
+ *   retry(token), discard(token) } — one conversation, oldest first; loaded turns true once the
+ *   newest page has arrived. Sending goes through the conversation's Outbox (data/outbox.ts):
+ *   pending is what it still owes, retry sends one again now, discard gives its text back.
  * useThreadInfo(id) → { title(me), members } — a conversation's title and members; title(me) is
  *   the stored title, or the other people's names when there is none.
  * useCreateChat() → create(title) → the new thread's id.
@@ -22,14 +23,15 @@
  */
 import type { Message } from "./merge";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Schema } from "../api/client";
 import { mergeNewest, mergeOlder } from "./merge";
+import { Outbox, type Pending } from "./outbox";
 import { useSession } from "./session";
 
 export type ChatSummary = Schema["ChatSummary"];
 export type { Message } from "./merge";
-export type Pending = { clientToken: string; content: string };
+export type { Pending } from "./outbox";
 
 const CHATS_PAGE = 50;
 const MESSAGES_PAGE = 100;
@@ -67,9 +69,6 @@ export function useChats() {
   };
 }
 
-function token() {
-  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 30).toString(36)}`;
-}
 
 export function useThread(id: number) {
   const { mt } = useSession();
@@ -77,8 +76,23 @@ export function useThread(id: number) {
   const [loaded, setLoaded] = useState(false);
   const [older, setOlder] = useState<number | null | undefined>(undefined);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [pending, setPending] = useState<Pending[]>([]);
   const [error, setError] = useState<unknown>(null);
+
+  const outbox = useMemo(
+    () =>
+      new Outbox(
+        id,
+        async (content, clientToken) =>
+          (await mt!.POST("/chat/{id}/messages", { params: { path: { id } }, body: { content, clientToken } })).data!,
+        (sent) => {
+          if (sent) setMessages((held) => mergeNewest(held, [sent]));
+          setPending(outbox.pending);
+        },
+      ),
+    [mt, id],
+  );
+  const [pending, setPending] = useState<readonly Pending[]>(() => outbox.pending);
+  useEffect(() => () => outbox.dispose(), [outbox]);
 
   useEffect(() => {
     let alive = true;
@@ -88,8 +102,7 @@ export function useThread(id: number) {
         const { data } = await mt!.GET("/chat/{id}/messages", { params: { path: { id }, query: { page_size: MESSAGES_PAGE } } });
         if (!alive || !data) return;
         setMessages((held) => mergeNewest(held, data.messages));
-        const stored = new Set(data.messages.map((m) => m.clientToken));
-        setPending((p) => p.filter((x) => !stored.has(x.clientToken)));
+        outbox.reconcile(data.messages);
         if (first) setOlder(data.page.has_more ? (data.page.next_start ?? null) : null);
         setLoaded(true);
         first = false;
@@ -104,7 +117,7 @@ export function useThread(id: number) {
       alive = false;
       clearInterval(t);
     };
-  }, [mt, id]);
+  }, [mt, id, outbox]);
 
   const loadOlder = async () => {
     if (older == null || loadingOlder) return;
@@ -123,22 +136,6 @@ export function useThread(id: number) {
     setLoadingOlder(false);
   };
 
-  const send = async (text: string) => {
-    const content = text.trim();
-    if (!content) return;
-    const p = { clientToken: token(), content };
-    setPending((x) => [...x, p]);
-    try {
-      const { data } = await mt!.POST("/chat/{id}/messages", { params: { path: { id } }, body: p });
-      if (data) {
-        setMessages((held) => mergeNewest(held, [data]));
-        setPending((x) => x.filter((y) => y.clientToken !== p.clientToken));
-      }
-    } catch (e) {
-      setError(e);
-    }
-  };
-
   return {
     messages,
     loaded,
@@ -147,7 +144,9 @@ export function useThread(id: number) {
     hasOlder: older !== null,
     loadingOlder,
     error,
-    send,
+    send: (text: string) => outbox.enqueue(text),
+    retry: (clientToken: string) => outbox.retry(clientToken),
+    discard: (clientToken: string) => outbox.discard(clientToken),
   };
 }
 
