@@ -329,7 +329,9 @@ export function SignIn() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.page },
   grow: { flex: 1 },
-  top: { position: "absolute", top: 8, right: 12, zIndex: 1, padding: 8 },
+  // In the flow rather than floating over it: a view laid over the scroll view is under it on
+  // Android, where neither a finger nor UiAutomator can reach it.
+  top: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 8 },
   scroll: {
     flexGrow: 1,
     justifyContent: "center",
