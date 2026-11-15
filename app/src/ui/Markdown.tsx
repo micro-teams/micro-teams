@@ -3,8 +3,8 @@
  * links and images.
  *
  * <Markdown source onLink? /> — onLink(href) is called for a tapped link; without it links are
- *   drawn but do nothing. A ```mermaid block is drawn by renderMermaid when one is given, and as
- *   its source with a label saying so otherwise.
+ *   drawn but do nothing. A ```mermaid block is drawn as a diagram when it is the flowchart subset
+ *   mermaid/parse.ts reads, and as its source with a label saying so otherwise.
  *
  * Example: <Markdown source={"# plan\n\n- one\n- two"} onLink={(href) => follow(href)} />
  *
@@ -16,11 +16,13 @@
  */
 import { Image } from "expo-image";
 import { lexer, type Token, type Tokens } from "marked";
-import { ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextStyle, View } from "react-native";
+import { MermaidView } from "./mermaid/MermaidView";
+import { parseMermaid } from "./mermaid/parse";
 import { colors, fonts } from "./theme";
 
-type Props = { source: string; onLink?: (href: string) => void; renderMermaid?: (source: string) => ReactNode };
+type Props = { source: string; onLink?: (href: string) => void };
 
 const HEADING: Record<number, number> = { 1: 22, 2: 19, 3: 17, 4: 15, 5: 14, 6: 13 };
 
@@ -113,7 +115,12 @@ function ImageBlock({ token }: { token: Tokens.Image }) {
   );
 }
 
-function Blocks({ tokens, onLink, renderMermaid }: { tokens: Token[] } & Omit<Props, "source">) {
+function Mermaid({ source }: { source: string }) {
+  const graph = useMemo(() => parseMermaid(source), [source]);
+  return graph ? <MermaidView graph={graph} /> : null;
+}
+
+function Blocks({ tokens, onLink }: { tokens: Token[] } & Omit<Props, "source">) {
   return (
     <>
       {tokens.map((t, i) => {
@@ -135,7 +142,7 @@ function Blocks({ tokens, onLink, renderMermaid }: { tokens: Token[] } & Omit<Pr
           }
           case "code": {
             const c = t as Tokens.Code;
-            if (c.lang === "mermaid" && renderMermaid) return <View key={i}>{renderMermaid(c.text)}</View>;
+            if (c.lang === "mermaid" && parseMermaid(c.text)) return <Mermaid key={i} source={c.text} />;
             return (
               <View key={i} style={styles.pre}>
                 {c.lang === "mermaid" && <Text style={[styles.label, styles.muted]}>mermaid diagram, shown as its source</Text>}
@@ -150,7 +157,7 @@ function Blocks({ tokens, onLink, renderMermaid }: { tokens: Token[] } & Omit<Pr
           case "blockquote":
             return (
               <View key={i} style={styles.quote}>
-                <Blocks tokens={(t as Tokens.Blockquote).tokens} onLink={onLink} renderMermaid={renderMermaid} />
+                <Blocks tokens={(t as Tokens.Blockquote).tokens} onLink={onLink} />
               </View>
             );
           case "list": {
@@ -162,7 +169,7 @@ function Blocks({ tokens, onLink, renderMermaid }: { tokens: Token[] } & Omit<Pr
                   <View key={n} style={styles.item}>
                     <Text style={[styles.text, styles.bullet]}>{item.task ? (item.checked ? "☑" : "☐") : l.ordered ? `${start + n}.` : "•"}</Text>
                     <View style={styles.itemBody}>
-                      <Blocks tokens={item.tokens.filter((x) => x.type !== "checkbox")} onLink={onLink} renderMermaid={renderMermaid} />
+                      <Blocks tokens={item.tokens.filter((x) => x.type !== "checkbox")} onLink={onLink} />
                     </View>
                   </View>
                 ))}
@@ -207,11 +214,11 @@ function Blocks({ tokens, onLink, renderMermaid }: { tokens: Token[] } & Omit<Pr
   );
 }
 
-export function Markdown({ source, onLink, renderMermaid }: Props) {
+export function Markdown({ source, onLink }: Props) {
   const tokens = useMemo(() => lexer(source, { gfm: true }), [source]);
   return (
     <View style={styles.root}>
-      <Blocks tokens={tokens} onLink={onLink} renderMermaid={renderMermaid} />
+      <Blocks tokens={tokens} onLink={onLink} />
     </View>
   );
 }
