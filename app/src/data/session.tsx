@@ -9,7 +9,8 @@
  *   so a sign-in right after it goes to the server just chosen.
  * Connection — the same, outside React: one per server, holding the session, the clients and the
  *   updates socket. subscribe(listener) and current() let React read the session; adoptLines()
- *   asks the deployment for its lines once; updates is the UpdatesStore topics are watched in.
+ *   asks the deployment for its lines once; updates is the UpdatesStore topics are watched in;
+ *   presence is the registry avatars ask whether they are agents.
  *   The socket runs while somebody is signed in and is dialled again when the app comes back to
  *   the foreground. Nothing is fetched or dialled before somebody signs in, so a
  *   client that is about to be pointed at another server never talks to the default one.
@@ -30,6 +31,7 @@ import { AppState } from "react-native";
 import * as auth from "../api/auth";
 import { createMtClient, type MtClient } from "../api/client";
 import { pageOrigin } from "../platform/platform";
+import { Presence } from "./presence";
 import { storage } from "../platform/storage";
 import { Substrate } from "../transport/substrate";
 import { UpdatesSocket } from "../transport/updates/socket";
@@ -46,6 +48,7 @@ export class Connection {
   readonly substrate: Substrate;
   readonly mt: MtClient;
   readonly updates = new UpdatesStore();
+  readonly presence = new Presence(() => (this.session ? this.mt : null));
   private socket: UpdatesSocket | null = null;
   private session: auth.Session | null = storage.getJson<auth.Session>(SESSION_KEY);
   private readonly listeners = new Set<() => void>();
@@ -147,6 +150,7 @@ export class Connection {
 type Value = {
   origin: string;
   updates: UpdatesStore;
+  presence: Presence;
   user: auth.AuthUser | null;
   mt: MtClient | null;
   substrate: Substrate;
@@ -183,6 +187,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value: Value = {
     origin: conn.origin,
     updates: conn.updates,
+    presence: conn.presence,
     user: session?.user ?? null,
     mt: session ? conn.mt : null,
     substrate: conn.substrate,

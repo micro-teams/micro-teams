@@ -1,9 +1,12 @@
 /*
  * The one avatar, and WeChat's grid of them for a group.
  *
- * <Avatar userId nickname? avatarId? size?> — a rounded square: the person's picture from
- *   cheese-auth when they have one, otherwise a colour chosen by `abs(userId) % 8` and their first
- *   character. The same person keeps the same colour on every screen and device.
+ * <Avatar userId nickname? avatarId? size? clickable?> — a rounded square: the person's picture
+ *   from cheese-auth when they have one, otherwise a colour chosen by `abs(userId) % 8` and their
+ *   first character. The same person keeps the same colour on every screen and device. Every
+ *   avatar asks the presence registry about its id: an agent that is working gets a pulsing violet
+ *   ring, and an agent is always tappable (unless clickable is false, inside a group tile) — the
+ *   tap opens its live screen, or says why it cannot.
  * <MemberGrid members size?> — up to nine faces in one tile; a row that is not full is centred, so
  *   three members read one-over-two and five read two-over-three.
  * colourFor(userId) — that colour, for anything else that has to match it.
@@ -14,10 +17,13 @@
  * Nothing else in the app draws a face, so a change to how people look is a change here only.
  */
 import { Image } from "expo-image";
-import { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
+import { usePresence } from "../data/presence";
 import { useSession } from "../data/session";
 import { colors, fonts, metrics } from "./theme";
+import { useToast } from "./Toast";
 
 const PALETTE = ["#4E6EF2", "#12B76A", "#F79009", "#EF4444", "#7C3AED", "#06AED4", "#E64980", "#2DD4BF"];
 
@@ -25,36 +31,70 @@ export function colourFor(userId: number): string {
   return PALETTE[Math.abs(userId) % PALETTE.length];
 }
 
-export function Avatar({
-  userId,
-  nickname,
-  avatarId,
-  size = metrics.avatarInBubble,
-}: {
-  userId: number;
-  nickname?: string | null;
-  avatarId?: number | null;
-  size?: number;
-}) {
+/** The ring around a working agent: 0.35 → 1 opacity and 1 → 1.08 scale, out and back, 1.6 s. */
+function Ring({ size }: { size: number }) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = withRepeat(withTiming(1, { duration: 1600 }), -1, true);
+    return () => cancelAnimation(t);
+  }, [t]);
+  const style = useAnimatedStyle(() => ({ opacity: 0.35 + 0.65 * t.value, transform: [{ scale: 1 + 0.08 * t.value }] }));
+  const inset = size * 0.18;
+  return (
+    <Animated.View
+      testID="working-ring"
+      pointerEvents="none"
+      style={[styles.ring, { top: -inset, left: -inset, right: -inset, bottom: -inset, borderRadius: size }, style]}
+    />
+  );
+}
+
+function Picture({ userId, label, avatarId, size }: { userId: number; label: string; avatarId?: number | null; size: number }) {
   const { origin } = useSession();
   const [failed, setFailed] = useState(false);
-  const label = (nickname ?? "").trim();
   const box = { width: size, height: size, borderRadius: metrics.avatarRadius };
-
   if (avatarId && !failed) {
-    return (
-      <Image
-        source={{ uri: `${origin}/api/avatars/${avatarId}` }}
-        style={box}
-        contentFit="cover"
-        onError={() => setFailed(true)}
-      />
-    );
+    return <Image source={{ uri: `${origin}/api/avatars/${avatarId}` }} style={box} contentFit="cover" onError={() => setFailed(true)} />;
   }
   return (
     <View style={[styles.fallback, box, { backgroundColor: colourFor(userId) }]}>
       <Text style={[styles.initial, { fontSize: size * 0.4 }]}>{label ? [...label][0].toUpperCase() : "#"}</Text>
     </View>
+  );
+}
+
+export function Avatar({
+  userId,
+  nickname,
+  avatarId,
+  size = metrics.avatarInBubble,
+  clickable = true,
+}: {
+  userId: number;
+  nickname?: string | null;
+  avatarId?: number | null;
+  size?: number;
+  clickable?: boolean;
+}) {
+  const { agent, working, watchable } = usePresence(userId);
+  const toast = useToast();
+  const label = (nickname ?? agent?.nickname ?? "").trim();
+  const face = (
+    <View style={{ width: size, height: size }}>
+      {working && <Ring size={size} />}
+      <Picture userId={userId} label={label} avatarId={avatarId ?? agent?.avatarId} size={size} />
+    </View>
+  );
+  if (!agent || !clickable) return face;
+  const name = label || `#${userId}`;
+  return (
+    <Pressable
+      testID={`agent-avatar-${userId}`}
+      accessibilityLabel={watchable ? `${name} · 点击查看现场` : agent.online ? `${name} · 现场暂不可用` : `${name} · 离线`}
+      onPress={() => toast(watchable ? `「${name}」的现场还没有在这个客户端里做好` : agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)}
+    >
+      {face}
+    </Pressable>
   );
 }
 
@@ -87,7 +127,7 @@ export function MemberGrid({ members, size = metrics.avatarInList }: { members: 
         <View key={r} style={[styles.gridRow, { marginTop: r === 0 ? 0 : gap, gap }]}>
           {Array.from({ length: count }, () => {
             const m = shown[i++];
-            return <Avatar key={m.userId} {...m} size={tile} />;
+            return <Avatar key={m.userId} {...m} size={tile} clickable={false} />;
           })}
         </View>
       ))}
@@ -98,6 +138,7 @@ export function MemberGrid({ members, size = metrics.avatarInList }: { members: 
 const styles = StyleSheet.create({
   fallback: { alignItems: "center", justifyContent: "center" },
   initial: { color: "#fff", fontWeight: "600", fontFamily: fonts.mono },
+  ring: { position: "absolute", borderWidth: 2, borderColor: colors.working },
   grid: { backgroundColor: colors.hover, borderRadius: metrics.avatarRadius, justifyContent: "center" },
   gridRow: { flexDirection: "row", justifyContent: "center" },
 });
