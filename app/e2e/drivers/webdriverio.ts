@@ -33,9 +33,15 @@ export class WebdriverioDriver implements Driver {
    */
   private async shown(id: string, timeoutMs = 15_000) {
     const el = await this.byId(id);
-    if (!(await el.isDisplayed().catch(() => false))) {
-      const scroll = `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId("${id}"))`;
-      await (await this.browser.$(scroll)).isExisting().catch(() => false);
+    // Scroll the page down a step at a time until it appears, or the page stops moving.
+    for (let i = 0; i < 6 && !(await el.isDisplayed().catch(() => false)); i++) {
+      const page = await this.browser.$("android=new UiSelector().scrollable(true)");
+      if (!(await page.isExisting())) break;
+      if (await this.browser.isKeyboardShown()) await this.browser.hideKeyboard();
+      const moved = await this.browser
+        .execute("mobile: scrollGesture", { elementId: page.elementId, direction: "down", percent: 0.6 })
+        .catch(() => false);
+      if (!moved) break;
     }
     await el.waitForDisplayed({ timeout: timeoutMs });
     return el;
