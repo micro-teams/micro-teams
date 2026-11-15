@@ -27,9 +27,9 @@ export class MtError extends Error {
   }
 }
 
-/** The response if it is a success; otherwise the server's own message, thrown. */
-async function checked(response: Response): Promise<Response> {
-  if (response.ok) return response;
+/** Nothing for a success; otherwise the server's own message, thrown. */
+async function failIfRefused(response: Response): Promise<void> {
+  if (response.ok) return;
   let message = `HTTP ${response.status}`;
   try {
     const body = (await response.clone().json()) as { message?: string };
@@ -67,10 +67,18 @@ export function createMtClient(opts: {
           const again = unsent.get(request) ?? request;
           again.headers.set("Authorization", `Bearer ${fresh}`);
           again.headers.set("X-MT-Retried", "1");
-          return checked(await plainFetch(again));
+          const retried = await plainFetch(again);
+          await failIfRefused(retried);
+          // openapi-fetch takes a replacement only as this runtime's own Response; React Native's
+          // fetch may hand back another implementation of it.
+          return retried instanceof Response
+            ? retried
+            : new Response(await retried.arrayBuffer(), { status: retried.status, headers: retried.headers });
         }
       }
-      return checked(response);
+      // Returning nothing keeps the response as it is.
+      await failIfRefused(response);
+      return undefined;
     },
   };
   client.use(auth);
