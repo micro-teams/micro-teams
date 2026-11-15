@@ -71,9 +71,9 @@ export function createMtClient(opts: {
           await failIfRefused(retried);
           // openapi-fetch takes a replacement only as this runtime's own Response; React Native's
           // fetch may hand back another implementation of it.
-          return retried instanceof Response
-            ? retried
-            : new Response(await retried.arrayBuffer(), { status: retried.status, headers: retried.headers });
+          if (retried instanceof Response) return retried;
+          const foreign = retried as unknown as Response;
+          return new Response(await foreign.arrayBuffer(), { status: foreign.status, headers: foreign.headers });
         }
       }
       // Returning nothing keeps the response as it is.
