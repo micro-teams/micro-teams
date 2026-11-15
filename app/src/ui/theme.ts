@@ -20,6 +20,8 @@ export const colors = {
   card: "#0A0A0A",
   raised: "#141414",
   hover: "#1B1B1B",
+  /** A button that cannot be pressed yet, and the quieter "tonal" button beside a field. */
+  disabled: "#262626",
   line: "#242424",
   ink: "#DDE8DD",
   inkMuted: "#798479",

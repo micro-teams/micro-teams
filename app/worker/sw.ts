@@ -8,11 +8,11 @@
  *
  * What it keeps. The document, the entry script, its stylesheets, the favicon and the manifest are
  * precached on install, because nothing starts without them; everything else is cached as it is
- * fetched. The document is asked for first and answered from the cache only when that fails, because its name
- * never changes and a cached copy of it would hide a deploy; everything else carries a content hash
- * in its name and is answered from the cache first. A new build is a new cache, and the old one is
- * deleted when the new worker activates — which, without skipWaiting, is only once no page is using
- * the old one, so nothing mid-load loses the files it was loading.
+ * fetched. The document is asked for first and answered from the cache only when that fails,
+ * because its name never changes and a cached copy of it would hide a deploy; everything else
+ * carries a content hash in its name and is answered from the cache first. A new build is a new
+ * cache, and the old one is deleted when the new worker activates — which, without skipWaiting, is
+ * only once no page is using the old one, so nothing mid-load loses the files it was loading.
  *
  * How it fetches. The page dials the substrate for its own requests, but the document, the scripts,
  * the fonts and the images are fetched by the browser, and a service worker is the only place they

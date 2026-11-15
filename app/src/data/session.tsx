@@ -42,7 +42,7 @@ export const defaultServer = process.env.EXPO_PUBLIC_DEFAULT_SERVER || "https://
 const SERVER_KEY = "server";
 const SESSION_KEY = "session";
 
-type SignUpForm = { username: string; password: string; email: string; code: string };
+type SignUpForm = { username: string; nickname: string; password: string; email: string; code: string };
 
 export class Connection {
   readonly substrate: Substrate;
@@ -122,7 +122,7 @@ export class Connection {
     this.adopt(
       await auth.register(this.origin, {
         username: form.username,
-        nickname: form.username,
+        nickname: form.nickname || form.username,
         password: form.password,
         email: form.email,
         emailCode: form.code,

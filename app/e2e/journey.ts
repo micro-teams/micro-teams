@@ -108,8 +108,11 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   const said = `你好 ${p.run}`;
 
   await d.open();
+  if (p.server !== null) {
+    await d.tap("settings");
+    await d.fill("server", p.server);
+  }
   await d.tap("go-register");
-  if (p.server !== null) await d.fill("server", p.server);
   await d.fill("email", email);
   await d.tap("send-code");
   await d.fill("code", await codeFromMail(p.mail, email));
@@ -118,6 +121,7 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   const title = `group ${p.run}`;
   await d.fill("username", username);
   await d.fill("password", password);
+  await d.fill("confirm", password);
   await d.tap("register");
   await d.waitFor("new-chat", 30_000);
   lap("sign up");

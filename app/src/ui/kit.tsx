@@ -6,6 +6,7 @@
  * <Header title onBack? actions?> — a page's top bar: 56 tall, a 1px line under it, an arrow when
  *   the page can be left. onBack is the stack's pop, never a jump somewhere.
  * <Button label onPress kind? disabled? busy? testID?> — kind "filled" (brand green, the default),
+ *   "tonal" (grey, the quiet action beside a field),
  *   "send" (WeChat green) or "text" (a word in brand green).
  * <Field value onChangeText placeholder? secure? testID? ...TextInputProps> — a bordered input;
  *   the border turns green while focused.
@@ -84,32 +85,34 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  kind?: "filled" | "send" | "text";
+  kind?: "filled" | "tonal" | "send" | "text";
   disabled?: boolean;
   busy?: boolean;
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
-  const filled = kind !== "text";
+  const off = disabled || busy;
+  const boxed = kind !== "text";
+  // A filled button that cannot be pressed goes grey rather than faint, as Material's did: a faint
+  // green still reads as "go".
+  const background = !boxed ? undefined : off && kind !== "send" ? colors.disabled : kind === "send" ? colors.send : kind === "tonal" ? colors.disabled : colors.brand;
+  const ink = off ? colors.inkMuted : kind === "send" ? "#fff" : kind === "filled" ? colors.page : kind === "tonal" ? colors.ink : colors.brand;
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      accessibilityState={{ disabled: !!off }}
       onPress={onPress}
-      disabled={disabled || busy}
+      disabled={off}
       style={({ pressed }) => [
-        filled ? styles.filled : styles.textButton,
-        filled && { backgroundColor: kind === "send" ? colors.send : colors.brand, borderRadius: kind === "send" ? 4 : 6 },
-        (disabled || busy) && { opacity: 0.5 },
+        boxed ? styles.filled : styles.textButton,
+        boxed && { backgroundColor: background, borderRadius: kind === "send" ? 4 : 6 },
+        off && kind === "send" && { opacity: 0.5 },
         pressed && { opacity: 0.8 },
         style,
       ]}
     >
-      {busy ? (
-        <ActivityIndicator color={filled ? colors.page : colors.brand} />
-      ) : (
-        <Txt style={{ color: kind === "send" ? "#fff" : filled ? colors.page : colors.brand }}>{label}</Txt>
-      )}
+      {busy ? <ActivityIndicator color={ink} /> : <Txt style={{ color: ink }}>{label}</Txt>}
     </Pressable>
   );
 }
