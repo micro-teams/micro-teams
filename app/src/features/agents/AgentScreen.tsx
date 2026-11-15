@@ -17,26 +17,13 @@ import { isWorking } from "../../data/presence";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
+import { Facts } from "../../ui/Facts";
 import { Button, Field, Header, Txt } from "../../ui/kit";
 import { ListRow, OnlineDot } from "../../ui/ListRow";
 import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
 import { ModelApiEditor, modelApiSummary } from "./ModelApi";
-
-function Fact({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
-  return (
-    <View style={styles.fact}>
-      <Txt variant="small" muted style={styles.factLabel}>
-        {label}
-      </Txt>
-      <Txt variant="small" style={styles.factValue} selectable>
-        {value}
-      </Txt>
-    </View>
-  );
-}
 
 /**
  * The cache keepalive: what it buys is not liveness but the driver's prefix cache not expiring, so
@@ -134,12 +121,13 @@ export function AgentScreen() {
               </View>
             </View>
           </View>
-          <View>
-            <Fact label="user id" value={String(agent.userId)} />
-            <Fact label="driver" value={agent.driver} />
-            <Fact label="machine" value={fleet.machineName(agent.machineId)} />
-            <Fact label="model" value={agent.llm ? [agent.llm.provider, agent.llm.model].filter(Boolean).join(" · ") : null} />
-          </View>
+          <Facts
+            rows={[
+              { label: "user id", value: String(agent.userId) },
+              { label: "driver", value: agent.driver },
+              { label: "machine", value: fleet.machineName(agent.machineId) },
+            ]}
+          />
           {/* Only for the drivers that take their model API from MicroTeams; the others read the machine's. */}
           {(agent.driver === "dsh" || agent.llm) && (
             <ListRow
@@ -175,9 +163,6 @@ const styles = StyleSheet.create({
   who: { flexDirection: "row", alignItems: "center" },
   whoText: { marginLeft: 16, flex: 1, gap: 6 },
   status: { flexDirection: "row", alignItems: "center", gap: 6 },
-  fact: { flexDirection: "row", paddingVertical: 4 },
-  factLabel: { width: 80 },
-  factValue: { flex: 1 },
   actions: { gap: 8, alignItems: "flex-start" },
   notice: { textAlign: "center", padding: 24 },
   keepalive: { borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 12, gap: 10 },

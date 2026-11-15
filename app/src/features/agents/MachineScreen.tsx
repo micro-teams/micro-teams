@@ -19,6 +19,7 @@ import { useTeams } from "../../data/teams";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
+import { Facts } from "../../ui/Facts";
 import { Header, Pressy, Txt } from "../../ui/kit";
 import { ListRow, OnlineDot } from "../../ui/ListRow";
 import { Confirm, TextPrompt } from "../../ui/prompts";
@@ -112,29 +113,21 @@ export function MachineScreen() {
       />
       <ScrollView contentContainerStyle={styles.column}>
         <View style={styles.facts}>
-          <View style={styles.fact}>
-            <Txt variant="small" muted style={styles.factLabel}>
-              status
-            </Txt>
-            <OnlineDot online={machine.online} />
-            <Txt variant="small">{machine.online ? "connected" : "not connected"}</Txt>
-          </View>
-          <View style={styles.fact}>
-            <Txt variant="small" muted style={styles.factLabel}>
-              machine id
-            </Txt>
-            <Txt variant="small" selectable>
-              {machine.id}
-            </Txt>
-          </View>
-          {machine.createdAt ? (
-            <View style={styles.fact}>
-              <Txt variant="small" muted style={styles.factLabel}>
-                enrolled
-              </Txt>
-              <Txt variant="small">{new Date(machine.createdAt).toLocaleString()}</Txt>
-            </View>
-          ) : null}
+          <Facts
+            rows={[
+              {
+                label: "status",
+                value: (
+                  <>
+                    <OnlineDot online={machine.online} />
+                    <Txt>{machine.online ? "connected" : "not connected"}</Txt>
+                  </>
+                ),
+              },
+              { label: "machine id", value: machine.id },
+              { label: "enrolled", value: machine.createdAt ? new Date(machine.createdAt).toLocaleString() : undefined },
+            ]}
+          />
         </View>
         <Section title="teams" action={<Pressy testID="machine-add-team" onPress={addTo}><Txt style={{ color: colors.brand }}>add to team</Txt></Pressy>} />
         {machine.teamIds.map((id) => (
@@ -181,9 +174,7 @@ export function MachineScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.page },
   column: { width: "100%", maxWidth: metrics.readingColumn, alignSelf: "center", paddingBottom: 32 },
-  facts: { padding: 16, gap: 6 },
-  fact: { flexDirection: "row", alignItems: "center", gap: 6 },
-  factLabel: { width: 90 },
+  facts: { padding: 16 },
   section: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
   grow: { flex: 1 },
   teamRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },

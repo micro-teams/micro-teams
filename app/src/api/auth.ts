@@ -11,7 +11,7 @@
  * Example: const session = await login("https://microteams.app", "alice", "secret");
  */
 
-export type AuthUser = { id: number; username: string; nickname: string; avatarId?: number | null };
+export type AuthUser = { id: number; username: string; nickname: string; avatarId?: number | null; intro?: string };
 export type Session = { user: AuthUser; accessToken: string };
 
 export class AuthError extends Error {

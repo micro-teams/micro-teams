@@ -3,6 +3,7 @@
  * these questions instead of looking at Platform.OS (a lint rule keeps it that way).
  *
  * isWeb — true in a browser.
+ * appVersion — this build's version (app.json's). clientPlatform — "web", "android" or "ios".
  * pageOrigin() — the origin the page was served from, or null on a phone.
  * onBack(handler) → unsubscribe — the platform's back: Android's back button, the browser's back
  *   button. handler returns whether it consumed the press (false lets Android leave the app).
@@ -17,8 +18,11 @@
  *   if (stack.length > 1) guardHistory();
  */
 import { BackHandler, Platform } from "react-native";
+import app from "../../app.json";
 
 export const isWeb = Platform.OS === "web";
+export const appVersion: string = app.expo.version;
+export const clientPlatform: string = Platform.OS;
 
 export function pageOrigin(): string | null {
   return isWeb ? window.location.origin : null;

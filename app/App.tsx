@@ -26,7 +26,7 @@ import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
 import { TeamScreen, TeamsScreen } from "./src/features/teams/TeamsScreen";
 import { ScreenFrame } from "./src/features/terminal/ScreenFrame";
-import { MeScreen } from "./src/features/me/MeScreen";
+import { LinesScreen, MeScreen } from "./src/features/me/MeScreen";
 import { SessionProvider, useSession } from "./src/data/session";
 import { NavProvider } from "./src/nav/NavProvider";
 import { Shell } from "./src/nav/Shell";
@@ -48,6 +48,7 @@ export const routes = {
   machine: MachineScreen,
   connect: ConnectScreen,
   me: MeScreen,
+  lines: LinesScreen,
   dialog: DialogFrame,
   screen: ScreenFrame,
   teams: TeamsScreen,
