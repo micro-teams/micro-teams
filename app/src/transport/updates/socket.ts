@@ -23,7 +23,7 @@ import { encodeFrame, parseFrame } from "./protocol";
 import { UpdatesStore } from "./store";
 
 export interface Wire {
-  send(text: string): void;
+  send(data: string | Uint8Array): void;
   close(): void;
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;

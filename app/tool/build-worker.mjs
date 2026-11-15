@@ -4,7 +4,7 @@
  *   node tool/build-worker.mjs <web-dist>
  *
  * Bundles worker/sw.ts (with the multipath client) into <web-dist>/sw.js, telling it what to
- * precache — the document, the entry scripts under _expo/static/js/web/ and the favicon — and a
+ * precache — the document, the entry scripts and stylesheets under _expo/static/ and the favicon — and a
  * build id: a hash of those files, so a build that changed any of them is a new cache and one that
  * changed none of them is not.
  */
@@ -22,7 +22,10 @@ if (!dist) {
 
 const scripts = path.join(dist, "_expo", "static", "js", "web");
 const entries = (await readdir(scripts).catch(() => [])).filter((f) => f.endsWith(".js")).map((f) => `_expo/static/js/web/${f}`);
-const shell = ["index.html", ...entries];
+const styles = (await readdir(path.join(dist, "_expo", "static", "css")).catch(() => []))
+  .filter((f) => f.endsWith(".css"))
+  .map((f) => `_expo/static/css/${f}`);
+const shell = ["index.html", ...entries, ...styles];
 for (const optional of ["favicon.ico"]) {
   if (await readFile(path.join(dist, optional)).then(() => true, () => false)) shell.push(optional);
 }

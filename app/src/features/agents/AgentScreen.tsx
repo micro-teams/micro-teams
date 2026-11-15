@@ -1,7 +1,8 @@
 /*
  * One agent: who it is, where it runs, what it is doing, and what can be done to it.
  *
- * <AgentScreen /> — drawn for an "agent" frame with { team, userId }. "chat" opens the one-to-one
+ * <AgentScreen /> — drawn for an "agent" frame with { team, userId }. "live screen" opens its
+ *   terminal over the app while it is online. "chat" opens the one-to-one
  *   conversation with the agent (starting it if there is none) on top of this frame; "rename" asks
  *   for a nickname; "close" asks first, stops the agent, and closes this frame. When the agent goes
  *   while the frame is open, it says so instead of showing stale facts.
@@ -95,6 +96,9 @@ export function AgentScreen() {
           </View>
           <View style={styles.actions}>
             <Button testID="agent-chat" label="chat with agent" onPress={chat} />
+            {agent.online && agent.sid ? (
+              <Button kind="text" testID="agent-screen" label="live screen" onPress={() => push("screen", "overlay", { sessionId: agent.sid })} />
+            ) : null}
             <Button kind="text" testID="agent-rename" label="rename" onPress={rename} />
             <Button kind="text" testID="agent-close" label="close agent" onPress={close} />
           </View>

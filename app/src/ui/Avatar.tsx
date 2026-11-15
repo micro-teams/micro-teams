@@ -6,7 +6,7 @@
  *   first character. The same person keeps the same colour on every screen and device. Every
  *   avatar asks the presence registry about its id: an agent that is working gets a pulsing violet
  *   ring, and an agent is always tappable (unless clickable is false, inside a group tile) — the
- *   tap opens its live screen, or says why it cannot.
+ *   tap opens its live screen over whatever is on screen, or says why it cannot.
  * <MemberGrid members size?> — up to nine faces in one tile; a row that is not full is centred, so
  *   three members read one-over-two and five read two-over-three.
  * colourFor(userId) — that colour, for anything else that has to match it.
@@ -22,6 +22,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 import { usePresence } from "../data/presence";
 import { useSession } from "../data/session";
+import { useNav } from "../nav/NavProvider";
 import { colors, fonts, metrics } from "./theme";
 import { useToast } from "./Toast";
 
@@ -78,6 +79,7 @@ export function Avatar({
 }) {
   const { agent, working, watchable } = usePresence(userId);
   const toast = useToast();
+  const { push } = useNav();
   const label = (nickname ?? agent?.nickname ?? "").trim();
   const face = (
     <View style={{ width: size, height: size }}>
@@ -91,7 +93,9 @@ export function Avatar({
     <Pressable
       testID={`agent-avatar-${userId}`}
       accessibilityLabel={watchable ? `${name} · 点击查看现场` : agent.online ? `${name} · 现场暂不可用` : `${name} · 离线`}
-      onPress={() => toast(watchable ? `「${name}」的现场还没有在这个客户端里做好` : agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)}
+      onPress={() =>
+        watchable ? push("screen", "overlay", { sessionId: agent.sid }) : toast(agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)
+      }
     >
       {face}
     </Pressable>

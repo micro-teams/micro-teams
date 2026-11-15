@@ -48,6 +48,7 @@ export class Connection {
   readonly substrate: Substrate;
   readonly mt: MtClient;
   readonly updates = new UpdatesStore();
+  readonly token = () => this.session?.accessToken ?? null;
   readonly presence = new Presence(() => (this.session ? this.mt : null));
   private socket: UpdatesSocket | null = null;
   private session: auth.Session | null = storage.getJson<auth.Session>(SESSION_KEY);
@@ -154,6 +155,8 @@ type Value = {
   user: auth.AuthUser | null;
   mt: MtClient | null;
   substrate: Substrate;
+  /** The access token now, read when a socket dials so a reconnect carries a refreshed one. */
+  token: () => string | null;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (form: SignUpForm) => Promise<void>;
   sendSignUpCode: (email: string) => Promise<void>;
@@ -191,6 +194,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     user: session?.user ?? null,
     mt: session ? conn.mt : null,
     substrate: conn.substrate,
+    token: conn.token,
     signIn: (u, p) => conn.signIn(u, p),
     signUp: (form) => conn.signUp(form),
     sendSignUpCode: (email) => conn.sendSignUpCode(email),

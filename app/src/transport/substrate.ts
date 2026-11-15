@@ -95,13 +95,13 @@ export class Substrate {
   };
 
   openSocket = (path: string): Wire => {
-    type Inner = { send(t: string): void; close(): void };
+    type Inner = { send(d: string | Uint8Array): void; close(): void; binaryType?: string };
     let inner: Inner | null = null;
     let dropped = false;
     const wire: Wire = {
-      send: (text) => {
+      send: (data) => {
         if (!inner) throw new Error("socket not open yet");
-        inner.send(text);
+        inner.send(data);
       },
       close: () => {
         dropped = true;
@@ -135,7 +135,9 @@ export class Substrate {
         return;
       }
       console.warn(`multipath: no substrate, opening ${path.split("?")[0]} directly`);
-      adopt(new WebSocket(asWebSocket(this.origin) + path) as unknown as Inner & Omit<Wire, "send" | "close">, false);
+      const ws = new WebSocket(asWebSocket(this.origin) + path);
+      ws.binaryType = "arraybuffer"; // binary frames as bytes, as they arrive over the substrate
+      adopt(ws as unknown as Inner & Omit<Wire, "send" | "close">, false);
     });
     return wire;
   };

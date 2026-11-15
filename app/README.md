@@ -27,8 +27,9 @@ because that is the only origin whose httpOnly refresh cookie it can use.
       nav/        the display stack (stack.ts), its React binding, and the shell that draws it
       ui/         the theme and the shared controls: Avatar, Dialog, Header, Button, Field
       features/   the screens, one directory per section
-      platform/   the only place that asks which platform it is on, local storage, and the
-                  service worker's registration
+      platform/   the only place that asks which platform it is on: local storage, the service
+                  worker's registration, and the terminal (xterm.js in the page on the web, in a
+                  WebView on a phone; `npm run codegen` builds the WebView's page)
     worker/       the web build's service worker (sw.ts): keeps the app offline, and fetches what
                   the browser itself asks for over the substrate; built into sw.js by
                   tool/build-worker.mjs (`npm run build:web` exports the bundle and builds it)
