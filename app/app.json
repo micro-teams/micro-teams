@@ -20,6 +20,18 @@
     "experiments": {
       "baseUrl": "/app"
     },
-    "plugins": ["expo-font", "expo-image", "expo-status-bar"]
+    "plugins": [
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
   }
 }

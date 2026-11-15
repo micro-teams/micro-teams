@@ -26,6 +26,8 @@ VERSION_FILE="$ROOT/VERSION"
 POM="$ROOT/backend/pom.xml"
 API="$ROOT/MicroTeams-API.yml"
 APPLETS_PKG="$ROOT/applets/package.json"
+APP_PKG="$ROOT/app/package.json"
+APP_JSON="$ROOT/app/app.json"
 README="$ROOT/README.md"
 
 # The product version carries an OpenAPI info.version too, but that field only allows
@@ -43,6 +45,8 @@ if [[ $# -eq 0 ]]; then
   printf '  %-28s %s\n' "backend/pom.xml"        "$(perl -0777 -ne 'print "$1\n" if /<artifactId>backend<\/artifactId>\s*<version>([^<]+)<\/version>/' "$POM")"
   printf '  %-28s %s\n' "MicroTeams-API.yml"     "$(perl -ne 'print "$1\n" if /^  version:\s*"?([^"\n]+)"?/' "$API")"
   printf '  %-28s %s\n' "applets/package.json"   "$(node -p "require('$APPLETS_PKG').version")"
+  printf '  %-28s %s\n' "app/package.json"       "$(node -p "require('$APP_PKG').version")"
+  printf '  %-28s %s\n' "app/app.json"           "$(node -p "require('$APP_JSON').expo.version")"
   echo
   echo "independent (NOT touched by this script):"
   printf '  %-28s %s\n' "micro-connector (protocol)" "$(perl -ne 'print "$1\n" if m{micro-connector/cli (v\S+)}' cli/go.mod)"
@@ -73,7 +77,11 @@ perl -i -pe "s{^(  version:\s*).*}{\${1}\"$api_ver\"}" "$API"
 # 4. applets/package.json — set top-level .version via node (leaves the rest untouched)
 node -e "const f='$APPLETS_PKG';const p=require(f);p.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
 
-# 5. README — the example run command references the built jar (backend-<version>.jar)
+# 5. app/package.json and app/app.json — the client's own version, which a native build reports
+node -e "const f='$APP_PKG';const p=require(f);p.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
+node -e "const f='$APP_JSON';const p=require(f);p.expo.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
+
+# 6. README — the example run command references the built jar (backend-<version>.jar)
 perl -i -pe "s{(microteams|backend)-[0-9]+\.[0-9]+\.[0-9]+\.jar}{backend-$new.jar}g" "$README"
 
 echo "done. verifying:"

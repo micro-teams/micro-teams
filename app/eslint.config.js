@@ -34,7 +34,7 @@ const noServerInScreens = {
 
 module.exports = [
   ...expo,
-  { ignores: ["dist/", "web-dist/", "android/", "ios/", "src/api/schema.d.ts"] },
+  { ignores: ["dist/", "web-dist/", "android/", "ios/", "src/api/schema.d.ts", "e2e/"] },
   {
     rules: {
       "import/first": "error",

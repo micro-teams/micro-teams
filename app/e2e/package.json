@@ -1,0 +1,15 @@
+{
+  "name": "microteams-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "playwright": "1.65.0",
+    "tsx": "^4.19.0",
+    "typescript": "~6.0.3",
+    "webdriverio": "^9.4.0"
+  }
+}

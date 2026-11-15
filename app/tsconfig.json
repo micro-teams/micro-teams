@@ -7,5 +7,8 @@
     "types": [
       "jest"
     ]
-  }
+  },
+  "exclude": [
+    "e2e"
+  ]
 }

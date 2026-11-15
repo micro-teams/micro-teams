@@ -145,6 +145,78 @@ jobs:
             echo "No uncommitted changes."
           fi
 
+  # The client: typecheck, lint, unit tests and the web build in one job; the Android build in
+  # another, because it is most of the time and has nothing to wait for.
+  build-app:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: app
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run codegen
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npx expo export --platform web --output-dir web-dist
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          name: web-dist
+          path: app/web-dist
+
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: app
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: "temurin"
+          java-version: "21"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-app-${{ runner.os }}-${{ hashFiles('app/package-lock.json', 'app/app.json') }}
+          restore-keys: gradle-app-${{ runner.os }}-
+      - run: npm ci
+      - run: npm run codegen
+      - run: npx expo prebuild --platform android --no-install
+      # arm64 for phones, x86_64 for the emulator the journey runs on: one APK serves both.
+      - name: Build the release APK
+        working-directory: app/android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon -q
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: android-apk
+          path: app/android/app/build/outputs/apk/release/app-release.apk
+
   build-applet:
     runs-on: ubuntu-latest
     # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which
@@ -270,10 +342,13 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-origin, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-origin, build-app, build-android, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -292,11 +367,14 @@ jobs:
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
-          # The marketing site at "/" and /version at the root. The bundle carries no client: the
-          # client is being rebuilt, and until it lands /app/ has nothing to serve.
-          mkdir -p "$STAGE/frontend/dist"
+          # The marketing site at "/", the web client under /app/, /version at the root, and the
+          # Android client under /downloads/ with the manifest that lists it.
+          VERSION="$(cat VERSION)-${GITHUB_SHA::7}"
+          mkdir -p "$STAGE/frontend/dist/app"
           find site -maxdepth 1 -type f ! -name README.md -exec cp {} "$STAGE/frontend/dist/" \;
-          echo "$(cat VERSION)-${GITHUB_SHA::7}" > "$STAGE/frontend/dist/version"
+          cp -r artifacts/web-dist/. "$STAGE/frontend/dist/app/"
+          echo "$VERSION" > "$STAGE/frontend/dist/version"
+          node app/tool/add-clients.mjs "$STAGE/frontend/dist" "$VERSION" artifacts/android-apk/app-release.apk debug
           cp artifacts/applets/*.js "$STAGE/applets/"
           chmod +x "$STAGE/gen-env.sh"
           # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
@@ -440,10 +518,71 @@ jobs:
         working-directory: microteams-deploy
         run: docker compose down
 
+  # The journey: the bundle above, driven through the client a person uses — one script, on the
+  # web build in Chromium and on the Android build in an emulator. See app/e2e/journey.ts.
+  test-journeys:
+    needs: [package-zip]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [web, android]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v8
+        with:
+          name: microteams-deploy
+          path: microteams-deploy
+      - name: Bring the bundle up, with a mail sink for sign-up codes
+        run: bash app/e2e/stack.sh microteams-deploy
+      - run: npm ci
+        working-directory: app/e2e
+      - name: The journey, in a browser
+        if: matrix.client == 'web'
+        working-directory: app/e2e
+        run: |
+          npx playwright install --with-deps chromium
+          RUN="w$GITHUB_RUN_ID" npx tsx run.ts web http://localhost/app/
+      - name: Let the emulator use KVM
+        if: matrix.client == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Appium
+        if: matrix.client == 'android'
+        run: |
+          npm i -g appium
+          appium driver install uiautomator2
+          nohup appium --address 127.0.0.1 --port 4723 > appium.log 2>&1 &
+      - name: The journey, on an emulator
+        if: matrix.client == 'android'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && RUN="a$GITHUB_RUN_ID" npx tsx run.ts android http://10.0.2.2
+      - name: What went wrong
+        if: failure()
+        run: |
+          tail -60 appium.log 2>/dev/null || true
+          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 3
+          name: journey-failure-${{ matrix.client }}
+          path: app/e2e/failure.png
+
   # One check to require in branch protection: it succeeds only when every job above did (a job with
   # `needs` runs only if all of them passed), so adding a job later never means editing the rule.
-  # The leaves, and nothing else: package-zip already needs every build, and the test job already
-  # needs package-zip, so naming those here would only repeat what the graph says. A job
+  # The leaves, and nothing else: package-zip already needs every build, and both test jobs already
+  # need package-zip, so naming those here would only repeat what the graph says. A job
   # whose dependency fails is skipped rather than failed, and a skipped need is not a success — so
   # this still cannot go green over a broken build.
   #
@@ -451,7 +590,7 @@ jobs:
   # it is a check that can go red without anybody being stopped.
   ci-success:
     name: CI success
-    needs: [test-api, test-machinery]
+    needs: [test-api, test-machinery, test-journeys]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All required CI jobs passed."

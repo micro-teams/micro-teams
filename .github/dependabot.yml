@@ -33,3 +33,13 @@ updates:
     directory: '/backend'
     schedule:
       interval: 'daily'
+
+  - package-ecosystem: 'npm'
+    directory: '/app'
+    schedule:
+      interval: 'weekly'
+    groups:
+      app-minor:
+        update-types:
+          - 'minor'
+          - 'patch'
