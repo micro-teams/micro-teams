@@ -22,6 +22,7 @@ import { DocsScreen } from "./src/features/docs/DocsScreen";
 import { AgentsScreen } from "./src/features/agents/AgentsScreen";
 import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
+import { TeamScreen, TeamsScreen } from "./src/features/teams/TeamsScreen";
 import { ScreenFrame } from "./src/features/terminal/ScreenFrame";
 import { MeScreen } from "./src/features/me/MeScreen";
 import { SessionProvider, useSession } from "./src/data/session";
@@ -45,6 +46,8 @@ export const routes = {
   me: MeScreen,
   dialog: DialogFrame,
   screen: ScreenFrame,
+  teams: TeamsScreen,
+  team: TeamScreen,
 };
 
 const queries = new QueryClient();

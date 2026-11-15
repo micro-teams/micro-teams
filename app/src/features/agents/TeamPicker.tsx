@@ -5,8 +5,8 @@
  *   current one, else the one this person looked at last, else the first) and remembers each
  *   change on the device. Mounted by every team-scoped section's root.
  * <TeamPicker /> — the team's name with a caret; tapping it asks, as a dialog on the stack (so
- *   back closes the list first), which team to look at. Switching shows that team's own stack as
- *   it was left.
+ *   back closes the list first), which team to look at, or to manage teams (the "teams" frame).
+ *   Switching shows that team's own stack as it was left. With no team yet it offers to make one.
  *
  * Example: <Header title="agents" actions={<TeamPicker />} />
  */
@@ -33,23 +33,33 @@ export function useTeamScope(): number | null {
 }
 
 export function TeamPicker() {
-  const { nav, switchTeam } = useNav();
+  const { nav, switchTeam, push } = useNav();
   const { teams } = useTeams();
   const ask = useAsk();
   const current = teams.find((t) => t.id === nav.team);
   const choose = async () => {
-    const id = await ask<number>("team", (done) => (
+    const id = await ask<number | "manage">("team", (done) => (
       <View>
         {teams.map((t) => (
           <Pressy key={t.id} testID={`team-${t.id}`} onPress={() => done(t.id)} style={styles.option}>
             <Txt style={t.id === nav.team ? { color: colors.brand } : undefined}>{t.name}</Txt>
           </Pressy>
         ))}
+        <Pressy testID="manage-teams" onPress={() => done("manage")} style={[styles.option, styles.manage]}>
+          <Txt muted>manage teams</Txt>
+        </Pressy>
       </View>
     ));
-    if (id !== null) switchTeam(id);
+    if (id === "manage") push("teams", "detail");
+    else if (id !== null) switchTeam(id);
   };
-  if (!teams.length) return null;
+  if (!teams.length) {
+    return (
+      <Pressy testID="team-picker" onPress={() => push("teams", "detail")} style={styles.button}>
+        <Txt style={{ color: colors.brand }}>new team</Txt>
+      </Pressy>
+    );
+  }
   return (
     <Pressy testID="team-picker" onPress={choose} style={styles.button}>
       <Txt numberOfLines={1} style={styles.name}>
@@ -64,4 +74,5 @@ const styles = StyleSheet.create({
   button: { flexDirection: "row", alignItems: "center", maxWidth: 180 },
   name: { flexShrink: 1 },
   option: { paddingVertical: 12 },
+  manage: { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 4 },
 });

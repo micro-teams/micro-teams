@@ -38,6 +38,8 @@ type Api = {
   select: (route: string, params?: Record<string, unknown>) => void;
   switchSection: (section: S.Section) => void;
   switchTeam: (team: number) => void;
+  /** Forget a team's stacks: it was deleted or left. */
+  dropTeam: (team: number) => void;
 };
 
 const NavCtx = createContext<Api | null>(null);
@@ -94,6 +96,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
       select: (route, params = {}) => setNav((n) => S.select(n, S.frame(route, "detail", params))),
       switchSection: (section) => setNav((n) => S.switchSection(n, section)),
       switchTeam: (team) => setNav((n) => S.switchTeam(n, team)),
+      dropTeam: (team) => setNav((n) => S.dropTeam(n, team)),
     }),
     [nav, popLocal, wide],
   );
