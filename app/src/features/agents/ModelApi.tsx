@@ -18,7 +18,8 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import type { FleetAgent, LlmSettings } from "../../data/agents";
-import { Choices } from "../../ui/Choices";
+import { Labelled } from "../../ui/Labelled";
+import { Select } from "../../ui/Menu";
 import { DialogActions } from "../../ui/Dialog";
 import { Button, Field, Txt } from "../../ui/kit";
 import { colors } from "../../ui/theme";
@@ -53,30 +54,31 @@ export function ModelApiFields({ initial, hasKey, onChange }: { initial?: Llm; h
   }, [provider, api, baseUrl, model, key, clearKey, none, custom, onChange]);
   return (
     <View style={styles.fields}>
-      <Txt variant="label" muted>
-        model API
-      </Txt>
-      <Choices
-        testIDPrefix="llm"
-        value={provider}
-        onChange={setProvider}
-        options={[
-          { value: "none", label: "the machine's own" },
-          { value: "deepseek", label: "DeepSeek" },
-          { value: "custom", label: "custom endpoint" },
-        ]}
-      />
-      {custom && (
-        <Choices
-          testIDPrefix="llm-api"
-          value={api}
-          onChange={setApi}
+      <Labelled label="model API">
+        <Select
+          testID="llm"
+          value={provider}
+          onChange={setProvider}
           options={[
-            { value: "openai-completions", label: "OpenAI Chat Completions" },
-            { value: "openai-responses", label: "OpenAI Responses" },
-            { value: "anthropic-messages", label: "Anthropic Messages" },
+            { value: "none", label: "the machine's own configuration" },
+            { value: "deepseek", label: "DeepSeek" },
+            { value: "custom", label: "custom endpoint" },
           ]}
         />
+      </Labelled>
+      {custom && (
+        <Labelled label="protocol">
+          <Select
+            testID="llm-api"
+            value={api}
+            onChange={setApi}
+            options={[
+              { value: "openai-completions", label: "OpenAI Chat Completions" },
+              { value: "openai-responses", label: "OpenAI Responses" },
+              { value: "anthropic-messages", label: "Anthropic Messages" },
+            ]}
+          />
+        </Labelled>
       )}
       {!none && (
         <>

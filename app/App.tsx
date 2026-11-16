@@ -31,6 +31,7 @@ import { SessionProvider, useSession } from "./src/data/session";
 import { NavProvider } from "./src/nav/NavProvider";
 import { Shell } from "./src/nav/Shell";
 import { DialogFrame } from "./src/ui/Dialog";
+import { MenuFrame } from "./src/ui/Menu";
 import { ToastProvider } from "./src/ui/Toast";
 
 const LIBERATION_MONO = require("./assets/fonts/LiberationMono-Regular.ttf");
@@ -50,6 +51,7 @@ export const routes = {
   me: MeScreen,
   lines: LinesScreen,
   dialog: DialogFrame,
+  menu: MenuFrame,
   screen: ScreenFrame,
   teams: TeamsScreen,
   team: TeamScreen,

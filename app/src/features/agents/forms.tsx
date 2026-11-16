@@ -6,8 +6,8 @@
  *   is none to reuse), or a new host — which a client cannot enrol, so that half is the two
  *   commands to run on it; the link the second prints is approved in the app. done(machineId)
  *   answers with the machine to add, or done(null) when finished.
- * <OpenAgent machines done /> — "open agent": which machine (one that serves the team and is
- *   online), and optionally a name, a driver, a working directory and — for dsh, which takes it
+ * <OpenAgent machines done /> — "open agent": which machine (a drop-down of those serving the team
+ *   and online), and optionally a name, a driver, a working directory and — for dsh, which takes it
  *   from MicroTeams — a model API. Every empty field means "let
  *   the server decide", and the placeholders say what it will decide; the drivers are the
  *   deployment's own list.
@@ -19,8 +19,9 @@ import { StyleSheet, View } from "react-native";
 import { useAllMachines, useDrivers, type LlmSettings, type Machine } from "../../data/agents";
 import { useSession } from "../../data/session";
 import { DialogActions } from "../../ui/Dialog";
-import { Choices } from "../../ui/Choices";
 import { Button, Field, Txt } from "../../ui/kit";
+import { Labelled } from "../../ui/Labelled";
+import { Select } from "../../ui/Menu";
 import { OnlineDot } from "../../ui/ListRow";
 import { colors, fonts } from "../../ui/theme";
 import { ModelApiFields } from "./ModelApi";
@@ -93,22 +94,22 @@ export function OpenAgent({ machines, done }: { machines: Machine[]; done: (form
   }
   return (
     <View style={styles.form}>
-      <Txt variant="label" muted>
-        machine
-      </Txt>
-      <Choices testIDPrefix="open-on" value={form.machineId} onChange={set("machineId")} options={usable.map((m) => ({ value: m.id, label: m.name }))} />
-      <Field testID="open-name" value={form.nickname} onChangeText={set("nickname")} placeholder="name — the server names it if you do not" />
+      <Labelled label="machine">
+        <Select testID="open-on" value={form.machineId} onChange={set("machineId")} options={usable.map((m) => ({ value: m.id, label: m.name }))} />
+      </Labelled>
+      <Labelled label="name">
+        <Field testID="open-name" value={form.nickname} onChangeText={set("nickname")} placeholder="the server names it if you do not" />
+      </Labelled>
       {drivers.length > 0 && (
-        <>
-          <Txt variant="label" muted>
-            driver
-          </Txt>
-          <Choices testIDPrefix="driver" value={driver} onChange={set("driver")} options={drivers.map((d) => ({ value: d, label: d === defaultDriver ? `${d} (default)` : d }))} />
-        </>
+        <Labelled label="driver">
+          <Select testID="driver" value={driver} onChange={set("driver")} options={drivers.map((d) => ({ value: d, label: d === defaultDriver ? `${d} (default)` : d }))} />
+        </Labelled>
       )}
       {/* dsh takes its model API from here; the other drivers from their machine. */}
       {driver === "dsh" && <ModelApiFields onChange={setLlm} />}
-      <Field testID="open-cwd" value={form.cwd} onChangeText={set("cwd")} placeholder="working directory — the connector's default if empty" autoCapitalize="none" />
+      <Labelled label="working directory">
+        <Field testID="open-cwd" value={form.cwd} onChangeText={set("cwd")} placeholder="the connector's default" autoCapitalize="none" />
+      </Labelled>
       <DialogActions>
         <Button kind="text" testID="open-agent-ok" label="open" onPress={() => done(form)} disabled={!form.machineId} />
       </DialogActions>
@@ -117,7 +118,7 @@ export function OpenAgent({ machines, done }: { machines: Machine[]; done: (form
 }
 
 const styles = StyleSheet.create({
-  form: { gap: 8 },
+  form: { gap: 12 },
   command: { backgroundColor: colors.page, borderRadius: 6, padding: 10 },
   code: { fontFamily: fonts.mono, fontSize: 13 },
   spare: { flexDirection: "row", alignItems: "center", gap: 8 },

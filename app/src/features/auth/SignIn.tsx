@@ -15,7 +15,7 @@
  * is always the origin it was served from.
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { ReactNode, useState } from "react";
+import { useState } from "react";
 import {
   KeyboardAvoidingView,
   Pressable,
@@ -27,35 +27,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "../../data/session";
 import { isWeb } from "../../platform/platform";
 import { Button, Field, Txt } from "../../ui/kit";
+import { Labelled } from "../../ui/Labelled";
 import { colors } from "../../ui/theme";
 import { isValidUsername, passwordChecks, USERNAME_RULE } from "./validation";
-
-function Labelled({
-  label,
-  children,
-  hint,
-  bad,
-}: {
-  label: string;
-  children: ReactNode;
-  hint?: string;
-  bad?: boolean;
-}) {
-  return (
-    <View>
-      <Txt style={styles.label}>{label}</Txt>
-      {children}
-      {hint ? (
-        <Txt
-          variant="label"
-          style={[styles.hint, bad && { color: colors.danger }]}
-        >
-          {hint}
-        </Txt>
-      ) : null}
-    </View>
-  );
-}
 
 export function SignIn() {
   const session = useSession();
@@ -351,8 +325,6 @@ const styles = StyleSheet.create({
   },
   settings: { paddingVertical: 16 },
   title: { fontSize: 24, marginBottom: 8 },
-  label: { marginBottom: 6 },
-  hint: { marginTop: 4, color: colors.inkMuted },
   rules: { marginTop: 6, gap: 4 },
   sendCode: { height: 40, paddingHorizontal: 20 },
   rule: { flexDirection: "row", alignItems: "center", gap: 6 },
