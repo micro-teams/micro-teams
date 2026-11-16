@@ -5,7 +5,7 @@
  *
  * <ListRow leading title subtitle? onPress testID? selected?> — selected tints the row: the one
  *   whose detail is showing beside the list in a wide window.
- * <OnlineDot online> — green when online, grey when not, with the word for screen readers.
+ * <OnlineDot online label?> — green when online, grey when not; label writes the word beside it.
  *
  * Example: <ListRow leading={<Avatar userId={7} />} title="alice" subtitle={<OnlineDot online />} onPress={open} />
  */
@@ -42,9 +42,16 @@ export function ListRow({
   );
 }
 
-export function OnlineDot({ online }: { online: boolean }) {
+export function OnlineDot({ online, label }: { online: boolean; label?: boolean }) {
+  const dot = <View accessibilityLabel={online ? "online" : "offline"} style={[styles.dot, { backgroundColor: online ? colors.brand : colors.inkMuted }]} />;
+  if (!label) return dot;
   return (
-    <View accessibilityLabel={online ? "online" : "offline"} style={[styles.dot, { backgroundColor: online ? colors.brand : colors.inkMuted }]} />
+    <View style={styles.labelled}>
+      {dot}
+      <Txt variant="small" muted>
+        {online ? "online" : "offline"}
+      </Txt>
+    </View>
   );
 }
 
@@ -54,5 +61,6 @@ const styles = StyleSheet.create({
   text: { flex: 1, marginLeft: 12 },
   title: { fontWeight: "500" },
   subtitle: { flexDirection: "row", alignItems: "center", marginTop: 4, gap: 6 },
+  labelled: { flexDirection: "row", alignItems: "center", gap: 4 },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });

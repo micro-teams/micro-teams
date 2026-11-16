@@ -22,7 +22,6 @@ import { DialogActions } from "../../ui/Dialog";
 import { Button, Field, Txt } from "../../ui/kit";
 import { Labelled } from "../../ui/Labelled";
 import { Select } from "../../ui/Menu";
-import { OnlineDot } from "../../ui/ListRow";
 import { colors, fonts } from "../../ui/theme";
 import { ModelApiFields } from "./ModelApi";
 
@@ -46,11 +45,13 @@ export function AddDevice({ team, done }: { team: number; done: (machineId: stri
           <Txt variant="title">A machine you already have</Txt>
           {spare.map((m) => (
             <View key={m.id} style={styles.spare}>
-              <OnlineDot online={m.online} />
-              <Txt style={styles.grow} numberOfLines={1}>
-                {m.name}
-              </Txt>
-              <Button kind="text" testID={`reuse-${m.id}`} label="add" onPress={() => done(m.id)} />
+              <View style={styles.grow}>
+                <Txt numberOfLines={1}>{m.name}</Txt>
+                <Txt variant="small" muted>
+                  {m.online ? "connected" : "not connected"}
+                </Txt>
+              </View>
+              <Button kind="tonal" testID={`reuse-${m.id}`} label="Add" onPress={() => done(m.id)} />
             </View>
           ))}
           <View style={styles.rule} />
@@ -67,7 +68,7 @@ export function AddDevice({ team, done }: { team: number; done: (machineId: stri
         Prints a link. Open it here, choose which teams the machine should serve, and approve.
       </Txt>
       <DialogActions>
-        <Button kind="text" label="done" onPress={() => done(null)} />
+        <Button kind="text" label="Done" onPress={() => done(null)} />
       </DialogActions>
     </View>
   );
@@ -121,7 +122,7 @@ const styles = StyleSheet.create({
   form: { gap: 12 },
   command: { backgroundColor: colors.page, borderRadius: 6, padding: 10 },
   code: { fontFamily: fonts.mono, fontSize: 13 },
-  spare: { flexDirection: "row", alignItems: "center", gap: 8 },
+  spare: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
   grow: { flex: 1 },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: 8 },
 });

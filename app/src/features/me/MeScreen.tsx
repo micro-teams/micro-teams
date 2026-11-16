@@ -123,7 +123,7 @@ export function MeScreen() {
             { label: "lines", value: lines.length ? `${up} of ${lines.length} up` : "direct", onPress: () => push("lines", "detail"), testID: "lines" },
           ]}
         />
-        <Button testID="sign-out" label="log out" onPress={leave} style={styles.logout} />
+        <Button testID="sign-out" label="log out" danger onPress={leave} style={styles.logout} />
       </ScrollView>
     </View>
   );
@@ -136,5 +136,5 @@ const styles = StyleSheet.create({
   me: { flexDirection: "row", alignItems: "center", gap: 16 },
   grow: { flex: 1 },
   report: { fontSize: 12, marginBottom: 8 },
-  logout: { height: 44, marginTop: 8, backgroundColor: colors.danger },
+  logout: { height: 44, marginTop: 8 },
 });

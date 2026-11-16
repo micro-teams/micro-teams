@@ -19,6 +19,7 @@ import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
 import { Button, Header, Txt } from "../../ui/kit";
+import { Labelled } from "../../ui/Labelled";
 import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
@@ -45,13 +46,21 @@ export function ThreadInfoScreen() {
   };
 
   const add = async () => {
-    const raw = await ask<string>("add someone", (done) => <TextPrompt testID="add-member" initial="" action="add" numeric done={done} />);
+    const raw = await ask<string>("Add someone", (done) => (
+      <Labelled label="User id" hint="the number on their profile">
+        <TextPrompt testID="add-member" initial="" action="Add" numeric done={done} />
+      </Labelled>
+    ));
     const userId = Number((raw ?? "").trim());
     if (raw && Number.isInteger(userId) && userId > 0) await guard(() => info.add(userId));
   };
 
   const rename = async () => {
-    const title = await ask<string>("rename chat", (done) => <TextPrompt testID="rename" initial={info.storedTitle} action="rename" done={done} />);
+    const title = await ask<string>("Rename chat", (done) => (
+      <Labelled label="Title">
+        <TextPrompt testID="rename" initial={info.storedTitle} action="Rename" done={done} />
+      </Labelled>
+    ));
     if (title?.trim()) await guard(() => info.rename(title.trim()));
   };
 
@@ -63,15 +72,15 @@ export function ThreadInfoScreen() {
   };
 
   const dissolve = async () => {
-    const ok = await ask<boolean>("delete this chat?", (done) => (
-      <Confirm text="It goes for everyone in it, along with every message." action="delete" done={done} />
+    const ok = await ask<boolean>("Delete this chat?", (done) => (
+      <Confirm text="It goes for everyone in it, along with every message." action="Delete" done={done} />
     ));
     if (ok && (await guard(() => info.dissolve()))) popTo(threadKey);
   };
 
   return (
     <View style={styles.root}>
-      <Header title="chat info" onBack={backFor(self)} />
+      <Header title="Chat info" onBack={backFor(self)} />
       <ScrollView contentContainerStyle={styles.body}>
         <Txt variant="title">{info.storedTitle || "untitled"}</Txt>
         <View style={styles.grid}>
@@ -97,7 +106,7 @@ export function ThreadInfoScreen() {
           {canManage && (
             <Pressable testID="add-member" onPress={add} style={styles.member}>
               <View style={styles.addTile}>
-                <MaterialIcons name="add" size={28} color={colors.inkMuted} />
+                <MaterialIcons name="add" size={24} color={colors.ink} />
               </View>
               <Txt variant="small" muted style={styles.name}>
                 add
@@ -105,12 +114,10 @@ export function ThreadInfoScreen() {
             </Pressable>
           )}
         </View>
-        {canManage && <Button kind="text" testID="rename-chat" label="rename chat" onPress={rename} style={styles.left} />}
-        {myRole === "OWNER" && (
-          <Pressable testID="delete-chat" onPress={dissolve} style={styles.left}>
-            <Txt style={{ color: colors.danger }}>delete this chat</Txt>
-          </Pressable>
-        )}
+        <View style={styles.actions}>
+          {canManage && <Button kind="outlined" icon="edit" testID="rename-chat" label="Rename chat" onPress={rename} />}
+          {myRole === "OWNER" && <Button kind="text" danger icon="delete-outline" testID="delete-chat" label="Delete this chat" onPress={dissolve} />}
+        </View>
       </ScrollView>
     </View>
   );
@@ -121,7 +128,7 @@ const styles = StyleSheet.create({
   body: { padding: 16, gap: 16 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
   member: { width: 64, alignItems: "center" },
-  name: { marginTop: 4, textAlign: "center" },
+  name: { marginTop: 6, textAlign: "center" },
   remove: {
     position: "absolute",
     right: -6,
@@ -136,12 +143,11 @@ const styles = StyleSheet.create({
   addTile: {
     width: 56,
     height: 56,
-    borderRadius: 6,
+    borderRadius: 12,
     borderWidth: 1,
-    borderStyle: "dashed",
     borderColor: colors.line,
     alignItems: "center",
     justifyContent: "center",
   },
-  left: { alignSelf: "flex-start" },
+  actions: { gap: 8, marginTop: 8 },
 });

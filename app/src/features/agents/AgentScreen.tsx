@@ -1,11 +1,12 @@
 /*
  * One agent: who it is, where it runs, what it is doing, and what can be done to it.
  *
- * <AgentScreen /> — drawn for an "agent" frame with { team, userId }. "live screen" opens its
- *   terminal over the app while it is online. "chat" opens the one-to-one
- *   conversation with the agent (starting it if there is none) on top of this frame; "rename" asks
- *   for a nickname; "close" asks first, stops the agent, and closes this frame. When the agent goes
- *   while the frame is open, it says so instead of showing stale facts.
+ * <AgentScreen /> — drawn for an "agent" frame with { team, userId }, laid out as the previous
+ *   client's: the face (tap: its live screen), the name with its pencil (rename), whether it is
+ *   online, the facts, the keepalive and model API, then "chat with agent" — the one-to-one
+ *   conversation, started if there is none, on top of this frame — and "close agent", which asks
+ *   first, stops the agent and closes this frame. When the agent goes while the frame is open, it
+ *   says so instead of showing stale facts.
  *
  * Example: open(self, "agent", { team: 3, userId: 42 })
  */
@@ -17,6 +18,7 @@ import { isWorking } from "../../data/presence";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
+import { EditableName } from "../../ui/EditableName";
 import { Facts } from "../../ui/Facts";
 import { Button, Field, Header, Txt } from "../../ui/kit";
 import { ListRow, OnlineDot } from "../../ui/ListRow";
@@ -109,47 +111,44 @@ export function AgentScreen() {
         </Txt>
       ) : (
         <ScrollView contentContainerStyle={styles.body}>
-          <View style={styles.who}>
-            <Avatar userId={agent.userId} nickname={agent.nickname} avatarId={agent.avatarId} size={72} />
-            <View style={styles.whoText}>
-              <Txt variant="title">{name}</Txt>
-              <View style={styles.status}>
-                <OnlineDot online={agent.online} />
-                <Txt variant="small" muted>
-                  {!agent.online ? "offline" : isWorking(agent) ? String(agent.vars?.status) : "idle"}
-                </Txt>
-              </View>
+          <View style={styles.column}>
+            {/* Which agent this is, before anything you can do to it. Tapping the face opens its live screen. */}
+            <View style={styles.center}>
+              <Avatar userId={agent.userId} nickname={agent.nickname} avatarId={agent.avatarId} size={96} />
             </View>
-          </View>
-          <Facts
-            rows={[
-              { label: "user id", value: String(agent.userId) },
-              { label: "driver", value: agent.driver },
-              { label: "machine", value: fleet.machineName(agent.machineId) },
-            ]}
-          />
-          {/* Only for the drivers that take their model API from MicroTeams; the others read the machine's. */}
-          {(agent.driver === "dsh" || agent.llm) && (
-            <ListRow
-              testID="agent-llm"
-              leading={<MaterialIcons name="api" size={22} color={colors.inkMuted} />}
-              title="Model API"
-              subtitle={
-                <Txt variant="small" muted numberOfLines={2}>
-                  {modelApiSummary(agent.llm)}
-                </Txt>
-              }
-              onPress={editLlm}
+            <EditableName name={name} onEdit={rename} testID="agent-rename" />
+            <View style={styles.center}>
+              <OnlineDot online={agent.online} label />
+            </View>
+            <Facts
+              rows={[
+                { label: "user id", value: String(agent.userId) },
+                { label: "driver", value: agent.driver },
+                { label: "machine", value: fleet.machineName(agent.machineId) },
+                { label: "team", value: agent.teamId === undefined ? undefined : String(agent.teamId) },
+                { label: "status", value: !agent.online ? undefined : isWorking(agent) ? String(agent.vars?.status) : "idle" },
+              ]}
             />
-          )}
-          <Keepalive agent={agent} apply={(on, min) => guard(() => actions.keepalive(agent, on, min))} />
-          <View style={styles.actions}>
-            <Button testID="agent-chat" label="chat with agent" onPress={chat} />
-            {agent.online && agent.sid ? (
-              <Button kind="text" testID="agent-screen" label="live screen" onPress={() => push("screen", "overlay", { sessionId: agent.sid })} />
-            ) : null}
-            <Button kind="text" testID="agent-rename" label="rename" onPress={rename} />
-            <Button kind="text" testID="agent-close" label="close agent" onPress={close} />
+            <Txt variant="small" muted style={styles.hint}>
+              tap the face to watch its live screen
+            </Txt>
+            <Keepalive agent={agent} apply={(on, min) => guard(() => actions.keepalive(agent, on, min))} />
+            {/* Only for the drivers that take their model API from MicroTeams; the others read the machine's. */}
+            {(agent.driver === "dsh" || agent.llm) && (
+              <ListRow
+                testID="agent-llm"
+                leading={<MaterialIcons name="api" size={22} color={colors.inkMuted} />}
+                title="Model API"
+                subtitle={
+                  <Txt variant="small" muted numberOfLines={2}>
+                    {modelApiSummary(agent.llm)}
+                  </Txt>
+                }
+                onPress={editLlm}
+              />
+            )}
+            <Button testID="agent-chat" icon="chat-bubble-outline" label="chat with agent" onPress={chat} style={styles.chat} />
+            <Button kind="text" danger icon="power-settings-new" testID="agent-close" label="close agent" onPress={close} style={styles.center} />
           </View>
         </ScrollView>
       )}
@@ -159,11 +158,11 @@ export function AgentScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.page },
-  body: { padding: 16, gap: 24 },
-  who: { flexDirection: "row", alignItems: "center" },
-  whoText: { marginLeft: 16, flex: 1, gap: 6 },
-  status: { flexDirection: "row", alignItems: "center", gap: 6 },
-  actions: { gap: 8, alignItems: "flex-start" },
+  body: { paddingHorizontal: 24, paddingVertical: 32 },
+  column: { width: "100%", maxWidth: 420, alignSelf: "center", gap: 16 },
+  center: { alignSelf: "center" },
+  hint: { textAlign: "center" },
+  chat: { height: 44 },
   notice: { textAlign: "center", padding: 24 },
   keepalive: { borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 12, gap: 10 },
   toggleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
