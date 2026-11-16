@@ -62,5 +62,7 @@ export const metrics = {
 export const WIDE = 840;
 
 export const fonts = {
-  mono: isWeb ? "LiberationMono, ui-monospace, Menlo, Consolas, 'PingFang SC', 'Noto Sans SC', monospace" : "LiberationMono",
+  // On the web the faces come from public/fonts (see public/index.html), Chinese included; a phone
+  // draws Chinese with its system's Noto CJK, the same family.
+  mono: isWeb ? "LiberationMono, 'MT Noto Sans SC', monospace" : "LiberationMono",
 } as const;

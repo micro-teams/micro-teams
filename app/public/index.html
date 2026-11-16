@@ -18,6 +18,20 @@
     <link rel="icon" type="image/svg+xml" href="/app/favicon.svg" />
     <link rel="manifest" href="/app/manifest.json" />
     <title>MicroTeams</title>
+    <!-- The faces the previous client bundled, served from here rather than any font service: the
+         monospace face in both weights, and Noto Sans SC for Chinese, which a browser would
+         otherwise draw with whatever its system has (often a much poorer match). Only CJK ranges
+         reach the 8 MB Chinese face, and swap keeps the first frame from waiting on it. -->
+    <style>
+      @font-face { font-family: "LiberationMono"; font-weight: 400; font-display: swap; src: url("/app/fonts/LiberationMono-Regular.ttf") format("truetype"); }
+      @font-face { font-family: "LiberationMono"; font-weight: 700; font-display: swap; src: url("/app/fonts/LiberationMono-Bold.ttf") format("truetype"); }
+      @font-face {
+        font-family: "MT Noto Sans SC";
+        font-display: swap;
+        src: url("/app/fonts/NotoSansSC-Regular.otf") format("opentype");
+        unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF, U+20000-2FA1F;
+      }
+    </style>
     <style id="expo-reset">
       html, body { margin: 0; padding: 0; height: 100%; background: #000; }
       body { overflow: hidden; }

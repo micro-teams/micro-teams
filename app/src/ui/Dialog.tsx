@@ -17,7 +17,7 @@
  * would leave back closing the page underneath while the question stayed up.
  */
 import { ReactNode, useEffect } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useFrame, useNav } from "../nav/NavProvider";
 import { Txt } from "./kit";
 import { colors } from "./theme";
@@ -68,7 +68,10 @@ export function DialogFrame() {
           <Txt variant="title" style={styles.title}>
             {params.title}
           </Txt>
-          {params.render(done)}
+          {/* Taller than the window: the body scrolls, the title stays. */}
+          <ScrollView style={styles.body} keyboardShouldPersistTaps="handled">
+            {params.render(done)}
+          </ScrollView>
         </View>
       </View>
     </View>
@@ -87,6 +90,7 @@ const styles = StyleSheet.create({
   card: {
     width: "100%",
     maxWidth: 420,
+    maxHeight: "100%",
     backgroundColor: colors.raised,
     borderRadius: 12,
     borderWidth: 1,
@@ -94,5 +98,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   title: { marginBottom: 16 },
+  body: { flexGrow: 0 },
   actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 20 },
 });

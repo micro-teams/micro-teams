@@ -20,6 +20,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 import type { ComponentType } from "react";
 import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSession } from "../data/session";
+import { Avatar } from "../ui/Avatar";
 import { Txt } from "../ui/kit";
 import { colors, metrics, WIDE } from "../ui/theme";
 import { FrameProvider, useNav } from "./NavProvider";
@@ -59,9 +61,7 @@ function StackView({ stack, routes, wide, onScreen }: { stack: Frame[]; routes: 
   if (!wide) {
     return (
       <View style={[StyleSheet.absoluteFill, !onScreen && styles.hidden]}>
-        {stack.map((f, i) => (
-          <Drawn key={f.key} frame={f} routes={routes} visible={i === shown || i > shown} />
-        ))}
+        {stack.map((f, i) => (f.kind === "overlay" ? null : <Drawn key={f.key} frame={f} routes={routes} visible={i === shown} />))}
       </View>
     );
   }
@@ -81,17 +81,19 @@ function StackView({ stack, routes, wide, onScreen }: { stack: Frame[]; routes: 
           f.kind === "overlay" ? null : <Drawn key={f.key} frame={f} routes={routes} visible={j + 1 === detail} />,
         )}
       </View>
-      {stack.map((f, i) =>
-        f.kind === "overlay" && i > shown ? <Drawn key={f.key} frame={f} routes={routes} visible /> : null,
-      )}
     </View>
   );
 }
 
 function Destinations({ nav, vertical, onPick }: { nav: Nav; vertical: boolean; onPick: (s: Section) => void }) {
+  const { user } = useSession();
+  // The rail has three, with your own face pinned at the bottom for "me" — the previous clients'
+  // shape, and the only thing on a wide window that says who is signed in. A phone has nowhere to
+  // pin a face, so its bar has "me" as a fourth button.
+  const items = vertical ? SECTIONS.filter((s) => s.section !== "me") : SECTIONS;
   return (
     <View style={vertical ? styles.rail : styles.tabs}>
-      {SECTIONS.map(({ section, label, icon }) => {
+      {items.map(({ section, label, icon }) => {
         const active = nav.section === section;
         const colour = active ? colors.brand : colors.inkMuted;
         return (
@@ -101,11 +103,20 @@ function Destinations({ nav, vertical, onPick }: { nav: Nav; vertical: boolean; 
             onPress={() => onPick(section)}
             style={[styles.destination, active && { backgroundColor: colors.hover }]}
           >
-            <MaterialIcons name={icon} size={metrics.railIcon} color={colour} />
-            <Txt style={{ fontSize: metrics.railLabel, color: colour, marginTop: 2 }}>{label}</Txt>
+            {/* A glyph's box is as tall as the icon font's line, not the icon: pinned, or the label sits low. */}
+            <MaterialIcons name={icon} size={metrics.railIcon} color={colour} style={styles.icon} />
+            <Txt style={[styles.label, { color: colour }]}>{label}</Txt>
           </Pressable>
         );
       })}
+      {vertical && user ? (
+        <>
+          <View style={styles.grow} />
+          <Pressable testID="destination-me" accessibilityLabel={user.nickname} onPress={() => onPick("me")} style={[styles.me, nav.section === "me" && { backgroundColor: colors.hover }]}>
+            <Avatar userId={user.id} nickname={user.nickname} avatarId={user.avatarId} size={36} clickable={false} />
+          </Pressable>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -128,12 +139,27 @@ export function Shell({ routes }: { routes: Routes }) {
     />
   ));
 
+  // Overlays — dialogs, the live screen — over the whole window, rail and tab bar included: a
+  // terminal gets every pixel there is, and a dialog's scrim dims everything behind it. Every
+  // stack's overlays stay mounted (a live screen keeps its connection while you look elsewhere);
+  // only the current stack's are shown.
+  const overlays = [...keys].flatMap((key) => {
+    const stack = key === currentKey ? stackOf(nav) : nav.stacks[key];
+    const shown = topOpaque(stack);
+    return stack.map((f, i) => (f.kind === "overlay" && i > shown ? <Drawn key={f.key} frame={f} routes={routes} visible={key === currentKey} /> : null));
+  });
+
   return (
-    <SafeAreaView style={[styles.root, wide && styles.row]} edges={["top", "bottom"]}>
-      {wide && <Destinations nav={nav} vertical onPick={switchSection} />}
-      <View style={styles.body}>{stacks}</View>
-      {!wide && atRoot && <Destinations nav={nav} vertical={false} onPick={switchSection} />}
-    </SafeAreaView>
+    <View style={styles.root}>
+      <SafeAreaView style={[styles.root, wide && styles.row]} edges={["top", "bottom"]}>
+        {wide && <Destinations nav={nav} vertical onPick={switchSection} />}
+        <View style={styles.body}>{stacks}</View>
+        {!wide && atRoot && <Destinations nav={nav} vertical={false} onPick={switchSection} />}
+      </SafeAreaView>
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        {overlays}
+      </View>
+    </View>
   );
 }
 
@@ -162,6 +188,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
+  icon: { width: metrics.railIcon, height: metrics.railIcon, lineHeight: metrics.railIcon, textAlign: "center" },
+  label: { fontSize: metrics.railLabel, lineHeight: 12, marginTop: 2 },
+  grow: { flex: 1 },
+  me: { padding: 4, borderRadius: metrics.avatarRadius },
   destination: {
     width: metrics.railItem,
     height: metrics.railItem,

@@ -14,9 +14,10 @@
  * message under it clipped rather than ellipsised. Rows are roomier when the list fills a phone
  * than when it is the narrow column beside a conversation.
  */
+import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { chatTitle, ChatSummary, parseMemberIds, useChats, useCreateChat } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -109,7 +110,14 @@ export function ChatsScreen() {
 
   return (
     <View style={styles.root} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      <Header title="chats" actions={<Button kind="text" testID="new-chat" label="new" onPress={newChat} />} />
+      <Header
+        title="chats"
+        actions={
+          <Pressable testID="new-chat" accessibilityLabel="new chat" hitSlop={10} onPress={newChat}>
+            <MaterialIcons name="add-comment" size={22} color={colors.ink} />
+          </Pressable>
+        }
+      />
       {error ? <Txt style={styles.notice}>{String(error)}</Txt> : null}
       <FlashList
         data={chats}

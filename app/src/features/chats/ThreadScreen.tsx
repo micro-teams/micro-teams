@@ -28,7 +28,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { forwardRef, useState } from "react";
-import { Pressable, ScrollViewProps, StyleSheet, TextInput, View } from "react-native";
+import { Pressable, ScrollViewProps, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
@@ -125,6 +125,11 @@ export function ThreadScreen() {
   const thread = useThread(id);
   const info = useThreadInfo(id);
   const [draft, setDraft] = useState("");
+  // The composer grows with what is typed, up to 40% of the window (never less than six lines'
+  // worth), on the web too, where a text area does not grow by itself.
+  const { height: windowHeight } = useWindowDimensions();
+  const [contentHeight, setContentHeight] = useState(0);
+  const inputHeight = Math.min(Math.max(140, windowHeight * 0.4), Math.max(metrics.composerHeight, contentHeight + 20));
   const [laidOut, setLaidOut] = useState(false);
   const { bottom } = useSafeAreaInsets();
   const members: Member[] = info.members;
@@ -184,17 +189,20 @@ export function ThreadScreen() {
       {!thread.loaded && <View style={styles.fill} />}
       <KeyboardStickyView offset={{ closed: 0, opened: bottom }}>
         <View style={styles.composer}>
-          <TextInput
-            testID="composer"
-            accessibilityLabel="message"
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="message…"
-            placeholderTextColor={colors.inkMuted}
-            multiline
-          />
-          <Button kind="send" testID="send" label="send" onPress={send} disabled={!draft.trim()} style={styles.send} />
+          <View style={styles.composerColumn}>
+            <TextInput
+              testID="composer"
+              accessibilityLabel="message"
+              style={[styles.input, { height: inputHeight }]}
+              onContentSizeChange={(e) => setContentHeight(e.nativeEvent.contentSize.height)}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="message…"
+              placeholderTextColor={colors.inkMuted}
+              multiline
+            />
+            <Button kind="send" testID="send" label="send" onPress={send} disabled={!draft.trim()} style={styles.send} />
+          </View>
         </View>
       </KeyboardStickyView>
     </View>
@@ -207,7 +215,9 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   edge: { textAlign: "center", paddingVertical: 16 },
   separator: { textAlign: "center", paddingVertical: 8 },
-  row: { flexDirection: "row", paddingHorizontal: 10, paddingVertical: 3, gap: 8 },
+  // One centred reading column, as the previous clients had: in a wide window the faces sit in
+  // from the edges and a bubble's 72% is of the column, never a 1200 px line.
+  row: { flexDirection: "row", paddingHorizontal: 10, paddingVertical: 3, gap: 8, width: "100%", maxWidth: metrics.readingColumn, alignSelf: "center" },
   rowMine: { flexDirection: "row-reverse" },
   column: { flexShrink: 1, maxWidth: `${metrics.bubbleMaxFraction * 100}%` },
   name: { marginLeft: 4, marginBottom: 2 },
@@ -222,17 +232,14 @@ const styles = StyleSheet.create({
   stuck: { flexDirection: "row", gap: 8, marginTop: 2 },
   action: { color: colors.danger, textDecorationLine: "underline" },
   composer: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    gap: 8,
     padding: 12,
     backgroundColor: colors.card,
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
+  composerColumn: { flexDirection: "row", alignItems: "stretch", gap: 8, width: "100%", maxWidth: metrics.readingColumn, alignSelf: "center" },
   input: {
     flex: 1,
-    maxHeight: 140,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 6,
