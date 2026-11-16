@@ -20,3 +20,9 @@ test("a message deleted inside the newest page's range goes", () => {
 test("an older page is folded in without duplicates", () => {
   expect(ids(mergeOlder([m(3), m(4)], [m(1), m(2), m(3)]))).toEqual([1, 2, 3, 4]);
 });
+
+test("a refetch with nothing new keeps the same array", () => {
+  const held = mergeNewest([], [m(1), m(2), m(3)]);
+  expect(mergeNewest(held, [m(2), m(3)])).toBe(held);
+  expect(mergeNewest(held, [m(2), m(4)])).not.toBe(held);
+});

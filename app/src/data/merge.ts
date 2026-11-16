@@ -21,7 +21,16 @@ export type Message = Schema["Message"];
 export function mergeNewest(held: Message[], page: Message[]): Message[] {
   if (!page.length) return held;
   const sorted = [...page].sort((a, b) => a.id - b.id);
+  // Nothing new — the usual answer to a refetch — keeps the very same array, so nothing on screen
+  // is told to lay itself out again.
+  const tail = held.slice(-sorted.length);
+  const before = held[held.length - sorted.length - 1];
+  if (tail.length === sorted.length && sorted.every((m, i) => same(m, tail[i])) && (!before || before.id < sorted[0].id)) return held;
   return [...held.filter((m) => m.id < sorted[0].id), ...sorted];
+}
+
+function same(a: Message, b: Message | undefined): boolean {
+  return !!b && a.id === b.id && a.content === b.content && a.editedAt === b.editedAt;
 }
 
 /** Folds an older page in, dropping ids already held (pages may overlap). */

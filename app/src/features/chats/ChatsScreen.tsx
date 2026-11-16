@@ -17,14 +17,14 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { chatTitle, ChatSummary, parseMemberIds, useChats, useCreateChat } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar, MemberGrid } from "../../ui/Avatar";
 import { DialogActions, useAsk } from "../../ui/Dialog";
 import { Button, Field, Header, Pressy, Txt } from "../../ui/kit";
-import { colors, metrics } from "../../ui/theme";
+import { colors, metrics, WIDE } from "../../ui/theme";
 import { listTime } from "./time";
 
 /**
@@ -100,8 +100,12 @@ export function ChatsScreen() {
   const { chats, loadMore, loading, error } = useChats();
   const create = useCreateChat();
   const ask = useAsk();
-  const [width, setWidth] = useState(0);
-  const dense = width > 0 && width < metrics.readingColumn;
+  // The list's own width, guessed from the window before the first layout. A hidden stack lays out
+  // at zero width; taking that as the width drew the rows roomy for a frame on coming back, then
+  // dense — the list visibly shrank. A zero width is not news and is ignored.
+  const window = useWindowDimensions();
+  const [width, setWidth] = useState(() => (window.width >= WIDE ? metrics.listPane : window.width));
+  const dense = width < metrics.readingColumn;
 
   const newChat = async () => {
     const id = await ask<number>("new chat", (done) => <NewChatForm create={create} done={done} />);
@@ -109,7 +113,7 @@ export function ChatsScreen() {
   };
 
   return (
-    <View style={styles.root} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    <View style={styles.root} onLayout={(e) => e.nativeEvent.layout.width > 0 && setWidth(e.nativeEvent.layout.width)}>
       <Header
         title="chats"
         actions={

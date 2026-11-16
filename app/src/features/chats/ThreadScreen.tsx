@@ -27,14 +27,15 @@
  */
 import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { forwardRef, useState } from "react";
-import { Pressable, ScrollViewProps, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
+import { forwardRef, useRef, useState } from "react";
+import { HostInstance, Pressable, ScrollViewProps, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
 import { isStuck } from "../../data/outbox";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
+import { useKeyboardSlide } from "../../platform/keyboardSlide";
 import { Avatar } from "../../ui/Avatar";
 import { Button, Header, Txt } from "../../ui/kit";
 import { colors, fonts, metrics } from "../../ui/theme";
@@ -131,6 +132,13 @@ export function ThreadScreen() {
   const [contentHeight, setContentHeight] = useState(0);
   const inputHeight = Math.min(Math.max(140, windowHeight * 0.4), Math.max(metrics.composerHeight, contentHeight + 20));
   const [laidOut, setLaidOut] = useState(false);
+  // On the web the keyboard resizes the page at once; these glide instead (a phone follows its
+  // keyboard frame by frame already). At the bottom the messages ride with the composer; scrolled
+  // up, only the composer moves and the messages stay where they are.
+  const listArea = useRef<HostInstance>(null);
+  const composerArea = useRef<HostInstance>(null);
+  const atBottom = useRef(true);
+  useKeyboardSlide(() => (atBottom.current ? [listArea.current, composerArea.current] : [composerArea.current]));
   const { bottom } = useSafeAreaInsets();
   const members: Member[] = info.members;
   const title = info.title(user?.id);
@@ -158,37 +166,44 @@ export function ThreadScreen() {
         }
       />
       {thread.loaded && (
-      <FlashList
-        style={!laidOut && thread.messages.length > 0 && styles.hidden}
-        onLoad={() => setLaidOut(true)}
-        data={thread.messages}
-        keyExtractor={(m) => String(m.id)}
-        renderScrollComponent={ChatScroll}
-        maintainVisibleContentPosition={{ startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }}
-        onStartReached={thread.loadOlder}
-        onStartReachedThreshold={0.5}
-        ListHeaderComponent={<Txt variant="small" muted style={styles.edge}>{edge}</Txt>}
-        ListFooterComponent={
-          <>
-            {thread.pending.map((p) => (
-              <PendingRow
-                key={p.clientToken}
-                pending={p}
-                onRetry={() => thread.retry(p.clientToken)}
-                onRemove={() => setDraft(thread.discard(p.clientToken) ?? "")}
-              />
-            ))}
-            {thread.error ? <Txt style={styles.error}>{String(thread.error)}</Txt> : null}
-          </>
-        }
-        renderItem={({ item, index }) => (
-          <Row item={item} prev={thread.messages[index - 1]} me={user?.id} members={members} group={members.length > 2} />
-        )}
-      />
+        <View ref={listArea} style={styles.fill}>
+          <FlashList
+            onScroll={({ nativeEvent: e }) => {
+              atBottom.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
+            }}
+            style={!laidOut && thread.messages.length > 0 && styles.hidden}
+            // Shown two frames after the first layout, not on it: the list measures its rows and
+            // settles its position from the bottom in those frames, and that settling is the flash.
+            onLoad={() => requestAnimationFrame(() => requestAnimationFrame(() => setLaidOut(true)))}
+            data={thread.messages}
+            keyExtractor={(m) => String(m.id)}
+            renderScrollComponent={ChatScroll}
+            maintainVisibleContentPosition={{ startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }}
+            onStartReached={thread.loadOlder}
+            onStartReachedThreshold={0.5}
+            ListHeaderComponent={<Txt variant="small" muted style={styles.edge}>{edge}</Txt>}
+            ListFooterComponent={
+              <>
+                {thread.pending.map((p) => (
+                  <PendingRow
+                    key={p.clientToken}
+                    pending={p}
+                    onRetry={() => thread.retry(p.clientToken)}
+                    onRemove={() => setDraft(thread.discard(p.clientToken) ?? "")}
+                  />
+                ))}
+                {thread.error ? <Txt style={styles.error}>{String(thread.error)}</Txt> : null}
+              </>
+            }
+            renderItem={({ item, index }) => (
+              <Row item={item} prev={thread.messages[index - 1]} me={user?.id} members={members} group={members.length > 2} />
+            )}
+          />
+        </View>
       )}
       {!thread.loaded && <View style={styles.fill} />}
       <KeyboardStickyView offset={{ closed: 0, opened: bottom }}>
-        <View style={styles.composer}>
+        <View ref={composerArea} style={styles.composer}>
           <View style={styles.composerColumn}>
             <TextInput
               testID="composer"
