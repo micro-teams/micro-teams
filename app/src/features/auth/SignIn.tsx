@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "../../data/session";
+import { AutofillForm } from "../../platform/AutofillForm";
 import { isWeb } from "../../platform/platform";
 import { Button, Field, Txt } from "../../ui/kit";
 import { Labelled } from "../../ui/Labelled";
@@ -119,7 +120,7 @@ export function SignIn() {
               </Labelled>
             </View>
           )}
-          <View style={styles.card}>
+          <AutofillForm style={styles.card}>
             <Txt style={styles.title}>
               {mode === "in" ? "login" : "register"}
             </Txt>
@@ -130,7 +131,7 @@ export function SignIn() {
                     testID="username"
                     value={username}
                     onChangeText={setUsername}
-                    autoComplete="username"
+                    autoComplete="username" textContentType="username" importantForAutofill="yes" nativeID="username"
                   />
                 </Labelled>
                 <Labelled label="password">
@@ -139,7 +140,7 @@ export function SignIn() {
                     value={password}
                     onChangeText={setPassword}
                     secure
-                    autoComplete="current-password"
+                    autoComplete="current-password" textContentType="password" importantForAutofill="yes" nativeID="password"
                     onSubmitEditing={() =>
                       canSignIn &&
                       run(() => target().signIn(username.trim(), password))
@@ -158,7 +159,7 @@ export function SignIn() {
                     testID="username"
                     value={username}
                     onChangeText={setUsername}
-                    autoComplete="username"
+                    autoComplete="username" textContentType="username" importantForAutofill="yes" nativeID="username"
                   />
                 </Labelled>
                 <Labelled label="nickname">
@@ -177,7 +178,7 @@ export function SignIn() {
                     value={password}
                     onChangeText={setPassword}
                     secure
-                    autoComplete="new-password"
+                    autoComplete="new-password" textContentType="newPassword" importantForAutofill="yes"
                   />
                   <View style={styles.rules}>
                     {checks.rules.map((r) => (
@@ -209,7 +210,7 @@ export function SignIn() {
                     value={confirm}
                     onChangeText={setConfirm}
                     secure
-                    autoComplete="new-password"
+                    autoComplete="new-password" textContentType="newPassword" importantForAutofill="yes"
                   />
                 </Labelled>
                 <Labelled label="email">
@@ -293,7 +294,7 @@ export function SignIn() {
                 onPress={() => switchTo(mode === "in" ? "up" : "in")}
               />
             </View>
-          </View>
+          </AutofillForm>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
