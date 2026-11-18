@@ -316,7 +316,9 @@ async function withAMachine(
   const marker = `e2e-marker-${run}`;
   // Opening an agent opens its page. Its program is given a minute to finish starting: a message
   // that arrives while it is still starting is typed into it but not always submitted.
-  await d.waitFor("agent-chat", 15_000);
+  // Waited for by its name at the top: the chat button may be below the fold, or under the
+  // keyboard still up from the dialog, until tapping it scrolls it into view.
+  await d.waitFor("agent-rename", 15_000);
   await elsewhere.untilIdle(teamId, agentId);
   await d.tap("agent-chat");
   await d.waitFor("composer", 30_000);
