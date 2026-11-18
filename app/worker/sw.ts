@@ -62,6 +62,12 @@ const router = createLineRouter({
     });
   },
   fallbackAfterMs: 3000,
+  // As the page's substrate (src/transport/substrate.ts): a dead line noticed and replaced in
+  // seconds, and a request not answered over the lines in 2.5 s sent directly.
+  pingIntervalMs: 2000,
+  deadAfterMs: 5000,
+  maxDelayMs: 2000,
+  requestTimeoutMs: 2500,
   fallback: (request) => {
     counts.direct += 1;
     return fetch(request);
