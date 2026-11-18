@@ -161,7 +161,7 @@ export function DocsScreen() {
             <Row
               testID="doc-root"
               label={teamName}
-              icon={expanded.has("") ? "folder-open" : "folder"}
+              icon="folder"
               depth={0}
               onPress={() => toggle("")}
               menu={menuItems(true)}
@@ -172,7 +172,7 @@ export function DocsScreen() {
             <Row
               testID={`doc-${node.path}`}
               label={nameOf(node.path)}
-              icon={node.isFolder ? (expanded.has(node.path) ? "folder-open" : "folder") : "description"}
+              icon={node.isFolder ? "folder" : "description"}
               depth={depth + 1}
               onPress={() => (node.isFolder ? toggle(node.path) : open(self, "doc", { team, path: node.path }))}
               menu={menuItems(false)}

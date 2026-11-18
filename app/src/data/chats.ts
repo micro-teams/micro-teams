@@ -27,7 +27,7 @@
  */
 import type { Message } from "./merge";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Schema } from "../api/client";
 import { mergeNewest, mergeOlder } from "./merge";
 import { Outbox, type Pending } from "./outbox";
@@ -45,6 +45,29 @@ export function chatTitle(chat: ChatSummary, me: number | undefined): string {
   if (chat.title) return chat.title;
   const others = chat.members.filter((m) => m.userId !== me);
   return others.length === 1 ? others[0].nickname : chat.members.map((m) => m.nickname).join("、");
+}
+
+/**
+ * Whether the first screen has what it shows: signed out, at once; signed in, once the chat list's
+ * first page has arrived or failed — or after eight seconds, so a slow server never holds the app
+ * behind its splash.
+ */
+export function useFirstScreen(signedIn: boolean): boolean {
+  const queries = useQueryClient();
+  const [late, setLate] = useState(false);
+  const settled = useSyncExternalStore(
+    (changed) => queries.getQueryCache().subscribe(changed),
+    () => {
+      const st = queries.getQueryState(["chats"]);
+      return !!st && (st.status === "success" || st.status === "error");
+    },
+  );
+  useEffect(() => {
+    if (!signedIn) return;
+    const t = setTimeout(() => setLate(true), 8000);
+    return () => clearTimeout(t);
+  }, [signedIn]);
+  return !signedIn || settled || late;
 }
 
 export function useChats() {

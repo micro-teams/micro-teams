@@ -9,7 +9,9 @@
  * fallback face would visibly jump when it arrives.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
+import { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -31,8 +33,11 @@ import { SessionProvider, useSession } from "./src/data/session";
 import { NavProvider } from "./src/nav/NavProvider";
 import { Shell } from "./src/nav/Shell";
 import { DialogFrame } from "./src/ui/Dialog";
+import { Splash } from "./src/ui/Splash";
 import { MenuFrame } from "./src/ui/Menu";
 import { ToastProvider } from "./src/ui/Toast";
+import { useFirstScreen } from "./src/data/chats";
+import { markReady } from "./src/platform/ready";
 
 const LIBERATION_MONO = require("./assets/fonts/LiberationMono-Regular.ttf");
 
@@ -61,19 +66,31 @@ const queries = new QueryClient();
 
 function Root() {
   const { user } = useSession();
-  return user ? (
-    <NavProvider key={user.id}>
-      <Shell routes={routes} />
-    </NavProvider>
-  ) : (
-    <SignIn />
+  // Drawn underneath the splash while it fills in — the chat list's first page included — and
+  // shown in one piece once it has.
+  const firstScreen = useFirstScreen(!!user);
+  useEffect(() => {
+    if (firstScreen) markReady();
+  }, [firstScreen]);
+  return (
+    <>
+      {user ? (
+        <NavProvider key={user.id}>
+          <Shell routes={routes} />
+        </NavProvider>
+      ) : (
+        <SignIn />
+      )}
+      {!firstScreen && <Splash />}
+    </>
   );
 }
 
 export default function App() {
-  const [fontsLoaded, fontError] = useFonts({ LiberationMono: LIBERATION_MONO });
+  // The icon font too: without it every icon is blank for a moment and then pops in.
+  const [fontsLoaded, fontError] = useFonts({ LiberationMono: LIBERATION_MONO, ...MaterialIcons.font });
   if (fontError) throw fontError;
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded) return <Splash />;
   return (
     <SafeAreaProvider>
       <KeyboardProvider>

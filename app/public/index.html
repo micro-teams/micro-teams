@@ -32,6 +32,19 @@
         unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF, U+20000-2FA1F;
       }
     </style>
+    <!-- The splash, from the first byte until the app has drawn a complete first screen (it sets
+         data-mt-ready on <html>; src/platform/ready.web.ts), so nothing assembles in front of the
+         reader. After twenty seconds it says it is taking too long and offers the two things that
+         help: trying again, and clearing the app's cache. -->
+    <style>
+      #mt-splash { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+        background: #060606; color: #f5f5f5; z-index: 2147483647; font: 500 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        transition: opacity .2s ease; }
+      #mt-splash-word { color: #8a8a8a; }
+      #mt-splash-slow { color: #8a8a8a; font-size: 13px; text-align: center; line-height: 1.8; }
+      #mt-splash-slow a { color: #f5f5f5; }
+      html[data-mt-ready="1"] #mt-splash { opacity: 0; pointer-events: none; }
+    </style>
     <style id="expo-reset">
       html, body { margin: 0; padding: 0; height: 100%; background: #000; }
       body { overflow: hidden; }
@@ -41,5 +54,18 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
+    <div id="mt-splash">
+      <div>MicroTeams</div>
+      <div id="mt-splash-word">loading…</div>
+      <div id="mt-splash-slow" hidden>
+        <div>This is taking longer than it should.</div>
+        <div><a href="" onclick="location.reload();return false">try again</a> &nbsp;·&nbsp; <a href="/app/unregister.html">clear this app's cache</a></div>
+      </div>
+    </div>
+    <script>
+      setTimeout(function () {
+        if (document.documentElement.dataset.mtReady !== "1") document.getElementById("mt-splash-slow").hidden = false;
+      }, 20000);
+    </script>
   </body>
 </html>
