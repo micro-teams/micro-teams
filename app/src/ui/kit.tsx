@@ -30,9 +30,9 @@ import {
   View,
   ViewStyle,
 } from "react-native";
-import { colors, fonts, metrics } from "./theme";
+import { colors, fonts, metrics, type } from "./theme";
 
-const SIZES = { body: 14, title: 16, small: 12, label: 11 } as const;
+
 
 export function Txt({
   children,
@@ -42,7 +42,7 @@ export function Txt({
   ...rest
 }: {
   children: ReactNode;
-  variant?: keyof typeof SIZES;
+  variant?: keyof typeof type;
   muted?: boolean;
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
@@ -52,7 +52,7 @@ export function Txt({
   return (
     <Text
       {...rest}
-      style={[{ fontFamily: fonts.mono, fontSize: SIZES[variant], color: muted ? colors.inkMuted : colors.ink }, style]}
+      style={[{ fontFamily: fonts.mono, ...type[variant], color: muted ? colors.inkMuted : colors.ink }, style]}
     >
       {children}
     </Text>
@@ -225,6 +225,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
+    letterSpacing: 0.25,
     fontFamily: fonts.mono,
     color: colors.ink,
   },

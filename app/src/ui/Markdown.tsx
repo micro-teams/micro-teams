@@ -129,7 +129,7 @@ function Blocks({ tokens, onLink }: { tokens: Token[] } & Omit<Props, "source">)
             return null;
           case "heading": {
             const h = t as Tokens.Heading;
-            return <Para key={i} tokens={h.tokens} onLink={onLink} style={{ ...styles.heading, fontSize: HEADING[h.depth] ?? 14 }} />;
+            return <Para key={i} tokens={h.tokens} onLink={onLink} style={{ ...styles.heading, fontSize: HEADING[h.depth] ?? 14, lineHeight: Math.round((HEADING[h.depth] ?? 14) * 1.3) }} />;
           }
           case "paragraph": {
             const p = t as Tokens.Paragraph;
@@ -223,12 +223,13 @@ export function Markdown({ source, onLink }: Props) {
   );
 }
 
-const base: TextStyle = { fontFamily: fonts.mono, color: colors.ink, fontSize: 14, lineHeight: 22 };
+// The previous client's reading text: 14 px on a 1.7 line, M3's body spacing.
+const base: TextStyle = { fontFamily: fonts.mono, color: colors.ink, fontSize: 14, lineHeight: 24, letterSpacing: 0.25 };
 
 const styles = StyleSheet.create({
   root: { gap: 12 },
   text: base,
-  heading: { ...base, fontWeight: "700", marginTop: 8 },
+  heading: { ...base, fontWeight: "700", marginTop: 8, letterSpacing: 0 },
   strong: { fontWeight: "700" },
   em: { fontStyle: "italic" },
   del: { textDecorationLine: "line-through" },
@@ -237,7 +238,7 @@ const styles = StyleSheet.create({
   codespan: { fontFamily: fonts.mono, backgroundColor: colors.raised, color: colors.ink },
   link: { color: colors.brand, textDecorationLine: "underline" },
   pre: { backgroundColor: colors.raised, borderRadius: 6, padding: 12 },
-  code: { ...base, fontSize: 13, lineHeight: 19 },
+  code: { ...base, fontSize: 13, lineHeight: 20, letterSpacing: 0.4 },
   quote: { borderLeftWidth: 3, borderLeftColor: colors.line, paddingLeft: 12, gap: 8 },
   list: { gap: 4 },
   item: { flexDirection: "row" },

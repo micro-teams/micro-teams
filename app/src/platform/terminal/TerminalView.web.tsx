@@ -17,8 +17,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
     post.current = onMessage;
   });
   useEffect(() => {
-    term.current = mountTerminal(host.current!, (m) => post.current(m), { fontFamily: fonts.mono });
-    return () => term.current?.dispose();
+    // The face is loaded before the terminal measures its cell, or the cell is a fallback's.
+    let gone = false;
+    void document.fonts.load("13px LiberationMono").catch(() => undefined).then(() => {
+      if (!gone) term.current = mountTerminal(host.current!, (m) => post.current(m), { fontFamily: fonts.mono });
+    });
+    return () => {
+      gone = true;
+      term.current?.dispose();
+    };
   }, []);
   useEffect(() => term.current?.setTyping(typing), [typing]);
   useImperativeHandle(ref, () => ({ write: (bytes) => term.current?.write(bytes) }), []);

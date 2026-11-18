@@ -61,6 +61,18 @@ export const metrics = {
 /** Phone layout below this width, list-beside-detail at or above it. */
 export const WIDE = 840;
 
+/**
+ * The text styles, as the previous client had them: Material 3's type scale set in the monospace
+ * face — the size, the line, and the letter spacing, which in a monospace face is much of its look
+ * (M3 spaces body text 0.25 px, small 0.4, labels 0.5).
+ */
+export const type = {
+  body: { fontSize: 14, lineHeight: 20, letterSpacing: 0.25 },
+  small: { fontSize: 12, lineHeight: 16, letterSpacing: 0.4 },
+  label: { fontSize: 11, lineHeight: 16, letterSpacing: 0.5 },
+  title: { fontSize: 16, lineHeight: 24, letterSpacing: 0.15 },
+} as const;
+
 export const fonts = {
   // On the web the faces come from public/fonts (see public/index.html), Chinese included; a phone
   // draws Chinese with its system's Noto CJK, the same family.

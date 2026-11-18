@@ -1,5 +1,5 @@
 /*
- * Builds the page a phone draws the live screen in: xterm.js, its stylesheet and
+ * Builds the page a phone draws the live screen in: xterm.js, its stylesheet, the monospace face and
  * src/platform/terminal/host.ts in one HTML document, written as a string constant to
  * src/platform/terminal/page.generated.ts (not committed; `npm run codegen` makes it).
  *
@@ -28,11 +28,18 @@ const js = await build({
   legalComments: "none",
 });
 const css = await readFile(require.resolve("@xterm/xterm/css/xterm.css"), "utf8");
+// The app's monospace face, inside the page: a WebView knows only the system's fonts, and the
+// system's monospace is not the face the terminal is set in everywhere else.
+const face = async (file, weight) =>
+  `@font-face{font-family:"LiberationMono";font-weight:${weight};src:url(data:font/ttf;base64,${(
+    await readFile(path.join(here, "..", "public", "fonts", file))
+  ).toString("base64")}) format("truetype")}`;
+const fontsCss = (await face("LiberationMono-Regular.ttf", 400)) + (await face("LiberationMono-Bold.ttf", 700));
 const script = js.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
 
 const html = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>${css}
+<style>${fontsCss}${css}
 html,body{margin:0;height:100%;background:#000;overflow:hidden}#t{position:absolute;inset:0}</style>
 </head><body><div id="t"></div><script>${script}</script></body></html>`;
 

@@ -53,7 +53,7 @@ function Bubble({ text, mine, faded }: { text: string; mine: boolean; faded?: bo
   return (
     <View style={[styles.bubble, { backgroundColor: bg }, faded && { opacity: 0.6 }]}>
       <View style={[styles.tail, { backgroundColor: bg }, mine ? { right: -3 } : { left: -3 }]} />
-      <Txt selectable style={{ color: mine ? colors.ownBubbleInk : colors.otherBubbleInk, fontSize: metrics.bubbleText, lineHeight: 19 }}>
+      <Txt selectable style={{ color: mine ? colors.ownBubbleInk : colors.otherBubbleInk, fontSize: metrics.bubbleText, lineHeight: 19, letterSpacing: 0.25 }}>
         {text}
       </Txt>
     </View>
