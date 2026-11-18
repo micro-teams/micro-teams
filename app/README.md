@@ -60,8 +60,9 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
                   substrate
     public/       copied into the web build as is: index.html (the splash, drawn before any script
                   runs), the fonts, the icons, and unregister.html, the way out of a stuck cache
+    assets/       the mark (logo.svg) and the launcher icons tool/icons.sh renders from it
     plugins/      the Expo config plugin that signs the release APK
-    tool/         the build steps above, and the terminal page's generator
+    tool/         the build steps above, the terminal page's generator, and the icons
     e2e/          the journey (see below)
 
 Rules held by code rather than by memory (eslint.config.js):

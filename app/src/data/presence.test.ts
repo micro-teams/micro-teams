@@ -43,6 +43,21 @@ test("an id still tracked by another face is not forgotten", async () => {
   expect(asked).toEqual([[1]]);
 });
 
+test("a face scrolled away and back asks nothing new; refresh asks about everybody", async () => {
+  const { mt, asked } = fakeMt([]);
+  const p = new Presence(() => mt);
+  p.track(1);
+  await jest.advanceTimersByTimeAsync(20);
+  p.untrack(1);
+  p.track(1);
+  p.track(2);
+  await jest.advanceTimersByTimeAsync(20);
+  expect(asked).toEqual([[1], [2]]);
+  p.refresh();
+  await jest.advanceTimersByTimeAsync(20);
+  expect(asked).toEqual([[1], [2], [1, 2]]);
+});
+
 test("nothing is asked while signed out", async () => {
   const p = new Presence(() => null);
   p.track(1);

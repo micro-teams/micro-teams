@@ -16,18 +16,15 @@ import { useSession } from "./session";
 
 const cache = new Map<string, Promise<string | null>>();
 
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
+/**
+ * The engine's own btoa over the bytes as a binary string, built a chunk at a time: encoding in a
+ * loop of JavaScript string operations is slow enough per picture to stall a list being flung
+ * while new faces come into view.
+ */
 function base64(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const [a, b = 0, c = 0] = [bytes[i], bytes[i + 1], bytes[i + 2]];
-    const n = (a << 16) | (b << 8) | c;
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63];
-    out += i + 1 < bytes.length ? ALPHABET[(n >> 6) & 63] : "=";
-    out += i + 2 < bytes.length ? ALPHABET[n & 63] : "=";
-  }
-  return out;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 export function pictureUri(bytes: ArrayBuffer, type: string): string {

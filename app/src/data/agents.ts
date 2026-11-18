@@ -2,7 +2,8 @@
  * A team's machines and agents, and what can be done to an agent.
  *
  * useFleet(teamId) → { machines, agents, machineName(id), loaded, error } — refetched when the
- *   team's topic moves, answering its digest with "machines:online machines:agents".
+ *   team's topic moves, answering its digest with "machines:online machines:agents"; presence is
+ *   asked again then too, since an agent's screen starting or stopping is what moves it.
  * useAgent(teamId, userId) → the agent from that team's fleet, or undefined once it has gone.
  * useAgentActions(teamId) → { rename(agent, nickname), close(agent), chatWith(agent), open(form),
  *   keepalive(agent, enabled, minutes), setLlm(agent, settings), reboot(agent) } —
@@ -33,7 +34,7 @@ export type LlmSettings = Schema["AgentLlmSettings"];
 export const teamTopic = (id: number) => `team:${id}`;
 
 export function useFleet(teamId: number | null) {
-  const { mt } = useSession();
+  const { mt, presence } = useSession();
   const q = useQuery({
     queryKey: ["fleet", teamId],
     enabled: !!mt && teamId !== null,
@@ -49,7 +50,10 @@ export function useFleet(teamId: number | null) {
   const agents = q.data?.agents ?? [];
   useTopic(
     teamId === null ? null : teamTopic(teamId),
-    () => void q.refetch(),
+    () => {
+      void q.refetch();
+      presence.refresh();
+    },
     () => (q.data ? `${machines.length}:${machines.filter((m) => m.online).length}:${agents.length}` : null),
   );
   return {

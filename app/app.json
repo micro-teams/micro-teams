@@ -6,8 +6,13 @@
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
+    "icon": "./assets/icon.png",
     "android": {
       "package": "app.microteams.microteams",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#07C160"
+      },
       "edgeToEdgeEnabled": true
     },
     "ios": {
