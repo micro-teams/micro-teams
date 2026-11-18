@@ -68,8 +68,11 @@ export class Connection {
           const fresh = await auth.refresh(origin);
           this.adopt(fresh);
           return fresh.accessToken;
-        } catch {
-          this.adopt(null);
+        } catch (e) {
+          // Signed out only when cheese-auth says the session is over. No network, a timeout or a
+          // 5xx from a proxy fails this request and nothing else: the next one tries again.
+          if (e instanceof auth.AuthError && (e.status === 401 || e.status === 403)) this.adopt(null);
+          else console.warn(`refresh failed, still signed in: ${String(e)}`);
           return null;
         }
       },

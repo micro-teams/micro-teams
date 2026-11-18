@@ -5,7 +5,7 @@
  * AuthUser, Session — who is signed in, and the bearer token the backend accepts.
  * login(origin, username, password), register(origin, form), sendSignUpCode(origin, email),
  *   refresh(origin) → Session (refresh rides the httpOnly cookie the browser, or the native
- *   cookie store, keeps), logout(origin, token).
+ *   cookie store, keeps; one in flight at a time, see below), logout(origin, token).
  * AuthError — what cheese-auth refused, with its own message and the HTTP status.
  *
  * Example: const session = await login("https://microteams.app", "alice", "secret");
@@ -50,6 +50,20 @@ export const register = (
 export const sendSignUpCode = (origin: string, email: string) =>
   call<unknown>(origin, "/users/verify/email", { email });
 
-export const refresh = (origin: string) => call<Session>(origin, "/users/auth/refresh-token");
+/**
+ * One refresh at a time per origin. The refresh cookie ROTATES: every refresh spends it and sets a
+ * new one, so two refreshes in flight together — a burst of requests that all met an expired token
+ * at once — send the same cookie twice, and the second is refused as reused. That refusal signed
+ * people out in the middle of using the app. Callers arriving while one is in flight get its answer.
+ */
+const inflight = new Map<string, Promise<Session>>();
+export function refresh(origin: string): Promise<Session> {
+  let pending = inflight.get(origin);
+  if (!pending) {
+    pending = call<Session>(origin, "/users/auth/refresh-token").finally(() => inflight.delete(origin));
+    inflight.set(origin, pending);
+  }
+  return pending;
+}
 
 export const logout = (origin: string, token: string) => call<unknown>(origin, "/users/auth/logout", undefined, token);
