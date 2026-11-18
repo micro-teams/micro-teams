@@ -1,5 +1,6 @@
 /*
- * One document: read as markdown, or edited as text and saved as a commit.
+ * One document: read as what it is (DocView: markdown, a diagram, a table, an SVG, code), or edited
+ * as text and saved as a commit.
  *
  * <DocScreen /> — drawn for a "doc" frame with { team, path }. The header has the history (pushes
  *   "docHistory") and edit, or cancel and save while editing. A link to another document of the
@@ -14,9 +15,9 @@ import { Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from "rea
 import { nameOf, resolveDocLink, useDoc, useDocEdits } from "../../data/docs";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Button, Header, Txt } from "../../ui/kit";
-import { Markdown } from "../../ui/Markdown";
 import { colors, fonts, metrics } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
+import { DocView, kindOf } from "./DocView";
 
 export function DocScreen() {
   const self = useFrame();
@@ -26,6 +27,8 @@ export function DocScreen() {
   const edits = useDocEdits(team);
   const toast = useToast();
   const [draft, setDraft] = useState<string | null>(null);
+  // Text is edited as text; a binary file, which the API can only hand over mangled, is not.
+  const binary = doc.loaded && kindOf(path, doc.content) === "binary";
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -59,8 +62,8 @@ export function DocScreen() {
           <Button kind="text" testID="doc-save" label={saving ? "saving…" : "save"} onPress={save} disabled={saving} />
         </>
       ) : (
-        <Pressable testID="doc-edit" accessibilityLabel="edit" hitSlop={8} disabled={!doc.loaded} onPress={() => setDraft(doc.content)}>
-          <MaterialIcons name="edit" size={20} color={doc.loaded ? colors.ink : colors.inkMuted} />
+        <Pressable testID="doc-edit" accessibilityLabel="edit" hitSlop={8} disabled={!doc.loaded || binary} onPress={() => setDraft(doc.content)}>
+          <MaterialIcons name="edit" size={20} color={doc.loaded && !binary ? colors.ink : colors.inkMuted} />
         </Pressable>
       )}
     </View>
@@ -98,7 +101,7 @@ export function DocScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.body} testID="doc-view">
           <View style={styles.column}>
-            <Markdown source={doc.content} onLink={follow} />
+            <DocView path={path} content={doc.content} onLink={follow} />
           </View>
         </ScrollView>
       )}
