@@ -6,6 +6,9 @@
  *   resize, scroll). typing hands it the keyboard; without it nothing typed comes out.
  *
  * TerminalViewHandle, TerminalViewProps — the ref's write(bytes), and the props above.
+ * <TerminalWarmup /> — one terminal nobody sees, kept from the moment it is mounted: the first
+ *   WebView a process makes starts the browser engine behind every later one, which on a phone
+ *   costs most of a second, so a live screen opened later starts in a fraction of that.
  *
  * Example: <TerminalView ref={term} typing={mode === "typing"} onMessage={handle} style={{ flex: 1 }} />
  *
@@ -41,6 +44,10 @@ function base64(bytes: Uint8Array): string {
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({ typing, onMessage, style }, ref) {
   const web = useRef<WebView>(null);
+  const born = useRef(0);
+  useEffect(() => {
+    born.current = Date.now();
+  }, []);
   const ready = useRef(false);
   const queued = useRef<string[]>([]);
   const send = (m: object) => {
@@ -65,6 +72,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
       onMessage={(e) => {
         const m = JSON.parse(e.nativeEvent.data) as FromTerminal | { type: "ready" };
         if (m.type === "ready") {
+          console.log(`terminal: ready in ${Date.now() - born.current} ms`);
           ready.current = true;
           for (const t of queued.current.splice(0)) web.current?.postMessage(t);
           return;
@@ -74,3 +82,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
     />
   );
 });
+
+export function TerminalWarmup() {
+  return <TerminalView typing={false} onMessage={() => {}} style={{ position: "absolute", width: 1, height: 1, opacity: 0 }} />;
+}

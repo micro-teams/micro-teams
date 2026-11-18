@@ -13,7 +13,7 @@
  * Example: push("screen", "overlay", { sessionId: agent.sid })
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLiveScreen, type ViewMode } from "../../data/screen";
@@ -42,8 +42,14 @@ export function ScreenFrame() {
   const insets = useSafeAreaInsets();
   const term = useRef<TerminalViewHandle>(null);
   const [drawn, setDrawn] = useState(false);
+  const opened = useRef(0);
+  useEffect(() => {
+    opened.current = Date.now();
+  }, []);
   const { state, screen } = useLiveScreen(sessionId, (bytes) => {
     term.current?.write(bytes);
+    if (opened.current > 0) console.log(`screen: the first of it after ${Date.now() - opened.current} ms`);
+    opened.current = -1;
     setDrawn(true);
   });
 

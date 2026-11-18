@@ -1,6 +1,6 @@
 /*
  * The web half of TerminalView: xterm.js straight into this document — the page is a browser
- * already, so there is nothing to embed.
+ * already, so there is nothing to embed, and nothing for TerminalWarmup to start.
  */
 import "@xterm/xterm/css/xterm.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
@@ -32,3 +32,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
   // On the web a View is a div, which is what xterm mounts on.
   return <View ref={(v) => void (host.current = v as unknown as HTMLElement | null)} style={style} testID="terminal" />;
 });
+
+export function TerminalWarmup() {
+  return null;
+}

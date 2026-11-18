@@ -32,6 +32,7 @@ import { LinesScreen, MeScreen } from "./src/features/me/MeScreen";
 import { SessionProvider, useSession } from "./src/data/session";
 import { NavProvider } from "./src/nav/NavProvider";
 import { Shell } from "./src/nav/Shell";
+import { TerminalWarmup } from "./src/platform/terminal/TerminalView";
 import { DialogFrame } from "./src/ui/Dialog";
 import { Splash } from "./src/ui/Splash";
 import { MenuFrame } from "./src/ui/Menu";
@@ -81,6 +82,7 @@ function Root() {
       ) : (
         <SignIn />
       )}
+      {user && firstScreen && <TerminalWarmup />}
       {!firstScreen && <Splash />}
     </>
   );
