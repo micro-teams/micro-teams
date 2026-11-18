@@ -152,7 +152,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.55</version>
+            <version>3.0.0</version>
         </dependency>
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
@@ -218,12 +218,12 @@
         <dependency>
             <groupId>com.aallam.openai</groupId>
             <artifactId>openai-client-jvm</artifactId>
-            <version>4.1.0</version>
+            <version>4.2.0</version>
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
             <artifactId>ktor-client-java-jvm</artifactId>
-            <version>3.6.0</version>
+            <version>3.6.1</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -247,14 +247,14 @@
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
-            <version>7.8.0.202609011348-r</version>
+            <version>7.8.1.202611041320-r</version>
         </dependency>
         <!-- Smart-HTTP git server: lets an agent (or human) clone/commit/push a team's document
              tree as an ordinary git remote. Kept at the same version as jgit core. -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit.http.server</artifactId>
-            <version>7.8.0.202609011348-r</version>
+            <version>7.8.1.202611041320-r</version>
         </dependency>
     </dependencies>
 
@@ -310,7 +310,7 @@
             <plugin>
                 <groupId>org.openapitools</groupId>
                 <artifactId>openapi-generator-maven-plugin</artifactId>
-                <version>7.26.0</version>
+                <version>7.27.0</version>
                 <executions>
                     <execution>
                         <goals>
@@ -421,7 +421,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.10.4</version>
+                <version>3.11.0</version>
                 <configuration>
                     <java>
                         <googleJavaFormat/>
