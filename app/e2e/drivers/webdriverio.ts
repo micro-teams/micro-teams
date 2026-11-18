@@ -93,8 +93,13 @@ export class WebdriverioDriver implements Driver {
   }
 
   async waitFor(id: string, timeoutMs = 15_000) {
-    await (await this.byId(id)).waitForExist({ timeout: timeoutMs });
-    await this.shown(id, timeoutMs);
+    // Where it should appear first; then scrolled for, because a page come back to keeps its scroll
+    // and the platform does not keep views that are off screen.
+    const appeared = await (await this.byId(id)).waitForDisplayed({ timeout: Math.min(timeoutMs, 5000) }).then(
+      () => true,
+      () => false,
+    );
+    if (!appeared) await this.shown(id, timeoutMs);
   }
 
   private byText(text: string) {
