@@ -1,20 +1,30 @@
 /*
  * Pictures from the origin — avatars — fetched over the substrate like everything else, rather
- * than by the image component straight from the origin.
+ * than by the image component straight from the origin, and kept on the device.
  *
  * usePicture(path) → a uri an <Image> can show, or null while it loads (or when it failed). path is
- *   origin-relative ("/api/avatars/12"). Each picture is fetched once per session and shared by
- *   every face showing it.
- * pictureUri(bytes, type) — what the bytes become: an object URL in a browser, a data URI on a
- *   phone (React Native's Blob cannot be built from bytes).
+ *   origin-relative ("/api/avatars/12"). A picture already on the device is there from the first
+ *   frame, on every launch: an avatar's address names one picture forever (a new one gets a new
+ *   id), so a kept copy is never stale and is never asked for again. Each picture is fetched at
+ *   most once per session, and shared by every face showing it.
+ * pictureUri(bytes, type) — what the bytes become: a data URI, the one form an <Image> shows on
+ *   every platform and that can be kept as a string.
  *
  * Example: const uri = usePicture(`/api/avatars/${avatarId}`);
+ *
+ * Kept in storage, the most recently shown first, up to KEEP characters in all; a picture larger
+ * than ONE is shown but not kept, so one large picture cannot push every face out.
  */
 import { useEffect, useState } from "react";
-import { isWeb } from "../platform/platform";
+import { storage } from "../platform/storage";
 import { useSession } from "./session";
 
-const cache = new Map<string, Promise<string | null>>();
+const KEEP = 3_000_000;
+const ONE = 300_000;
+const INDEX = "pictures";
+
+const shown = new Map<string, string>();
+const fetching = new Map<string, Promise<string | null>>();
 
 /**
  * The engine's own btoa over the bytes as a binary string, built a chunk at a time: encoding in a
@@ -28,31 +38,55 @@ function base64(bytes: Uint8Array): string {
 }
 
 export function pictureUri(bytes: ArrayBuffer, type: string): string {
-  if (isWeb) return URL.createObjectURL(new Blob([bytes], { type }));
   return `data:${type};base64,${base64(new Uint8Array(bytes))}`;
+}
+
+/** What is on the device for this key, read synchronously. */
+function known(key: string): string | null {
+  const held = shown.get(key);
+  if (held) return held;
+  const kept = storage.get(`picture:${key}`);
+  if (kept) shown.set(key, kept);
+  return kept;
+}
+
+function keep(key: string, uri: string) {
+  shown.set(key, uri);
+  if (uri.length > ONE) return;
+  const index = (storage.getJson<{ key: string; size: number }[]>(INDEX) ?? []).filter((e) => e.key !== key);
+  index.unshift({ key, size: uri.length });
+  let total = 0;
+  const kept = index.filter((e) => (total += e.size) <= KEEP);
+  for (const e of index.slice(kept.length)) storage.remove(`picture:${e.key}`);
+  storage.set(`picture:${key}`, uri);
+  storage.setJson(INDEX, kept);
 }
 
 export function usePicture(path: string | null): string | null {
   const { origin, substrate } = useSession();
   const key = path ? `${origin}${path}` : null;
-  const [uri, setUri] = useState<string | null>(null);
+  const ready = key ? known(key) : null;
+  const [fetched, setFetched] = useState<{ key: string; uri: string } | null>(null);
   useEffect(() => {
-    if (!key) return;
+    if (!key || known(key)) return;
     let alive = true;
-    let pending = cache.get(key);
+    let pending = fetching.get(key);
     if (!pending) {
       pending = substrate.fetch(key).then(
         async (res) => (res.ok ? pictureUri(await res.arrayBuffer(), res.headers.get("Content-Type") ?? "image/png") : null),
         () => null,
       );
+      fetching.set(key, pending);
       // A failure is not remembered: the next face to ask tries again.
-      void pending.then((u) => u === null && cache.delete(key));
-      cache.set(key, pending);
+      void pending.then((uri) => {
+        fetching.delete(key);
+        if (uri) keep(key, uri);
+      });
     }
-    void pending.then((u) => alive && setUri(u));
+    void pending.then((uri) => alive && uri && setFetched({ key, uri }));
     return () => {
       alive = false;
     };
   }, [key, substrate]);
-  return key ? uri : null;
+  return ready ?? (fetched && fetched.key === key ? fetched.uri : null);
 }

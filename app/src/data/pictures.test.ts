@@ -1,5 +1,5 @@
 /*
- * A picture's bytes as a data URI on a phone.
+ * A picture's bytes as a data URI.
  *
  * Run with `npm test`.
  */
