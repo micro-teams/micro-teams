@@ -32,6 +32,10 @@ test("a conversation's address opens it", () => {
   expect(routes("chats/5")?.stack[1]).toEqual(["thread", { id: 5 }]);
 });
 
+test("the lines panel is reached only by its address", () => {
+  expect(routes("__lines")).toEqual({ section: "me", stack: [["me", {}], ["lines", {}]] });
+});
+
 test("anything else opens the app as usual", () => {
   expect(routes("")).toBeNull();
   expect(routes("chats/abc")).toBeNull();

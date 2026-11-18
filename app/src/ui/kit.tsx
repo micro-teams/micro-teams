@@ -163,6 +163,7 @@ export function Field({ secure, style, ...props }: TextInputProps & { secure?: b
       autoCapitalize="none"
       autoCorrect={false}
       secureTextEntry={secure}
+      underlineColorAndroid="transparent"
       accessibilityLabel={props.accessibilityLabel ?? props.placeholder}
       {...props}
       onFocus={(e) => {

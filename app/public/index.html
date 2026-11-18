@@ -49,6 +49,9 @@
       html, body { margin: 0; padding: 0; height: 100%; background: #000; }
       body { overflow: hidden; }
       #root { display: flex; height: 100%; flex: 1; }
+      /* The browser's own focus ring drew a white edge round every field; the app's fields show
+         focus with their green border instead. */
+      input:focus, textarea:focus { outline: none; }
     </style>
   </head>
   <body>

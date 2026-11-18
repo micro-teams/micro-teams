@@ -9,6 +9,8 @@
  *     connect?code=…   → agents › approve device (the end of `microteams link auto-connect`)
  *     screen/<sid>     → chats › the live screen over it (the CLI's "watch" link)
  *     chats/<id>       → chats › that conversation
+ *     __lines          → me › the lines panel, which has no button anywhere: it is for whoever
+ *                        is diagnosing the network, not something people need to see
  *
  * Example: navFromLink("chats/5", {}) — the chat list with conversation 5 open on it.
  */
@@ -21,5 +23,6 @@ export function navFromLink(path: string, query: Record<string, string>): Nav | 
   }
   if (parts[0] === "screen" && parts[1]) return push(initialNav(), frame("screen", "overlay", { sessionId: parts[1] }));
   if (parts[0] === "chats" && /^\d+$/.test(parts[1] ?? "")) return push(initialNav(), frame("thread", "detail", { id: Number(parts[1]) }));
+  if (parts[0] === "__lines") return push(switchSection(initialNav(), "me"), frame("lines", "detail"));
   return null;
 }
