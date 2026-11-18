@@ -15,7 +15,7 @@ forgotten; code does not.
 |---|---|
 | **`MicroTeams-API.yml`** | The single API contract. The backend's interfaces and the client's are both **generated** from it. |
 | **`backend/`** ("mt") | Kotlin / Spring Boot. Chat, teams, git-backed documents, machines, agents. |
-| **`app/`** | TypeScript, Expo / React Native. The client: web (served at `/app/`), Android and iOS from one codebase. |
+| **`app/`** | TypeScript, Expo / React Native. The client, from one codebase: the web build (served at `/app/`) and the Android APK (offered at `/downloads/`). |
 | **`site/`** | The marketing site at the deployment's root ("/") — plain HTML/CSS/JS, no build step. |
 | **`cli/`** | Go. Runs on a machine, hosts the agent's CLI, speaks the connector protocol. |
 | **`applets/`** | TypeScript, bundled for the CLI's embedded JS runtime: the `microteams api` command tree (the agents' frontend) and the screen drivers. Served by the backend, fetched by the CLI on demand. |
@@ -81,7 +81,10 @@ one side only. The known exceptions:
 ```mermaid
 flowchart TD
     browser(["browser"]) -->|one public origin| nginx["nginx"]
+    nginx -->|"/mt/link (the lines)"| origin["origin<br/>MultiPath substrate"]
+    origin -->|each exchange, spliced back| nginx
     nginx -->|"/"| site["site<br/>static marketing pages"]
+    nginx -->|"/app/"| app["app<br/>the web build"]
     nginx -->|"/api"| auth["cheese-auth<br/>NestJS · :8091"]
     nginx -->|"/mt"| mt["mt<br/>Kotlin / Spring · :8199"]
     cli["cli<br/>on your machine"] -->|WebSocket| mt
@@ -92,8 +95,8 @@ flowchart TD
 
 Everything the browser touches is **one origin** — nginx puts all three behind it at different
 path prefixes — so there is effectively no cross-origin request and cheese-auth's `httpOnly`
-refresh cookie simply works. The web build calls relative paths only (`/api/...`, `/mt/...`),
-never an absolute backend URL. That is required, not tidiness.
+refresh cookie simply works. The web build talks only to the origin it was served from, never to
+a backend URL of its own. That is required, not tidiness.
 
 Both backends trust the **same JWT** because they share `JWT_SECRET`: mt verifies the signature
 itself and never calls cheese-auth to check a request. (`application.legacy-url` is a different,
@@ -175,12 +178,15 @@ server {
                      proxy_http_version 1.1;             # the CLI link + live-screen WebSockets
                      proxy_set_header Upgrade $http_upgrade;
                      proxy_set_header Connection "upgrade"; }
-    location /     { proxy_pass http://127.0.0.1:5173;  include proxy_params;
-                     proxy_http_version 1.1;             # vite HMR
-                     proxy_set_header Upgrade $http_upgrade;
-                     proxy_set_header Connection "upgrade"; }
+    location /app/ { alias /path/to/micro-teams/app/web-dist/;   # `npm run build:web` in app/
+                     try_files $uri $uri/ /app/index.html; }
+    location /     { root /path/to/micro-teams/site; }
 }
 ```
+
+Without the origin (`deploy/`'s `origin` service) there is no substrate, and the app sends every
+request directly, saying so on its lines panel (`/app/__lines`): what a deployment does when its
+lines are down.
 
 `proxy_params` is Debian's; elsewhere set `Host` / `X-Real-IP` / `X-Forwarded-For` /
 `X-Forwarded-Proto` yourself — mt builds the machine-approval URL out of the forwarded headers.

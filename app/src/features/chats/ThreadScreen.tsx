@@ -239,8 +239,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   edge: { textAlign: "center", paddingVertical: 16 },
   separator: { textAlign: "center", paddingVertical: 8 },
-  // One centred reading column, as the previous clients had: in a wide window the faces sit in
-  // from the edges and a bubble's 72% is of the column, never a 1200 px line.
+  // One centred reading column: in a wide window the faces sit in from the edges and a bubble's 72% is of the column, never a 1200 px line.
   row: { flexDirection: "row", paddingHorizontal: 10, paddingVertical: 3, gap: 8, width: "100%", maxWidth: metrics.readingColumn, alignSelf: "center" },
   rowMine: { flexDirection: "row-reverse" },
   column: { flexShrink: 1, maxWidth: `${metrics.bubbleMaxFraction * 100}%` },

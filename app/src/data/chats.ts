@@ -15,6 +15,10 @@
  * useCreateChat() → create(title, memberIds?) → the new thread's id. parseMemberIds(raw) — "12, 34 56" as ids.
  * chatTitle(chat, me) — a group by its title, a one-to-one by the other person.
  *
+ * ChatSummary, ThreadMember — the API's own shapes, named for the screens.
+ * useFirstScreen(signedIn) → boolean — true once the first screen can be shown complete: signed
+ *   out, or the chat list's first page has arrived or failed, or eight seconds have passed.
+ *
  * Example:
  *   const { chats, loadMore } = useChats();
  *   <FlashList data={chats} onEndReached={loadMore} ... />
@@ -44,7 +48,7 @@ const MESSAGES_PAGE = 100;
 export function chatTitle(chat: ChatSummary, me: number | undefined): string {
   if (chat.title) return chat.title;
   const others = chat.members.filter((m) => m.userId !== me);
-  return others.length === 1 ? others[0].nickname : chat.members.map((m) => m.nickname).join("、");
+  return others.length === 1 ? others[0].nickname : chat.members.map((m) => m.nickname).join(", ");
 }
 
 /**
@@ -203,7 +207,7 @@ export function useThreadInfo(id: number) {
     title: (me: number | undefined) => {
       if (q.data?.thread.title) return q.data.thread.title;
       const others = members.filter((m) => m.userId !== me);
-      return others.map((m) => m.nickname ?? `#${m.userId}`).join("、");
+      return others.map((m) => m.nickname ?? `#${m.userId}`).join(", ");
     },
   };
 }

@@ -6,8 +6,8 @@
  *
  * Example: {user ? <Shell routes={routes} /> : <SignIn />}
  *
- * The previous clients' look: a bordered card, lowercase, the heading and each field's name above
- * its box rather than inside it. Registering mirrors the username into the nickname until the
+ * A bordered card, lowercase, the heading and each field's name above its box rather than inside
+ * it, as every form in the app is set. Registering mirrors the username into the nickname until the
  * nickname is edited, ticks off the password's four rules as they are met, and asks cheese-auth to
  * mail a code first; "create account" waits until everything the server checks is right. Where the
  * server is, on a phone, sits behind the gear top-right, not in the form: it is a property of the

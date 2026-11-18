@@ -72,7 +72,7 @@ function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; den
   const size = dense ? metrics.avatarInDenseList : metrics.avatarInList;
   const last = chat.lastMessage;
   const sender = chat.members.find((m) => m.userId === last?.senderId)?.nickname;
-  const preview = !last ? "tap to open" : oneOnOne ? last.content : `${sender ?? ""}：${last.content}`;
+  const preview = !last ? "tap to open" : oneOnOne ? last.content : `${sender ?? ""}: ${last.content}`;
   return (
     <Pressy testID={`chat-${chat.id}`} onPress={onPress} style={styles.row}>
       {face ? <Avatar userId={face.userId} nickname={face.nickname} avatarId={face.avatarId} size={size} /> : <MemberGrid members={chat.members} size={size} />}

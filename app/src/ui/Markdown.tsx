@@ -223,7 +223,7 @@ export function Markdown({ source, onLink }: Props) {
   );
 }
 
-// The previous client's reading text: 14 px on a 1.7 line, M3's body spacing.
+// Reading text: 14 px on a 1.7 line, M3's body spacing.
 const base: TextStyle = { fontFamily: fonts.mono, color: colors.ink, fontSize: 14, lineHeight: 24, letterSpacing: 0.25 };
 
 const styles = StyleSheet.create({

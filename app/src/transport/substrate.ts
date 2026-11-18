@@ -22,11 +22,11 @@
  *
  * Example: const s = new Substrate(origin); const res = await s.fetch(`${origin}/mt/chat`);
  *
- * Everything the app fetches goes through here except two kinds, each for a reason: the sign-in
- * calls that ride the httpOnly refresh cookie (a browser attaches that cookie only to its own
- * requests, never to bytes a script sends over another transport), and an installer download (one
- * large file for the system to fetch). The page's own files ride the lines through the service
- * worker (worker/sw.ts).
+ * Everything the app fetches goes through here except two kinds, each for a reason: the calls to
+ * cheese-auth (api/auth.ts) — signing in rides the httpOnly refresh cookie, which a browser attaches
+ * only to its own requests, never to bytes a script sends over another transport, and a picture is
+ * posted as the platform's own file upload — and an installer download (one large file for the
+ * system to fetch). The page's own files ride the lines through the service worker (worker/sw.ts).
  */
 import { Client, type LinkStat } from "@micro-teams/multipath";
 import { storage } from "../platform/storage";

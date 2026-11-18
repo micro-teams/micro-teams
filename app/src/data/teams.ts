@@ -11,6 +11,8 @@
  * pickTeam(teams, current, remembered) — the team to look at: the current one while it still
  *   exists, else the remembered one, else the first; null when there are no teams.
  *
+ * Team, TeamMember, Role — the API's own shapes; ROLES — the roles in order of rank, highest first.
+ *
  * Example: const team = pickTeam(teams, nav.team, rememberedTeam(user.id));
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";

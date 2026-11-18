@@ -6,7 +6,7 @@
 # that number into every artifact that must ship it, and — just as importantly —
 # leaves alone the versions that are deliberately NOT the product version:
 #
-#   * the wire-protocol version -> no longer lives here at all: it belongs to micro-connector
+#   * the wire-protocol version -> not in this repository: it belongs to micro-connector
 #                                   (cli/protocol), pinned in cli/go.mod. It is bumped only on a
 #                                   breaking protocol change, and never alongside a product release.
 #   * deploy/tmux/build-static-tmux.sh  version=3.5a  -> the third-party tmux we vendor

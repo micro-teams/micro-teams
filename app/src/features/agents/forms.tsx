@@ -12,6 +12,9 @@
  *   the server decide", and the placeholders say what it will decide; the drivers are the
  *   deployment's own list.
  *
+ * OpenForm — what the open-agent dialog returns: the machine, a nickname, the driver, a working
+ *   directory, and the model API settings when they were given.
+ *
  * Example: const machineId = await ask<string | null>("add a device", (done) => <AddDevice team={3} done={done} />);
  */
 import { MaterialIcons } from "@expo/vector-icons";

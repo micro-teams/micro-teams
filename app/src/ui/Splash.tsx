@@ -1,7 +1,7 @@
 /*
  * What is on screen while the app gets ready, so that nothing assembles itself in front of the
- * reader: the previous client's launcher — the name on black, a word under it, and after twenty
- * seconds an admission that it is taking too long, with the two things that help.
+ * reader: the name on black, a word under it, and after twenty seconds an admission that it is
+ * taking too long, with the two things that help.
  *
  * <Splash /> — drawn over everything until the first screen is complete (App.tsx decides when).
  * On the web public/index.html shows the same thing from the first byte, before any script runs.

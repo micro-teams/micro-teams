@@ -8,6 +8,8 @@
  *   label with a caret, opening a menu with the chosen one ticked.
  * <MenuFrame> — what the route table draws for the "menu" overlay frame.
  *
+ * MenuItem<T> — a choice ({ value, label, checked?, danger?, testID? }) or "divider".
+ *
  * Example:
  *   <MenuButton items={[{ value: "rename", label: "rename" }, "divider", { value: "delete", label: "delete", danger: true }]}
  *     onSelected={act}><Txt>⋯</Txt></MenuButton>

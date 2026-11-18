@@ -10,6 +10,8 @@
  *   is mounted.
  * isWorking(agent) — busy, starting or compacting: what draws the ring.
  *
+ * Agent — the API's own shape for an agent, as presence knows it.
+ *
  * Example: const { agent, working } = usePresence(7);
  *
  * Being in the answer is being an agent: the server enumerates only agents, so a person is anybody

@@ -22,6 +22,8 @@
  * useLiveScreen(sessionId, onBytes) → { state, screen } — a LiveScreen over the session's substrate
  *   for the calling component's lifetime, redialled when the app returns to the foreground.
  *
+ * ViewMode, ScrollDir, ScreenState — the modes, the scroll directions, and what onState reports.
+ *
  * Example: const { screen } = useLiveScreen(sid, (b) => term.write(b)); screen.setMode("typing");
  */
 import { useEffect, useMemo, useState } from "react";

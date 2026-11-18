@@ -21,8 +21,8 @@ import { BackHandler, Platform } from "react-native";
 import app from "../../app.json";
 
 export const isWeb = Platform.OS === "web";
-// VERSION-<commit> from CI (EXPO_PUBLIC_MT_VERSION), as the previous client showed it; app.json's
-// version when built by hand.
+// VERSION-<commit> from CI (EXPO_PUBLIC_MT_VERSION): the release and the exact build in one string,
+// which is what a bug report needs; app.json's version when built by hand.
 export const appVersion: string = process.env.EXPO_PUBLIC_MT_VERSION || app.expo.version;
 export const clientPlatform: string = Platform.OS;
 

@@ -9,6 +9,9 @@
  * <DocView path content onLink /> — the drawing. A binary file says what it is instead of showing
  *   its bytes as garbage; the document API carries text, so pictures other than SVG cannot be shown.
  *
+ * DocKind — the kinds kindOf tells apart. extensionOf(path) — the file's extension, lowercase, ""
+ *   for none (a leading dot is part of the name, not an extension).
+ *
  * Example: <DocView path="notes/plan.md" content={text} onLink={follow} />
  */
 import { Image } from "expo-image";

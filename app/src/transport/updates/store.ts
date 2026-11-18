@@ -18,6 +18,8 @@
  *   system, and each one is logged with its topic.
  * SyncReason — why a subscriber is being told to look again.
  *
+ * TopicListener — what subscribe takes: called with each update on its topic.
+ *
  * Example:
  *   const drop = store.subscribe("thread:5", { onChange: () => refetch(), digest: () => held() });
  *

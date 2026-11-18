@@ -1,9 +1,11 @@
 /*
- * What something is, as a bordered list of label / value rows — the previous clients' fact list.
+ * What something is, as a bordered list of label / value rows.
  *
  * <Facts rows={[{ label, value, onPress?, testID? }]} /> — a row with onPress is tappable and ends
  *   in a chevron; values are selectable, so an id can be copied out. Rows with no value are left
  *   out.
+ *
+ * Fact — one row: { label, value?, onPress?, testID? }.
  *
  * Example: <Facts rows={[{ label: "user id", value: "42" }, { label: "version", value: v, onPress: info }]} />
  */

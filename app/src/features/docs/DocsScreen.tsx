@@ -27,7 +27,7 @@ import { TeamPicker, useTeamScope } from "../agents/TeamPicker";
 
 type Action = "file" | "folder" | "rename" | "move" | "delete";
 
-/** The row menu, grouped as the previous client did: making, then renaming and moving, then deleting. */
+/** The row menu, grouped by how much each does: making, then renaming and moving, then deleting. */
 function menuItems(isRoot: boolean): MenuItem<Action>[] {
   const make: MenuItem<Action>[] = [
     { value: "file", label: "new file", testID: "doc-action-file" },

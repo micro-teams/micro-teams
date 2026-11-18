@@ -6,6 +6,8 @@
  * password fine and then fails on submit teaches people not to trust it. passwordChecks reports the
  * four rules separately, because the useful thing to show is which one is not met yet.
  *
+ * USERNAME_RULE — the username rule in words, as cheese-auth states it.
+ *
  * Example: passwordChecks("abc").rules → [{ label: "at least 8 characters", met: false }, ...]
  */
 export const USERNAME_RULE = "Username must be 4-32 characters long and can only contain letters, numbers, underscores and hyphens.";

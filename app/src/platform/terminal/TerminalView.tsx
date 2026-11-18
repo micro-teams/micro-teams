@@ -5,6 +5,8 @@
  *   puts screen bytes on it; onMessage gets what the terminal says (page.ts's FromTerminal: keys,
  *   resize, scroll). typing hands it the keyboard; without it nothing typed comes out.
  *
+ * TerminalViewHandle, TerminalViewProps — the ref's write(bytes), and the props above.
+ *
  * Example: <TerminalView ref={term} typing={mode === "typing"} onMessage={handle} style={{ flex: 1 }} />
  *
  * On a phone it is xterm.js in a WebView, from a page built into the app (tool/terminal-html.mjs

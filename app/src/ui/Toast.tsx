@@ -5,7 +5,7 @@
  * <ToastProvider> — wrap the app once. useToast() → toast(text) — show text for three seconds,
  *   replacing whatever was showing.
  *
- * Example: const toast = useToast(); toast("「alice」当前离线，无法查看现场");
+ * Example: const toast = useToast(); toast("alice is offline: there is no screen to watch");
  */
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";

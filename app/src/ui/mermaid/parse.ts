@@ -13,6 +13,8 @@
  * bowsAround(fromRank, toRank) — an edge that skips a rank must curve round, or the boxes drawn
  *   over it hide it and the diagram silently loses a connection.
  *
+ * NodeShape, MermaidNode, MermaidEdge — what parseMermaid returns a graph of.
+ *
  * Example: const g = parseMermaid("graph TD\n  a[start] --> b{ok?}"); const ranks = layOut(g!);
  */
 

@@ -96,9 +96,9 @@ export function Avatar({
         // An agent's face is always its live screen, wherever it is drawn.
         <Pressable
           testID={`agent-avatar-${userId}`}
-          accessibilityLabel={watchable ? `${name} · 点击查看现场` : agent.online ? `${name} · 现场暂不可用` : `${name} · 离线`}
+          accessibilityLabel={watchable ? `${name} · tap to watch` : agent.online ? `${name} · no screen right now` : `${name} · offline`}
           onPress={() =>
-            watchable ? push("screen", "overlay", { sessionId: agent.sid }) : toast(agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)
+            watchable ? push("screen", "overlay", { sessionId: agent.sid }) : toast(agent.online ? `${name} has no screen to watch right now` : `${name} is offline: there is no screen to watch`)
           }
         >
           {picture}

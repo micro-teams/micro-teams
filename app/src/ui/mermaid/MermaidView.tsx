@@ -3,6 +3,9 @@
  *
  * <MermaidView graph /> — the diagram at its own size, scrolling sideways when wider than the page.
  *
+ * measure(text, size) → { lines, w, h } — a label's lines, wrapped and cut at three, and the box
+ *   they need at that font size; wide (CJK) characters count double.
+ *
  * Example: const g = parseMermaid(src); return g ? <MermaidView graph={g} /> : <Code text={src} />;
  *
  * Measured rather than laid out by the platform: the face is monospace, so a label's size is its

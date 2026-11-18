@@ -6,6 +6,8 @@
  *   set in, with the Chinese faces that draw what it lacks. WIDE — the one breakpoint between the
  *   phone layout and the list-beside-detail one.
  *
+ * type — the text styles (below), by Material 3's names: title, body, small, label and so on.
+ *
  * Example: <View style={{ backgroundColor: colors.page, width: metrics.listPane }} />
  *
  * Monospace throughout because a chat full of paths, ids and command output lines up. A value
@@ -62,7 +64,7 @@ export const metrics = {
 export const WIDE = 840;
 
 /**
- * The text styles, as the previous client had them: Material 3's type scale set in the monospace
+ * The text styles: Material 3's type scale set in the monospace
  * face — the size, the line, and the letter spacing, which in a monospace face is much of its look
  * (M3 spaces body text 0.25 px, small 0.4, labels 0.5).
  */

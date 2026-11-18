@@ -4,12 +4,12 @@
  * At prebuild it adds a "release" signing config to android/app/build.gradle that reads
  * android/key.properties (storeFile, storePassword, keyAlias, keyPassword — CI writes it from the
  * repository's secrets), and makes the release build use it when that file exists. Without the
- * file a release build is debug-signed, as before, so a fork or a laptop still builds.
+ * file a release build is debug-signed, so a fork or a laptop still builds.
  *
  * Example: plugins: ["./plugins/release-signing"] in app.json; CI writes android/key.properties.
  *
- * The key is the one the Flutter client was signed with, which is what lets an installed copy be
- * replaced in place: Android refuses an update signed by anybody else.
+ * The key is the one the copies already installed were signed with, which is what lets an
+ * installed copy be replaced in place: Android refuses an update signed by anybody else.
  */
 const { withAppBuildGradle } = require("expo/config-plugins");
 

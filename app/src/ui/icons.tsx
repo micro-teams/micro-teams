@@ -1,7 +1,7 @@
 /*
  * The icons the icon font does not have: Material's outlined variants, drawn from their paths.
  *
- * <AddCommentOutlined size? color? /> — "new chat", hollow, as the previous client drew it.
+ * <AddCommentOutlined size? color? /> — "new chat": Material's outlined add-comment, hollow.
  *
  * Example: <AddCommentOutlined size={22} color={colors.ink} />
  */

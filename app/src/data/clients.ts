@@ -5,6 +5,9 @@
  * useClientPackages() → { packages, loaded } — each { platform, url, bytes, signed }; empty when
  *   the deployment ships none, or the list cannot be read (an ordinary state, not an error).
  *
+ * ClientPackage — one installable client in clients.json: platform, arch, url, size, and whether
+ *   it is release- or debug-signed.
+ *
  * Example: const { packages } = useClientPackages();
  *
  * The list rides the lines; the download it links to does not — one large file is the browser's

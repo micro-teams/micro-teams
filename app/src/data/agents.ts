@@ -16,6 +16,9 @@
  *   into those teams; resolves with the machine.
  * useAllMachines() → every machine this person has, in any team: what "add device" can reuse.
  *
+ * Machine, FleetAgent, LlmSettings — the API's own shapes, named for the screens.
+ * teamTopic(id) — the updates topic a team's fleet changes are announced on ("team:<id>").
+ *
  * Example: const { agents } = useFleet(team); const { chatWith } = useAgentActions(team);
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";

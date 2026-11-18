@@ -12,6 +12,7 @@
  * so a wheel turn or a drag becomes scroll steps (one per 40 px, dragging down reveals earlier
  * output, as pulling a page down shows what is above it) and the terminal's own tiny buffer never
  * scrolls. Black is black and white is white: the ANSI sixteen are xterm's defaults, the colours a
+ * FromTerminal — what the page sends back: keys typed, a new size, or a scroll.
  * program picked on purpose.
  */
 import { FitAddon } from "@xterm/addon-fit";

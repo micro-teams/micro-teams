@@ -12,6 +12,9 @@
  *   it whole, so the fields not changing are sent back as they are.
  * AuthError — what cheese-auth refused, with its own message and the HTTP status.
  *
+ * Picture — a picture to upload: what the picker returned (a Blob on the web, a file uri on a
+ *   phone).
+ *
  * Example: const session = await login("https://microteams.app", "alice", "secret");
  */
 

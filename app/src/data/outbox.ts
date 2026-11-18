@@ -13,6 +13,9 @@
  * outbox.dispose() — stop retrying (the conversation was closed).
  * isStuck(pending) — whether it has failed often enough that the person should be told.
  *
+ * Pending — a message not yet stored: its client token, text, how often it was tried, and the
+ *   last error.
+ *
  * Example:
  *   const box = new Outbox(5, (content, clientToken) => api.post(5, content, clientToken), redraw);
  *   box.enqueue("hello");

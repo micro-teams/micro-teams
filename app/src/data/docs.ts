@@ -16,6 +16,8 @@
  * resolveDocLink(from, href) — the document a link in `from` points to, or null for a web address,
  *   an anchor or anything else outside the tree.
  *
+ * DocNode, DocCommit — the API's own shapes: a tree entry, and a commit in a document's history.
+ *
  * Example: const { content } = useDoc(3, "notes/plan.md");
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";

@@ -1,9 +1,9 @@
 /*
- * The web half of keyboardSlide.ts. A resize that shrinks or grows the page while a text field has
- * focus moves the targets by the difference at once, without a transition, so they appear not to
- * have moved; on the next frame the transform is released with a transition, and they glide to
- * where the new layout put them. A desktop window dragged to another size has no focused field
- * involved and is left alone.
+ * The web half of keyboardSlide.ts. useKeyboardSlide(targets) — targets returns the elements to
+ * move. A resize that shrinks or grows the page while a text field has focus moves the targets by
+ * the difference at once, without a transition, so they appear not to have moved; on the next frame
+ * the transform is released with a transition, and they glide to where the new layout put them. A
+ * desktop window dragged to another size has no focused field involved and is left alone.
  */
 import { useEffect, useRef } from "react";
 

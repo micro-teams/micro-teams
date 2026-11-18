@@ -87,8 +87,8 @@ function StackView({ stack, routes, wide, onScreen }: { stack: Frame[]; routes: 
 
 function Destinations({ nav, vertical, onPick }: { nav: Nav; vertical: boolean; onPick: (s: Section) => void }) {
   const { user } = useSession();
-  // The rail has three, with your own face pinned at the bottom for "me" — the previous clients'
-  // shape, and the only thing on a wide window that says who is signed in. A phone has nowhere to
+  // The rail has three, with your own face pinned at the bottom for "me": the only thing on a wide
+  // window that says who is signed in. A phone has nowhere to
   // pin a face, so its bar has "me" as a fourth button.
   const items = vertical ? SECTIONS.filter((s) => s.section !== "me") : SECTIONS;
   return (

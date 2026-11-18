@@ -1,6 +1,6 @@
 /*
  * A form field's name above its box, and a line of help (or of trouble) under it — how every form
- * in the previous clients was set, rather than a label floating inside the box.
+ * in the app is set, rather than with a label floating inside the box.
  *
  * <Labelled label hint? bad?>{field}</Labelled> — bad colours the hint as an error.
  *

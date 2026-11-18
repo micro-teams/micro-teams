@@ -1,5 +1,5 @@
 /*
- * The web half of worker.ts: registers sw.js under the app's base URL. Skipped in development,
+ * The web half of worker.ts. registerWorker() — registers sw.js under the app's base URL. Skipped in development,
  * where the bundle is served by Metro and a worker caching it would serve yesterday's code.
  */
 export function registerWorker(): void {
