@@ -349,12 +349,11 @@ async function withAMachine(
   await d.waitGone(`member-${agentId}`, 15_000);
   lap("out of the conversation");
 
-  // Back to the agent's page from its section's root: tapping the section you are in returns there.
+  // Back, one page at a time, to the agent's page the conversation was opened from.
   await d.back();
+  await d.waitFor("composer");
   await d.back();
-  await d.tap("destination-agents");
-  await d.tap("destination-agents");
-  await d.tap(`agent-${agentId}`);
+  await d.waitFor("agent-rename");
 
   const renamed = `agent${run}x`;
   await d.tap("agent-rename");
