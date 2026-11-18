@@ -30,12 +30,14 @@ export class WebdriverioDriver implements Driver {
 
   /**
    * The element with this id, scrolled into view first when it is not on screen: UiAutomator sees
-   * only what is drawn, and a long form (registering) runs past the bottom of a phone.
+   * only what is drawn, a long form (registering) runs past the bottom of a phone, and a page come
+   * back to keeps the scroll it was left with, so what is wanted may be above.
    */
   private async shown(id: string, timeoutMs = 15_000) {
     const el = await this.byId(id);
-    // Swipe the page up a step at a time (a finger, not an API: what a person does) until it appears.
-    for (let i = 0; i < 6 && !(await el.isDisplayed().catch(() => false)); i++) {
+    // Swipe the page a step at a time (a finger, not an API: what a person does) until it appears:
+    // down the page first, then back up it.
+    for (let i = 0; i < 12 && !(await el.isDisplayed().catch(() => false)); i++) {
       const page = await this.browser.$("android=new UiSelector().scrollable(true)");
       if (!(await page.isExisting())) break;
       if (await this.browser.isKeyboardShown()) await this.browser.hideKeyboard();
@@ -44,10 +46,10 @@ export class WebdriverioDriver implements Driver {
       const cx = Math.round(x + width / 2);
       await this.browser
         .action("pointer", { parameters: { pointerType: "touch" } })
-        .move({ x: cx, y: Math.round(y + height * 0.75) })
+        .move({ x: cx, y: Math.round(y + height * (i < 6 ? 0.75 : 0.3)) })
         .down()
         .pause(100)
-        .move({ x: cx, y: Math.round(y + height * 0.3), duration: 400 })
+        .move({ x: cx, y: Math.round(y + height * (i < 6 ? 0.3 : 0.75)), duration: 400 })
         .pause(100)
         .up()
         .perform();
@@ -91,7 +93,8 @@ export class WebdriverioDriver implements Driver {
   }
 
   async waitFor(id: string, timeoutMs = 15_000) {
-    await (await this.byId(id)).waitForDisplayed({ timeout: timeoutMs });
+    await (await this.byId(id)).waitForExist({ timeout: timeoutMs });
+    await this.shown(id, timeoutMs);
   }
 
   private byText(text: string) {
