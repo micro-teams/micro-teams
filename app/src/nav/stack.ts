@@ -13,6 +13,9 @@
  * frame(route, kind, params?) — a new Frame with a fresh key. stackKey(section, team) — where a
  *   stack is kept. TEAM_SCOPED — the sections whose stacks are kept per team.
  *
+ * Section, FrameKind — the four sections, and the three kinds of frame: a section's list, a page
+ *   opened from it, and an overlay drawn over the whole window.
+ *
  * Example:
  *   let nav = initialNav();                                       // [chats]
  *   nav = push(nav, frame("thread", "detail", { id: 5 }));        // [chats, thread 5]
@@ -123,9 +126,21 @@ export function switchSection(nav: Nav, section: Section): Nav {
   return { ...nav, section };
 }
 
-/** Look at another team. Each team keeps its own stacks, so coming back finds them as they were. */
+/**
+ * Look at another team. Each team keeps its own stacks, so coming back finds them as they were.
+ * What was opened before any team was known — a link the app was started with — is opened in the
+ * first team picked, over that team's root, rather than left behind in a stack nobody shows.
+ */
 export function switchTeam(nav: Nav, team: number): Nav {
-  return { ...nav, team };
+  if (nav.team !== null) return { ...nav, team };
+  const stacks = { ...nav.stacks };
+  for (const section of TEAM_SCOPED) {
+    const early = stacks[stackKey(section, null)];
+    if (!early) continue;
+    delete stacks[stackKey(section, null)];
+    stacks[stackKey(section, team)] = [rootOf(section, team), ...early.slice(1)];
+  }
+  return { ...nav, stacks, team };
 }
 
 /** Forget a team's stacks — it was left or deleted. */

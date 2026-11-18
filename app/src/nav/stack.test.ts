@@ -51,6 +51,15 @@ test("each team keeps its own stack in a team-scoped section", () => {
   expect(top(nav).params).toEqual({ team: 1, path: "a.md" });
 });
 
+test("a link opened before any team is known is still open once a team is picked", () => {
+  let nav = push(switchSection(initialNav(), "agents"), frame("connect", "detail", { code: "c" }));
+  nav = switchTeam(nav, 3);
+  expect(routes(nav)).toEqual(["agents", "connect"]);
+  expect(stackOf(nav)[0].params).toEqual({ team: 3 });
+  nav = switchTeam(nav, 4);
+  expect(routes(nav)).toEqual(["agents"]);
+});
+
 test("a team that is gone takes its stacks with it", () => {
   let nav = switchTeam(switchSection(initialNav(), "docs"), 1);
   nav = push(nav, frame("file", "detail", { team: 1, path: "a.md" }));
