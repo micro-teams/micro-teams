@@ -7,8 +7,8 @@
  *
  * Example: const { packages } = useClientPackages();
  *
- * Fetched directly, not over the substrate: a download is one large file the browser or the
- * system's download manager fetches, and it is the one thing that does not ride the lines.
+ * The list rides the lines; the download it links to does not — one large file is the browser's
+ * or the system's download manager's to fetch.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "./session";
@@ -16,13 +16,13 @@ import { useSession } from "./session";
 export type ClientPackage = { platform: string; arch?: string; url: string; bytes: number; signed: string };
 
 export function useClientPackages() {
-  const { origin } = useSession();
+  const { origin, substrate } = useSession();
   const q = useQuery({
     queryKey: ["client-packages", origin],
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<ClientPackage[]> => {
       try {
-        const res = await fetch(`${origin}/downloads/clients.json`);
+        const res = await substrate.fetch(`${origin}/downloads/clients.json`);
         if (!res.ok) return [];
         const body = (await res.json()) as { clients?: ClientPackage[] };
         return (body.clients ?? []).filter((c) => typeof c.url === "string" && c.url);

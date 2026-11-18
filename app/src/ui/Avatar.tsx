@@ -22,8 +22,8 @@ import { useEffect, useState } from "react";
 import { MaterialIcons } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
+import { usePicture } from "../data/pictures";
 import { usePresence } from "../data/presence";
-import { useSession } from "../data/session";
 import { useNav } from "../nav/NavProvider";
 import { colors, fonts, metrics } from "./theme";
 import { useToast } from "./Toast";
@@ -53,11 +53,12 @@ function Ring({ size }: { size: number }) {
 }
 
 function Picture({ userId, label, avatarId, size }: { userId: number; label: string; avatarId?: number | null; size: number }) {
-  const { origin } = useSession();
+  // Over the lines like every other byte (data/pictures.ts), not fetched by the image component.
+  const uri = usePicture(avatarId ? `/api/avatars/${avatarId}` : null);
   const [failed, setFailed] = useState(false);
   const box = { width: size, height: size, borderRadius: metrics.avatarRadius };
-  if (avatarId && !failed) {
-    return <Image source={{ uri: `${origin}/api/avatars/${avatarId}` }} style={box} contentFit="cover" onError={() => setFailed(true)} />;
+  if (uri && !failed) {
+    return <Image source={{ uri }} style={box} contentFit="cover" onError={() => setFailed(true)} />;
   }
   return (
     <View style={[styles.fallback, box, { backgroundColor: colourFor(userId) }]}>
