@@ -38,7 +38,9 @@ declare const __MT_SHELL__: string[];
 const BASE = new URL("./", self.location.href).pathname;
 const CACHE = `microteams-${__MT_BUILD__}`;
 const LINES = "microteams-lines";
-const DOCUMENT = [BASE, `${BASE}index.html`];
+// Asked for first, always: the document and the manifest name the build, and a cached copy of
+// either would hide a deploy.
+const DOCUMENT = [BASE, `${BASE}index.html`, `${BASE}files.json`];
 const SHELL = __MT_SHELL__.map((f) => `${BASE}${f}`);
 
 const asWebSocket = (origin: string) => origin.replace(/^http/, "ws");
@@ -77,6 +79,8 @@ self.addEventListener("install", (event) => {
       // One at a time rather than addAll: one missing file must not leave the app with no worker.
       await Promise.all(
         SHELL.map(async (url) => {
+          // The loader may have put it there already, in this same cache.
+          if (await cache.match(url)) return;
           try {
             await cache.add(new Request(url, { cache: "reload" }));
           } catch (e) {
