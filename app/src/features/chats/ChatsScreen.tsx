@@ -1,6 +1,6 @@
 /*
  * The chat list: every conversation, most recent first, the next page loaded as the end comes
- * into view.
+ * near.
  *
  * <ChatsScreen /> — the "chats" section's root frame. A row opens its conversation with open(),
  *   so it lands beside the list in a wide window and on top of it on a phone. "new" asks for a
@@ -14,9 +14,8 @@
  * message under it clipped rather than ellipsised. Rows are roomier when the list fills a phone
  * than when it is the narrow column beside a conversation.
  */
-import { FlashList } from "@shopify/flash-list";
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
+import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import { chatTitle, ChatSummary, parseMemberIds, useChats, useCreateChat } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -102,8 +101,12 @@ export function ChatsScreen() {
     latest.current = { open, self };
   });
   const onOpen = useCallback((id: number) => latest.current.open(latest.current.self, "thread", { id }), []);
+  const viewport = useRef(0);
   const { user } = useSession();
   const { chats, loadMore, loading, error } = useChats();
+  const nearEnd = ({ nativeEvent: e }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - e.layoutMeasurement.height) loadMore();
+  };
   const create = useCreateChat();
   const ask = useAsk();
   // The list's own width, guessed from the window before the first layout. A hidden stack lays out
@@ -129,18 +132,20 @@ export function ChatsScreen() {
         }
       />
       {error ? <Txt style={styles.notice}>{String(error)}</Txt> : null}
-      <FlashList
-        data={chats}
-        keyExtractor={(c) => String(c.id)}
-        // Off, unlike a conversation's list. Kept on, it held the first visible row still when a
-        // conversation with a new message moved to the top, so the conversation that just spoke
-        // landed above the top of the screen; a chat list shows its newest at the top, as WeChat's does.
-        maintainVisibleContentPosition={{ disabled: true }}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
-        renderItem={({ item }) => <Row chat={item} me={user?.id} dense={dense} onOpen={onOpen} />}
-        ListEmptyComponent={<Txt muted style={styles.notice}>{loading ? "loading…" : "no conversations yet"}</Txt>}
-      />
+      {/* Every loaded row drawn once, not recycled: scrolling it is the platform's alone, with no
+          JavaScript per frame, and a page of conversations is small. The next page is asked for
+          when a scroll comes to rest near the end. */}
+      <ScrollView
+        onMomentumScrollEnd={nearEnd}
+        onScrollEndDrag={nearEnd}
+        onLayout={(e) => (viewport.current = e.nativeEvent.layout.height)}
+        onContentSizeChange={(_, h) => h <= viewport.current && loadMore()}
+      >
+        {chats.map((c) => (
+          <Row key={c.id} chat={c} me={user?.id} dense={dense} onOpen={onOpen} />
+        ))}
+        {!chats.length && <Txt muted style={styles.notice}>{loading ? "loading…" : "no conversations yet"}</Txt>}
+      </ScrollView>
     </View>
   );
 }

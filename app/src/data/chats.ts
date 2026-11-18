@@ -21,7 +21,7 @@
  *
  * Example:
  *   const { chats, loadMore } = useChats();
- *   <FlashList data={chats} onEndReached={loadMore} ... />
+ *   chats.map((c) => <Row key={c.id} chat={c} />), and loadMore() when a scroll ends near the end
  *
  * Pages are fetched by cursor. The list and a conversation are fetched again when the updates
  * socket says their topic moved (and once on every reconnect and return to the foreground), and
