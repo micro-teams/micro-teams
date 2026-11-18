@@ -28,7 +28,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { forwardRef, useRef, useState } from "react";
-import { HostInstance, Pressable, ScrollViewProps, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
+import { HostInstance, Pressable, ScrollViewProps, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
@@ -126,11 +126,13 @@ export function ThreadScreen() {
   const thread = useThread(id);
   const info = useThreadInfo(id);
   const [draft, setDraft] = useState("");
-  // The composer grows with what is typed, up to 40% of the window (never less than six lines'
-  // worth), on the web too, where a text area does not grow by itself.
+  // The composer is one line tall and grows with what is typed, up to 40% of the window (never
+  // less than six lines' worth). Its height comes from an invisible copy of the text set exactly
+  // like it: a text area's own scroll height only ever grows, so measuring it kept the box tall
+  // after the text was gone.
   const { height: windowHeight } = useWindowDimensions();
-  const [contentHeight, setContentHeight] = useState(0);
-  const inputHeight = Math.min(Math.max(140, windowHeight * 0.4), Math.max(metrics.composerHeight, contentHeight + 20));
+  const [textHeight, setTextHeight] = useState(LINE);
+  const inputHeight = Math.min(Math.max(140, windowHeight * 0.4), Math.max(metrics.composerHeight, textHeight + 2 * PAD_V + 2));
   const [laidOut, setLaidOut] = useState(false);
   // On the web the keyboard resizes the page at once; these glide instead (a phone follows its
   // keyboard frame by frame already). At the bottom the messages ride with the composer; scrolled
@@ -205,17 +207,21 @@ export function ThreadScreen() {
       <KeyboardStickyView offset={{ closed: 0, opened: bottom }}>
         <View ref={composerArea} style={styles.composer}>
           <View style={styles.composerColumn}>
+            <View style={styles.inputBox}>
+              <Text style={styles.measure} pointerEvents="none" importantForAccessibility="no-hide-descendants" onLayout={(e) => setTextHeight(e.nativeEvent.layout.height)}>
+                {`${draft}\u200b`}
+              </Text>
             <TextInput
               testID="composer"
               accessibilityLabel="message"
               style={[styles.input, { height: inputHeight }]}
-              onContentSizeChange={(e) => setContentHeight(e.nativeEvent.contentSize.height)}
               value={draft}
               onChangeText={setDraft}
               placeholder="message…"
               placeholderTextColor={colors.inkMuted}
               multiline
             />
+            </View>
             <Button kind="send" testID="send" label="send" onPress={send} disabled={!draft.trim()} style={styles.send} />
           </View>
         </View>
@@ -223,6 +229,9 @@ export function ThreadScreen() {
     </View>
   );
 }
+
+const LINE = 20;
+const PAD_V = 9;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.page },
@@ -253,14 +262,27 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
   },
   composerColumn: { flexDirection: "row", alignItems: "stretch", gap: 8, width: "100%", maxWidth: metrics.readingColumn, alignSelf: "center" },
+  inputBox: { flex: 1 },
+  // The invisible copy the composer's height is read from: the same face, size, line and inner
+  // width as the input, laid out but never seen.
+  measure: {
+    position: "absolute",
+    left: 1,
+    right: 1,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    lineHeight: LINE,
+    fontFamily: fonts.mono,
+    opacity: 0,
+  },
   input: {
-    flex: 1,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 6,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: PAD_V,
     fontSize: 14,
+    lineHeight: LINE,
     fontFamily: fonts.mono,
     color: colors.ink,
   },

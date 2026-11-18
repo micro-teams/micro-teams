@@ -57,6 +57,14 @@ test("says what the viewer is doing on arrival, and never types while watching",
   expect(new TextDecoder().decode(wires[0].sent.at(-1) as Uint8Array)).toBe("ls\r");
 });
 
+test("Esc has its own button and is sent in any mode", () => {
+  const { screen, wires } = rig();
+  screen.start();
+  wires[0].onopen!();
+  screen.escape();
+  expect([...(wires[0].sent.at(-1) as Uint8Array)]).toEqual([0x1b]);
+});
+
 test("leaving history returns the pane to the live screen", () => {
   const { screen, wires, json } = rig();
   screen.start();

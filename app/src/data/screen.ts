@@ -11,7 +11,8 @@
  * LiveScreen({ open, path, onState }) — start() dials; close() ends it for good; drawOn(f) says
  *   where screen bytes go. Modes:
  *   "watching" never types (keys() is dropped: that promise is what lets an agent keep working
- *   while people watch), "history" pages back through tmux, "typing" has the keyboard. setMode
+ *   while people watch; escape() is the one key sent in any mode, because it has a button of its
+ *   own), "history" pages back through tmux, "typing" has the keyboard. setMode
  *   leaving history returns the pane to the live screen for everybody. scroll(dir) may be sent in
  *   any mode and holds the driver off ("scroll") until two seconds after the last step.
  *   Reconnects forever: 0.5 s, doubling to 30 s, forgiven only once a connection has lasted 5 s,
@@ -86,6 +87,11 @@ export class LiveScreen {
   keys(data: string) {
     if (this.mode !== "typing") return;
     this.send(new TextEncoder().encode(data));
+  }
+
+  /** Esc, from its own button: a deliberate press, sent in any mode. */
+  escape() {
+    this.send(new Uint8Array([0x1b]));
   }
 
   setMode(mode: ViewMode) {

@@ -5,7 +5,7 @@
  * <ScreenFrame /> — drawn for a "screen" overlay frame with { sessionId }. One row of chrome above
  *   the terminal (a terminal is the content; the chrome is a tax on how many lines you see): close,
  *   the three modes — watching, history, typing — as icons, "the agent is not driving" while
- *   typing, and compact. While the socket is down one row says it is reconnecting, and once
+ *   typing, compact, and Esc (sent when pressed, in any mode: a phone's keyboard has none). While the socket is down one row says it is reconnecting, and once
  *   several attempts have never connected, that the screen may be gone or not yours to watch, with
  *   a way to try now.
  *
@@ -57,6 +57,9 @@ export function ScreenFrame() {
           </Txt>
         )}
         <Small testID="screen-compact" icon="compress" label="compact" onPress={() => screen.compact()} />
+        <Pressable testID="screen-esc" accessibilityLabel="send Esc" onPress={() => screen.escape()} hitSlop={6} style={styles.esc}>
+          <Txt variant="label">Esc</Txt>
+        </Pressable>
       </View>
       {state.reconnecting && (
         <Pressable onPress={() => screen.retry()} style={[styles.banner, state.doubtful && styles.doubtful]}>
@@ -87,6 +90,7 @@ const styles = StyleSheet.create({
   root: { ...StyleSheet.absoluteFill, backgroundColor: "#000" },
   chrome: { flexDirection: "row", alignItems: "center", backgroundColor: colors.raised, paddingHorizontal: 4, paddingVertical: 2 },
   small: { width: 28, height: 28, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  esc: { height: 24, paddingHorizontal: 8, marginLeft: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
   selected: { backgroundColor: colors.page },
   gap: { width: 4 },
   spacer: { flex: 1 },
