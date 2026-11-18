@@ -107,7 +107,7 @@ export function AgentsScreen() {
               <ListRow
                 key={a.userId}
                 testID={`agent-${a.userId}`}
-                leading={<Avatar userId={a.userId} nickname={a.nickname} avatarId={a.avatarId} size={44} clickable={false} />}
+                leading={<Avatar userId={a.userId} nickname={a.nickname} avatarId={a.avatarId} size={44} />}
                 title={a.nickname || `agent #${a.userId}`}
                 subtitle={
                   <>

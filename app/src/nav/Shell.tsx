@@ -113,7 +113,7 @@ function Destinations({ nav, vertical, onPick }: { nav: Nav; vertical: boolean; 
         <>
           <View style={styles.grow} />
           <Pressable testID="destination-me" accessibilityLabel={user.nickname} onPress={() => onPick("me")} style={[styles.me, nav.section === "me" && { backgroundColor: colors.hover }]}>
-            <Avatar userId={user.id} nickname={user.nickname} avatarId={user.avatarId} size={36} clickable={false} />
+            <Avatar userId={user.id} nickname={user.nickname} avatarId={user.avatarId} size={36} />
           </Pressable>
         </>
       ) : null}

@@ -143,6 +143,11 @@ export class Connection {
     if (token) await auth.logout(this.origin, token).catch((e: unknown) => console.warn(`logout: ${String(e)}`));
   }
 
+  /** Your own face changed: the session's copy of you says so at once. */
+  setMyAvatar(avatarId: number) {
+    if (this.session) this.adopt({ ...this.session, user: { ...this.session.user, avatarId } });
+  }
+
   adoptLines() {
     this.mt.GET("/lines", {}).then(
       ({ data }) => this.substrate.adopt((data?.lines ?? []).map((l) => l.url || this.origin)),
@@ -165,6 +170,8 @@ type Value = {
   sendSignUpCode: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   setServer: (origin: string) => Connection;
+  /** Your own face changed (data/avatar.ts): the session's copy of you says so at once. */
+  setMyAvatar: (avatarId: number) => void;
 };
 
 const Ctx = createContext<Value | null>(null);
@@ -202,6 +209,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     signUp: (form) => conn.signUp(form),
     sendSignUpCode: (email) => conn.sendSignUpCode(email),
     signOut: () => conn.signOut(),
+    setMyAvatar: (avatarId) => conn.setMyAvatar(avatarId),
     setServer: (next) => {
       const clean = next.trim().replace(/\/+$/, "");
       storage.set(SERVER_KEY, clean);

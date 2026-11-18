@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useChangePicture } from "../../data/avatar";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { appVersion, clientPlatform } from "../../platform/platform";
@@ -21,6 +22,7 @@ import { DialogActions, useAsk } from "../../ui/Dialog";
 import { Facts } from "../../ui/Facts";
 import { Button, Header, Txt } from "../../ui/kit";
 import { colors, metrics } from "../../ui/theme";
+import { useToast } from "../../ui/Toast";
 
 function useEverySecond() {
   const [, tick] = useState(0);
@@ -64,6 +66,8 @@ export function MeScreen() {
   const { user, origin, signOut, substrate } = useSession();
   const { push } = useNav();
   const ask = useAsk();
+  const toast = useToast();
+  const { change, changing } = useChangePicture();
   useEverySecond();
 
   const leave = async () => {
@@ -103,7 +107,14 @@ export function MeScreen() {
       <Header title="me" />
       <ScrollView contentContainerStyle={styles.body}>
         <View style={[styles.card, styles.me]}>
-          <Avatar userId={user.id} nickname={user.nickname} avatarId={user.avatarId} size={56} />
+          <Avatar
+            userId={user.id}
+            nickname={user.nickname}
+            avatarId={user.avatarId}
+            size={56}
+            changing={changing === "me"}
+            onChangePicture={() => change("me").catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)))}
+          />
           <View style={styles.grow}>
             <Txt variant="title" numberOfLines={1}>
               {user.nickname}

@@ -6,6 +6,10 @@
  * login(origin, username, password), register(origin, form), sendSignUpCode(origin, email),
  *   refresh(origin) → Session (refresh rides the httpOnly cookie the browser, or the native
  *   cookie store, keeps; one in flight at a time, see below), logout(origin, token).
+ * uploadAvatar(origin, token, picture) → avatarId — a picture to cheese-auth, always as the
+ *   signed-in person, even for an agent's face (only pointing a profile at it differs).
+ * updateProfile(origin, token, userId, profile) — the caller's own profile; cheese-auth replaces
+ *   it whole, so the fields not changing are sent back as they are.
  * AuthError — what cheese-auth refused, with its own message and the HTTP status.
  *
  * Example: const session = await login("https://microteams.app", "alice", "secret");
@@ -67,3 +71,37 @@ export function refresh(origin: string): Promise<Session> {
 }
 
 export const logout = (origin: string, token: string) => call<unknown>(origin, "/users/auth/logout", undefined, token);
+
+/** A picture to upload: a file the picker returned. */
+export type Picture = { uri: string; name: string; type: string; blob?: Blob };
+
+export async function uploadAvatar(origin: string, token: string, picture: Picture): Promise<number> {
+  const form = new FormData();
+  // A browser posts a Blob; React Native posts a file by its uri.
+  if (picture.blob) form.append("avatar", picture.blob, picture.name);
+  else form.append("avatar", { uri: picture.uri, name: picture.name, type: picture.type } as unknown as Blob);
+  const res = await fetch(`${origin}/api/avatars`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  const text = await res.text();
+  const json = text ? (JSON.parse(text) as { message?: string; data?: { avatarId: number } }) : {};
+  if (!res.ok || !json.data) throw new AuthError(json.message ?? `HTTP ${res.status}`, res.status);
+  return json.data.avatarId;
+}
+
+export async function updateProfile(
+  origin: string,
+  token: string,
+  userId: number,
+  profile: { nickname: string; intro: string; avatarId: number },
+): Promise<void> {
+  const res = await fetch(`${origin}/api/users/${userId}`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const json = text ? (JSON.parse(text) as { message?: string }) : {};
+    throw new AuthError(json.message ?? `HTTP ${res.status}`, res.status);
+  }
+}

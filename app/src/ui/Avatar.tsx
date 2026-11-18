@@ -1,12 +1,13 @@
 /*
  * The one avatar, and WeChat's grid of them for a group.
  *
- * <Avatar userId nickname? avatarId? size? clickable?> — a rounded square: the person's picture
- *   from cheese-auth when they have one, otherwise a colour chosen by `abs(userId) % 8` and their
- *   first character. The same person keeps the same colour on every screen and device. Every
- *   avatar asks the presence registry about its id: an agent that is working gets a pulsing violet
- *   ring, and an agent is always tappable (unless clickable is false, inside a group tile) — the
- *   tap opens its live screen over whatever is on screen, or says why it cannot.
+ * <Avatar userId nickname? avatarId? size? onChangePicture? changing?> — a rounded square: the
+ *   person's picture from cheese-auth when they have one, otherwise a colour chosen by
+ *   `abs(userId) % 8` and their first character. The same person keeps the same colour on every
+ *   screen and device. Every avatar asks the presence registry about its id: an agent that is
+ *   working gets a pulsing violet ring, and an agent's face is always tappable, everywhere it is
+ *   drawn — the tap opens its live screen over whatever is on screen, or says why it cannot.
+ *   onChangePicture adds a camera badge (your own face, an agent's page) that changes the picture.
  * <MemberGrid members size?> — up to nine faces in one tile; a row that is not full is centred, so
  *   three members read one-over-two and five read two-over-three.
  * colourFor(userId) — that colour, for anything else that has to match it.
@@ -18,7 +19,8 @@
  */
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { MaterialIcons } from "@expo/vector-icons";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 import { usePresence } from "../data/presence";
 import { useSession } from "../data/session";
@@ -69,36 +71,47 @@ export function Avatar({
   nickname,
   avatarId,
   size = metrics.avatarInBubble,
-  clickable = true,
+  onChangePicture,
+  changing,
 }: {
   userId: number;
   nickname?: string | null;
   avatarId?: number | null;
   size?: number;
-  clickable?: boolean;
+  /** Where a face may be changed (your own, an agent's page): a camera badge that does it. */
+  onChangePicture?: () => void;
+  changing?: boolean;
 }) {
   const { agent, working, watchable } = usePresence(userId);
   const toast = useToast();
   const { push } = useNav();
   const label = (nickname ?? agent?.nickname ?? "").trim();
-  const face = (
+  const name = label || `#${userId}`;
+  const picture = <Picture userId={userId} label={label} avatarId={avatarId ?? agent?.avatarId} size={size} />;
+  return (
     <View style={{ width: size, height: size }}>
       {working && <Ring size={size} />}
-      <Picture userId={userId} label={label} avatarId={avatarId ?? agent?.avatarId} size={size} />
+      {agent ? (
+        // An agent's face is always its live screen, wherever it is drawn.
+        <Pressable
+          testID={`agent-avatar-${userId}`}
+          accessibilityLabel={watchable ? `${name} · 点击查看现场` : agent.online ? `${name} · 现场暂不可用` : `${name} · 离线`}
+          onPress={() =>
+            watchable ? push("screen", "overlay", { sessionId: agent.sid }) : toast(agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)
+          }
+        >
+          {picture}
+        </Pressable>
+      ) : (
+        picture
+      )}
+      {onChangePicture ? (
+        // Always visible rather than on hover: a phone has no hover, and an affordance nobody can find is not one.
+        <Pressable testID="change-avatar" accessibilityLabel="change picture" onPress={onChangePicture} disabled={changing} hitSlop={6} style={styles.badge}>
+          {changing ? <ActivityIndicator size="small" color={colors.page} /> : <MaterialIcons name="photo-camera" size={14} color={colors.page} />}
+        </Pressable>
+      ) : null}
     </View>
-  );
-  if (!agent || !clickable) return face;
-  const name = label || `#${userId}`;
-  return (
-    <Pressable
-      testID={`agent-avatar-${userId}`}
-      accessibilityLabel={watchable ? `${name} · 点击查看现场` : agent.online ? `${name} · 现场暂不可用` : `${name} · 离线`}
-      onPress={() =>
-        watchable ? push("screen", "overlay", { sessionId: agent.sid }) : toast(agent.online ? `「${name}」的现场暂不可用` : `「${name}」当前离线，无法查看现场`)
-      }
-    >
-      {face}
-    </Pressable>
   );
 }
 
@@ -131,7 +144,7 @@ export function MemberGrid({ members, size = metrics.avatarInList }: { members: 
         <View key={r} style={[styles.gridRow, { marginTop: r === 0 ? 0 : gap, gap }]}>
           {Array.from({ length: count }, () => {
             const m = shown[i++];
-            return <Avatar key={m.userId} {...m} size={tile} clickable={false} />;
+            return <Avatar key={m.userId} {...m} size={tile} />;
           })}
         </View>
       ))}
@@ -143,6 +156,19 @@ const styles = StyleSheet.create({
   fallback: { alignItems: "center", justifyContent: "center" },
   initial: { color: "#fff", fontWeight: "600", fontFamily: fonts.mono },
   ring: { position: "absolute", borderWidth: 2, borderColor: colors.working },
+  badge: {
+    position: "absolute",
+    right: -4,
+    bottom: -4,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.brand,
+    borderWidth: 2,
+    borderColor: colors.page,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   grid: { backgroundColor: colors.hover, borderRadius: metrics.avatarRadius, justifyContent: "center" },
   gridRow: { flexDirection: "row", justifyContent: "center" },
 });

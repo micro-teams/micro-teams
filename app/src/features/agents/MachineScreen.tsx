@@ -145,7 +145,7 @@ export function MachineScreen() {
             {here.length ? (
               here.map((a, i) => (
                 <Pressy key={a.userId} onPress={() => push("agent", "detail", { team, userId: a.userId })} style={[styles.line, i > 0 && styles.divided]}>
-                  <Avatar userId={a.userId} nickname={a.nickname} avatarId={a.avatarId} size={32} clickable={false} />
+                  <Avatar userId={a.userId} nickname={a.nickname} avatarId={a.avatarId} size={32} />
                   <Txt style={styles.grow} numberOfLines={1}>
                     {a.nickname || `agent #${a.userId}`}
                   </Txt>

@@ -14,6 +14,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useAgent, useAgentActions, useFleet, type FleetAgent, type LlmSettings } from "../../data/agents";
+import { useChangePicture } from "../../data/avatar";
 import { isWorking } from "../../data/presence";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
@@ -72,6 +73,7 @@ export function AgentScreen() {
   const actions = useAgentActions(team);
   const ask = useAsk();
   const toast = useToast();
+  const { change, changing } = useChangePicture();
   const name = agent?.nickname || `agent #${userId}`;
 
   const guard = async (action: () => Promise<unknown>) => {
@@ -114,7 +116,14 @@ export function AgentScreen() {
           <View style={styles.column}>
             {/* Which agent this is, before anything you can do to it. Tapping the face opens its live screen. */}
             <View style={styles.center}>
-              <Avatar userId={agent.userId} nickname={agent.nickname} avatarId={agent.avatarId} size={96} />
+              <Avatar
+                userId={agent.userId}
+                nickname={agent.nickname}
+                avatarId={agent.avatarId}
+                size={96}
+                changing={changing === agent.userId}
+                onChangePicture={() => guard(() => change(agent.userId))}
+              />
             </View>
             <EditableName name={name} onEdit={rename} testID="agent-rename" />
             <View style={styles.center}>
@@ -130,7 +139,7 @@ export function AgentScreen() {
               ]}
             />
             <Txt variant="small" muted style={styles.hint}>
-              tap the face to watch its live screen
+              tap the face to watch its live screen · the camera changes its picture
             </Txt>
             <Keepalive agent={agent} apply={(on, min) => guard(() => actions.keepalive(agent, on, min))} />
             {/* Only for the drivers that take their model API from MicroTeams; the others read the machine's. */}
