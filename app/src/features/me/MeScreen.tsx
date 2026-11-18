@@ -13,7 +13,8 @@
  */
 import { useEffect, useState } from "react";
 import * as Clipboard from "expo-clipboard";
-import { Linking, ScrollView, StyleSheet, View } from "react-native";
+import { MaterialIcons } from "@expo/vector-icons";
+import { Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useChangePicture } from "../../data/avatar";
 import { useClientPackages } from "../../data/clients";
 import { useSession } from "../../data/session";
@@ -102,7 +103,15 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
               {[p.bytes > 0 ? `${(p.bytes / 1048576).toFixed(1)} MB` : "", p.signed === "debug" ? "debug-signed" : ""].filter(Boolean).join(" · ")}
             </Txt>
           </View>
-          <Button kind="tonal" icon="download" testID={`download-${p.platform}`} label="download" onPress={() => void Linking.openURL(`${origin}${p.url}`)} />
+          <Pressable
+            testID={`download-${p.platform}`}
+            accessibilityLabel={`download ${p.platform}`}
+            hitSlop={8}
+            onPress={() => void Linking.openURL(`${origin}${p.url}`)}
+            style={styles.download}
+          >
+            <MaterialIcons name="download" size={22} color={colors.brand} />
+          </Pressable>
         </View>
       ))}
       <DialogActions>
@@ -184,5 +193,6 @@ const styles = StyleSheet.create({
   right: { alignItems: "flex-end", marginTop: 8 },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: 12 },
   app: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
+  download: { padding: 6 },
   logout: { height: 44, marginTop: 8 },
 });

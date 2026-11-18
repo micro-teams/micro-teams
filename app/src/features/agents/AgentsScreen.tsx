@@ -95,7 +95,7 @@ export function AgentsScreen() {
                 </View>
               }
               title={m.name}
-              subtitle={<OnlineDot online={m.online} />}
+              subtitle={<OnlineDot online={m.online} label />}
               onPress={() => open(self, "machine", { team, machineId: m.id })}
             />
           ))}
