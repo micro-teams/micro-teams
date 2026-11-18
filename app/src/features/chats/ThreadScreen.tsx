@@ -28,7 +28,7 @@
  */
 import { MaterialIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { forwardRef, useRef, useState } from "react";
+import { forwardRef, memo, useRef, useState } from "react";
 import { HostInstance, Pressable, ScrollViewProps, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -62,7 +62,8 @@ function Bubble({ text, mine, faded }: { text: string; mine: boolean; faded?: bo
   );
 }
 
-function Row({ item, prev, me, members, group }: { item: Message; prev?: Message; me?: number; members: Member[]; group: boolean }) {
+// Memoised: a row is redrawn only when its own message, the one before it or the members change.
+const Row = memo(function Row({ item, prev, me, members, group }: { item: Message; prev?: Message; me?: number; members: Member[]; group: boolean }) {
   const mine = item.senderId === me;
   const who = members.find((m) => m.userId === item.senderId);
   return (
@@ -85,7 +86,7 @@ function Row({ item, prev, me, members, group }: { item: Message; prev?: Message
       </View>
     </View>
   );
-}
+});
 
 function PendingRow({ pending, onRetry, onRemove }: { pending: Pending; onRetry: () => void; onRemove: () => void }) {
   const stuck = isStuck(pending);

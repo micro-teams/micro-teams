@@ -15,7 +15,7 @@
  * than when it is the narrow column beside a conversation.
  */
 import { FlashList } from "@shopify/flash-list";
-import { useState } from "react";
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { chatTitle, ChatSummary, parseMemberIds, useChats, useCreateChat } from "../../data/chats";
 import { useSession } from "../../data/session";
@@ -64,7 +64,8 @@ function NewChatForm({ create, done }: { create: (title: string, members: number
   );
 }
 
-function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; dense: boolean; onPress: () => void }) {
+// Memoised, with a callback that never changes: a row is redrawn only when its own conversation does.
+const Row = memo(function Row({ chat, me, dense, onOpen }: { chat: ChatSummary; me?: number; dense: boolean; onOpen: (id: number) => void }) {
   const others = chat.members.filter((m) => m.userId !== me);
   const oneOnOne = chat.members.length === 2 && others.length === 1;
   const agents = chat.members.filter((m) => m.isAgent === true);
@@ -74,7 +75,7 @@ function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; den
   const sender = chat.members.find((m) => m.userId === last?.senderId)?.nickname;
   const preview = !last ? "tap to open" : oneOnOne ? last.content : `${sender ?? ""}: ${last.content}`;
   return (
-    <Pressy testID={`chat-${chat.id}`} onPress={onPress} style={styles.row}>
+    <Pressy testID={`chat-${chat.id}`} onPress={() => onOpen(chat.id)} style={styles.row}>
       {face ? <Avatar userId={face.userId} nickname={face.nickname} avatarId={face.avatarId} size={size} /> : <MemberGrid members={chat.members} size={size} />}
       <View style={styles.text}>
         <View style={styles.titleLine}>
@@ -91,11 +92,16 @@ function Row({ chat, me, dense, onPress }: { chat: ChatSummary; me?: number; den
       </View>
     </Pressy>
   );
-}
+});
 
 export function ChatsScreen() {
   const self = useFrame();
   const { open } = useNav();
+  const latest = useRef({ open, self });
+  useLayoutEffect(() => {
+    latest.current = { open, self };
+  });
+  const onOpen = useCallback((id: number) => latest.current.open(latest.current.self, "thread", { id }), []);
   const { user } = useSession();
   const { chats, loadMore, loading, error } = useChats();
   const create = useCreateChat();
@@ -132,7 +138,7 @@ export function ChatsScreen() {
         maintainVisibleContentPosition={{ disabled: true }}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
-        renderItem={({ item }) => <Row chat={item} me={user?.id} dense={dense} onPress={() => open(self, "thread", { id: item.id })} />}
+        renderItem={({ item }) => <Row chat={item} me={user?.id} dense={dense} onOpen={onOpen} />}
         ListEmptyComponent={<Txt muted style={styles.notice}>{loading ? "loading…" : "no conversations yet"}</Txt>}
       />
     </View>

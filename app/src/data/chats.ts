@@ -183,14 +183,16 @@ export function useThread(id: number) {
 
 export type ThreadMember = Schema["ThreadMember"];
 
+const RANK = { OWNER: 0, ADMIN: 1, MEMBER: 2 } as const;
+
 export function useThreadInfo(id: number) {
   const { mt } = useSession();
   const q = useQuery({
     queryKey: ["thread", id],
     queryFn: async () => (await mt!.GET("/chat/{id}", { params: { path: { id } } })).data!,
   });
-  const rank = { OWNER: 0, ADMIN: 1, MEMBER: 2 } as const;
-  const members: ThreadMember[] = [...(q.data?.members ?? [])].sort((a, b) => rank[a.role] - rank[b.role]);
+  // The same array until the conversation changes, so the rows that take it are not redrawn.
+  const members: ThreadMember[] = useMemo(() => [...(q.data?.members ?? [])].sort((a, b) => RANK[a.role] - RANK[b.role]), [q.data]);
   const queries = useQueryClient();
   const after = async (call: Promise<unknown>) => {
     await call;

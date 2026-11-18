@@ -126,7 +126,6 @@ export function MeScreen() {
   const ask = useAsk();
   const toast = useToast();
   const { change, changing } = useChangePicture();
-  useEverySecond();
 
   const leave = async () => {
     const ok = await ask<boolean>("log out?", (done) => (
