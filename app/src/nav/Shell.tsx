@@ -9,7 +9,9 @@
  * The layout is a function of the stack and the width, and nothing else:
  *   - narrow: the top opaque frame fills the window; the tab bar shows only at a section's root,
  *     the way WeChat hides it inside a conversation;
- *   - wide: the rail, the section's root list, and beside it the top opaque frame above the root.
+ *   - wide: the rail, the section's root list, and beside it the top opaque frame above the root;
+ *     when that frame is a side page, the page it was opened from beside the list and the side page
+ *     at the right. A section in ONE_PANE is drawn as on a narrow window, beside the rail.
  * Overlays (dialogs, the live screen) are drawn over all of it either way.
  *
  * Every stack that has been opened stays mounted, hidden while it is not on screen, so switching
@@ -25,7 +27,7 @@ import { Avatar } from "../ui/Avatar";
 import { Txt } from "../ui/kit";
 import { colors, metrics, WIDE } from "../ui/theme";
 import { FrameProvider, useNav } from "./NavProvider";
-import { Frame, Nav, Section, stackKey, stackOf } from "./stack";
+import { Frame, Nav, ONE_PANE, Section, stackKey, stackOf } from "./stack";
 
 type Icon = keyof typeof MaterialIcons.glyphMap;
 
@@ -58,14 +60,16 @@ function topOpaque(stack: Frame[]): number {
 
 function StackView({ stack, routes, wide, onScreen }: { stack: Frame[]; routes: Routes; wide: boolean; onScreen: boolean }) {
   const shown = topOpaque(stack);
-  if (!wide) {
+  if (!wide || ONE_PANE.has(stack[0].route as Section)) {
     return (
       <View style={[StyleSheet.absoluteFill, !onScreen && styles.hidden]}>
         {stack.map((f, i) => (f.kind === "overlay" ? null : <Drawn key={f.key} frame={f} routes={routes} visible={i === shown} />))}
       </View>
     );
   }
-  const detail = shown > 0 ? shown : -1;
+  // A side page sits at the right of the page it was opened from, which stays in the middle.
+  const side = shown > 1 && stack[shown].kind === "side" ? shown : -1;
+  const detail = side > 0 ? shown - 1 : shown > 0 ? shown : -1;
   return (
     <View style={[StyleSheet.absoluteFill, styles.row, !onScreen && styles.hidden]}>
       <View style={styles.listPane}>
@@ -78,9 +82,14 @@ function StackView({ stack, routes, wide, onScreen }: { stack: Frame[]; routes: 
           </View>
         )}
         {stack.slice(1).map((f, j) =>
-          f.kind === "overlay" ? null : <Drawn key={f.key} frame={f} routes={routes} visible={j + 1 === detail} />,
+          f.kind === "overlay" || j + 1 === side ? null : <Drawn key={f.key} frame={f} routes={routes} visible={j + 1 === detail} />,
         )}
       </View>
+      {side > 0 && (
+        <View style={styles.sidePane}>
+          <Drawn frame={stack[side]} routes={routes} visible />
+        </View>
+      )}
     </View>
   );
 }
@@ -170,6 +179,7 @@ const styles = StyleSheet.create({
   hidden: { display: "none" },
   listPane: { width: metrics.listPane, borderRightWidth: 1, borderRightColor: colors.line },
   detailPane: { flex: 1 },
+  sidePane: { width: metrics.sidePane, borderLeftWidth: 1, borderLeftColor: colors.line },
   empty: { flex: 1, alignItems: "center", justifyContent: "center" },
   rail: {
     width: metrics.railWidth,

@@ -6,13 +6,16 @@
  *   an owner and themselves, and renames; an owner deletes the conversation, which closes this
  *   frame and the conversation under it (popTo threadKey) rather than jumping anywhere.
  *
- * Example: push("threadInfo", "detail", { id: 5, threadKey: self.key })
+ * A side page: in a wide window it sits at the right of the conversation, which stays in view, and
+ * closes with a cross; in a narrow one it is a page with a back arrow.
+ *
+ * Example: push("threadInfo", "side", { id: 5, threadKey: self.key })
  *
  * A grid rather than a list because a roster is scanned, not read. Every action that changes
  * something asks first, and a refusal from the server is shown, never swallowed.
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useThreadInfo } from "../../data/chats";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -21,13 +24,14 @@ import { useAsk } from "../../ui/Dialog";
 import { Button, Header, Txt } from "../../ui/kit";
 import { Labelled } from "../../ui/Labelled";
 import { Confirm, TextPrompt } from "../../ui/prompts";
-import { colors } from "../../ui/theme";
+import { colors, WIDE } from "../../ui/theme";
 import { useToast } from "../../ui/Toast";
 
 export function ThreadInfoScreen() {
   const self = useFrame();
   const { id, threadKey } = self.params as { id: number; threadKey: string };
-  const { backFor, popTo } = useNav();
+  const { backFor, popTo, pop } = useNav();
+  const beside = useWindowDimensions().width >= WIDE;
   const { user } = useSession();
   const info = useThreadInfo(id);
   const ask = useAsk();
@@ -80,7 +84,17 @@ export function ThreadInfoScreen() {
 
   return (
     <View style={styles.root}>
-      <Header title="Chat info" onBack={backFor(self)} />
+      <Header
+        title="Chat info"
+        onBack={beside ? undefined : backFor(self)}
+        actions={
+          beside && (
+            <Pressable testID="close-info" accessibilityLabel="close" hitSlop={10} onPress={pop}>
+              <MaterialIcons name="close" size={22} color={colors.ink} />
+            </Pressable>
+          )
+        }
+      />
       <ScrollView contentContainerStyle={styles.body}>
         <Txt variant="title">{info.storedTitle || "untitled"}</Txt>
         <View style={styles.grid}>

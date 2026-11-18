@@ -7,7 +7,8 @@
  *   moves anything. open() is what a tap on an item does: beside the list in a wide window when
  *   it was tapped in the list (select), on top of the stack otherwise (push).
  *   backFor(frame) is the header's back action for that frame, or undefined where there is
- *   nothing to go back to: a section's root, or a detail drawn beside its list in a wide window.
+ *   nothing to go back to: a section's root, or a detail drawn beside its list in a wide window
+ *   (a section in ONE_PANE has no list beside it, so there it is a page like any other).
  * useFrame() → the Frame the calling screen is drawn for (its key and params).
  * <FrameProvider frame> — what the shell wraps each drawn frame in, so useFrame() can answer.
  *
@@ -86,11 +87,13 @@ export function NavProvider({ children }: { children: ReactNode }) {
       nav,
       open: (from, route, params = {}) =>
         setNav((n) =>
-          wide && from.kind === "list" ? S.select(n, S.frame(route, "detail", params)) : S.push(n, S.frame(route, "detail", params)),
+          wide && !S.ONE_PANE.has(n.section) && from.kind === "list"
+            ? S.select(n, S.frame(route, "detail", params))
+            : S.push(n, S.frame(route, "detail", params)),
         ),
       backFor: (frame) => {
         const at = S.stackOf(nav).findIndex((f) => f.key === frame.key);
-        return at >= (wide ? 2 : 1) ? () => popLocal() : undefined;
+        return at >= (wide && !S.ONE_PANE.has(nav.section) ? 2 : 1) ? () => popLocal() : undefined;
       },
       push: (route, kind, params = {}) => setNav((n) => S.push(n, S.frame(route, kind, params))),
       pop: () => {

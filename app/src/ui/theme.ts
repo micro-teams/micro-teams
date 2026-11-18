@@ -44,6 +44,7 @@ export const metrics = {
   railIcon: 20,
   railLabel: 10,
   listPane: 320,
+  sidePane: 340,
   readingColumn: 768,
   avatarInList: 48,
   avatarInDenseList: 44,

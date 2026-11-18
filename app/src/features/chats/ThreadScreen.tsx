@@ -3,7 +3,8 @@
  *
  * <ThreadScreen /> — drawn for a "thread" frame; reads { id } from the frame. Scrolling up to the
  *   top loads the page before; the top of the list always says what it is doing (loading, more
- *   above, or the beginning). The header's info button pushes the conversation's info frame.
+ *   above, or the beginning). The header's info button opens the conversation's info as a side
+ *   page, and closes it when it is open.
  *
  * Example: open(self, "thread", { id: 5 })
  *
@@ -35,6 +36,7 @@ import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
 import { isStuck } from "../../data/outbox";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
+import { top } from "../../nav/stack";
 import { useKeyboardSlide } from "../../platform/keyboardSlide";
 import { Avatar } from "../../ui/Avatar";
 import { Button, Header, Txt } from "../../ui/kit";
@@ -121,7 +123,12 @@ function PendingRow({ pending, onRetry, onRemove }: { pending: Pending; onRetry:
 export function ThreadScreen() {
   const self = useFrame();
   const id = self.params.id as number;
-  const { backFor, push } = useNav();
+  const { backFor, push, pop, nav } = useNav();
+  // The info button opens the conversation's info beside it, and closes it again when it is open.
+  const infoOpen = (() => {
+    const t = top(nav);
+    return t.route === "threadInfo" && t.params.threadKey === self.key;
+  })();
   const { user } = useSession();
   const thread = useThread(id);
   const info = useThreadInfo(id);
@@ -162,7 +169,7 @@ export function ThreadScreen() {
         title={title}
         onBack={backFor(self)}
         actions={
-          <Pressable testID="chat-info" accessibilityLabel="chat info" hitSlop={10} onPress={() => push("threadInfo", "detail", { id, threadKey: self.key })}>
+          <Pressable testID="chat-info" accessibilityLabel="chat info" hitSlop={10} onPress={() => (infoOpen ? pop() : push("threadInfo", "side", { id, threadKey: self.key }))}>
             <MaterialIcons name="info-outline" size={22} color={colors.ink} />
           </Pressable>
         }

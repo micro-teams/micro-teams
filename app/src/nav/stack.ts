@@ -13,8 +13,10 @@
  * frame(route, kind, params?) — a new Frame with a fresh key. stackKey(section, team) — where a
  *   stack is kept. TEAM_SCOPED — the sections whose stacks are kept per team.
  *
- * Section, FrameKind — the four sections, and the three kinds of frame: a section's list, a page
- *   opened from it, and an overlay drawn over the whole window.
+ * Section, FrameKind — the four sections, and the four kinds of frame: a section's list, a page
+ *   opened from it, a side page (beside the page it was opened from in a wide window, a page of its
+ *   own in a narrow one), and an overlay drawn over the whole window. ONE_PANE — the sections that
+ *   are one page in a wide window too: nothing in them is a list to pick from.
  *
  * Example:
  *   let nav = initialNav();                                       // [chats]
@@ -30,8 +32,9 @@ export type Section = "chats" | "docs" | "agents" | "me";
 
 /** Sections whose content belongs to one team: each team gets its own stack in them. */
 export const TEAM_SCOPED: ReadonlySet<Section> = new Set<Section>(["docs", "agents"]);
+export const ONE_PANE: ReadonlySet<Section> = new Set<Section>(["me"]);
 
-export type FrameKind = "list" | "detail" | "overlay";
+export type FrameKind = "list" | "detail" | "side" | "overlay";
 
 export interface Frame {
   /** Unique within its stack; React keys and popTo use it. */
