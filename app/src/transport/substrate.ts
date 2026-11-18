@@ -9,12 +9,12 @@
  *   already up is never dropped to learn about another.
  * substrate.fetch(input, init) — fetch() over the substrate. It goes out directly instead when the
  *   substrate cannot carry it now: no line has come up within DIAL_WAIT of the dial, or none is up
- *   at this moment; and a GET or HEAD that the substrate fails, or does not answer within
+ *   at this moment; and a GET or HEAD that the substrate fails, or does not start answering within
  *   REQUEST_WAIT (a line that died silently is only noticed after a while, and a request over it
  *   would hang until then), is sent again directly.
  * substrate.openSocket(path) → Wire — a WebSocket to the origin: a stream over the substrate once a
- *   line is up, waiting at most DIAL_WAIT for one, and directly otherwise; the updates socket's and
- *   the live screen's open().
+ *   line is up, waiting at most DIAL_WAIT for one, and directly otherwise, or when the stream is not
+ *   open within REQUEST_WAIT; the updates socket's and the live screen's open().
  * substrate.stats() — each line's health, for the lines panel; error() — the last failure;
  *   linesInUse() — the lines the client is using.
  * substrate.reset() — close the client and dial again (the app came back from the background, and
@@ -35,8 +35,17 @@ import type { Wire } from "./updates/socket";
 const SERVICE = "app";
 /** How long after a dial starts requests wait for its first line before going out directly. */
 const DIAL_WAIT = 3000;
-/** How long a GET waits for the substrate's answer before asking directly. */
-const REQUEST_WAIT = 10_000;
+/** How long a GET waits for the substrate's answer to start, or a socket for its stream to open,
+ * before going directly. A line that answers at all answers well within it. */
+const REQUEST_WAIT = 2500;
+/**
+ * How quickly a dead line is noticed and replaced. A phone changing networks leaves its sockets
+ * open and silent; the client's defaults (a ping every 5 s, dead after 15 s, retries backing off to
+ * 5 s) would leave everything on that line stalled for most of a quarter of a minute, and the line
+ * that does come back up up to 5 s after the network has. A ping is a few bytes; a line that stays
+ * unreachable costs one attempt every 2 s.
+ */
+const LIVENESS = { pingIntervalMs: 2000, deadAfterMs: 5000, maxDelayMs: 2000 };
 
 const lineKey = (origin: string) => `lines:${origin}`;
 const asWebSocket = (url: string) => url.replace(/^http/, "ws");
@@ -77,7 +86,7 @@ export class Substrate {
   /** The running client, dialling a new one if there is none or the origin refused the last. */
   private live(): Client {
     if (!this.client || this.client.closed) {
-      this.client = Client.connect(this.lines.map(asWebSocket));
+      this.client = Client.connect(this.lines.map(asWebSocket), LIVENESS);
       this.dialledAt = Date.now();
       const client = this.client;
       void client.ready().then(() => {
@@ -145,18 +154,29 @@ export class Substrate {
       if (opened) wire.onopen?.();
       else ws.onopen = () => wire.onopen?.();
     };
-    const direct = () => {
-      console.warn(`multipath: no line up, opening ${path.split("?")[0]} directly`);
+    const direct = (why: string) => {
+      console.warn(`multipath: ${why}, opening ${path.split("?")[0]} directly`);
       const ws = new WebSocket(asWebSocket(this.origin) + path);
       ws.binaryType = "arraybuffer"; // binary frames as bytes, as they arrive over the substrate
       attach(ws as unknown as Inner, false);
     };
     const client = this.live();
     void this.ready(client).then(async (ok) => {
-      if (!ok) return direct();
+      if (!ok) return direct("no line up");
+      let late = false;
+      const timer = setTimeout(() => {
+        late = true;
+        this.lastError = `socket ${path.split("?")[0]}: not open over the lines in ${REQUEST_WAIT} ms`;
+        direct(`not open over the lines in ${REQUEST_WAIT} ms`);
+      }, REQUEST_WAIT);
       try {
-        attach((await client.openWebSocket(SERVICE, path)) as unknown as Inner, true);
+        const ws = (await client.openWebSocket(SERVICE, path)) as unknown as Inner;
+        clearTimeout(timer);
+        if (late) return ws.close();
+        attach(ws, true);
       } catch (e) {
+        clearTimeout(timer);
+        if (late) return;
         this.lastError = `socket ${path.split("?")[0]}: ${String(e)}`;
         wire.onerror?.(e);
       }
