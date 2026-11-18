@@ -11,9 +11,8 @@
  * Example: routes={{ docs: DocsScreen, ... }}
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { childPath, DocNode, flatten, nameOf, parentOf, useDocEdits, useDocTree } from "../../data/docs";
 import { useTeams } from "../../data/teams";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -154,22 +153,20 @@ export function DocsScreen() {
           loading…
         </Txt>
       ) : (
-        <FlashList
-          data={rows}
-          keyExtractor={(r) => r.node.path}
-          ListHeaderComponent={
+        // Drawn once and scrolled by the platform, with no JavaScript per frame: a tree is not long.
+        <ScrollView>
+          <Row
+            testID="doc-root"
+            label={teamName}
+            icon="folder"
+            depth={0}
+            onPress={() => toggle("")}
+            menu={menuItems(true)}
+            onAction={(a) => act(null, a)}
+          />
+          {rows.map(({ node, depth }) => (
             <Row
-              testID="doc-root"
-              label={teamName}
-              icon="folder"
-              depth={0}
-              onPress={() => toggle("")}
-              menu={menuItems(true)}
-              onAction={(a) => act(null, a)}
-            />
-          }
-          renderItem={({ item: { node, depth } }) => (
-            <Row
+              key={node.path}
               testID={`doc-${node.path}`}
               label={nameOf(node.path)}
               icon={node.isFolder ? "folder" : "description"}
@@ -178,15 +175,13 @@ export function DocsScreen() {
               menu={menuItems(false)}
               onAction={(a) => act(node, a)}
             />
-          )}
-          ListEmptyComponent={
-            expanded.has("") ? (
-              <Txt muted style={styles.notice}>
-                no documents yet — “⋯” on the team makes one
-              </Txt>
-            ) : null
-          }
-        />
+          ))}
+          {!rows.length && expanded.has("") ? (
+            <Txt muted style={styles.notice}>
+              no documents yet — “⋯” on the team makes one
+            </Txt>
+          ) : null}
+        </ScrollView>
       )}
     </View>
   );

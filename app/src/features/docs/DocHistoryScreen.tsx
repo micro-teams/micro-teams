@@ -9,7 +9,6 @@
  *
  * Example: push("docHistory", "detail", { team: 3, path: "notes/plan.md" })
  */
-import { FlashList } from "@shopify/flash-list";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { nameOf, useDocDiff, useDocHistory } from "../../data/docs";
 import { useFrame, useNav } from "../../nav/NavProvider";
@@ -28,23 +27,21 @@ export function DocHistoryScreen() {
       {history.error ? (
         <Txt style={styles.notice}>{String(history.error)}</Txt>
       ) : (
-        <FlashList
-          data={history.commits}
-          keyExtractor={(c) => c.sha}
-          renderItem={({ item: c }) => (
-            <Pressy testID={`commit-${c.sha.slice(0, 7)}`} style={styles.row} onPress={() => push("docDiff", "detail", { team, path, sha: c.sha, message: c.message })}>
+        <ScrollView>
+          {history.commits.map((c) => (
+            <Pressy key={c.sha} testID={`commit-${c.sha.slice(0, 7)}`} style={styles.row} onPress={() => push("docDiff", "detail", { team, path, sha: c.sha, message: c.message })}>
               <Txt numberOfLines={2}>{c.message.trim() || "(no message)"}</Txt>
               <Txt variant="small" muted>
                 {`${c.sha.slice(0, 7)} · ${c.author} · ${listTime(new Date(c.timestamp * 1000).toISOString())}`}
               </Txt>
             </Pressy>
-          )}
-          ListEmptyComponent={
+          ))}
+          {!history.commits.length && (
             <Txt muted style={styles.notice}>
               {history.loaded ? "no history" : "loading…"}
             </Txt>
-          }
-        />
+          )}
+        </ScrollView>
       )}
     </View>
   );
