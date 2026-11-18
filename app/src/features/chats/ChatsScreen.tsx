@@ -126,6 +126,10 @@ export function ChatsScreen() {
       <FlashList
         data={chats}
         keyExtractor={(c) => String(c.id)}
+        // Off, unlike a conversation's list. Kept on, it held the first visible row still when a
+        // conversation with a new message moved to the top, so the conversation that just spoke
+        // landed above the top of the screen; a chat list shows its newest at the top, as WeChat's does.
+        maintainVisibleContentPosition={{ disabled: true }}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
         renderItem={({ item }) => <Row chat={item} me={user?.id} dense={dense} onPress={() => open(self, "thread", { id: item.id })} />}
