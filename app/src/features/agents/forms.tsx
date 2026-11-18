@@ -14,8 +14,10 @@
  *
  * Example: const machineId = await ask<string | null>("add a device", (done) => <AddDevice team={3} done={done} />);
  */
+import { MaterialIcons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useCallback, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { useAllMachines, useDrivers, type LlmSettings, type Machine } from "../../data/agents";
 import { useSession } from "../../data/session";
 import { DialogActions } from "../../ui/Dialog";
@@ -23,14 +25,25 @@ import { Button, Field, Txt } from "../../ui/kit";
 import { Labelled } from "../../ui/Labelled";
 import { Select } from "../../ui/Menu";
 import { colors, fonts } from "../../ui/theme";
+import { useToast } from "../../ui/Toast";
 import { ModelApiFields } from "./ModelApi";
 
+/** A command to run on another machine, with a button that copies it: typed out by hand, one wrong character is a failed install. */
 function Command({ text }: { text: string }) {
+  const toast = useToast();
   return (
     <View style={styles.command}>
-      <Txt selectable style={styles.code}>
+      <Txt selectable style={[styles.code, styles.grow]}>
         {text}
       </Txt>
+      <Pressable
+        testID="copy-command"
+        accessibilityLabel="copy"
+        hitSlop={8}
+        onPress={() => void Clipboard.setStringAsync(text).then(() => toast("copied"), (e: unknown) => toast(`could not copy: ${String(e)}`))}
+      >
+        <MaterialIcons name="content-copy" size={18} color={colors.inkMuted} />
+      </Pressable>
     </View>
   );
 }
@@ -120,7 +133,7 @@ export function OpenAgent({ machines, done }: { machines: Machine[]; done: (form
 
 const styles = StyleSheet.create({
   form: { gap: 12 },
-  command: { backgroundColor: colors.page, borderRadius: 6, padding: 10 },
+  command: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.page, borderRadius: 6, padding: 10 },
   code: { fontFamily: fonts.mono, fontSize: 13 },
   spare: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
   grow: { flex: 1 },
