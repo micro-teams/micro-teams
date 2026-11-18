@@ -4,7 +4,8 @@
  *
  * new WebdriverioDriver({ appPackage, appActivity }) — expects an Appium server on 127.0.0.1:4723
  *   and an emulator with the app installed. tap() puts the keyboard away first, as a person does
- *   before reaching for a button it covers.
+ *   before reaching for a button it covers. There is no go(): an installed app has no address bar,
+ *   and a link the CLI prints opens in a browser.
  *
  * Example: await journey(new WebdriverioDriver({ appPackage: "app.microteams.microteams", appActivity: ".MainActivity" }), params);
  */
@@ -93,8 +94,16 @@ export class WebdriverioDriver implements Driver {
     await (await this.byId(id)).waitForDisplayed({ timeout: timeoutMs });
   }
 
+  private byText(text: string) {
+    return this.browser.$(`android=new UiSelector().text("${text}")`);
+  }
+
   async waitForText(text: string, timeoutMs = 15_000) {
-    await (await this.browser.$(`android=new UiSelector().text("${text}")`)).waitForDisplayed({ timeout: timeoutMs });
+    await (await this.byText(text)).waitForDisplayed({ timeout: timeoutMs });
+  }
+
+  async shows(text: string) {
+    return (await this.byText(text)).isDisplayed().catch(() => false);
   }
 
   async waitGone(id: string, timeoutMs = 15_000) {

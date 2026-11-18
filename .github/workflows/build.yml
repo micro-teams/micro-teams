@@ -61,8 +61,8 @@ jobs:
           path: backend/target/*.jar
 
   # The MultiPath origin: the server end of the substrate, a separate process that runs in front of
-  # the backend. It is the one thing in this repository that pulls from GitHub Packages, which is
-  # why it carries the token plumbing the backend used to.
+  # the backend. It is the one thing in this repository built from GitHub Packages, which is why it
+  # carries the token plumbing.
   build-origin:
     runs-on: ubuntu-latest
     permissions:
@@ -214,10 +214,10 @@ jobs:
           restore-keys: gradle-app-${{ runner.os }}-
       - run: npm ci
       - run: npm run codegen
-      # The version code: above every code the Flutter client shipped (see app.config.js), rising
-      # with each run.
+      # The version code: above every code already installed (see app.config.js), rising with each
+      # run.
       - run: MT_VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER)) npx expo prebuild --platform android --no-install
-      # The key the Flutter client was signed with, so an installed copy is replaced in place
+      # The key the installed copies were signed with, so an installed copy is replaced in place
       # (plugins/release-signing.js reads key.properties). Without it the APK is debug-signed, and
       # says so in clients.json: a debug-signed package cannot later be replaced by a signed one.
       - name: Write the release key, if this repository has one
@@ -333,10 +333,10 @@ jobs:
     # install.sh drops it at ~/.config/microteams/bin/tmux (macOS is not published — install.sh
     # falls back to copying the machine's own tmux there). Only the build recipe is in git.
     #
-    # Built NATIVELY on a matching-arch runner — the arm64 build used to run under QEMU emulation
-    # (minutes of emulated gcc; the Dockerfile already passes `make -j$(nproc)`, so the bottleneck was
-    # emulation, not parallelism). The two arches now run as parallel matrix jobs, and the result is
-    # cached by the build recipe's hash so an unchanged tmux version rebuilds instantly.
+    # Built NATIVELY on a matching-arch runner: under QEMU emulation an arm64 build is minutes of
+    # emulated gcc, whatever `make -j$(nproc)` asks for. The two arches run as parallel matrix jobs,
+    # and the result is cached by the build recipe's hash so an unchanged tmux version rebuilds
+    # instantly.
     strategy:
       fail-fast: false
       matrix:
@@ -459,26 +459,18 @@ jobs:
           name: microteams-deploy
           path: microteams-deploy
 
-  # The one test that exercises this system the way it is actually used: the shipped bundle, plus a
-  # real machine with the real connector on it. `test-compose` used to stop at "the containers report
-  # healthy", which cannot see the half of the product that lives on a machine — the connector, its
-  # private tmux, the applet driving a terminal, and the path a chat message takes into a program.
-  # Every incident so far has lived exactly there, so that is what this boots and asserts.
+  # The matrix is what plays the agent's program: the real Claude Code and pi, each in front of a
+  # mock model API.
   #
-  # The matrix is what plays the agent's program, and both entries are the real Claude Code.
-  #
-  # `npm:2.1.220` is PINNED, which is where the determinism comes from: nothing about it can change
-  # without us changing the number, so a red run means we broke something. It used to share that job
-  # with a `fake` stand-in — a shell script pretending to be Claude — and the stand-in is gone,
-  # because pinning already buys what it was there for, while it cost a second implementation of
-  # every leg and proved nothing about driving the real program.
-  #
-  # It is also the leg that proves the applet drives Claude Code at all: through the first-run
-  # wizard, the bypass-permissions gate, and back out through `microteams api say`.
+  # `npm:2.1.220` and `pi:0.87.0` are PINNED, which is where the determinism comes from: nothing about
+  # them can change without us changing the number, so a red run means we broke something. The
+  # pinned Claude leg is also the one that proves the applet drives Claude Code at all: through the
+  # first-run wizard, the bypass-permissions gate, and back out through `microteams api say`.
   #
   # The `installer` leg tracks Claude Code's latest and stays advisory (continue-on-error): a UI
   # change upstream is intelligence worth having, not a reason to block someone else's merge. When it
   # goes red, the fix belongs in the applet, and the pinned leg is what says whether we broke it.
+  #
   # The machinery, without anybody using it: the connector, its private tmux, the applet, and the
   # path a message takes into a program's stdin — driven by curl, with no client in the picture.
   # It is NOT the whole product end to end: it is deliberately the layer underneath the client, where
@@ -515,9 +507,8 @@ jobs:
           docker compose up -d --wait --wait-timeout 360
       # Only the pinned leg exercises `microteams update`: it needs a distinctly-versioned connector
       # binary so the e2e can PROVE the running service re-execed into the freshly downloaded one
-      # (not merely that a file on disk changed). It moved here when the `fake` leg was deleted —
-      # this coverage was never about which program plays the agent, only about needing exactly one
-      # leg to carry it. `setup-go` matches build-cli's toolchain, and the two env vars below persist
+      # (not merely that a file on disk changed). Which program plays the agent does not matter to
+      # it; exactly one leg has to carry it. `setup-go` matches build-cli's toolchain, and the two env vars below persist
       # to the "End-to-end" step in the same job/leg.
       - uses: actions/setup-go@v7
         if: matrix.leg == 'npm:2.1.220'
@@ -548,15 +539,38 @@ jobs:
         run: docker compose down
 
   # The journey: the bundle above, driven through the client a person uses — one script, on the
-  # web build in Chromium and on the Android build in an emulator. See app/e2e/journey.ts.
+  # web build in Chromium and on the Android build in an emulator — with a real machine in it: the
+  # connector and tmux from the bundle, and a real agent program in front of a mock model, which the
+  # journey asks whether what was typed in the app reached it. See app/e2e/journey.ts.
+  #
+  # Each run pairs a client with a program, so that every client and every program is covered in
+  # as few runs as that allows rather than in every combination. The pinned programs are where
+  # determinism comes from; `installer` is Claude Code's latest and advisory, as in test-machinery.
   test-journeys:
     needs: [package-zip]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
-        client: [web, android]
+        include:
+          - client: web
+            leg: npm:2.1.220
+            driver: ""
+            experimental: false
+          - client: android
+            leg: pi:0.87.0
+            driver: pi
+            experimental: false
+          - client: web
+            leg: installer
+            driver: ""
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    env:
+      RUN: j${{ github.run_id }}${{ strategy.job-index }}
+      LEG: ${{ matrix.leg }}
+      DRIVER: ${{ matrix.driver }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -568,6 +582,8 @@ jobs:
           path: microteams-deploy
       - name: Bring the bundle up, with a mail sink for sign-up codes
         run: bash app/e2e/stack.sh microteams-deploy
+      - name: A machine waiting to be approved (${{ matrix.leg }})
+        run: echo "ENROLL=$(bash app/e2e/machine.sh up microteams-deploy '${{ matrix.leg }}' | tail -1)" >> "$GITHUB_ENV"
       - run: npm ci
         working-directory: app/e2e
       - name: The journey, in a browser
@@ -578,7 +594,7 @@ jobs:
           # Is everything where it is served (the site at /, the app under /app/, deep links, the
           # worker's scope, /version)? Then the journey through the app.
           npx tsx bundle.ts http://localhost
-          RUN="w$GITHUB_RUN_ID" npx tsx run.ts web http://localhost/app/
+          npx tsx run.ts web http://localhost/app/
       - name: Let the emulator use KVM
         if: matrix.client == 'android'
         run: |
@@ -603,17 +619,20 @@ jobs:
           disable-animations: true
           # The emulator's own launcher sometimes stops answering under load, and the system's
           # "isn't responding" dialog then covers the app the journey is driving: hidden here.
-          script: adb shell settings put global hide_error_dialogs 1 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (RUN="a$GITHUB_RUN_ID" npx tsx run.ts android http://10.0.2.2 || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1))
+          script: adb shell settings put global hide_error_dialogs 1 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://10.0.2.2 || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1))
+      - name: The app's requests went over the substrate
+        run: bash app/e2e/carried.sh
       - name: What went wrong
         if: failure()
         run: |
           tail -60 appium.log 2>/dev/null || true
-          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend
+          bash app/e2e/machine.sh logs
+          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend origin
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
           retention-days: 3
-          name: journey-failure-${{ matrix.client }}
+          name: journey-failure-${{ matrix.client }}-${{ strategy.job-index }}
           path: app/e2e/failure.png
 
   # One check to require in branch protection: it succeeds only when every job above did (a job with

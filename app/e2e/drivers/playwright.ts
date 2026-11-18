@@ -3,8 +3,9 @@
  * data-testid react-native-web renders for a testID. Only what is visible counts: every frame of
  * every stack stays mounted, hidden, so the same id or text is usually also somewhere off screen.
  *
- * new PlaywrightDriver(url) — opens url on open(). Console errors, failed requests and HTTP errors
- *   are recorded and returned by dump().
+ * new PlaywrightDriver(url) — opens url on open(), where the app is served; go(path) opens an
+ *   address under it, as a link pasted into the address bar does. Console errors, failed requests
+ *   and HTTP errors are recorded and returned by dump().
  *
  * Example: await journey(new PlaywrightDriver("http://localhost/app/"), params);
  */
@@ -62,6 +63,14 @@ export class PlaywrightDriver implements Driver {
 
   async waitGone(id: string, timeoutMs = 15_000) {
     await this.id(id).waitFor({ state: "hidden", timeout: timeoutMs });
+  }
+
+  async shows(text: string) {
+    return (await this.p.getByText(text, { exact: true }).filter({ visible: true }).count()) > 0;
+  }
+
+  async go(path: string) {
+    await this.p.goto(new URL(path, this.url).href);
   }
 
   /**
