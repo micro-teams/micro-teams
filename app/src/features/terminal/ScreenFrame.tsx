@@ -5,14 +5,15 @@
  * <ScreenFrame /> — drawn for a "screen" overlay frame with { sessionId }. One row of chrome above
  *   the terminal (a terminal is the content; the chrome is a tax on how many lines you see): close,
  *   the three modes — watching, history, typing — as icons, "the agent is not driving" while
- *   typing, compact, and Esc (sent when pressed, in any mode: a phone's keyboard has none). While the socket is down one row says it is reconnecting, and once
- *   several attempts have never connected, that the screen may be gone or not yours to watch, with
- *   a way to try now.
+ *   typing, compact, and Esc (sent when pressed, in any mode: a phone's keyboard has none). Until
+ *   the first of the screen arrives one row says it is connecting; while the socket is down, that
+ *   it is reconnecting, and once several attempts have never connected, that the screen may be
+ *   gone or not yours to watch, with a way to try now.
  *
  * Example: push("screen", "overlay", { sessionId: agent.sid })
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLiveScreen, type ViewMode } from "../../data/screen";
@@ -40,7 +41,11 @@ export function ScreenFrame() {
   const { pop } = useNav();
   const insets = useSafeAreaInsets();
   const term = useRef<TerminalViewHandle>(null);
-  const { state, screen } = useLiveScreen(sessionId, (bytes) => term.current?.write(bytes));
+  const [drawn, setDrawn] = useState(false);
+  const { state, screen } = useLiveScreen(sessionId, (bytes) => {
+    term.current?.write(bytes);
+    setDrawn(true);
+  });
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]} testID="screen">
@@ -61,6 +66,14 @@ export function ScreenFrame() {
           <Txt variant="label">Esc</Txt>
         </Pressable>
       </View>
+      {!drawn && !state.reconnecting && (
+        <View testID="screen-connecting" style={styles.banner}>
+          <ActivityIndicator size="small" color={colors.ink} />
+          <Txt variant="small" style={styles.bannerText}>
+            connecting…
+          </Txt>
+        </View>
+      )}
       {state.reconnecting && (
         <Pressable onPress={() => screen.retry()} style={[styles.banner, state.doubtful && styles.doubtful]}>
           <ActivityIndicator size="small" color={colors.ink} />
