@@ -73,6 +73,17 @@ export function LinesScreen() {
  */
 function ClientInfo({ report, done }: { report: string; done: (v: boolean) => void }) {
   const toast = useToast();
+  const ask = useAsk();
+  // A download says nothing until the server answers, which can take seconds: said here instead.
+  const coming = () =>
+    void ask<boolean>("downloading", (ok) => (
+      <>
+        <Txt>The download will start in a few seconds. Please wait.</Txt>
+        <DialogActions>
+          <Button kind="text" testID="download-ok" label="ok" onPress={() => ok(true)} />
+        </DialogActions>
+      </>
+    ));
   const { origin } = useSession();
   const { packages, loaded } = useClientPackages();
   return (
@@ -104,7 +115,7 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
               {[p.bytes > 0 ? `${(p.bytes / 1048576).toFixed(1)} MB` : "", p.signed === "debug" ? "debug-signed" : ""].filter(Boolean).join(" · ")}
             </Txt>
           </View>
-          <DownloadLink testID={`download-${p.platform}`} label={`download ${p.platform}`} url={`${origin}${p.url}`} style={styles.download}>
+          <DownloadLink testID={`download-${p.platform}`} label={`download ${p.platform}`} url={`${origin}${p.url}`} onStart={coming} style={styles.download}>
             <MaterialIcons name="download" size={22} color={colors.brand} />
           </DownloadLink>
         </View>
