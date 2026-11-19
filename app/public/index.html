@@ -18,8 +18,9 @@
     <link rel="icon" type="image/svg+xml" href="/app/favicon.svg" />
     <link rel="manifest" href="/app/manifest.json" />
     <title>MicroTeams</title>
-    <!-- The fonts — the monospace face in both weights, and Noto Sans SC for Chinese — are registered
-         by the loader (worker/loader.js) from its cache, not by @font-face rules here. -->
+    <!-- The fonts — the monospace face in both weights, and Noto Sans SC for Chinese once the first
+         screen is drawn — are registered by the loader (worker/loader.js) from its cache, not by
+         @font-face rules here. -->
     <!-- The splash, from the first byte until the app has drawn a complete first screen (it sets
          data-mt-ready on <html>; src/platform/ready.web.ts), so nothing assembles in front of the
          reader. After twenty seconds it says it is taking too long and offers the two things that

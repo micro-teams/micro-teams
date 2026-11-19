@@ -32,9 +32,9 @@ const css = await readFile(require.resolve("@xterm/xterm/css/xterm.css"), "utf8"
 // system's monospace is not the face the terminal is set in everywhere else.
 const face = async (file, weight) =>
   `@font-face{font-family:"LiberationMono";font-weight:${weight};src:url(data:font/ttf;base64,${(
-    await readFile(path.join(here, "..", "public", "fonts", file))
+    await readFile(path.join(here, "..", file))
   ).toString("base64")}) format("truetype")}`;
-const fontsCss = (await face("LiberationMono-Regular.ttf", 400)) + (await face("LiberationMono-Bold.ttf", 700));
+const fontsCss = (await face("assets/fonts/LiberationMono-Regular.ttf", 400)) + (await face("public/fonts/LiberationMono-Bold.ttf", 700));
 const script = js.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
 
 const html = `<!doctype html><html><head><meta charset="utf-8">

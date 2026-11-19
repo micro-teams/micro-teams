@@ -115,6 +115,12 @@ your proxy sets, so the **same bundle works behind any domain**. Your proxy must
 - **Not buffer the terminal stream.** The screen is streamed; a proxy that response-buffers makes it
   update in laggy bursts. (nginx: `proxy_buffering off` for that route — the bundled nginx already
   does this internally; it matters for *your* outer proxy.)
+- **Cache `/app/_expo/static/` if it caches at all.** Every file there is named by its content and
+  answered with `Cache-Control: public, max-age=31536000, immutable`; every other name under `/app/`
+  is `no-cache`. A CDN that respects the origin's headers caches the first and revalidates the
+  rest. Cloudflare does so only when no rule of the zone bypasses its cache for these paths; a
+  Cache Rule "URI Path starts with `/app/_expo/static/`: eligible for cache, edge and browser TTL
+  from the origin" makes it explicit.
 
 **Cloudflare Tunnel** works with no extra config: `cloudflared` sets the forwarded headers and
 handles WebSocket automatically. Just point a tunnel at `http://<host>:80`.
