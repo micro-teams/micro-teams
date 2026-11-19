@@ -16,6 +16,9 @@
  * less that inset. The send button is stretched to the field's height rather than given the same
  * number, so the two agree on screen whatever the field's padding comes to.
  *
+ * Read at the newest message, the list stays there whatever changes below it — the composer
+ * growing, a message sent or arriving; scrolled up, nothing moves it.
+ *
  * The list is shown once its first page is laid out: until every row is measured it may still
  * re-anchor at the bottom, and that settling is not something a reader should watch.
  *
@@ -27,7 +30,7 @@
  * 72% of the reading column.
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { forwardRef, memo, useRef, useState } from "react";
 import { HostInstance, Pressable, ScrollViewProps, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
@@ -148,12 +151,20 @@ export function ThreadScreen() {
   const listArea = useRef<HostInstance>(null);
   const composerArea = useRef<HostInstance>(null);
   const atBottom = useRef(true);
+  // Read at the newest message, the conversation stays there: when the composer grows or shrinks
+  // (the list's own box changes), when a message is sent or arrives, and when one is on its way
+  // (the footer grows). Scrolled up, nothing moves it.
+  const list = useRef<FlashListRef<Message>>(null);
+  const follow = () => {
+    if (atBottom.current) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+  };
   useKeyboardSlide(() => (atBottom.current ? [listArea.current, composerArea.current] : [composerArea.current]));
   const { bottom } = useSafeAreaInsets();
   const members: Member[] = info.members;
   const title = info.title(user?.id);
 
   const send = () => {
+    atBottom.current = true;
     thread.send(draft);
     setDraft("");
   };
@@ -176,8 +187,10 @@ export function ThreadScreen() {
         }
       />
       {thread.loaded && (
-        <View ref={listArea} style={styles.fill}>
+        <View ref={listArea} style={styles.fill} onLayout={follow}>
           <FlashList
+            ref={list}
+            onContentSizeChange={follow}
             onScroll={({ nativeEvent: e }) => {
               atBottom.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
             }}
