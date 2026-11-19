@@ -77,7 +77,8 @@ export const type = {
 } as const;
 
 export const fonts = {
-  // On the web the faces come from public/fonts (see public/index.html), Chinese included; a phone
-  // draws Chinese with its system's Noto CJK, the same family.
+  // On the web the loader (worker/loader.js) registers the faces. Chinese is drawn in the system's
+  // CJK font (through "monospace") until Noto Sans SC arrives after the first screen, then in it,
+  // as a phone draws it with its system's Noto CJK, the same family.
   mono: isWeb ? "LiberationMono, 'MT Noto Sans SC', monospace" : "LiberationMono",
 } as const;

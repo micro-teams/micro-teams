@@ -24,11 +24,23 @@ because that is the only origin whose httpOnly refresh cookie it can use.
     npm run build:web        # web-dist/: the export, plus the loader, files.json and sw.js
 
 `tool/build-worker.mjs` (run by `build:web`) turns the export into what a deployment serves: the
-entry script in `index.html` is replaced by the loader (`worker/loader.js`), which caches every
-file the first screen needs and shows how much of it has arrived; `files.json` lists those files;
-`sw.js` is the service worker. All three are named by one version, `MT_VERSION` — CI sets it to
-`<VERSION>-<commit>`, the string the app shows as its version — and that version names the one
-cache they share, so a new build is a new cache and every other one is deleted.
+entry script in `index.html` is replaced by the loader (`worker/loader.js`), which registers the
+service worker and waits briefly for it, so that on a first visit too every file the first screen
+needs comes over the MultiPath lines; it caches those files and shows how much of them has
+arrived. `files.json` lists those files; `sw.js` is the service worker. All three are named by one
+version, `MT_VERSION` — CI sets it to `<VERSION>-<commit>`, the string the app shows as its
+version — and that version names the one cache they share, so a new build is a new cache and every
+other one is deleted.
+
+Every file whose name carries its content hash is in one directory, `_expo/static/`: Expo's
+scripts and stylesheets, the assets (`metro.config.js` moves them there from `assets/`) and the
+faces from `public/fonts` (build-worker names them by their content). `deploy/nginx.conf` serves
+that directory as immutable for a year and every other name as `no-cache`; the build fails if a
+file in it is not named by its content.
+
+The Chinese face is not on the first screen: Chinese is drawn in the system's font until the
+loader has fetched `NotoSansSC-Common.woff2` after the first screen. It is Noto Sans SC cut to
+GB 2312's characters (1.4 MB against the whole font's 8.3 MB); `tool/fonts.sh` makes it.
 
 The APK is `npx expo prebuild --platform android` and then `./gradlew assembleRelease` in
 `android/`, as `.github/workflows/build.yml` runs them. The version code is `MT_VERSION_CODE`
@@ -51,8 +63,8 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
                   (links.ts) and the shell that draws it
       ui/         the theme and the shared controls: Avatar, Dialog, Menu, Header, Button, Field
       features/   the screens, one directory per section
-      platform/   the only place that asks which platform it is on: local storage, the service
-                  worker's registration, when the first screen is ready, the keyboard, keeping a
+      platform/   the only place that asks which platform it is on: local storage, when the
+                  first screen is ready, the keyboard, keeping a
                   conversation's place as earlier messages arrive above it, password autofill,
                   and the terminal (xterm.js in the page on the web, in a WebView on a phone;
                   `npm run codegen` builds the WebView's page)
@@ -63,7 +75,8 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
                   runs), the fonts, the icons, and unregister.html, the way out of a stuck cache
     assets/       the mark (logo.svg) and the launcher icons tool/icons.sh renders from it
     plugins/      the Expo config plugin that signs the release APK
-    tool/         the build steps above, the terminal page's generator, and the icons
+    tool/         the build steps above, the terminal page's generator, the icons and the
+                  Chinese face
     e2e/          the journey (see below)
 
 Rules held by code rather than by memory (eslint.config.js):
