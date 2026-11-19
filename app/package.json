@@ -51,7 +51,7 @@
     "jest": "~30.5.2",
     "jest-expo": "~58.0.14",
     "openapi-typescript": "^7.13.0",
-    "typescript": "~6.0.3"
+    "typescript": "~7.0.2"
   },
   "overrides": {
     "openapi-typescript": {
