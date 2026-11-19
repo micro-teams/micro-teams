@@ -14,12 +14,13 @@
 import { useEffect, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { MaterialIcons } from "@expo/vector-icons";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { useChangePicture } from "../../data/avatar";
 import { useClientPackages } from "../../data/clients";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
-import { appVersion, clientPlatform, download } from "../../platform/platform";
+import { DownloadLink } from "../../platform/DownloadLink";
+import { appVersion, clientPlatform } from "../../platform/platform";
 import { Avatar } from "../../ui/Avatar";
 import { DialogActions, useAsk } from "../../ui/Dialog";
 import { Facts } from "../../ui/Facts";
@@ -103,15 +104,9 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
               {[p.bytes > 0 ? `${(p.bytes / 1048576).toFixed(1)} MB` : "", p.signed === "debug" ? "debug-signed" : ""].filter(Boolean).join(" · ")}
             </Txt>
           </View>
-          <Pressable
-            testID={`download-${p.platform}`}
-            accessibilityLabel={`download ${p.platform}`}
-            hitSlop={8}
-            onPress={() => download(`${origin}${p.url}`)}
-            style={styles.download}
-          >
+          <DownloadLink testID={`download-${p.platform}`} label={`download ${p.platform}`} url={`${origin}${p.url}`} style={styles.download}>
             <MaterialIcons name="download" size={22} color={colors.brand} />
-          </Pressable>
+          </DownloadLink>
         </View>
       ))}
       <DialogActions>
