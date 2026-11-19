@@ -18,7 +18,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { ComponentType, Ref } from "react";
-import type { StyleProp, ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 import WebView, { type WebViewProps } from "react-native-webview";
 import { TERMINAL_HTML } from "./page.generated";
 import type { FromTerminal } from "./page";
@@ -84,5 +84,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
 });
 
 export function TerminalWarmup() {
-  return <TerminalView typing={false} onMessage={() => {}} style={{ position: "absolute", width: 1, height: 1, opacity: 0 }} />;
+  // In a box of its own: the WebView component wraps itself in a view that grows to fill its
+  // parent, so placed directly beside the app it would take half the window.
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden" }}>
+      <TerminalView typing={false} onMessage={() => {}} style={{ flex: 1 }} />
+    </View>
+  );
 }
