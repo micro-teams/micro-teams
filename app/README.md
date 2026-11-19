@@ -52,9 +52,10 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
       ui/         the theme and the shared controls: Avatar, Dialog, Menu, Header, Button, Field
       features/   the screens, one directory per section
       platform/   the only place that asks which platform it is on: local storage, the service
-                  worker's registration, when the first screen is ready, the keyboard, password
-                  autofill, and the terminal (xterm.js in the page on the web, in a WebView on a
-                  phone; `npm run codegen` builds the WebView's page)
+                  worker's registration, when the first screen is ready, the keyboard, keeping a
+                  conversation's place as earlier messages arrive above it, password autofill,
+                  and the terminal (xterm.js in the page on the web, in a WebView on a phone;
+                  `npm run codegen` builds the WebView's page)
     worker/       the web build's loader (loader.js) and service worker (sw.ts), which keeps the
                   app openable offline and fetches what the browser itself asks for over the
                   substrate

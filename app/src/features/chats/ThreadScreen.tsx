@@ -19,8 +19,12 @@
  * Read at the newest message, the list stays there whatever changes below it — the composer
  * growing, a message sent or arriving; scrolled up, nothing moves it.
  *
- * The list is shown once its first page is laid out: until every row is measured it may still
- * re-anchor at the bottom, and that settling is not something a reader should watch.
+ * Every loaded message is drawn once in a plain scroll view, which the platform scrolls with no
+ * JavaScript per frame; a recycling list re-renders rows as they come into view, and on a phone that
+ * work competes with the scroll. What such a list did is done here instead. The conversation is
+ * drawn hidden, put at its end, and shown two frames later, so it never appears at the top first.
+ * The page before is asked for once the reader is within a screen of the top; when it arrives above
+ * what is being read, that stays where it was (platform/keepPlace.ts).
  *
  * A message on its way is drawn at once, faded, with "sending…" under it; one that has failed several
  * times says why and offers retry and remove, and removing puts its text back in the composer.
@@ -30,26 +34,21 @@
  * 72% of the reading column.
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { forwardRef, memo, useRef, useState } from "react";
-import { HostInstance, Pressable, ScrollViewProps, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
-import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
+import { memo, useRef, useState } from "react";
+import { HostInstance, NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { KeyboardChatScrollView, type KeyboardChatScrollViewRef, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Message, Pending, useThread, useThreadInfo } from "../../data/chats";
 import { isStuck } from "../../data/outbox";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { top } from "../../nav/stack";
+import { useKeepPlace } from "../../platform/keepPlace";
 import { useKeyboardSlide } from "../../platform/keyboardSlide";
 import { Avatar } from "../../ui/Avatar";
 import { Button, Header, Txt } from "../../ui/kit";
 import { colors, fonts, metrics } from "../../ui/theme";
 import { needsSeparator, separatorTime } from "./time";
-
-const ChatScroll = forwardRef<never, ScrollViewProps>(function ChatScroll(props, ref) {
-  const { bottom } = useSafeAreaInsets();
-  return <KeyboardChatScrollView ref={ref} {...props} keyboardLiftBehavior="whenAtEnd" offset={bottom} />;
-});
 
 type Member = { userId: number; nickname?: string; avatarId?: number };
 
@@ -154,9 +153,22 @@ export function ThreadScreen() {
   // Read at the newest message, the conversation stays there: when the composer grows or shrinks
   // (the list's own box changes), when a message is sent or arrives, and when one is on its way
   // (the footer grows). Scrolled up, nothing moves it.
-  const list = useRef<FlashListRef<Message>>(null);
+  const list = useRef<KeyboardChatScrollViewRef>(null);
   const follow = () => {
     if (atBottom.current) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+  };
+  // Within a screen of the top, the page before is asked for (loadOlder ignores the ask while one
+  // is on its way or there is none).
+  const onScroll = ({ nativeEvent: e }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    atBottom.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
+    if (e.contentOffset.y < e.layoutMeasurement.height) void thread.loadOlder();
+  };
+  const keepPlace = useKeepPlace(list, thread.messages[0]?.id);
+  // The first time there is something to show, it is put at its end while still hidden.
+  const onContentSizeChange = () => {
+    if (laidOut || !thread.messages.length) return follow();
+    list.current?.scrollToEnd({ animated: false });
+    requestAnimationFrame(() => requestAnimationFrame(() => setLaidOut(true)));
   };
   useKeyboardSlide(() => (atBottom.current ? [listArea.current, composerArea.current] : [composerArea.current]));
   const { bottom } = useSafeAreaInsets();
@@ -188,40 +200,35 @@ export function ThreadScreen() {
       />
       {thread.loaded && (
         <View ref={listArea} style={styles.fill} onLayout={follow}>
-          <FlashList
+          <KeyboardChatScrollView
             ref={list}
-            onContentSizeChange={follow}
-            onScroll={({ nativeEvent: e }) => {
-              atBottom.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
-            }}
+            keyboardLiftBehavior="whenAtEnd"
+            offset={bottom}
+            {...keepPlace}
+            onContentSizeChange={onContentSizeChange}
+            onScroll={onScroll}
+            scrollEventThrottle={100}
+            // Rows out of view are left out of what is drawn each frame: with every row of a long
+            // conversation attached, flinging it keeps the render thread more than half busy.
+            removeClippedSubviews
             style={!laidOut && thread.messages.length > 0 && styles.hidden}
-            // Shown two frames after the first layout, not on it: the list measures its rows and
-            // settles its position from the bottom in those frames, and that settling is the flash.
-            onLoad={() => requestAnimationFrame(() => requestAnimationFrame(() => setLaidOut(true)))}
-            data={thread.messages}
-            keyExtractor={(m) => String(m.id)}
-            renderScrollComponent={ChatScroll}
-            maintainVisibleContentPosition={{ startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }}
-            onStartReached={thread.loadOlder}
-            onStartReachedThreshold={0.5}
-            ListHeaderComponent={<Txt variant="small" muted style={styles.edge}>{edge}</Txt>}
-            ListFooterComponent={
-              <>
-                {thread.pending.map((p) => (
-                  <PendingRow
-                    key={p.clientToken}
-                    pending={p}
-                    onRetry={() => thread.retry(p.clientToken)}
-                    onRemove={() => setDraft(thread.discard(p.clientToken) ?? "")}
-                  />
-                ))}
-                {thread.error ? <Txt style={styles.error}>{String(thread.error)}</Txt> : null}
-              </>
-            }
-            renderItem={({ item, index }) => (
-              <Row item={item} prev={thread.messages[index - 1]} me={user?.id} members={members} group={members.length > 2} />
-            )}
-          />
+          >
+            <Txt variant="small" muted style={styles.edge}>
+              {edge}
+            </Txt>
+            {thread.messages.map((item, index) => (
+              <Row key={item.id} item={item} prev={thread.messages[index - 1]} me={user?.id} members={members} group={members.length > 2} />
+            ))}
+            {thread.pending.map((p) => (
+              <PendingRow
+                key={p.clientToken}
+                pending={p}
+                onRetry={() => thread.retry(p.clientToken)}
+                onRemove={() => setDraft(thread.discard(p.clientToken) ?? "")}
+              />
+            ))}
+            {thread.error ? <Txt style={styles.error}>{String(thread.error)}</Txt> : null}
+          </KeyboardChatScrollView>
         </View>
       )}
       {!thread.loaded && <View style={styles.fill} />}
