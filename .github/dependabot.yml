@@ -34,13 +34,10 @@ updates:
     schedule:
       interval: 'daily'
 
-  # The app's only npm dependency is Playwright, for the browser checks. Dart/Flutter packages are
-  # not covered here — dependabot has no pub ecosystem — so app/pubspec.yaml is bumped by hand.
   - package-ecosystem: 'npm'
     directory: '/app'
     schedule:
-      interval: 'daily'
-    # Batch the low-risk minor/patch bumps into one PR; majors still come individually.
+      interval: 'weekly'
     groups:
       app-minor:
         update-types:

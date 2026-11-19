@@ -1,109 +1,106 @@
 # app — the MicroTeams client
 
-One codebase for web, Android, iOS, Windows, macOS and Linux. It IS the client — the React app
-that used to live in `frontend/` is gone, and what CI packages into the deployment bundle is the
-web build produced here.
+One TypeScript codebase, Expo and React Native, with react-native-web for the browser. Two builds
+ship: the web build, which a deployment serves under `/app/`, and the Android APK, which it offers
+under `/downloads/`. The web build is real DOM — text, selection, scrolling and zoom are the
+browser's own.
 
 ## Running it
 
-    bash tool/codegen.sh          # generates packages/mt_api from ../MicroTeams-API.yml
-    flutter pub get
-    flutter run -d chrome         # or: flutter build web --release --no-web-resources-cdn
+    export NODE_AUTH_TOKEN=<a token with read:packages>   # @micro-teams/multipath is on GitHub Packages
+    npm ci
+    npm run codegen          # src/api/schema.d.ts from ../MicroTeams-API.yml, and the terminal's
+                             # WebView page (neither is committed)
+    npx expo start --web     # or: npx expo run:android
 
-A native build has no proxy in front of it and therefore no idea where the server is, so it has to
-be told:
+A native build talks to `EXPO_PUBLIC_DEFAULT_SERVER` (default `https://microteams.app`) until the
+person signs in to another server. The web build always talks to the origin it was served from,
+because that is the only origin whose httpOnly refresh cookie it can use.
 
-    flutter build apk --dart-define=MT_ORIGIN=https://your-host
+    npm run typecheck && npm run lint && npm test
 
-The web build needs no such flag: it is served from the same origin that proxies `/api` and `/mt`,
-which is also what lets the httpOnly refresh cookie work at all.
+## Building what ships
 
-## Tests
+    npm run build:web        # web-dist/: the export, plus the loader, files.json and sw.js
 
-    flutter test                       # unit and widget tests
-    flutter build web --release --no-web-resources-cdn && node tool/launcher.mjs build/web && node tool/make-sw.mjs build/web
-    npm ci && npx playwright install chromium && bash tool/check-web.sh
+`tool/build-worker.mjs` (run by `build:web`) turns the export into what a deployment serves: the
+entry script in `index.html` is replaced by the loader (`worker/loader.js`), which caches every
+file the first screen needs and shows how much of it has arrived; `files.json` lists those files;
+`sw.js` is the service worker. All three are named by one version, `MT_VERSION` — CI sets it to
+`<VERSION>-<commit>`, the string the app shows as its version — and that version names the one
+cache they share, so a new build is a new cache and every other one is deleted.
 
-The second one is not optional in CI, and it is the only thing that can answer the questions that
-matter about a web build: does it paint at all (Flutter draws into a canvas, so a DOM check proves
-nothing — see `lib/src/core/ready_signal.dart`), does the service worker register and store the
-engine, does a second visit work with the network off, and does the escape hatch clear it again.
+The APK is `npx expo prebuild --platform android` and then `./gradlew assembleRelease` in
+`android/`, as `.github/workflows/build.yml` runs them. The version code is `MT_VERSION_CODE`
+(see `app.config.js`); the release key comes from `android/key.properties`, which CI writes from
+the repository's secrets (`plugins/release-signing.js`), and without it the APK is debug-signed.
+`tool/add-clients.mjs` puts the APK into a deployment's `downloads/` and writes `clients.json`,
+the list the app's version dialog offers.
 
-If `flutter test` dies with `HttpException: Connection reset by peer` on a localhost URL, the
-shell has `HTTP_PROXY` set and the test harness is honouring it for its own loopback connection.
-`export NO_PROXY=127.0.0.1,localhost` and try again. This costs an hour the first time it happens.
+The version itself is the repository's `VERSION`; `../scripts/version.sh` is what sets it,
+`package.json` and `app.json` included.
 
 ## How it is arranged
 
-    lib/src/
-      core/         config (where the servers are), errors, the read cache
-      auth/         cheese-auth: envelope responses, refresh cookie
-      mt/           the nt client: bearer token, 401 retry, error translation
-      updates/      the sync protocol, the store, the socket — no Flutter in the first two
-      features/     one directory per feature: a controller, and screens
-      ui/           theme and shared widgets
-      app.dart      routes, and the one shell both layouts share
+    src/
+      api/        the two servers: cheese-auth (auth.ts) and the backend (client.ts, typed from
+                  the generated schema.d.ts)
+      transport/  the MultiPath substrate every request rides when it is up, and the updates socket
+      data/       the session, and every query and action a screen can use
+      nav/        the display stack (stack.ts), its React binding, the links from outside
+                  (links.ts) and the shell that draws it
+      ui/         the theme and the shared controls: Avatar, Dialog, Menu, Header, Button, Field
+      features/   the screens, one directory per section
+      platform/   the only place that asks which platform it is on: local storage, the service
+                  worker's registration, when the first screen is ready, the keyboard, keeping a
+                  conversation's place as earlier messages arrive above it, password autofill,
+                  and the terminal (xterm.js in the page on the web, in a WebView on a phone;
+                  `npm run codegen` builds the WebView's page)
+    worker/       the web build's loader (loader.js) and service worker (sw.ts), which keeps the
+                  app openable offline and fetches what the browser itself asks for over the
+                  substrate
+    public/       copied into the web build as is: index.html (the splash, drawn before any script
+                  runs), the fonts, the icons, and unregister.html, the way out of a stuck cache
+    assets/       the mark (logo.svg) and the launcher icons tool/icons.sh renders from it
+    plugins/      the Expo config plugin that signs the release APK
+    tool/         the build steps above, the terminal page's generator, and the icons
+    e2e/          the journey (see below)
 
-Three rules, each enforced by `test/architecture_test.dart` rather than by good intentions:
+Rules held by code rather than by memory (eslint.config.js):
 
-1. **A screen never talks to a server.** No `mtCall`, no client import, no subscription. It renders
-   state and reports intent; a controller behind a provider does the rest. The React client had to
-   grow a custom lint for this after the same fetch had been copied into two layouts and drifted.
-2. **Only the plumbing knows where the server is.** No hostname anywhere else.
-3. **The generated client is gitignored**, so a hand edit cannot survive a checkout.
+1. **A screen never talks to a server.** No API client, transport or query library in
+   `src/features` or `src/ui`; they read hooks from `src/data`.
+2. **Only `src/platform` branches on the platform.**
+3. **The generated client is not committed**, so a hand edit cannot survive a checkout.
+
+## The journey
+
+`e2e/journey.ts` is one script of what a person does, driven by Playwright in Chromium and by
+Appium on an Android emulator, against the deployment bundle CI built and a real machine: the
+connector and tmux from the bundle, and the real Claude Code or pi in front of a mock model API.
+CI runs it in `test-journeys`; on a machine with Docker, port 80 free and Chromium for Playwright,
+the web leg is:
+
+    bash e2e/stack.sh <unpacked bundle>                                 # the stack and a mail sink
+    export LEG=npm:2.1.220 RUN=l1
+    export ENROLL=$(bash e2e/machine.sh up <unpacked bundle> $LEG | tail -1)
+    (cd e2e && npm ci && npx tsx run.ts web http://localhost/app/)
+    bash e2e/carried.sh                                                 # over the substrate
 
 ## Things worth knowing before changing something
 
-- **One stack, two arrangements.** The stack is the URL hierarchy: `/chats` → `/chats/5` →
-  `/chats/5/info` is three frames, and back pops exactly one of them. A narrow window draws the top
-  frame; a wide one draws the nearest list frame beside the top detail frame. That is the whole
-  rule, and all four sections (chats, docs, agents, teams) obey it — a section that arranged itself
-  differently would be a section people have to learn separately. It is the same idea as Android's
-  list-detail Scene: the layout is a function of the stack and the width, not a second navigation
-  state. The chrome (bottom bar, rail) is OUTSIDE the stack and never disappears.
-- **Every branch stays alive.** `StatefulShellRoute.indexedStack` keeps each visited destination
-  mounted with its own location, so switching tabs and coming back returns to the conversation, the
-  file and the half-typed message you left. The React client did this by hand (`MobileTabs`,
-  `sectionKeepAlive`) because react-router unmounts on every navigation.
-- **An avatar is not a picture.** Every `UserAvatar` registers its user id with one app-global
-  presence registry, which batches them into a single request — thirty faces in a list is one
-  question, not thirty. Being in the answer IS being an agent; a working agent gets the pulsing ring
-  and its `elapsed · tokens`; tapping one raises the live-screen overlay, and an agent with nothing
-  to show says why rather than doing nothing.
-- **Watching a live screen is an overlay, not a route.** `terminal/scene.dart` is mounted once above
-  the router. Going *to* a terminal would replace the list you were reading and the message you were
-  typing; the test that matters asserts the draft below it survives.
-- **Mermaid: a narrow subset, drawn — everything else, source.** `docs/mermaid.dart` reads
-  flowcharts (TD/TB/LR, three node shapes, labelled edges) and refuses everything else *as a whole
-  block*. Half a diagram is worse than none, because a reader cannot tell which half went missing.
-- **The message list is reversed.** Newest at the bottom, index 0 at the end. That is why there is
-  no scroll anchor, no pin-to-bottom rule and no position restore: "load older" is just "reached
-  the end of the list". Scroll-up pagination is the one feature in this app that has been reported
-  broken twice (T-073); this shape is the fix, and
-  `test/features/chats/thread_pagination_test.dart` is what keeps it fixed.
-- **The top of a conversation always says what it is doing** — loading, or "the beginning". A
-  reader who scrolls up and sees nothing cannot tell a working feature from a broken one, and that
-  ambiguity is most of why T-073 took so long to pin down.
-- **A digest must match the backend's exactly.** `ChatsQuery.digest` is the number of conversations
-  and nothing more — deliberately, because the list carries no message id. A "better" digest here
-  would fire constantly and mean nothing.
-- **The font is bundled.** Flutter draws its own text and does not inherit the platform's monospace
-  family, which the terminal needs.
-- **The service worker is ours, not Flutter's** (`web/sw.js`, stamped by `tool/make-sw.mjs`).
-  It also asks the server what is deployed (`/build.json`, served without caching) and throws its
-  cache away when the answer is not the build it holds — because a worker is only replaced when its
-  own bytes change, so a deploy that ships new files beside an old `sw.js` is otherwise invisible.
-  After deploying, `node tool/verify-deploy.mjs https://your-host` says whether the thing that just
-  went out is internally consistent; it is the one-line version of the outage on 2026-08-21.
-  Flutter's is deprecated: its loader no longer registers one on a first visit unless you pass an
-  explicit `serviceWorkerUrl`, and doing that prints a warning saying it will stop working. Ours
-  also gets to decide what to keep — the shell is precached, the engine is cached as it is actually
-  fetched, so a first visit downloads only the wasm variant this browser chose.
-- **Nothing is fetched from anybody else.** `--no-web-resources-cdn` is not optional: without it
-  Flutter loads its ~7MB engine from `gstatic.com`, which means a network that cannot reach Google
-  cannot start this app at all, the largest asset in the product never travels over MultiPath's
-  lines, and our own worker cannot cache it (cross-origin, opaque). With the flag the engine is
-  served from the same origin as everything else, and the browser check asserts that no request
-  leaves it.
-- **A first visit needs the network; every one after it does not.** Anything claiming otherwise is
-  claiming a browser can run a build it has never downloaded.
+- **One stack, every arrangement.** The app is one display stack per section (per section and
+  team for docs and agents). Opening something pushes a frame; back — Android's button, the
+  browser's, the arrow in a header, a dialog's scrim — pops exactly one. There is no "go to an
+  address" inside the app (a link from outside opens a stack of its own, `nav/links.ts`), so back
+  can only ever return to where a page was opened from. A narrow window draws the top frame; a
+  wide one draws the section's list beside the top frame. Dialogs and menus are frames too, which
+  is why back closes them and not the page under them.
+- **Every stack stays mounted.** Switching sections or teams hides a stack rather than unmounting
+  it, so a conversation, its scroll position and a half-typed message are still there on return.
+- **The keyboard does not move the conversation.** The composer rides up with the keyboard; the
+  list keeps its height and is given the keyboard's height as extra room to scroll into.
+- **An avatar is one component.** Nothing else draws a face.
+- **Every request rides the substrate but two kinds.** The calls to cheese-auth (`src/api/auth.ts`)
+  and an installer download go directly; why is in `src/transport/substrate.ts`. A request the substrate cannot carry goes directly too, and says
+  so in the console and on the lines panel (`/app/__lines`).

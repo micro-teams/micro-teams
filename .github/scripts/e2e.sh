@@ -2,11 +2,9 @@
 # The machinery under the product: the shipped bundle, a real machine, a real agent, one real
 # message — driven by curl, with no client in the picture.
 #
-# It used to be called the full-stack test, and it is not: nothing here touches the interface a
-# person uses, so it cannot tell you whether they can reach any of it. That is what the journeys do
-# (app/integration_test/, run by app/tool/e2e/run.sh). This script is the layer underneath, and the
-# division is worth keeping: when this is red the plumbing broke; when a journey is red the product
-# did.
+# It is not a full-stack test: nothing here touches the interface a person uses, so it cannot tell
+# you whether they can reach any of it. It is the layer underneath the client, and when it is red the
+# plumbing broke.
 #
 # What this covers that nothing else does. The unit and integration tests exercise the backend with a
 # FAKE machine (a WebSocket client in the test JVM), and `test-compose` only proved the containers
@@ -35,11 +33,9 @@
 #   pi:<version>    real pi at a PINNED version, in front of a mock OpenAI API — the same contract
 #                   as the pinned Claude leg: it can only go red when we change something.
 #
-# There used to be a third, `fake`: a shell script pretending to be Claude, kept as "the
-# deterministic baseline". It is gone. Pinning already buys determinism, and the stand-in cost a
-# second implementation of every leg while proving nothing about driving the real program. The one
-# thing it uniquely carried — reading back the exact bytes the agent was handed (T-058) — moved to
-# the mock's own request log, which is a stronger place to read it from.
+# There is no stand-in program pretending to be Claude: pinning buys determinism, and a stand-in
+# would be a second implementation of every leg that proves nothing about driving the real program.
+# The exact bytes the agent was handed are read back from the mock's own request log.
 #
 # Both legs assert the thing that matters most: that the agent ANSWERS. MockServer's Anthropic
 # emulation streams a proper SSE response handing Claude Code a scripted Bash tool call that runs
@@ -49,8 +45,7 @@
 # Usage: e2e.sh [npm:<version>|installer|pi:<version>]   (run from an unpacked bundle directory)
 set -euo pipefail
 
-# Installing the agent's program and scripting the model are shared with app/tool/e2e/run.sh — see
-# that file for why there is one copy rather than two.
+# Installing the agent's program and scripting the model live in agent-leg.sh, beside this file.
 # shellcheck source=agent-leg.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-leg.sh"
 
@@ -188,15 +183,11 @@ SID="$(printf '%s' "$OPENED" | json "d['sid']")"
 pass "agent $AGENT_ID on screen $SID"
 
 step "the screen really exists on the machine"
-# The connector keeps its tmux on a private socket, and WHERE that socket is moved in connector
-# 0.1.6: out of /tmp (world-writable, and emptied on boot — both had bitten it) and into
-# $XDG_RUNTIME_DIR or $HOME/.local/state, with the old path kept only as a last resort. This script
-# hardcoded the old one, so the session was there and nobody was looking at it: "no tmux session on
-# the machine", about a machine that had one.
-#
-# Asked rather than assumed, in the connector's own order of preference, and the first that exists
-# wins — which also means this keeps working across the crossing, when a machine updated in place is
-# still using the socket the previous build opened.
+# The connector keeps its tmux on a private socket in $XDG_RUNTIME_DIR or $HOME/.local/state, and
+# in /tmp only as a last resort (/tmp is world-writable and emptied on boot). Asked rather than
+# assumed, in the connector's own order of preference, and the first that exists wins: a machine
+# updated in place may still be using the socket an earlier build opened, and a hardcoded path
+# reports "no tmux session" about a machine that has one.
 SOCK="$(docker exec -u "$MACHINE_USER" "$MACHINE_CT" sh -c '
   for d in "${XDG_RUNTIME_DIR:-}/microteams" "$HOME/.local/state/microteams" "/tmp/microteams-$(id -u)"; do
     [ -S "$d/t.sock" ] && { printf %s "$d/t.sock"; exit 0; }
@@ -345,18 +336,19 @@ else
 fi
 
 # --- the failure this system keeps hitting -------------------------------------------------------
-# A dead tmux used to pass for a live screen: the applet runtime lives in the connector process, so it
-# survives the session it was driving, and `microteams status` counted map entries rather than
-# sessions. Killing the server here is the cheapest possible reproduction of that production incident.
+# A dead tmux must not pass for a live screen: the applet runtime lives in the connector process, so
+# it survives the session it was driving, and a status that counted the runtime's entries rather
+# than tmux's sessions would still report it. Killing the server here is the cheapest possible
+# reproduction of that production incident.
 step "a screen whose tmux died is reported as gone, not as running"
 mtmux kill-server 2>/dev/null || true
 sleep 3
-# `microteams status` must stop claiming a running screen. (Older connectors report the stale count.)
+# `microteams status` must stop claiming a running screen.
 STATUS="$(onmachine '$HOME/.local/bin/microteams status --config $HOME/.config/microteams/config.json' 2>&1 || true)"
 printf '%s\n' "$STATUS"
 printf '%s' "$STATUS" | grep -qE 'screens +(0|none)' ||
   fail "status still reports running screens after the tmux server died"
-pass "the connector no longer counts a screen whose tmux is gone"
+pass "the connector does not count a screen whose tmux is gone"
 
 # --- waking a dead agent with a message ----------------------------------------------------------
 # The screen is now genuinely gone (the step above killed the server and proved the connector admits

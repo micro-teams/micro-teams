@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 #
 #  Description: Putting a real agent program on a machine container, and scripting what the model
-#               says back. Sourced by both harnesses that need it.
-#
-#               There is one copy because there is one answer. `.github/scripts/e2e.sh` drives the
-#               machinery with curl and `app/tool/e2e/run.sh` drives the whole product through the
-#               interface, but "install the agent's program and put a mock model in front of it" is
-#               the same paragraph either way — and it was the reason a stand-in `claude` existed
-#               at all: a second implementation is cheaper to keep than to share, right up until
-#               the two drift.
+#               says back. Sourced by every harness that needs it, so that "install the agent's
+#               program and put a mock model in front of it" has one implementation.
 #
 #               Two programs play the agent: Claude Code, behind a mock Anthropic API, and pi,
 #               behind a mock OpenAI one. The install and the model scripting fork on the leg;

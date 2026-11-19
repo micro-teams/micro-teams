@@ -1,14 +1,70 @@
 {
-  "name": "microteams-app-checks",
-  "private": true,
+  "name": "microteams-app",
   "version": "0.1.19",
-  "description": "The browser checks for the built web app, and the launcher that starts it. Flutter builds the app itself; this is the launcher that loads it (tool/launcher-html.mjs — ours since MultiPath 0.2.0 dropped its launcher), and the Playwright checks — service workers, offline start and the escape hatch need a real browser.",
-  "type": "module",
+  "private": true,
+  "main": "index.ts",
   "scripts": {
-    "launcher": "node tool/launcher.mjs build/web",
-    "check:web": "bash tool/check-web.sh"
+    "codegen": "openapi-typescript ../MicroTeams-API.yml -o src/api/schema.d.ts && node tool/terminal-html.mjs",
+    "web": "expo start --web",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
+    "lint": "eslint .",
+    "test": "jest",
+    "build:web": "expo export --platform web --output-dir web-dist && node tool/build-worker.mjs web-dist"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~58.0.17",
+    "@expo/vector-icons": "^15.0.2",
+    "@micro-teams/multipath": "0.2.0-rc.7",
+    "@tanstack/react-query": "^5.107.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "expo": "~58.0.25",
+    "expo-build-properties": "~58.0.12",
+    "expo-clipboard": "~58.0.4",
+    "expo-font": "~58.0.12",
+    "expo-image": "~58.0.18",
+    "expo-image-picker": "~58.0.10",
+    "expo-status-bar": "~58.0.5",
+    "marked": "^18.2.0",
+    "openapi-fetch": "^0.17.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-native": "^0.88.1",
+    "react-native-get-random-values": "^2.1.0",
+    "react-native-keyboard-controller": "1.22.7",
+    "react-native-mmkv": "^4.3.2",
+    "react-native-nitro-modules": "^0.37.2",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-svg": "15.16.0",
+    "react-native-web": "^0.21.4",
+    "react-native-webview": "14.0.1",
+    "react-native-worklets": "0.13.0"
   },
   "devDependencies": {
-    "playwright": "1.65.1"
+    "@types/jest": "30.0.0",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "jest": "~30.5.2",
+    "jest-expo": "~58.0.14",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "setupFiles": [
+      "./jest.setup.js"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|@micro-teams/.*|react-native-.*|marked)"
+    ]
   }
 }
