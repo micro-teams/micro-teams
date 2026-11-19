@@ -12,12 +12,16 @@
  * takeLink() → { path, query } | null — on the web, the address the page was opened at, relative to
  *   where the app is served (null at the app's own root), and the address bar is put back to that
  *   root: the link has been read, and the app's state is the stack from now on. Null on a phone.
+ * download(url) — fetch a file for the person to keep: on the web a link with the download attribute,
+ *   clicked in this page — no window is opened, which a browser may block, or leave behind empty
+ *   when the file arrives as an attachment, or open as a page in an installed web app; on a phone the
+ *   system opens it.
  *
  * Example:
  *   useEffect(() => onBack(() => pop()), [pop]);
  *   if (stack.length > 1) guardHistory();
  */
-import { BackHandler, Platform } from "react-native";
+import { BackHandler, Linking, Platform } from "react-native";
 import app from "../../app.json";
 
 export const isWeb = Platform.OS === "web";
@@ -54,4 +58,14 @@ export function takeLink(): { path: string; query: Record<string, string> } | nu
 
 export function guardHistory() {
   if (isWeb) window.history.pushState({ mt: "guard" }, "");
+}
+
+export function download(url: string) {
+  if (!isWeb) return void Linking.openURL(url);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = url.slice(url.lastIndexOf("/") + 1);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }

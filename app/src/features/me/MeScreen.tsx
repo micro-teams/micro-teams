@@ -14,12 +14,12 @@
 import { useEffect, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { MaterialIcons } from "@expo/vector-icons";
-import { Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useChangePicture } from "../../data/avatar";
 import { useClientPackages } from "../../data/clients";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
-import { appVersion, clientPlatform } from "../../platform/platform";
+import { appVersion, clientPlatform, download } from "../../platform/platform";
 import { Avatar } from "../../ui/Avatar";
 import { DialogActions, useAsk } from "../../ui/Dialog";
 import { Facts } from "../../ui/Facts";
@@ -107,7 +107,7 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
             testID={`download-${p.platform}`}
             accessibilityLabel={`download ${p.platform}`}
             hitSlop={8}
-            onPress={() => void Linking.openURL(`${origin}${p.url}`)}
+            onPress={() => download(`${origin}${p.url}`)}
             style={styles.download}
           >
             <MaterialIcons name="download" size={22} color={colors.brand} />
