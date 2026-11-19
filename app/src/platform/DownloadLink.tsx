@@ -2,7 +2,8 @@
  * A file for the person to keep, as a control that fetches it.
  *
  * <DownloadLink url label testID? style?>{content}</DownloadLink> — on a phone, tapping hands the
- *   address to the system, which downloads it. DownloadLink.web.tsx is the web half: a real link.
+ *   address to the system, which downloads it. DownloadLink.web.tsx is the web half: the page
+ *   downloads it, showing its progress from the tap, and hands the browser the finished file.
  *
  * Example: <DownloadLink url={`${origin}${p.url}`} label="download android"><Icon /></DownloadLink>
  */
