@@ -9,8 +9,8 @@
 #                                  requests from the multipath server (default 20); unless the
 #                                  app's two WebSockets — the updates socket and a live screen —
 #                                  were each opened over the lines and never directly (a viewer
-#                                  the journey opens from outside the app, marked outside=1, is
-#                                  not the app's); and, with a
+#                                  the journey opens from outside the app, named by its User-Agent,
+#                                  is not the app's); and, with a
 #                                  machine (machine.sh), unless its control link was only ever
 #                                  opened over its multipath client, and a short command
 #                                  (`microteams api`) run now goes over it too; prints the counts
@@ -28,7 +28,7 @@ echo "$CARRIED requests reached nginx over the lines (from the multipath server,
 for socket in /mt/updates /mt/machine/screen/; do
   over="$(grep -c "^$MP_IP .*\"GET $socket" <<<"$LOG" || true)"
   # The journey's second viewer of a live screen is another client, outside the app, and says so.
-  direct="$(grep "\"GET $socket" <<<"$LOG" | grep -v "outside=1" | grep -vc "^$MP_IP " || true)"
+  direct="$(grep "\"GET $socket" <<<"$LOG" | grep -v 'ua="e2e-outside-viewer"' | grep -vc "^$MP_IP " || true)"
   echo "$socket: $over over the lines, $direct directly"
   [ "$over" -ge 1 ] && [ "$direct" = 0 ] || { echo "FAIL: $socket was not opened over the lines alone" >&2; exit 1; }
 done

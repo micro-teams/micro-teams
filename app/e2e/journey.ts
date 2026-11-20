@@ -185,11 +185,15 @@ export async function outside(api: string, username: string, password: string) {
   };
 }
 
+/** The User-Agent of the journey's own viewer, which carried.sh tells from the app's sockets. */
+const OUTSIDE_VIEWER = "e2e-outside-viewer";
+
 /** A second viewer of a live screen over a plain WebSocket, acknowledging all it is sent. */
 function watch(api: string, token: string, sid: string, cols: number, rows: number): Promise<Viewer> {
-  // outside=1: not the app's own socket, which carried.sh requires to ride the lines.
-  const url = `${api.replace(/^http/, "ws")}/mt/machine/screen/${encodeURIComponent(sid)}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}&outside=1`;
-  const ws = new WebSocket(url);
+  const url = `${api.replace(/^http/, "ws")}/mt/machine/screen/${encodeURIComponent(sid)}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}`;
+  // Named, because it is not the app's own socket, which carried.sh requires to ride the lines.
+  // (Node's WebSocket takes headers; the DOM typings it is declared with do not say so.)
+  const ws = new WebSocket(url, { headers: { "User-Agent": OUTSIDE_VIEWER } } as unknown as string[]);
   ws.binaryType = "arraybuffer";
   const v: Viewer = {
     sizes: [],
