@@ -8,13 +8,14 @@
  *   answer is read whole and none is compressed: the platform has neither a streaming Response nor
  *   DecompressionStream.
  * substrate.fetch(input, init) — fetch() over the lines. It goes to the network instead, logged
- *   with the reason and counted, when no session is live (waiting for one at most FALLBACK_AFTER,
- *   once, after the start), and for a GET or HEAD also when the lines fail it or have not begun to
- *   answer within REQUEST_WAIT. Any other method is sent at most once, over the lines: once it may
- *   have reached the server, its failure is the caller's.
+ *   with the reason and counted, when no session is live (waiting for one at most FALLBACK_AFTER
+ *   after the start, and again whenever a session ended less than REPLACING ago, since its
+ *   successor is then usually seconds away: a server restart), and for a GET or HEAD also when the
+ *   lines fail it or have not begun to answer within REQUEST_WAIT. Any other method is sent at most
+ *   once, over the lines: once it may have reached the server, its failure is the caller's.
  * substrate.openSocket(path) → Wire — a WebSocket to the origin over a fresh stream, the updates
  *   socket's and the live screen's open(); directly, logged and counted, when no session is live
- *   (as for fetch) or the stream has not opened within REQUEST_WAIT.
+ *   within FALLBACK_AFTER or the stream has not opened within REQUEST_WAIT.
  * substrate.diagnostics() → Diagnostics — everything the lines panel shows and copies: the client's
  *   stats (session, every line, every stream), the fallbacks with their reasons, and the latest
  *   events (lines up and down, sessions started and ended).
@@ -39,6 +40,8 @@ const FALLBACK_AFTER = 3000;
  * going to the network: a line that died silently is noticed within a second, and every live line
  * answers well within this. */
 const REQUEST_WAIT = 10_000;
+/** How long after a session ended a request still waits for the next one. */
+const REPLACING = 5000;
 /** How many fallbacks and events the diagnostics keep. */
 const KEPT = 50;
 
@@ -68,14 +71,15 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | "late"> {
 export class Substrate {
   private readonly client: Client;
   private readonly router: LineRouter;
-  private readonly started = Date.now();
   private readonly fallbacks: Diagnostics["fallbacks"] = { count: 0, recent: [] };
   private readonly events: Diagnostics["events"] = [];
+  private endedAt = 0;
 
   constructor(private readonly origin: string) {
     const key = `multipath-lines:${origin}`;
     const onEvent = (event: ClientEvent) => {
       if (event.type === "fallback") return this.fellBack(event.url, event.reason);
+      if (event.type === "session-end") this.endedAt = Date.now();
       this.events.push({ at: new Date().toISOString(), event });
       this.events.splice(0, this.events.length - KEPT);
     };
@@ -105,8 +109,11 @@ export class Substrate {
     this.fallbacks.recent.splice(0, this.fallbacks.recent.length - KEPT);
   }
 
-  fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
-    this.router.fetch(input instanceof Request && !init ? input : new Request(input, init));
+  fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = input instanceof Request && !init ? input : new Request(input, init);
+    if (Date.now() - this.endedAt < REPLACING) await this.client.live(FALLBACK_AFTER);
+    return this.router.fetch(request);
+  };
 
   openSocket = (path: string): Wire => {
     let inner: Inner | null = null;
@@ -143,8 +150,7 @@ export class Substrate {
       attach(ws as unknown as Inner, false);
     };
     void (async () => {
-      const wait = Math.max(0, FALLBACK_AFTER - (Date.now() - this.started));
-      if (!(await this.client.live(wait))) return direct(`no live session ${wait > 0 ? `within ${wait} ms` : "now"}`);
+      if (!(await this.client.live(FALLBACK_AFTER))) return direct(`no live session within ${FALLBACK_AFTER} ms`);
       const opening = this.client.openWebSocket(path);
       try {
         const ws = await within(opening, REQUEST_WAIT);
