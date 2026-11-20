@@ -189,11 +189,13 @@ constructor(
     }
 
     /** Whether a frame of [type] arrives at all — for asserting that one must NOT. */
-    private fun noFrame(type: String, withinMs: Long = 1500): Boolean {
+    private fun noFrame(type: String, withinMs: Long = 1500, sid: String? = null): Boolean {
         val deadline = System.currentTimeMillis() + withinMs
         while (System.currentTimeMillis() < deadline) {
             val payload = collector.frames.poll(200, TimeUnit.MILLISECONDS) ?: continue
-            if (JSONObject(payload).optString("t") == type) return false
+            val obj = JSONObject(payload)
+            if (obj.optString("t") == type && (sid == null || obj.optString("sid") == sid))
+                return false
         }
         return true
     }
@@ -505,7 +507,7 @@ constructor(
         val first = awaitFrameFor("screen.subscribe", liveSid)
         assertEquals(90, first.getInt("cols"))
         assertTrue(
-            noFrame("session.close", 4000),
+            noFrame("session.close", 4000, liveSid),
             "a silent machine must not get the program respawned",
         )
         assertEquals(ScreenState.LIVE, machineHub.screen(liveSid)!!.state)
@@ -545,7 +547,10 @@ constructor(
         awaitTrue("the screen must be dead") {
             machineHub.screen(watchedSid)!!.state == ScreenState.DEAD
         }
-        assertTrue(noFrame("session.close", 2000), "a death under a viewer must not respawn")
+        assertTrue(
+            noFrame("session.close", 2000, watchedSid),
+            "a death under a viewer must not respawn",
+        )
         viewer.close()
     }
 

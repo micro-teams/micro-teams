@@ -7,16 +7,23 @@
  *
  *               Client -> server:
  *                 binary                                  input bytes (keys, pastes, mouse)
+ *                 {"type":"reply","data":"<base64>"}      the terminal's automatic answers to
+ *                                                         tmux's queries (device attributes,
+ *                                                         cursor position); not typing, so they
+ *                                                         need no lease
  *                 {"type":"resize","cols":C,"rows":R}     the room the viewer has
  *                 {"type":"ack","n":N}                    N more bytes of screen data rendered
  *                 {"type":"lease","op":"take"|"renew"|"release"}
  *                 {"type":"capture","id":"..."}           ask for the screen's text
- *                 {"type":"command","id":"...","name":"usage"|"compact"}  call that applet function
+ *                 {"type":"command","id":"...","name":N}  call applet function N, one of the
+ *                                                         names the `commands` frame listed
  *                 anything else is ignored, except that on a protocol 1 machine the older client's
  *                 {"type":"control","level"} and {"type":"scroll","dir"} are still honoured, and
- *                 {"type":"compact"} is honoured on both.
+ *                 {"type":"compact"} is honoured on both when compact is listed.
  *
  *               Server -> client, all through the viewer's one ViewerPump so nothing overtakes:
+ *                 {"type":"commands","names":[...]}       first: the applet functions this
+ *                                                         screen offers a viewer
  *                 binary                                  screen bytes for this viewer
  *                 {"type":"size","cols":C,"rows":R}       the terminal's size from now on
  *                 {"type":"lease","holder":"free"|"self"|"driver"|"other","name":..,"refused":b}
@@ -28,12 +35,15 @@
  *               which is logged, and since it never acknowledges, the server acknowledges each
  *               chunk on its behalf as the pump writes it to the socket.
  *
- *               "refused" is how a viewer learns its input or take was turned down: the
- *               connector answers a refusal by repeating the lease holder it last told that
- *               viewer, so the same holder twice in a row — held by somebody else — is a refusal.
+ *               "refused" is how a viewer learns its input or take was turned down. The connector
+ *               answers a refused input or take with the lease state, unchanged, to that viewer
+ *               alone; so a lease state is a refusal exactly when it answers input or a take this
+ *               viewer sent since its last lease state, names somebody else, and that holder is
+ *               the one it already knew. A repeat that follows a resubscribe answers nothing.
  *
  *               ScreenAttachPreflight  beforeAttach(sid) -> the sid to attach to (see below).
- *               ViewerHandler(hub, objectMapper, profiles, preflight?) — registered by
+ *               ScreenCommands         commandsOf(sid) -> the applet functions a viewer may call.
+ *               ViewerHandler(hub, objectMapper, profiles, preflight?, commands?) — registered by
  *               ConnectorWebSocketConfig; Spring calls its WebSocket callbacks.
  *
  *  Author(s):
@@ -48,6 +58,7 @@ import app.microteams.machine.link.MachineHub
 import app.microteams.machine.link.ViewerSink
 import app.microteams.user.UserProfileRepository
 import java.nio.ByteBuffer
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
@@ -72,6 +83,14 @@ fun interface ScreenAttachPreflight {
     fun beforeAttach(sid: String): String
 }
 
+/**
+ * Which applet functions a viewer of a screen may call. The machine layer does not know what runs
+ * on a screen, so the module that opened it answers; a screen nobody answers for offers none.
+ */
+fun interface ScreenCommands {
+    fun commandsOf(sid: String): List<String>
+}
+
 /** The room an older client that says nothing about its size is given. */
 private const val LEGACY_COLS = 120
 private const val LEGACY_ROWS = 32
@@ -79,14 +98,12 @@ private const val LEGACY_ROWS = 32
 /** How long a command call waits for the applet before the viewer is told it failed. */
 private const val COMMAND_TIMEOUT_SECONDS = 10L
 
-/** The applet functions a viewer may call. */
-private val COMMANDS = setOf("usage", "compact")
-
 class ViewerHandler(
     private val hub: MachineHub,
     private val objectMapper: ObjectMapper,
     private val profiles: UserProfileRepository,
     private val preflight: ScreenAttachPreflight? = null,
+    private val screenCommands: ScreenCommands? = null,
 ) : AbstractWebSocketHandler() {
     private val logger = LoggerFactory.getLogger(ViewerHandler::class.java)
 
@@ -94,8 +111,13 @@ class ViewerHandler(
         val sid: String,
         val id: String,
         val pump: ViewerPump,
+        val commands: List<String>,
     ) : ViewerSink {
+        /** The lease holder this viewer was last told. */
         @Volatile var lastHolder: String? = null
+
+        /** Input or a take sent since the last lease state, which that state may be refusing. */
+        @Volatile var asked = false
 
         fun text(frame: Map<String, Any?>) {
             pump.offer(ViewerFrame.Text(objectMapper.writeValueAsString(frame)))
@@ -109,7 +131,8 @@ class ViewerHandler(
             text(mapOf("type" to "size", "cols" to cols, "rows" to rows))
 
         override fun lease(holder: String) {
-            val refused = holder == lastHolder && holder != "" && holder != id
+            val refused = asked && holder != "" && holder != id && holder == lastHolder
+            asked = false
             lastHolder = holder
             val (kind, name) =
                 when (holder) {
@@ -125,6 +148,10 @@ class ViewerHandler(
             text(mapOf("type" to "capture", "id" to id, "text" to text, "error" to error))
 
         override fun error(text: String) = text(mapOf("type" to "error", "error" to text))
+
+        override fun resubscribed() {
+            asked = false
+        }
     }
 
     /** session id -> its viewer. */
@@ -190,13 +217,14 @@ class ViewerHandler(
                     }
                 },
             )
-        val viewer = Viewer(screen.sid, id, pump)
+        val viewer = Viewer(screen.sid, id, pump, screenCommands?.commandsOf(screen.sid).orEmpty())
         viewers[session.id] = viewer
         (session.attributes["userId"] as? IdType)?.let { nicknames[id] = nicknameOf(it) }
         hub.attachViewer(
             screen.sid,
             HubViewer(id, viewer, cols ?: LEGACY_COLS, rows ?: LEGACY_ROWS),
         )
+        viewer.text(mapOf("type" to "commands", "names" to viewer.commands))
     }
 
     private fun nicknameOf(userId: IdType): String =
@@ -206,6 +234,7 @@ class ViewerHandler(
         val viewer = viewers[session.id] ?: return
         val buf = message.payload
         val data = ByteArray(buf.remaining()).also { buf.get(it) }
+        viewer.asked = true
         hub.viewerInput(viewer.sid, viewer.id, data)
     }
 
@@ -225,11 +254,27 @@ class ViewerHandler(
                 if (cols > 0 && rows > 0) hub.viewerResize(sid, viewer.id, cols, rows)
             }
             "ack" -> hub.viewerAck(sid, viewer.id, msg.path("n").asInt(0))
-            "lease" -> hub.viewerLease(sid, viewer.id, msg.path("op").asText())
+            "reply" -> {
+                val data =
+                    try {
+                        Base64.getDecoder().decode(msg.path("data").asText())
+                    } catch (e: IllegalArgumentException) {
+                        return viewer.error("reply data is not base64")
+                    }
+                hub.viewerReply(sid, viewer.id, data)
+            }
+            "lease" -> {
+                val op = msg.path("op").asText()
+                if (op == "take") viewer.asked = true
+                hub.viewerLease(sid, viewer.id, op)
+            }
             "capture" -> hub.viewerCapture(sid, viewer.id, msg.path("id").asText())
             "command" -> command(viewer, msg.path("id").asText(), msg.path("name").asText())
             "compact" ->
-                hub.screen(sid)?.let { hub.callScreen(it.machineId, sid, "compact", emptyList()) }
+                if ("compact" in viewer.commands)
+                    hub.screen(sid)?.let {
+                        hub.callScreen(it.machineId, sid, "compact", emptyList())
+                    }
             "control" -> hub.viewerControl(sid, msg.path("level").asText("passive"))
             "scroll" -> hub.viewerScroll(sid, msg.path("dir").asText("bottom"))
         }
@@ -240,7 +285,7 @@ class ViewerHandler(
         fun reply(error: String?) =
             viewer.text(mapOf("type" to "command", "id" to id, "error" to error))
         val screen = hub.screen(viewer.sid)
-        if (name !in COMMANDS) return reply("unknown command '$name'")
+        if (name !in viewer.commands) return reply("this screen offers no command '$name'")
         if (screen == null) return reply("the screen is gone")
         hub.callScreen(screen.machineId, screen.sid, name, emptyList())
             .orTimeout(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)

@@ -88,7 +88,7 @@ class LinkHandler(
                 return
             }
         if (b.attached) {
-            hub.onMachineMessage(b.machineId, msg)
+            hub.onMachineMessage(b.machineId, msg, b.transport)
             return
         }
         if (msg.t != "hello") {

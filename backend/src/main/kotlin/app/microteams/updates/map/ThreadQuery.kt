@@ -16,7 +16,7 @@
  *                 - a message being deleted from the page -> yes, the count changes
  *                 - a message on the page found undelivered -> yes, ":u<n>" is appended, n being
  *                   how many (message, recipient) failures the page holds; a page with none
- *                   digests as before
+ *                   has no suffix
  *                 - a message being edited                -> NO
  *
  *               Edits are left out on purpose. The only way to include one is to compare a

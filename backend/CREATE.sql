@@ -50,6 +50,11 @@ CREATE
         );
 
 CREATE
+    SEQUENCE microteams.agent_pending_message_seq
+START WITH
+    1 INCREMENT BY 50;
+
+CREATE
     SEQUENCE microteams.message_seq
 START WITH
     1 INCREMENT BY 50;
@@ -105,6 +110,22 @@ CREATE
             base_url VARCHAR(512),
             api_key VARCHAR(1024),
             PRIMARY KEY(agent_user_id)
+        );
+
+CREATE
+    TABLE
+        microteams.agent_pending_message(
+            agent_user_id BIGINT NOT NULL,
+            created_at TIMESTAMP(6) NOT NULL,
+            deleted_at TIMESTAMP(6),
+            id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL,
+            updated_at TIMESTAMP(6) NOT NULL,
+            PRIMARY KEY(id),
+            CONSTRAINT uq_agent_pending_message UNIQUE(
+                message_id,
+                agent_user_id
+            )
         );
 
 CREATE

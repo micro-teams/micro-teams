@@ -30,6 +30,9 @@ class CodexDriver(private val appletStore: AppletStore) : AgentDriver {
      */
     override val vars: Map<String, Any?> = mapOf("operatorPrompt" to OperatorPrompt.TEXT)
 
+    /** The codex applet's `usage` (Codex's /status). */
+    override val viewerCommands = listOf("usage")
+
     /**
      * Launch (or resume) one Codex session.
      *

@@ -11,7 +11,8 @@
  *               than here. A driver's applet reports its own name on screenReady, so the wire
  *               already carries which driver a screen is running.
  *
- *               AgentDriver: name, appletSource, vars, command(sessionId, cwd, resume).
+ *               AgentDriver: name, appletSource, vars, viewerCommands,
+ *               command(sessionId, cwd, resume).
  *               Example: hub.openScreen(m, driver.command(s, cwd, false), kind, driver.appletSource,
  *                        env, driver.vars)
  *
@@ -37,6 +38,13 @@ interface AgentDriver {
      */
     val vars: Map<String, Any?>
         get() = emptyMap()
+
+    /**
+     * The applet functions a person watching the screen may call (a usage or compact button); the
+     * live screen offers exactly these.
+     */
+    val viewerCommands: List<String>
+        get() = emptyList()
 
     /**
      * The argv that launches (or resumes) one session of this program. We mint [sessionId]

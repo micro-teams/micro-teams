@@ -1,35 +1,27 @@
 /*
  *  Description: One browser viewer's outbound queue, and the reason it exists.
  *
- *               Screen bytes reach a viewer on the machine's control-channel receive thread:
- *               LinkHandler.handleTextMessage -> MachineHub.onMachineMessage -> fanOutScreenData ->
- *               viewer.sendBytes. Writing to the browser's WebSocket *there* means a viewer that
- *               cannot keep up does not stall itself — it stalls that thread, and with it every
- *               other thing the machine is saying: other screens' data, rpc results, var updates,
- *               screenReady, exec results. A watcher on a slow relay could therefore freeze a whole
- *               machine, and the freeze looked exactly like "the agent stopped": nothing moved until
- *               something forced the pipe to drain, and any keystroke did (it travels the other
- *               direction, so it is never behind the jam, and the program repaints on input).
+ *               What a viewer is told reaches it on the machine's control-channel receive thread
+ *               (LinkHandler -> MachineHub.onMachineMessage -> the viewer's ViewerSink). Writing to
+ *               the browser's WebSocket there would let a viewer that cannot keep up stall that
+ *               thread, and with it everything else the machine says: other screens' data, rpc
+ *               results, variables, screenReady. So the machine thread only hands frames to this
+ *               queue and returns; one thread per viewer does the blocking write.
  *
- *               So the machine thread must never block on a browser. It hands bytes to this queue
- *               and returns immediately; one thread per viewer does the blocking write.
- *
- *               What to do when a viewer falls hopelessly behind is the interesting half. Dropping
- *               bytes out of a terminal stream is NOT a safe way to shed load: the stream is a
- *               sequence of escape sequences that mutate a state machine, so a hole in the middle
- *               does not cost you a frame, it can leave the parser (and the picture) wrong forever.
- *               Until the protocol can say "repaint everything" (the resync primitive this repo does
- *               not have yet), the only truthful options are block — which is what we are removing —
- *               or hang up. This hangs up: past `capacityBytes` of unwritten screen, the viewer is
- *               closed. The browser's reconnect loop dials again, and a reattach is a full repaint
- *               (a fresh tmux client paints the whole pane), so the picture comes back correct
- *               rather than subtly broken.
+ *               Flow control is the connector's: a protocol 2 viewer acknowledges what it has
+ *               rendered, and the connector stops reading a viewer's client while 256 KiB are
+ *               unacknowledged, so this queue stays short. It is bounded anyway, for a protocol 1
+ *               machine (no flow control) and for a browser that stops reading. Dropping bytes
+ *               would be wrong — the stream is escape sequences mutating a parser, and a hole can
+ *               leave the picture wrong for good — so past `capacityBytes` the viewer is hung up
+ *               on. Its client dials again, and a fresh subscription is a full repaint.
  *
  *               Text frames (the viewer's size, lease state, capture and command answers) go
  *               through the same queue as the bytes, so a size is never overtaken by the data drawn
  *               at that size, nor the other way round.
  *
  *               ViewerFrame.Bytes(data) / ViewerFrame.Text(json)  one outbound frame.
+ *               VIEWER_QUEUE_BYTES  the default capacityBytes.
  *               ViewerPump(label, capacityBytes?, write, giveUp, startThread?)
  *                 offer(frame) -> false once given up; close(); backlogBytes(); isClosed().
  *
@@ -63,7 +55,10 @@ sealed interface ViewerFrame {
     }
 }
 
-/** How much unwritten screen a single viewer may owe before we give up on it. */
+/**
+ * How many bytes of frames a viewer may owe — accepted by [ViewerPump.offer], not yet written —
+ * before it is hung up on. Far above what acknowledged flow control lets build up.
+ */
 const val VIEWER_QUEUE_BYTES: Int = 4 * 1024 * 1024
 
 class ViewerPump(

@@ -14,22 +14,33 @@
  *               messaged and being watched — never as a background sweep. Waking is
  *               AgentService.wakeAgent (respawn in place, resume=true), rate-limited so a program
  *               that dies on every start is not relaunched in a loop; only wakes sent to a
- *               connected machine count against that budget.
+ *               connected machine count against that budget. A wake held back by the back-off is
+ *               retried when the back-off ends, so the last attempt — and the giving up after it —
+ *               happen without anybody asking again.
  *
  *               **Delivering**: every message told to an agent has an id ("m<messageId>" for a chat
- *               message, "k<…>" for a keepalive) and stays in the agent's outstanding queue (in
- *               memory) until its outcome is definite:
+ *               message, "k<…>" for a keepalive) and stays in the agent's outstanding queue until
+ *               its outcome is definite. The queue is in memory; each chat message in it also has
+ *               an AgentPendingMessage row, and a server that starts finds the rows its
+ *               predecessor left and marks those messages undelivered ("the server restarted
+ *               before it was delivered"), since nothing will deliver them now.
  *                 - it is sent as `say(text, id)` while the agent is awake, and held while it is
  *                   asleep, dead or starting;
  *                 - the applet's rpc.result accepting it means it is queued there; a protocol 1
- *                   applet never reports more, so that is delivery; a protocol 2 applet later
- *                   calls `sayResult({id, ok, error})`;
+ *                   applet never reports more, so that is delivery — unless the value is `false`,
+ *                   which is how a protocol 1 applet says it could not take it; a protocol 2
+ *                   applet later calls `sayResult({id, ok, error})`;
  *                 - a send not yet accepted when the machine's connection closes or is replaced is
  *                   sent again on the next connection; an accepted one is sent again only when the
  *                   applet restarted (screenReady after a newer session.create than the send — see
- *                   HubScreen.generation), since a surviving applet still holds it;
- *                 - definite failures are an rpc error, sayResult ok=false, the agent being closed
- *                   and the wake giving up. A chat message that fails is recorded with
+ *                   HubScreen.generation). Otherwise the applet survived, and its sayResult may
+ *                   have been lost with the old connection: unless one arrives within
+ *                   [confirmGrace] of the reconnect, the message is failed with "the connection to
+ *                   the machine broke before the agent confirmed it" (a sayResult arriving later
+ *                   finds nothing to settle);
+ *                 - definite failures are an rpc error, a refusal, sayResult ok=false, the
+ *                   connection breaking before confirmation, the agent being closed and the wake
+ *                   giving up. A chat message that fails is recorded with
  *                   MessageService.markUndelivered so its sender sees it. An offline machine is not
  *                   a failure: the message waits for it.
  *
@@ -39,6 +50,7 @@
  *                 ensureAwakeForViewer(sid) -> the sid to attach to; never waits on the machine.
  *                 isAwake(agentUserId) / ensureAwake(agentUserId) — liveness, and waking.
  *                 forget(agentUserId) — the agent was closed; what it still owed fails.
+ *                 reportLostOnRestart() — at startup: what the previous process owed is undelivered.
  *
  *               Example: wakeup.tell(agent, prompt, "m41", 41L)
  *
@@ -62,16 +74,24 @@ import app.microteams.machine.link.ScreenLifecycleListener
 import app.microteams.machine.link.ScreenState
 import app.microteams.machine.link.ScreenVarListener
 import jakarta.annotation.PostConstruct
+import jakarta.annotation.PreDestroy
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import org.rucca.cheese.common.persistent.IdType
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The mirrored variable every screen applet owns to say what the program is doing, and the one
@@ -88,10 +108,20 @@ class AgentWakeup(
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
     private val messageService: MessageService,
+    private val pendingMessages: AgentPendingMessageRepository,
+    transactions: PlatformTransactionManager,
     // Late-bound: AgentService constructs the ScreenAgents that call back into here, so asking for
     // it eagerly would be a cycle. Nothing is resolved until the first wake.
     private val agentService: ObjectProvider<app.microteams.agent.screen.AgentService>,
     private val agentScreens: ObjectProvider<AgentScreens>,
+    /**
+     * Back-off between successive wakes of the same agent, in seconds; its length is how many wakes
+     * are tried before giving up. A program that starts, dies, and is restarted immediately is a
+     * busy loop that would hammer the machine and burn the agent's credits.
+     */
+    @Value("\${microteams.wakeup.backoff-seconds:0,15,60,300}") backoffSeconds: List<Long>,
+    /** How long after a reconnect a surviving applet has to confirm a message it had accepted. */
+    @Value("\${microteams.wakeup.confirm-grace-seconds:30}") confirmGraceSeconds: Long,
 ) {
     private val logger = LoggerFactory.getLogger(AgentWakeup::class.java)
 
@@ -107,6 +137,9 @@ class AgentWakeup(
         var generation: Long? = null
         var call: Int = 0
         var accepted: Boolean = false
+
+        /** The machine connection (its connectedAt) the applet accepted it on. */
+        var acceptedOn: Instant? = null
     }
 
     /** What each agent still owes, oldest first. */
@@ -127,22 +160,62 @@ class AgentWakeup(
         @Volatile var last: Instant = Instant.EPOCH
     }
 
-    /**
-     * Back-off between successive wakes of the same agent, and how many we try before giving up. A
-     * program that starts, dies, and is restarted immediately is a busy loop that would hammer the
-     * machine and burn the agent's credits.
-     *
-     * The budget resets once [stableWindow] has passed since the last wake — the agent stayed up
-     * rather than merely reaching a prompt before dying again.
-     */
-    private val backoff = listOf(0L, 15L, 60L, 300L).map(Duration::ofSeconds)
+    private val backoff = backoffSeconds.map(Duration::ofSeconds)
 
     private val maxAttempts = backoff.size
 
+    /**
+     * The wake budget resets once this has passed since the last wake — the agent stayed up rather
+     * than merely reaching a prompt before dying again.
+     */
     private val stableWindow = Duration.ofMinutes(30)
+
+    private val confirmGrace = Duration.ofSeconds(confirmGraceSeconds)
+
+    /**
+     * A transaction of its own for the pending row: chat tells an agent after its commit, inside a
+     * transaction that is finished, where a write would join it and never be committed.
+     */
+    private val ownTransaction =
+        TransactionTemplate(transactions).also {
+            it.propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+        }
+
+    /** Runs the back-off's retries and the confirmation deadlines. */
+    private val timer = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "agent-wakeup").also { it.isDaemon = true }
+    }
+
+    /** Agents asked about while a wake of theirs was in progress, to be looked at once it ends. */
+    private val lookAgain: MutableSet<IdType> = ConcurrentHashMap.newKeySet()
+
+    /** The wake retry scheduled for an agent the back-off held back, at most one each. */
+    private val retries = ConcurrentHashMap<IdType, ScheduledFuture<*>>()
+
+    @PreDestroy
+    fun stop() {
+        timer.shutdownNow()
+    }
+
+    /**
+     * Mark undelivered every chat message a previous server process still owed (its
+     * AgentPendingMessage rows): its memory, and with it any chance of delivering them, is gone.
+     * Runs at startup, before this server owes anything itself.
+     */
+    fun reportLostOnRestart() {
+        for (row in pendingMessages.findAll()) {
+            messageService.markUndelivered(
+                row.messageId!!,
+                row.agentUserId!!,
+                "the server restarted before it was delivered",
+            )
+            pendingMessages.delete(row)
+        }
+    }
 
     @PostConstruct
     fun subscribe() {
+        reportLostOnRestart()
         hub.addScreenLifecycleListener(
             object : ScreenLifecycleListener {
                 override fun onScreenState(screen: HubScreen, previous: ScreenState) {
@@ -194,13 +267,56 @@ class AgentWakeup(
 
     /** Say [text] to [agent] under [id]; [messageId] is the chat message it carries, if any. */
     fun tell(agent: ScreenAgent, text: String, id: String, messageId: IdType?) {
+        if (messageId != null) {
+            ownTransaction.executeWithoutResult {
+                pendingMessages.save(
+                    AgentPendingMessage().also {
+                        it.messageId = messageId
+                        it.agentUserId = agent.userId
+                    },
+                )
+            }
+        }
         queueOf(agent.userId).let { q -> synchronized(q) { q.add(Say(id, text, messageId)) } }
         deliver(agent)
     }
 
-    /** The machine said hello again: whatever waits for its agents can go out now. */
+    /**
+     * The machine said hello again: whatever waits for its agents can go out now, and what a
+     * surviving applet accepted on an earlier connection must be confirmed within [confirmGrace].
+     */
     fun deliverOn(machineId: String) {
-        agentRegistry.screenAgents().filter { it.machineId == machineId }.forEach { deliver(it) }
+        val now = hub.connectedAtOf(machineId)
+        val v2 = hub.protocolOf(machineId) == PROTOCOL_V2
+        for (agent in agentRegistry.screenAgents().filter { it.machineId == machineId }) {
+            val q = outstanding[agent.userId]
+            if (v2 && q != null) {
+                synchronized(q) {
+                    q.filter { it.accepted && it.acceptedOn != now }
+                        .forEach { awaitConfirmation(agent, q, it) }
+                }
+            }
+            deliver(agent)
+        }
+    }
+
+    /** Called holding [q]: fail [say] unless it is settled or sent again within [confirmGrace]. */
+    private fun awaitConfirmation(agent: ScreenAgent, q: MutableList<Say>, say: Say) {
+        val call = say.call
+        timer.schedule(
+            {
+                synchronized(q) {
+                    if (say.call != call || !say.accepted || !q.remove(say)) return@schedule
+                    failed(
+                        agent.userId,
+                        say,
+                        "the connection to the machine broke before the agent confirmed it",
+                    )
+                }
+            },
+            confirmGrace.toMillis(),
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     private fun queueOf(agentUserId: IdType): MutableList<Say> =
@@ -226,7 +342,7 @@ class AgentWakeup(
         say.accepted = false
         val call = ++say.call
         hub.callScreen(agent.machineId, agent.sid, "say", listOf(say.text, say.id))
-            .whenCompleteAsync { _, e -> answered(agent, q, say, call, e) }
+            .whenCompleteAsync { value, e -> answered(agent, q, say, call, value, e) }
     }
 
     /** The applet's rpc.result to one send of [say], or the end of the connection it went on. */
@@ -235,6 +351,7 @@ class AgentWakeup(
         q: MutableList<Say>,
         say: Say,
         call: Int,
+        value: Any?,
         e: Throwable?,
     ) {
         val cause = (e as? CompletionException)?.cause ?: e
@@ -242,12 +359,18 @@ class AgentWakeup(
             synchronized(q) {
                 if (say.call != call || say !in q) return
                 when {
+                    cause == null && value == false -> {
+                        q.remove(say)
+                        failed(agent.userId, say, "the agent's program could not take it")
+                        false
+                    }
                     cause == null -> {
                         say.accepted = true
+                        say.acceptedOn = hub.connectedAtOf(agent.machineId)
                         // A protocol 1 applet never reports more than having taken it.
                         if (hub.protocolOf(agent.machineId) != PROTOCOL_V2) {
                             q.remove(say)
-                            logger.debug("agent {}: {} delivered", agent.userId, say.id)
+                            delivered(agent.userId, say)
                         }
                         false
                     }
@@ -278,7 +401,7 @@ class AgentWakeup(
         synchronized(q) {
             val say = q.firstOrNull { it.id == id } ?: return null
             q.remove(say)
-            if (result["ok"] == true) logger.debug("agent {}: {} delivered", agent.userId, id)
+            if (result["ok"] == true) delivered(agent.userId, say)
             else {
                 val error = result["error"]?.toString()?.ifBlank { null } ?: "no reason given"
                 failed(agent.userId, say, "the agent's program could not take it: $error")
@@ -325,15 +448,27 @@ class AgentWakeup(
     }
 
     /** Called holding the agent's queue, after removing [say] from it. */
+    private fun delivered(agentUserId: IdType, say: Say) {
+        logger.debug("agent {}: {} delivered", agentUserId, say.id)
+        settle(agentUserId, say, null)
+    }
+
+    /** Called holding the agent's queue, after removing [say] from it. */
     private fun failed(agentUserId: IdType, say: Say, reason: String) {
         logger.warn("agent {}: {} not delivered: {}", agentUserId, say.id, reason)
+        settle(agentUserId, say, reason)
+    }
+
+    /** Record [say]'s outcome: no longer pending, and undelivered when [reason] says why. */
+    private fun settle(agentUserId: IdType, say: Say, reason: String?) {
         val messageId = say.messageId ?: return
         // Off this thread: it may be the machine's receive thread, which must not wait on the DB.
         CompletableFuture.runAsync {
             try {
-                messageService.markUndelivered(messageId, agentUserId, reason)
+                if (reason != null) messageService.markUndelivered(messageId, agentUserId, reason)
+                pendingMessages.deleteByMessageIdAndAgentUserId(messageId, agentUserId)
             } catch (e: Exception) {
-                logger.error("recording message {} as undelivered failed", messageId, e)
+                logger.error("recording the outcome of message {} failed", messageId, e)
             }
         }
     }
@@ -460,7 +595,12 @@ class AgentWakeup(
     fun ensureAwake(agentUserId: IdType): Boolean {
         if (isAwake(agentUserId) || isStarting(agentUserId)) return true
         val lock = locks.computeIfAbsent(agentUserId) { ReentrantLock() }
-        if (!lock.tryLock()) return true // another thread is already waking it
+        if (!lock.tryLock()) {
+            // Another thread is waking it; it looks again when it is done, so a death that lands
+            // meanwhile is not lost.
+            lookAgain.add(agentUserId)
+            return true
+        }
         try {
             if (isAwake(agentUserId) || isStarting(agentUserId)) return true
             val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull()
@@ -476,8 +616,11 @@ class AgentWakeup(
                 failAll(agentUserId, "the agent's program keeps exiting, so it was not restarted")
                 return false
             }
-            val wait = backoff[attempt.count]
-            if (Duration.between(attempt.last, Instant.now()) < wait) return false
+            val left = backoff[attempt.count] - Duration.between(attempt.last, Instant.now())
+            if (left > Duration.ZERO) {
+                retryWake(agentUserId, left)
+                return false
+            }
             attempt.count++
             attempt.last = Instant.now()
             return try {
@@ -488,11 +631,33 @@ class AgentWakeup(
             }
         } finally {
             lock.unlock()
+            if (lookAgain.remove(agentUserId)) ensureAwake(agentUserId)
+        }
+    }
+
+    /** Try [agentUserId]'s wake again once the back-off allows, unless a retry is already due. */
+    private fun retryWake(agentUserId: IdType, after: Duration) {
+        retries.computeIfAbsent(agentUserId) {
+            logger.info(
+                "agent {}: waking it again in {} s (back-off)",
+                agentUserId,
+                after.toSeconds() + 1,
+            )
+            timer.schedule(
+                {
+                    retries.remove(agentUserId)
+                    ensureAwake(agentUserId)
+                },
+                after.toMillis(),
+                TimeUnit.MILLISECONDS,
+            )
         }
     }
 
     /** The agent was closed for good: what it still owed fails, and its bookkeeping goes. */
     fun forget(agentUserId: IdType) {
+        retries.remove(agentUserId)?.cancel(false)
+        lookAgain.remove(agentUserId)
         failAll(agentUserId, "the agent was closed")
         outstanding.remove(agentUserId)
         askedByViewer.remove(agentUserId)

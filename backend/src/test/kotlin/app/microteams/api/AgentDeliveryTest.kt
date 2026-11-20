@@ -14,7 +14,12 @@
  *                 - accepted, and the machine connects again -> not said again (the applet still
  *                   holds it), until an applet announces itself after the re-adopt;
  *                 - a protocol 1 machine, which never calls sayResult: the accepted rpc.result is
- *                   delivery, so a reconnect does not say it again.
+ *                   delivery, so a reconnect does not say it again — but `false` is a failure;
+ *                 - what a server still owed when it stopped is marked undelivered when the next
+ *                   one starts (reportLostOnRestart, which startup runs).
+ *
+ *               It also opens the agent's live screen: the commands frame lists the claude
+ *               driver's viewer commands, and a listed one is called on the applet.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -23,6 +28,7 @@
 
 package app.microteams.api
 
+import app.microteams.agent.AgentWakeup
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
@@ -70,6 +76,7 @@ constructor(
     private val machineHub: MachineHub,
     private val machineRepository: MachineRepository,
     private val teamMachineRepository: TeamMachineRepository,
+    private val agentWakeup: AgentWakeup,
 ) {
     @LocalServerPort private var port: Int = 0
 
@@ -335,5 +342,55 @@ constructor(
         await("session.create")
         assertEquals(null, poll("rpc.call", "say", 1500), "delivered, so never said again")
         stillDelivered(messageId)
+    }
+
+    @Test
+    @Order(7)
+    fun aProtocol1AppletAnsweringFalseDidNotTakeIt() {
+        val (messageId, say) = postAndAwaitSay("seventh")
+        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":false}""")
+        assertTrue(awaitUndelivered(messageId).getString("reason").contains("could not take it"))
+    }
+
+    @Test
+    @Order(8)
+    fun theLiveScreenOffersTheDriversCommands() {
+        val frames = LinkedBlockingQueue<String>()
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    object : TextWebSocketHandler() {
+                        override fun handleTextMessage(s: WebSocketSession, m: TextMessage) {
+                            frames.add(m.payload)
+                        }
+                    },
+                    WebSocketHttpHeaders(),
+                    URI(
+                        "ws://localhost:$port/machine/screen/$sid?token=$humanToken&cols=80&rows=24",
+                    ),
+                )
+                .get(5, TimeUnit.SECONDS)
+        // On this protocol 1 machine the size echo comes with the subscribe; the commands follow.
+        var commands = JSONObject(frames.poll(5, TimeUnit.SECONDS) ?: error("no frame"))
+        if (commands.getString("type") == "size")
+            commands = JSONObject(frames.poll(5, TimeUnit.SECONDS) ?: error("no commands frame"))
+        assertEquals("commands", commands.getString("type"))
+        val names = commands.getJSONArray("names")
+        assertEquals(
+            listOf("usage", "compact"),
+            (0 until names.length()).map { names.getString(it) },
+        )
+        viewer.sendMessage(TextMessage("""{"type":"command","id":"u1","name":"usage"}"""))
+        await("rpc.call", "usage")
+        viewer.close()
+    }
+
+    @Test
+    @Order(9)
+    fun whatAServerStillOwedWhenItStoppedIsUndelivered() {
+        val (messageId, _) = postAndAwaitSay("ninth")
+        // What the next server's startup does with the rows this one left.
+        agentWakeup.reportLostOnRestart()
+        assertTrue(awaitUndelivered(messageId).getString("reason").contains("server restarted"))
     }
 }

@@ -6,7 +6,11 @@
  *                 size; what the machine says for it arrives in order, the size before the data.
  *               - Lease state is told as free / self / driver / other (with the other person's
  *                 nickname), and the same holder told twice is a refusal.
- *               - Capture and command calls are answered; an unknown command is refused.
+ *               - The first frame lists the commands the screen offers (none for a screen of no
+ *                 agent), and a command not listed is refused.
+ *               - A terminal reply goes to the machine as input that bypasses the lease.
+ *               - A lease state is a refusal only when it answers this viewer's input or take.
+ *               - Capture is answered.
  *               - An older viewer that sends no size is subscribed at 120x32 and the server
  *                 acknowledges the bytes it writes to it.
  *
@@ -162,6 +166,15 @@ constructor(
                 URI("ws://localhost:$port/machine/screen/$sid?$query"),
             )
             .get(5, TimeUnit.SECONDS)
+            .also {
+                val first = browser.nextJson()
+                assertEquals("commands", first.getString("type"), "the commands come first")
+                assertEquals(
+                    0,
+                    first.getJSONArray("names").length(),
+                    "a screen of no agent offers none",
+                )
+            }
     }
 
     @Test
@@ -206,10 +219,30 @@ constructor(
             """{"t":"screen.lease.state","sid":"$sid","viewer":"$viewer","holder":"driver"}""",
         )
         assertEquals("driver", browser.nextJson().getString("holder"))
+        // The same holder again, answering nothing this viewer did (a resubscribe's repeat).
         fromMachine(
             """{"t":"screen.lease.state","sid":"$sid","viewer":"$viewer","holder":"driver"}""",
         )
-        assertTrue(browser.nextJson().getBoolean("refused"), "the same holder again is a refusal")
+        assertFalse(browser.nextJson().getBoolean("refused"), "a repeat on its own is no refusal")
+        // A take the connector answers with the holder unchanged is.
+        socket.sendMessage(TextMessage("""{"type":"lease","op":"take"}"""))
+        await("screen.lease")
+        fromMachine(
+            """{"t":"screen.lease.state","sid":"$sid","viewer":"$viewer","holder":"driver"}""",
+        )
+        assertTrue(browser.nextJson().getBoolean("refused"), "an unchanged answer to a take")
+        // So is the answer to input.
+        socket.sendMessage(BinaryMessage("z".toByteArray()))
+        await("screen.input")
+        fromMachine(
+            """{"t":"screen.lease.state","sid":"$sid","viewer":"$viewer","holder":"driver"}""",
+        )
+        assertTrue(browser.nextJson().getBoolean("refused"), "an unchanged answer to input")
+
+        // The terminal's answer to a query is input that needs no lease.
+        socket.sendMessage(TextMessage("""{"type":"reply","data":"${b64("\u001b[?1;2c")}"}"""))
+        val reply = await("screen.input") { it.optString("op") == "reply" }
+        assertEquals(viewer, reply.getString("viewer"))
 
         socket.sendMessage(TextMessage("""{"type":"capture","id":"c1"}"""))
         assertEquals("c1", await("screen.capture").getString("id"))
@@ -220,17 +253,11 @@ constructor(
         assertEquals("capture", capture.getString("type"))
         assertEquals("line", capture.getString("text"))
 
-        socket.sendMessage(TextMessage("""{"type":"command","id":"x1","name":"usage"}"""))
-        val call = await("rpc.call") { it.getString("name") == "usage" }
-        fromMachine(
-            """{"t":"rpc.result","sid":"$sid","id":"${call.getString("id")}","value":"queued"}""",
-        )
-        val done = browser.nextJson()
-        assertEquals("command", done.getString("type"))
-        assertEquals("x1", done.getString("id"))
-        assertTrue(done.isNull("error"))
-        socket.sendMessage(TextMessage("""{"type":"command","id":"x2","name":"rm"}"""))
-        assertTrue(browser.nextJson().getString("error").contains("unknown command"))
+        // Nothing is listed for this screen, so nothing may be called on it.
+        socket.sendMessage(TextMessage("""{"type":"command","id":"x2","name":"usage"}"""))
+        val refusedCommand = browser.nextJson()
+        assertEquals("x2", refusedCommand.getString("id"))
+        assertTrue(refusedCommand.getString("error").contains("offers no command"))
 
         fromMachine(
             """{"t":"screen.error","sid":"$sid","viewer":"$viewer","error":"client ended"}""",

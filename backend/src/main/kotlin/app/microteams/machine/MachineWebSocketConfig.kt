@@ -24,6 +24,7 @@ package app.microteams.machine
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.LinkHandler
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.screen.ScreenCommands
 import app.microteams.machine.screen.ViewerHandler
 import app.microteams.user.UserProfileRepository
 import org.rucca.cheese.auth.AuthorizationService
@@ -74,7 +75,15 @@ class ConnectorWebSocketConfig {
             org.springframework.beans.factory.ObjectProvider<
                 app.microteams.machine.screen.ScreenAttachPreflight,
             >,
-    ): ViewerHandler = ViewerHandler(hub, objectMapper, profiles, preflight.getIfAvailable())
+        commands: org.springframework.beans.factory.ObjectProvider<ScreenCommands>,
+    ): ViewerHandler =
+        ViewerHandler(
+            hub,
+            objectMapper,
+            profiles,
+            preflight.getIfAvailable(),
+            commands.getIfAvailable(),
+        )
 
     /** The live-screen viewer request handler, carrying the JWT + membership handshake authz. */
     @Bean

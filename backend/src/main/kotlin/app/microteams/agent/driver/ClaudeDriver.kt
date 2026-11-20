@@ -1,7 +1,8 @@
 /*
  *  Description: The Claude Code driver — the only place in the backend that knows Claude exists.
  *               Its applet (claude.js) comes from the AppletStore (mounted applets-dir, or the
- *               classpath fallback).
+ *               classpath fallback); a viewer may call its `usage` and `compact`
+ *               (viewerCommands).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -18,6 +19,9 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
     override val name = "claude"
 
     override val appletSource: String by lazy { appletStore.require("claude.js") }
+
+    /** The claude applet's `usage` (Claude Code's /usage) and `compact` (/compact). */
+    override val viewerCommands = listOf("usage", "compact")
 
     /**
      * We always control Claude's session id (`--session-id` fresh / `--resume` to continue), and

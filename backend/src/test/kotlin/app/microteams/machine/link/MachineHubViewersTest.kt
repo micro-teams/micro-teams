@@ -50,6 +50,10 @@ class MachineHubViewersTest {
         override fun error(text: String) {
             events.add("error:$text")
         }
+
+        override fun resubscribed() {
+            events.add("resubscribed")
+        }
     }
 
     private fun hub(protocol: Int): Pair<MachineHub, MutableList<LinkMsg>> {
@@ -202,7 +206,9 @@ class MachineHubViewersTest {
         assertEquals(listOf("size:100x30", "bytes:hi"), a.events)
         assertEquals(listOf("size:80x24", "bytes:hi"), b.events)
         hub.viewerResize(screen.sid, "va", 90, 20)
+        // One shared window: every viewer is told its new size, not only the one that resized.
         assertEquals("size:90x20", a.events.last())
+        assertEquals("size:90x20", b.events.last())
         assertTrue(sent.all { it.viewer == null }, "protocol 1 has no viewer field")
         assertEquals(
             listOf("screen.subscribe", "screen.subscribe", "screen.resize"),
@@ -289,5 +295,76 @@ class MachineHubViewersTest {
         hub.attachMachine("m1", MachineTransport {}, 2)
         val e = runCatching { call.join() }.exceptionOrNull()
         assertTrue(e?.cause is LinkClosedException, "got $e")
+    }
+
+    @Test
+    fun `a terminal reply passes the lease on v2 and leaves viewerLevel alone on v1`() {
+        val (hub2, sent2) = hub(2)
+        val s2 = hub2.openScreen("m1", listOf("bash"), kind = "test")
+        hub2.attachViewer(s2.sid, HubViewer("va", Seen(), 80, 24))
+        sent2.clear()
+        hub2.viewerReply(s2.sid, "va", "\u001b[?1;2c".toByteArray())
+        assertEquals(listOf("screen.input"), sent2.map { it.t })
+        assertEquals("reply", sent2[0].op)
+        assertEquals("va", sent2[0].viewer)
+
+        val (hub1, sent1) = hub(1)
+        val s1 = hub1.openScreen("m1", listOf("bash"), kind = "test")
+        hub1.attachViewer(s1.sid, HubViewer("va", Seen(), 80, 24))
+        sent1.clear()
+        hub1.viewerReply(s1.sid, "va", "\u001b[?1;2c".toByteArray())
+        assertEquals(listOf("screen.input"), sent1.map { it.t }, "no viewerLevel for an answer")
+        assertEquals(null, sent1[0].op)
+    }
+
+    @Test
+    fun `a viewer whose sink fails is unsubscribed on v2`() {
+        val (hub, sent) = hub(2)
+        val screen = hub.openScreen("m1", listOf("bash"), kind = "test")
+        val broken =
+            object : ViewerSink by Seen() {
+                override fun bytes(data: ByteArray) = throw IllegalStateException("socket gone")
+            }
+        hub.attachViewer(screen.sid, HubViewer("va", broken, 80, 24))
+        sent.clear()
+        hub.onMachineMessage(
+            "m1",
+            LinkMsg(t = "screen.data", sid = screen.sid, viewer = "va", data = b64("x")),
+        )
+        assertTrue(screen.viewers.isEmpty())
+        assertEquals(listOf("screen.unsubscribe"), sent.map { it.t })
+        assertEquals("va", sent[0].viewer)
+    }
+
+    @Test
+    fun `an applet call is answered on the connection it came in on`() {
+        val (hub, current) = hub(2)
+        val screen = hub.openScreen("m1", listOf("bash"), kind = "test")
+        val old = CopyOnWriteArrayList<LinkMsg>()
+        val oldTransport = MachineTransport { old.add(it) }
+        current.clear()
+        hub.onMachineMessage(
+            "m1",
+            LinkMsg(t = "rpc.call", sid = screen.sid, id = "c1", name = "screenReady"),
+            oldTransport,
+        )
+        assertEquals(listOf("rpc.result"), old.map { it.t })
+        assertTrue(current.none { it.t == "rpc.result" }, "not on the newer connection")
+        // A connection closed meanwhile drops the answer instead of failing the caller.
+        hub.onMachineMessage(
+            "m1",
+            LinkMsg(t = "rpc.call", sid = screen.sid, id = "c2", name = "screenReady"),
+            MachineTransport { throw IllegalStateException("closed") },
+        )
+    }
+
+    @Test
+    fun `a resubscribe tells every viewer so a repeated lease state is not read as an answer`() {
+        val (hub, _) = hub(2)
+        hub.adoptScreen("s1", "m1", token = "tok1", kind = "agent")
+        val a = Seen()
+        hub.attachViewer("s1", HubViewer("va", a, 80, 24))
+        hub.readoptScreen("m1", "s1", emptyList(), "// src")
+        assertEquals(listOf("resubscribed"), a.events)
     }
 }
