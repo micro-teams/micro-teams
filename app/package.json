@@ -15,7 +15,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
     "@expo/vector-icons": "^15.0.2",
-    "@micro-teams/multipath": "file:vendor/micro-teams-multipath-465428115532.tgz",
+    "@micro-teams/multipath": "file:vendor/micro-teams-multipath-fbe895623141.tgz",
     "@tanstack/react-query": "^5.107.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
