@@ -87,6 +87,17 @@ this process, so a restarted or self-updated binary has to arrive back at the sa
 the sessions it left behind. That is also why the path is part of the brand — two connectors from
 different products sharing it would each see the other's screens.
 
+**Every line at once.** The service runs `multipath-client` (built from the multipath module pinned
+in `go.mod`, installed at `~/.config/microteams/bin/multipath-client` beside the private tmux) as
+a child process on two free loopback ports recorded in the state file. The client fetches the
+deployment's line list from `<origin>/multipath/v3/lines` and carries every connection made to its
+port over all lines at once. The control link and `microteams api` both connect to that port while
+the client has a live session; without one they go to the server directly, and the log (or stderr)
+says why. The service starts the client again whenever it exits, `microteams link retest` makes it
+fetch the line list now, `microteams status` shows its session and lines, and `microteams update`
+and `install.sh` install it together with `microteams`; a service that finds it missing downloads it
+from `<origin>/connector/latest/<os>-<arch>/multipath-client`.
+
 **`microteams api`** runs the server-hosted **CLI applet** (`cli.js`): the applet
 declares the whole command tree with `microteams.command`, and the host turns that
 declaration into subcommands, rebuilt from the applet each run so it never goes
@@ -121,13 +132,14 @@ internal/daemoncmd  the human-facing commands, and how they speak
 internal/host       assembles a connector out of the library, plus MicroTeams' own three
                     decisions: the state file, what updating means, and the bargain that keeps
                     agents alive across an update
-internal/lines      which network paths to the backend exist
+internal/mpclient   the MultiPath client the service supervises, and how short commands find it
 internal/netcfg     this machine's own network settings (its proxy)
 internal/hostlog    one log file, wherever the init system put the process
 internal/acpscreen  `microteams acp-screen`: a terminal front end for agents that speak ACP
 internal/mtbrand    which product this is — and that agents here are ordinary users, so a screen
                     exchanges its token for the user's rather than borrowing the machine's
-internal/state      how many screens are live, so a disconnect can warn before killing work
+internal/state      what the service publishes for short commands: screens, the control link, the
+                    MultiPath client's addresses
 internal/ui         terminal output
 ```
 

@@ -8,12 +8,12 @@
  *   Every action throws the server's own message. setServer returns the new server's Connection,
  *   so a sign-in right after it goes to the server just chosen.
  * Connection — the same, outside React: one per server, holding the session, the clients and the
- *   updates socket. subscribe(listener) and current() let React read the session; adoptLines()
- *   asks the deployment for its lines once; updates is the UpdatesStore topics are watched in;
- *   presence is the registry avatars ask whether they are agents.
+ *   updates socket. subscribe(listener) and current() let React read the session; updates is the
+ *   UpdatesStore topics are watched in; presence is the registry avatars ask whether they are
+ *   agents; close() ends its substrate when another server replaces it.
  *   The socket runs while somebody is signed in and is dialled again when the app comes back to
- *   the foreground. Nothing is fetched or dialled before somebody signs in, so a
- *   client that is about to be pointed at another server never talks to the default one.
+ *   the foreground. The substrate dials the server's lines as soon as the Connection exists; no
+ *   request is sent before somebody signs in.
  * defaultServer — what a native client offers before anybody has chosen one.
  *
  * Example: const { mt, user } = useSession(); const { data } = await mt!.GET("/chat", {});
@@ -111,10 +111,15 @@ export class Connection {
     this.socket = null;
   }
 
-  /** The app came back to the foreground: links and socket may be silently dead. */
+  /** The app came back to the foreground: the socket may be silently dead. The substrate needs
+   * nothing: a line silent for a second is dead, and a session without lines is replaced. */
   resumed() {
-    this.substrate.reset();
     this.socket?.resumed();
+  }
+
+  close() {
+    this.stopSocket();
+    this.substrate.close();
   }
 
   async signIn(username: string, password: string) {
@@ -148,12 +153,6 @@ export class Connection {
     if (this.session) this.adopt({ ...this.session, user: { ...this.session.user, avatarId } });
   }
 
-  adoptLines() {
-    this.mt.GET("/lines", {}).then(
-      ({ data }) => this.substrate.adopt((data?.lines ?? []).map((l) => l.url || this.origin)),
-      (e: unknown) => console.warn(`multipath: could not read /mt/lines: ${String(e)}`),
-    );
-  }
 }
 
 type Value = {
@@ -184,7 +183,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signedIn = session !== null;
   useEffect(() => {
     if (!signedIn) return;
-    conn.adoptLines();
     conn.startSocket();
     return () => conn.stopSocket();
   }, [conn, signedIn]);
@@ -214,6 +212,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const clean = next.trim().replace(/\/+$/, "");
       storage.set(SERVER_KEY, clean);
       const fresh = new Connection(clean, queries);
+      conn.close();
       setConn(fresh);
       return fresh;
     },

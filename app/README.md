@@ -7,8 +7,7 @@ browser's own.
 
 ## Running it
 
-    export NODE_AUTH_TOKEN=<a token with read:packages>   # @micro-teams/multipath is on GitHub Packages
-    npm ci
+    npm ci                   # @micro-teams/multipath comes from vendor/: scripts/multipath-pin.sh
     npm run codegen          # src/api/schema.d.ts from ../MicroTeams-API.yml, and the terminal's
                              # WebView page (neither is committed)
     npx expo start --web     # or: npx expo run:android
@@ -57,7 +56,7 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
     src/
       api/        the two servers: cheese-auth (auth.ts) and the backend (client.ts, typed from
                   the generated schema.d.ts)
-      transport/  the MultiPath substrate every request rides when it is up, and the updates socket
+      transport/  the MultiPath client every request rides when a session is up, and the updates socket
       data/       the session, and every query and action a screen can use
       nav/        the display stack (stack.ts), its React binding, the links from outside
                   (links.ts) and the shell that draws it
@@ -94,11 +93,18 @@ connector and tmux from the bundle, and the real Claude Code or pi in front of a
 CI runs it in `test-journeys`; on a machine with Docker, port 80 free and Chromium for Playwright,
 the web leg is:
 
-    bash e2e/stack.sh <unpacked bundle>                                 # the stack and a mail sink
+    bash e2e/stack.sh <unpacked bundle>          # the stack, three lines (:80 :8081 :8082), a mail sink
+    bash e2e/counters.sh baseline                # the multipath server at rest
     export LEG=npm:2.1.220 RUN=l1
     export ENROLL=$(bash e2e/machine.sh up <unpacked bundle> $LEG | tail -1)
     (cd e2e && npm ci && npx tsx run.ts web http://localhost/app/)
-    bash e2e/carried.sh                                                 # over the substrate
+    bash e2e/carried.sh                          # the app and the machine went over the lines
+    bash e2e/machine.sh stop && bash e2e/counters.sh settled   # and the server let go of them
+
+The journey breaks the lines on the way (a dead one and a slow one, then a restart of the multipath
+server) and prints how long each client took to notice and recover. The Android leg is the same
+with an emulator, `adb root` and `adb reverse tcp:P tcp:P` for ports 80, 8081 and 8082, and
+`npx tsx run.ts android http://localhost`.
 
 ## Things worth knowing before changing something
 
@@ -114,6 +120,8 @@ the web leg is:
 - **The keyboard does not move the conversation.** The composer rides up with the keyboard; the
   list keeps its height and is given the keyboard's height as extra room to scroll into.
 - **An avatar is one component.** Nothing else draws a face.
-- **Every request rides the substrate but two kinds.** The calls to cheese-auth (`src/api/auth.ts`)
-  and an installer download go directly; why is in `src/transport/substrate.ts`. A request the substrate cannot carry goes directly too, and says
-  so in the console and on the lines panel (`/app/__lines`).
+- **Every request rides the lines but two kinds.** The calls to cheese-auth (`src/api/auth.ts`)
+  and an installer download go directly; why is in `src/transport/substrate.ts`. A request the
+  lines cannot carry goes directly too, and says so in the console and on the lines panel
+  (*me → version → lines*, or `/app/__lines`), whose "copy diagnostics" button copies everything
+  the client knows about its session, lines, streams and fallbacks.

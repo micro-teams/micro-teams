@@ -111,8 +111,9 @@ pass "team $TEAM_ID"
 
 # --- a machine --------------------------------------------------------------------------------
 # A plain Debian container on the compose network, standing in for a customer's box. It gets the
-# connector and the static tmux from the bundle's own connector/ directory — the same files the
-# backend serves to a real machine — so a broken or missing binary in the bundle fails here.
+# connector, the multipath client and the static tmux from the bundle's own connector/ directory —
+# the same files the backend serves to a real machine, put where install.sh puts them — so a broken
+# or missing binary in the bundle fails here.
 step "spin a machine container and install the connector from the bundle ($LEG)"
 NET="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' \
   "$(docker compose ps -q nginx)")"
@@ -129,8 +130,9 @@ docker exec "$MACHINE_CT" bash -c "set -e
   mkdir -p /home/$MACHINE_USER/.local/bin /home/$MACHINE_USER/.config/microteams/bin"
 docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
 docker cp connector/linux-amd64/tmux "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/tmux"
+docker cp connector/linux-amd64/multipath-client "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/multipath-client"
 docker exec "$MACHINE_CT" bash -c "chmod +x /home/$MACHINE_USER/.local/bin/microteams \
-  /home/$MACHINE_USER/.config/microteams/bin/tmux
+  /home/$MACHINE_USER/.config/microteams/bin/tmux /home/$MACHINE_USER/.config/microteams/bin/multipath-client
   chown -R $MACHINE_USER: /home/$MACHINE_USER"
 onmachine() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -lc "$1"; }
 onmachine '$HOME/.local/bin/microteams --version' || fail "the bundled connector does not run"
@@ -169,7 +171,11 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat /tmp/connector.log; fail "machine never came online"; }
-pass "machine is online"
+# The stack's line list is http://nginx (MULTIPATH_ORIGIN in build.yml), which this machine reaches:
+# the control link must ride the multipath client, not go around it.
+docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" /tmp/connector.log ||
+  { docker exec "$MACHINE_CT" cat /tmp/connector.log; fail "the control link did not go through the multipath client"; }
+pass "machine is online, over its multipath client"
 
 # --- an agent ---------------------------------------------------------------------------------
 step "open an agent on it"

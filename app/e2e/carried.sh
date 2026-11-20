@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
-# Did the journey's requests go over the substrate? The origin terminates the lines and splices each
-# exchange into nginx, so a request that rode a line reaches nginx from the origin's address; one
-# sent directly reaches it from anywhere else. A client that cannot dial a line sends its requests
-# directly, which works — so every step of a journey passes with the substrate doing nothing, and
-# only this asks.
+# Did the journey's requests go over the lines? The multipath server terminates every line and
+# splices each stream into nginx, so a request that rode a line reaches nginx from the multipath
+# server's address; one sent directly reaches it from anywhere else. A client that cannot bring a
+# session up sends its requests directly, which works — so every step of a journey passes with the
+# lines doing nothing, and only this asks.
 #
 # Usage: carried.sh [at least]   — fails unless nginx served at least that many /mt/ and /api/
-#                                  requests from the origin (default 20), and unless the app's two
-#                                  WebSockets — the updates socket and a live screen — were each
-#                                  opened over the substrate and never directly (the machine's own
-#                                  connector, which is not the app, is left out); prints the counts
+#                                  requests from the multipath server (default 20); unless the
+#                                  app's two WebSockets — the updates socket and a live screen —
+#                                  were each opened over the lines and never directly; and, with a
+#                                  machine (machine.sh), unless its control link was only ever
+#                                  opened over its multipath client, and a short command
+#                                  (`microteams api`) run now goes over it too; prints the counts
 #
 # The stack must be up (stack.sh), as project e2e.
 set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WANT="${1:-20}"
 ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1" 2>/dev/null || true; }
-ORIGIN_IP="$(ip e2e-origin-1)" MACHINE_IP="$(ip e2e-machine)"
+MP_IP="$(ip e2e-multipath-1)" MACHINE_IP="$(ip e2e-machine)"
 LOG="$(docker logs e2e-nginx-1 2>/dev/null)"
-CARRIED="$(grep -c "^$ORIGIN_IP .*\"[A-Z]* /\(mt\|api\)/" <<<"$LOG" || true)"
-echo "$CARRIED requests reached nginx over the substrate (from the origin, $ORIGIN_IP)"
-[ "$CARRIED" -ge "$WANT" ] || { echo "FAIL: fewer than $WANT: the client is not using the substrate" >&2; exit 1; }
+CARRIED="$(grep -c "^$MP_IP .*\"[A-Z]* /\(mt\|api\)/" <<<"$LOG" || true)"
+echo "$CARRIED requests reached nginx over the lines (from the multipath server, $MP_IP)"
+[ "$CARRIED" -ge "$WANT" ] || { echo "FAIL: fewer than $WANT: the client is not using the lines" >&2; exit 1; }
 for socket in /mt/updates /mt/machine/screen/; do
-  over="$(grep -c "^$ORIGIN_IP .*\"GET $socket" <<<"$LOG" || true)"
-  direct="$(grep "\"GET $socket" <<<"$LOG" | grep -v "^$ORIGIN_IP " | { [ -n "$MACHINE_IP" ] && grep -v "^$MACHINE_IP " || cat; } | grep -c . || true)"
-  echo "$socket: $over over the substrate, $direct directly"
-  [ "$over" -ge 1 ] && [ "$direct" = 0 ] || { echo "FAIL: $socket was not opened over the substrate alone" >&2; exit 1; }
+  over="$(grep -c "^$MP_IP .*\"GET $socket" <<<"$LOG" || true)"
+  direct="$(grep "\"GET $socket" <<<"$LOG" | grep -vc "^$MP_IP " || true)"
+  echo "$socket: $over over the lines, $direct directly"
+  [ "$over" -ge 1 ] && [ "$direct" = 0 ] || { echo "FAIL: $socket was not opened over the lines alone" >&2; exit 1; }
 done
+
+[ -n "$MACHINE_IP" ] || exit 0
+over="$(grep -c "^$MP_IP .*\"GET /mt/machine/link" <<<"$LOG" || true)"
+direct="$(grep -c "^$MACHINE_IP .*\"GET /mt/machine/link" <<<"$LOG" || true)"
+echo "the machine's control link: $over over its multipath client, $direct directly"
+[ "$over" -ge 1 ] && [ "$direct" = 0 ] || { echo "FAIL: the control link was not opened over the multipath client alone" >&2; exit 1; }
+before="$(grep -c "^$MP_IP .*\"GET /mt/agent/cli-applet" <<<"$LOG" || true)"
+said="$(bash "$HERE/machine.sh" api)"
+after="$(docker logs e2e-nginx-1 2>/dev/null | grep -c "^$MP_IP .*\"GET /mt/agent/cli-applet" || true)"
+echo "a short command on the machine: $((after - before)) request(s) over the multipath client${said:+; it said: $said}"
+[ "$after" -gt "$before" ] && ! grep -q "directly" <<<"$said" || { echo "FAIL: the short command did not go over the multipath client" >&2; exit 1; }

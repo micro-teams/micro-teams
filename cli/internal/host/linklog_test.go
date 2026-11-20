@@ -14,8 +14,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	multipath "github.com/micro-teams/multipath/go"
 )
 
 // quietHost builds a Host whose narration goes to a buffer and whose clock a test can move.
@@ -24,9 +22,8 @@ func quietHost(t *testing.T) (*Host, *bytes.Buffer, *time.Time) {
 	var buf bytes.Buffer
 	clock := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
 	h := &Host{
-		mpLines: []multipath.Line{{ID: "origin", URL: "https://control.example", Transport: "wss"}},
-		logw:    &buf,
-		now:     func() time.Time { return clock },
+		logw: &buf,
+		now:  func() time.Time { return clock },
 	}
 	return h, &buf, &clock
 }

@@ -1,19 +1,31 @@
 # MicroTeams deployment — stock images + bind-mounted build artifacts, no custom images.
 #
-#   nginx      the domain-independent gateway (SPA + /api -> cheese-auth + /mt -> backend)
+#   nginx      the domain-independent gateway (SPA + /api -> cheese-auth + /mt -> backend,
+#              /multipath/v3/ -> multipath, /mt/link -> origin)
 #   backend    this app's jar, run on a stock JRE image
 #   cheese-auth identity service (a prebuilt image)
 #   postgres   shared DB: cheese-auth owns schema "public", backend owns "microteams"
+#   multipath  the MultiPath server (protocol 3), the far end of every line
+#   origin     the MultiPath origin of protocol 2, for clients that have not moved to 3 yet
 #
 # Secrets come from .env (generate it with `bash gen-env.sh`). All state lives in ./app_data/ as plain
 # host directories (no docker volumes) so it's visible and easy to back up. Images carry readable tags
 # here; a committed digest goes stale whenever a tag is re-pushed. The shipped bundle is still
 # reproducible: package-zip (CI) resolves each tag to a digest and pins it into the bundled compose.
 
+# Every container's log is rotated by docker: three files of 50 MB at most, so no log can fill the
+# disk of a host nobody watches.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16.2
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -33,6 +45,7 @@ services:
   cheese-auth:
     image: ghcr.io/micro-teams/cheese-auth:dev
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,18 +87,14 @@ services:
       start_period: 20s
 
   # EXACTLY ONE INSTANCE. Do not add `deploy.replicas`, and do not run a second copy behind the
-  # proxy. Write de-duplication (MultiPath) keeps its table in this JVM's heap, so two instances each
-  # keep their own and a request arriving over two network paths that land on different instances is
-  # executed twice. It fails silently: no error, no log, just an occasional duplicate message or
-  # duplicate membership change, which is the hardest kind of bug to trace back to its cause.
-  #
-  # This is the same premise the whole design rests on — every line leads to one origin — not an
-  # oversight. If capacity ever demands a second instance, that layer has to move to shared storage
-  # first (IdempotencyStore is an interface for exactly this); it is not a change you can make here
-  # alone.
+  # proxy. The backend holds the machines' control links (MachineHub) and the update subscriptions
+  # (UpdatesRegistry) in this JVM's memory, so a second instance would hold a different half of them:
+  # a machine connected to one could not be reached through the other, and an update published on
+  # one would never reach a browser subscribed to the other.
   backend:
     image: eclipse-temurin:21-jre
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +136,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    logging: *logging
     depends_on:
       backend:
         condition: service_healthy
@@ -145,20 +155,56 @@ services:
       retries: 10
       start_period: 5s
 
-  # The MultiPath origin: the server end of the substrate, and the only thing in this deployment
-  # that knows more than one path to it exists.
+  # The MultiPath server: the far end of every line. A client brings up one session carried over
+  # every line this deployment publishes in multipath/lines.json, and each stream of the session is
+  # spliced to nginx, so a request that arrives over a line lands exactly where the same request
+  # over plain HTTP lands: /api/ to auth, /mt/ to the backend, everything else to static files. It
+  # starts after nginx for that reason: with nothing to splice to, a link that connects is worse
+  # than none, because the client believes it has a working path.
   #
-  # It is spliced to NGINX, not to the backend, so a request that arrives over a line lands exactly
-  # where the same request over plain HTTP lands — /api/ to auth, /mt/ to the backend with the
-  # prefix stripped, everything else to static files. Splicing to the backend would have made a
-  # request's path depend on which way it travelled, which is the difference this layer exists to
-  # abolish. It starts after nginx for that reason: with nothing to splice to, a link that connects
-  # is worse than one that does not, because the client believes it has a working path.
-  #
-  # No TLS here: nginx terminates it and proxies /mt/link in as a plaintext WebSocket.
+  # nginx routes /multipath/v3/ (the link endpoint and the line list) here, on every server block;
+  # TLS ends in front of it. The binary comes with the bundle (multipath/multipath-server, built for
+  # linux/amd64 from the multipath module the CLI pins). The line list is this deployment's own file,
+  # read on every request, so a line is added or removed without a restart (deploy/README.md). The
+  # limits are the protocol's defaults, spelled out; the status port is the container's own.
+  multipath:
+    image: alpine:3.22
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      nginx:
+        condition: service_healthy
+    command:
+      - /opt/multipath/multipath-server
+      - -listen=:8080
+      - -target=nginx:80
+      - -lines-file=/opt/multipath/lines.json
+      - -status=127.0.0.1:9101
+      - -status-every=1m
+      - -window=2097152
+      - -stream-window=262144
+      - -max-streams=256
+      - -max-links=8
+    volumes:
+      # The directory, not the files: an editor that replaces lines.json with a new file is seen at
+      # once, where a single-file mount would keep serving the old one.
+      - ./multipath:/opt/multipath:ro
+    healthcheck:
+      # The line list as a client gets it (served only while the file parses) and the counters on
+      # the status port: both answer only from a running server with a valid configuration.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/multipath/v3/lines && wget -q -O /dev/null http://127.0.0.1:9101/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # The MultiPath origin of protocol 2, at /mt/link: the clients built before protocol 3 (connectors
+  # and Android packages already installed) reach this deployment through it until they have moved
+  # to the multipath server above. Spliced to nginx for the same reason; no TLS here either.
   origin:
     image: eclipse-temurin:21-jre
     restart: unless-stopped
+    logging: *logging
     depends_on:
       nginx:
         condition: service_healthy

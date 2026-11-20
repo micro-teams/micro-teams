@@ -4,7 +4,8 @@
 // talking to the workspace live under `microteams api`; that command tree is defined by a
 // server-supplied applet (see internal/commandapplet), fetched on demand, so it can evolve
 // without shipping a new binary. There is deliberately no separate "daemon" the user must know
-// about.
+// about. The resident service runs the MultiPath client beside it (internal/mpclient), and
+// `microteams api` sends its requests through that client while it has a live session.
 package main
 
 import (
@@ -21,8 +22,9 @@ import (
 	"github.com/micro-teams/microteams/cli/internal/acpscreen"
 	"github.com/micro-teams/microteams/cli/internal/daemoncmd"
 	"github.com/micro-teams/microteams/cli/internal/host"
-	"github.com/micro-teams/microteams/cli/internal/lines"
+	"github.com/micro-teams/microteams/cli/internal/mpclient"
 	"github.com/micro-teams/microteams/cli/internal/mtbrand"
+	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
 // Declare who this connector is before anything reads a path or an environment variable. See
@@ -82,27 +84,27 @@ func main() {
 }
 
 // apiClient is the HTTP client every `microteams api` call goes out on: authenticated by the
-// library, routed by MultiPath underneath.
-//
-// The order is the point, and it is why apiauth grew a seam rather than MultiPath being wedged in
-// somewhere: the credential is decided by looking at the API host, so it has to be attached above a
-// transport that no longer has a single host at all.
-//
-// A short command has fetched nothing, so it sends over whatever lines the resident service last
-// cached (see internal/lines). With no cache that is one same-origin line and the request goes out
-// exactly as it did before any of this existed.
+// library, and carried by the resident service's MultiPath client while that has a live session
+// (internal/mpclient), so a command reaches the server over every line as the service does. With no
+// such client the call goes to the server directly, and stderr says why.
 func apiClient() *http.Client {
-	return apiauth.ClientOver(lines.Transport(filepath.Join(configDir(), "config.json"), apiauth.APIBase()))
+	addr, err := mpclient.Lookup(state.CurrentClient(filepath.Join(configDir(), "config.json")))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "microteams: %v; sending directly\n", err)
+		return apiauth.ClientOver(nil)
+	}
+	return apiauth.ClientOver(mpclient.Transport(addr))
 }
 
 // loadAPICommands fetches the CLI applet and hangs its commands under apiCmd.
 func loadAPICommands(apiCmd *cobra.Command) error {
-	source, err := fetchCLIApplet()
+	client := apiClient()
+	source, err := fetchCLIApplet(client)
 	if err != nil {
 		return err
 	}
 	applet, err := commandapplet.Load(source, commandapplet.Options{
-		Client:  apiClient(),
+		Client:  client,
 		APIBase: apiauth.APIBase(),
 		FsRoot:  os.Getenv("MICROTEAMS_FS_ROOT"),
 	})
@@ -118,15 +120,13 @@ func loadAPICommands(apiCmd *cobra.Command) error {
 // fetchCLIApplet returns the CLI applet source: the server's current copy when reachable (cached
 // for next time), else the last cached copy. The endpoint is public, so no credential is needed to
 // fetch it — the applet authenticates its own calls.
-func fetchCLIApplet() (string, error) {
+func fetchCLIApplet(client *http.Client) (string, error) {
 	base := apiauth.APIBase()
 	cache := filepath.Join(configDir(), "cli-applet.js")
 
-	// Why it failed, kept for the error below. Without it this reports "could not fetch it" and
-	// nothing else — the same message whether the server is down, the name does not resolve, or the
-	// answer was a 500 — and the person reading it is an agent that cannot investigate.
+	// Why it failed, for the messages below: the reader is often an agent that cannot investigate.
 	reason := "no response"
-	resp, err := apiClient().Get(base + "/agent/cli-applet")
+	resp, err := client.Get(base + "/agent/cli-applet")
 	switch {
 	case err != nil:
 		reason = err.Error()
@@ -149,6 +149,7 @@ func fetchCLIApplet() (string, error) {
 		}
 	}
 	if data, cerr := os.ReadFile(cache); cerr == nil {
+		fmt.Fprintf(os.Stderr, "microteams: could not fetch the CLI applet from %s (%s); using the copy cached at %s\n", base, reason, cache)
 		return string(data), nil
 	}
 	return "", fmt.Errorf(

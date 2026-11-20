@@ -7,9 +7,10 @@
  *                     base / API base / ws override baked in from the request's own origin, so a
  *                     `curl -fsSL <origin>/install.sh | sh` resolves everything against <origin>
  *                     with nothing configured (matches MachineController's forwarded-header origin).
- *                 GET /connector/latest/{target}/{artifact}    → the `microteams` binary or static
- *                     `tmux` for one <os>-<arch>, streamed from application.connector-binaries-dir.
- *                     This is the endpoint cli/internal/update/update.go downloads from.
+ *                 GET /connector/latest/{target}/{artifact}    → the `microteams` binary, the
+ *                     `multipath-client` it runs beside it, or the static `tmux`, for one
+ *                     <os>-<arch>, streamed from application.connector-binaries-dir. install.sh and
+ *                     the CLI's self-update download from here.
  *
  *               Public (@NoAuth) and hand-written (not an AgentApi operation) for the same reason as
  *               AgentAppletController: it serves shell/binary *assets*, not business DTOs, which
@@ -58,7 +59,7 @@ class ConnectorController(
     // with update.go's platformDir.
     private val targets = setOf("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64")
     // The only artifacts published per target. Keeps the served path off the filesystem's leash.
-    private val artifacts = setOf("microteams", "tmux")
+    private val artifacts = setOf("microteams", "multipath-client", "tmux")
 
     @NoAuth
     @GetMapping("/install.sh", produces = ["text/x-shellscript"])

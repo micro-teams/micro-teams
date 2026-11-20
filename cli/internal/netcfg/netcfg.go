@@ -1,21 +1,11 @@
-// Package netcfg holds this machine's own idea of how to reach the network — today, its proxy.
+// Package netcfg holds this machine's own idea of how to reach the network: its proxy.
 //
-// The problem it solves is not that the code lacked proxy support. Every outbound path already
-// honours the standard Go convention: the control-link WebSocket dials through
-// websocket.DefaultDialer (whose Proxy is http.ProxyFromEnvironment), and the API client and the
-// line prober both go through http.DefaultTransport (likewise). Run the connector by hand in a
-// shell with a proxy exported and it uses it.
-//
-// What fails is the DELIVERY of that environment to a service. Debian's `service` execs its scripts
-// through `env -i`, wiping everything; a systemd unit inherits nobody's shell. So a machine with a
-// perfectly good global proxy has a connector process that has never heard of it, and the symptom
-// is the confusing one: it may connect (same-origin) while the line registry times out, so the
-// machine works and is permanently on one route.
-//
-// The fix is to stop depending on ambient environment for something we need. The proxy is written
-// here, in a file this product owns, and applied by the process to itself at startup. Whether the
-// machine is a container, whether an init system scrubs the environment, who ran it — none of it
-// matters any more, because nothing has to be handed to us.
+// Every outbound path honours the standard environment variables: the direct control link through
+// websocket.DefaultDialer, direct API calls through http.DefaultTransport, and the MultiPath client,
+// which inherits the service's environment, for its lines and line list. What a service lacks is the
+// environment itself: Debian's `service` runs its scripts through `env -i`, and a systemd unit
+// inherits nobody's shell. So the proxy is written here, in a file this product owns, and the
+// process applies it to itself at startup, whoever started it.
 //
 // It lives in its own file rather than in config.json for a specific reason: config.json is owned by
 // the connector library, which rewrites it from a struct, so any key that struct does not know
@@ -74,13 +64,10 @@ func Save(cfgPath string, s Settings) error {
 	return os.WriteFile(Path(cfgPath), data, 0o600)
 }
 
-// Apply makes this process use the configured proxy, and reports whether it set one.
-//
-// It works by exporting the standard variables into our OWN environment rather than by handing a
-// dialer to each caller — which looks indirect until you notice that the WebSocket dial happens
-// inside the connector library, where this repo cannot reach to pass anything. Setting the
-// environment covers every path at once, including the ones we do not own, and it is honest about
-// what it is: the same mechanism Go already uses, with the delivery problem removed.
+// Apply makes this process, and every process it starts, use the configured proxy, and reports
+// whether it set one. It exports the standard variables into this process's environment, because
+// the WebSocket dial happens inside the connector library and the MultiPath client is another
+// process: the environment is the one thing that reaches both.
 //
 // MUST be called before anything makes a request. http.ProxyFromEnvironment reads the environment
 // once and remembers it, so a later change would be ignored.

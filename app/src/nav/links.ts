@@ -9,8 +9,8 @@
  *     connect?code=…   → agents › approve device (the end of `microteams link auto-connect`)
  *     screen/<sid>     → chats › the live screen over it (the CLI's "watch" link)
  *     chats/<id>       → chats › that conversation
- *     __lines          → me › the lines panel, which has no button anywhere: it is for whoever
- *                        is diagnosing the network, not something people need to see
+ *     __lines          → me › the lines panel, otherwise reached from the client block under
+ *                        me › version: for whoever is diagnosing the network
  *
  * Example: navFromLink("chats/5", {}) — the chat list with conversation 5 open on it.
  */

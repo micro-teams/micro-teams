@@ -114,6 +114,10 @@ export class WebdriverioDriver implements Driver {
     return (await this.byText(text)).isDisplayed().catch(() => false);
   }
 
+  async text(id: string) {
+    return (await (await this.byId(id)).getText()).trim();
+  }
+
   async waitGone(id: string, timeoutMs = 15_000) {
     await (await this.byId(id)).waitForDisplayed({ timeout: timeoutMs, reverse: true });
   }

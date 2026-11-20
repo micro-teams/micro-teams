@@ -10,11 +10,20 @@
 #   machine.sh saw <leg> <text>    wait up to two minutes for the model on the machine to have been
 #                                  given text, and fail if it never was
 #   machine.sh logs                what the connector said
+#   machine.sh session             the id of the machine's live MultiPath session (its client's
+#                                  /status, found through the state file), or nothing
+#   machine.sh api                 run a short command (`microteams api`) on the machine and print
+#                                  what it said on stderr
+#   machine.sh stop                stop the connector the way its service manager would (SIGTERM)
 #
 # <leg> is what plays the agent's program, as in .github/scripts/agent-leg.sh: `npm:<version>` (the
 # pinned Claude Code), `installer` (its latest) or `pi:<version>`.
 #
-# The stack must be up (stack.sh): the machine joins its network and reaches it as http://nginx.
+# The stack must be up (stack.sh): the machine joins its network, and forwarders on the machine
+# (lines.py) make localhost:80, :8081 and :8082 the stack's three lines, so the machine reaches the
+# stack as http://localhost, under the same names as every other client. The connector is copied
+# without the multipath client, which it downloads from the stack when it starts, as a machine that
+# updated from a connector without one does.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MACHINE_CT=e2e-machine MOCK_CT=e2e-mock MACHINE_USER=agent
@@ -42,8 +51,11 @@ up)
   onmachine '$HOME/.local/bin/microteams --version' >/dev/null || fail "the bundled connector does not run"
   install_agent_program "$LEG" >&2
   docker network connect "$NET" "$MACHINE_CT"
+  docker cp "$HERE/lines.py" "$MACHINE_CT:/lines.py"
+  docker exec -d "$MACHINE_CT" python3 /lines.py --line 80=nginx:80 --line 8081=e2e-lines:8081 --line 8082=e2e-lines:8082
+  for _ in $(seq 1 20); do docker exec "$MACHINE_CT" curl -fsS -o /dev/null http://localhost/multipath/v3/lines && break; sleep 0.5; done
   wait_for_mock
-  ENROLL="$(docker exec "$MACHINE_CT" curl -fsS -X POST http://nginx/mt/machine/enroll/start \
+  ENROLL="$(docker exec "$MACHINE_CT" curl -fsS -X POST http://localhost/mt/machine/enroll/start \
     -H 'Content-Type: application/json' -d '{"name":"e2e-machine"}')"
   CODE="$(printf '%s' "$ENROLL" | python3 -c 'import sys,json;print(json.load(sys.stdin)["code"])')"
   [ -n "$CODE" ] || fail "enrolment start returned no code: $ENROLL"
@@ -51,12 +63,12 @@ up)
   # the connector. `or ""`, because a pending poll answers with the keys present and null.
   docker exec -d "$MACHINE_CT" bash -c "
     for _ in \$(seq 1 1200); do
-      OUT=\$(curl -fsS -X POST http://nginx/mt/machine/enroll/poll -H 'Content-Type: application/json' \
+      OUT=\$(curl -fsS -X POST http://localhost/mt/machine/enroll/poll -H 'Content-Type: application/json' \
         -d '{\"code\":\"$CODE\"}' || true)
       TOKEN=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"token\") or \"\")' 2>/dev/null || true)
       MID=\$(printf '%s' \"\$OUT\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"machineId\") or \"\")' 2>/dev/null || true)
       if [ -n \"\$TOKEN\" ]; then
-        printf '{\"base\":\"http://nginx/mt\",\"token\":\"%s\",\"machine_id\":\"%s\"}' \"\$TOKEN\" \"\$MID\" \
+        printf '{\"base\":\"http://localhost/mt\",\"token\":\"%s\",\"machine_id\":\"%s\"}' \"\$TOKEN\" \"\$MID\" \
           > /home/$MACHINE_USER/.config/microteams/config.json
         chown $MACHINE_USER: /home/$MACHINE_USER/.config/microteams/config.json
         su - $MACHINE_USER -c '\$HOME/.local/bin/microteams run --config \$HOME/.config/microteams/config.json' \
@@ -79,5 +91,24 @@ saw)
 logs)
   docker exec "$MACHINE_CT" tail -60 /tmp/connector.log 2>/dev/null || echo "(no connector log: it never started)"
   ;;
-*) echo "usage: machine.sh up <bundle> <leg> | saw <leg> <text> | logs" >&2; exit 2 ;;
+session)
+  onmachine 'python3 -c "
+import json, os, urllib.request
+try:
+    st = json.load(open(os.path.expanduser(\"~/.config/microteams/state.json\")))[\"multipathClient\"]
+    s = json.load(urllib.request.urlopen(\"http://\" + st[\"status\"] + \"/status\", timeout=2))[\"session\"]
+    print(s[\"id\"] if s and s[\"state\"] == \"live\" else \"\")
+except Exception:
+    print(\"\")
+"'
+  ;;
+api)
+  onmachine 'microteams api >/dev/null 2>/tmp/api.err; cat /tmp/api.err'
+  ;;
+stop)
+  docker exec "$MACHINE_CT" pkill -TERM -f "microteams run" || true
+  for _ in $(seq 1 20); do docker exec "$MACHINE_CT" pgrep -f "multipath-client|microteams run" >/dev/null || exit 0; sleep 0.5; done
+  fail "the connector or its multipath client did not stop within 10 s"
+  ;;
+*) echo "usage: machine.sh up <bundle> <leg> | saw <leg> <text> | logs | session | api | stop" >&2; exit 2 ;;
 esac

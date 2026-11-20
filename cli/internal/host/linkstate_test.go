@@ -11,11 +11,12 @@ package host
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/micro-teams/micro-connector/cli/protocol"
-	multipath "github.com/micro-teams/multipath/go"
+	"github.com/micro-teams/microteams/cli/internal/mpclient"
 )
 
 func TestNoConnectionIsClaimedBeforeTheServerSpeaks(t *testing.T) {
@@ -83,31 +84,23 @@ func TestReconnectingClearsTheOldFailure(t *testing.T) {
 	}
 }
 
-// A line going down is said out loud, and lands in the table `microteams status` reads.
-//
-// This is the observability the substrate takes away by working: every byte goes over every line, so
-// a line dying changes nothing anybody can feel. Three of four can fail in silence while the machine
-// looks perfect, and the first anyone would hear of it is the outage when the last one goes. The
-// transport reports the transition; this is where it becomes something a person can see.
-func TestALineGoingDownIsNarratedAndRecorded(t *testing.T) {
+// Without a client that has a live session, the control link goes to the server directly, and the
+// log says so once, with the reason.
+func TestWithoutAClientTheLinkGoesDirectlyAndSaysWhy(t *testing.T) {
 	h, log, _ := quietHost(t)
+	h.mp = mpclient.NewSupervisor(mpclient.Config{Binary: "/nonexistent", Base: "https://control.example/mt", Logf: h.logf})
+	h.ctrl = dialURL
+	h.grace = 0
 
-	h.reportLine(multipath.LinkState{Index: 0, Up: false, Reason: "i/o timeout", Duration: 90 * time.Second})
-
-	if !contains(log.String(), "origin") || !contains(log.String(), "i/o timeout") {
-		t.Errorf("a line died and the log does not name it or why: %q", log.String())
+	if got := h.chooseURL(); got != dialURL {
+		t.Fatalf("chooseURL = %q, want the configured URL %q", got, dialURL)
 	}
-}
-
-// And coming back is worth a line too: a path that has flapped forty times this morning is "up" at
-// any instant you look, which is exactly why the transitions have to be written down as they happen.
-func TestALineComingBackIsNarrated(t *testing.T) {
-	h, log, _ := quietHost(t)
-
-	h.reportLine(multipath.LinkState{Index: 0, Up: true, Duration: 3 * time.Second})
-
-	if !contains(log.String(), "origin") || !contains(log.String(), "up") {
-		t.Errorf("a line recovered and the log does not say so: %q", log.String())
+	h.chooseURL()
+	if n := strings.Count(log.String(), "goes directly"); n != 1 {
+		t.Fatalf("the route was said %d times, want once; log = %q", n, log.String())
+	}
+	if !h.direct.Load() {
+		t.Fatal("a direct link must be recorded as direct, so a live client moves it")
 	}
 }
 

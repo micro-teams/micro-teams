@@ -3,8 +3,18 @@
 # Generate the .env docker-compose reads its secrets from: a random DB password and the JWT secret
 # shared between the backend and cheese-auth. Run this once, before `docker compose up -d`.
 #
+# It also writes the multipath server's line list, multipath/lines.json, when there is none: one
+# line, MULTIPATH_ORIGIN (default http://localhost). The list is this deployment's own file and no
+# bundle carries one; README.md ("Lines") says what belongs in it.
+#
 set -euo pipefail
 cd "$(dirname "$0")"
+
+if [ ! -f multipath/lines.json ]; then
+    mkdir -p multipath
+    printf '{"lines": [\n  {"id": "origin", "url": "%s"}\n]}\n' "${MULTIPATH_ORIGIN:-http://localhost}" > multipath/lines.json
+    echo "Wrote multipath/lines.json with one line, ${MULTIPATH_ORIGIN:-http://localhost}: make it this deployment's public origin."
+fi
 
 if [ -f .env ]; then
     echo "refusing to overwrite an existing .env (delete it yourself to regenerate secrets)" >&2

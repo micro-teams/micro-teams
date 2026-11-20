@@ -56,6 +56,7 @@ class InstallFlowTest @Autowired constructor(private val mockMvc: MockMvc) {
         val target = binDir.resolve("linux-amd64")
         Files.createDirectories(target)
         Files.write(target.resolve("microteams"), fixture)
+        Files.write(target.resolve("multipath-client"), fixture)
     }
 
     @Test
@@ -96,6 +97,19 @@ class InstallFlowTest @Autowired constructor(private val mockMvc: MockMvc) {
                 .perform(get("/connector/latest/linux-amd64/microteams"))
                 .andExpect(status().isOk)
                 .andExpect(content().contentType("application/octet-stream"))
+                .andReturn()
+                .response
+                .contentAsByteArray
+
+        assertArrayEquals(fixture, bytes, "served bytes must match the published file exactly")
+    }
+
+    @Test
+    fun `the multipath client is published beside the binary`() {
+        val bytes =
+            mockMvc
+                .perform(get("/connector/latest/linux-amd64/multipath-client"))
+                .andExpect(status().isOk)
                 .andReturn()
                 .response
                 .contentAsByteArray
