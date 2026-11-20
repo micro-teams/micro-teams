@@ -362,7 +362,7 @@ async function withAMachine(
   { run, teamId, elsewhere, lap }: { run: string; teamId: number; elsewhere: Awaited<ReturnType<typeof outside>>; lap: (step: string) => void },
 ) {
   if (d.go) {
-    // `microteams link auto-connect` prints a link for a person to open; opening it is this.
+    // `microteams enable` prints a link for a person to open; opening it is this.
     await d.go(`connect?code=${machine.code}`);
     await d.tap(`connect-team-${teamId}`);
     await d.tap("connect-approve");

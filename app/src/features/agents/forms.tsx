@@ -79,7 +79,7 @@ export function AddDevice({ team, done }: { team: number; done: (machineId: stri
       <Txt variant="small" muted>
         Installs the connector and a private tmux for it to run in.
       </Txt>
-      <Command text="microteams link auto-connect" />
+      <Command text="microteams enable" />
       <Txt variant="small" muted>
         Prints a link. Open it here, choose which teams the machine should serve, and approve.
       </Txt>

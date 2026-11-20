@@ -1,5 +1,5 @@
 /*
- * The web end of `microteams link auto-connect`: approving a machine that is waiting to enrol.
+ * The web end of `microteams enable`: approving a machine that is waiting to enrol.
  *
  * <ConnectScreen /> — drawn for a "connect" frame with { code }, which the CLI's link carries. The
  *   signed-in person picks which of their teams the machine should serve and approves; there is no
@@ -67,7 +67,7 @@ export function ConnectScreen() {
               <Txt style={!code ? { color: colors.danger } : undefined}>
                 {code
                   ? "A machine is waiting to be enrolled. Pick which teams it should serve, then approve it — agents can be opened on it after that."
-                  : "this link has no code. Open the exact link `microteams link auto-connect` printed on the machine."}
+                  : "this link has no code. Open the exact link `microteams enable` printed on the machine."}
               </Txt>
             </View>
             <Txt variant="label" muted>
