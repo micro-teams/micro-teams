@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # What the multipath server holds, against what it held before any client came: every session,
 # link, stream and target connection is released once the clients have left, and its goroutines
-# are back to the count it started with.
+# are back to the count it started with, give or take two that live for the whole process once
+# the first session has been made (the shared timer of every session among them). A leak grows
+# with the clients and their requests, far past two.
 #
 # Usage:
 #   counters.sh baseline   record the server's counters now (no client may be connected yet)
 #   counters.sh settled    wait up to 15 s for sessions, links, streams and targets to be 0 and the
-#                          goroutines to be at most the baseline's; print both, fail if they are not
+#                          goroutines to be at most the baseline's plus two; print both, fail if not
 #
 # The stack must be up (stack.sh). The baseline is kept in $RUNNER_TEMP or /tmp.
 set -euo pipefail
@@ -26,7 +28,7 @@ settled)
     if python3 -c "
 import json,sys
 c=json.loads(sys.argv[1])
-sys.exit(0 if c['sessions']==0 and c['links']==0 and c['streams']==0 and c['targets']==0 and c['goroutines']<=int(sys.argv[2]) else 1)
+sys.exit(0 if c['sessions']==0 and c['links']==0 and c['streams']==0 and c['targets']==0 and c['goroutines']<=int(sys.argv[2])+2 else 1)
 " "$cur" "$base"; then
       echo "multipath server after the clients left: $cur (at rest: $(cat "$FILE"))"
       exit 0
