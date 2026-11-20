@@ -1,5 +1,3 @@
 
 # transient agent worktrees
 .claude/worktrees/
-origin/target/
-origin/dependency-reduced-pom.xml

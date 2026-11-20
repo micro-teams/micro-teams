@@ -2,7 +2,7 @@
 
 These rules apply to every AI agent working in this repository. They override any default behavior of the agent or its tooling.
 
-This file holds general rules only. The technical conventions of each part of the repository live in that part's `README.md` (`backend/`, `app/`, `cli/`, `applets/`, `deploy/`, `origin/`). Read the README of every part you change before changing it.
+This file holds general rules only. The technical conventions of each part of the repository live in that part's `README.md` (`backend/`, `app/`, `cli/`, `applets/`, `deploy/`). Read the README of every part you change before changing it.
 
 ## 1. Identity and attribution
 
