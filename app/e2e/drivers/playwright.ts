@@ -6,7 +6,8 @@
  *
  * new PlaywrightDriver(url, { browser, viewport }) — opens url on open(), where the app is served;
  *   go(path) opens an address under it, as a link pasted into the address bar does. Console errors,
- *   failed requests and HTTP errors are recorded and returned by dump(). The keyboard of the live
+ *   failed requests and HTTP errors are recorded and returned by dump(); the app's own account of
+ *   how long the live screen took to open is printed. The keyboard of the live
  *   screen is the page made shorter by 40%, as a phone's keyboard makes a page that asks for
  *   resizes-content; a scroll is a finger dragged down on a touch screen and a wheel turn on a desktop.
  *
@@ -44,6 +45,8 @@ export class PlaywrightDriver implements Driver {
     });
     this.p.on("console", (m) => {
       if (m.type() === "error") this.log.push(`console: ${m.text()}`);
+      // How long the live screen took to open, step by step, as the app measures it.
+      if (m.text().startsWith("screen: opened")) console.log(`  ${m.text()}`);
     });
     this.p.on("response", (r) => {
       if (r.status() >= 400) this.log.push(`HTTP ${r.status()} ${r.request().method()} ${r.url()}`);
@@ -134,7 +137,10 @@ export class PlaywrightDriver implements Driver {
   }
 
   async typeInTerminal(text: string) {
-    await this.p.locator(".xterm-helper-textarea").filter({ visible: false }).first().focus();
+    // xterm's input is a textarea it keeps out of sight; it has the focus once the terminal does.
+    await this.p.evaluate(
+      `[...document.querySelectorAll(".xterm")].find((e) => e.offsetParent !== null).querySelector(".xterm-helper-textarea").focus()`,
+    );
     for (const ch of text) {
       if (ch === "\x7f") await this.p.keyboard.press("Backspace");
       else await this.p.keyboard.type(ch);
@@ -152,46 +158,59 @@ export class PlaywrightDriver implements Driver {
       return;
     }
     // A finger dragged down the terminal, as touch events: Playwright's touchscreen only taps.
-    await this.p.evaluate(
-      ({ x, y }) => {
-        const target = document.elementFromPoint(x, y)!;
-        const touch = (cy: number) => new Touch({ identifier: 1, target, clientX: x, clientY: cy });
-        const fire = (type: string, cy: number) =>
-          target.dispatchEvent(new TouchEvent(type, { touches: type === "touchend" ? [] : [touch(cy)], changedTouches: [touch(cy)], bubbles: true, cancelable: true }));
-        fire("touchstart", y);
-        for (let i = 1; i <= 20; i++) fire("touchmove", y + i * 15);
-        fire("touchend", y + 300);
-      },
-      { x, y },
-    );
+    await this.p.evaluate(`(() => {
+      const x = ${x}, y = ${y};
+      const target = document.elementFromPoint(x, y);
+      const touch = (cy) => new Touch({ identifier: 1, target, clientX: x, clientY: cy });
+      const fire = (type, cy) =>
+        target.dispatchEvent(new TouchEvent(type, { touches: type === "touchend" ? [] : [touch(cy)], changedTouches: [touch(cy)], bubbles: true, cancelable: true }));
+      fire("touchstart", y);
+      for (let i = 1; i <= 20; i++) fire("touchmove", y + i * 15);
+      fire("touchend", y + 300);
+    })()`);
   }
 
+  // The functions below run in the page. They are strings, not functions: the runner that compiles
+  // this file adds helpers to functions that do not exist in the page.
+
   async watchOverflow(on: boolean) {
-    return this.p.evaluate((on) => {
-      const w = window as unknown as { __overflow?: { max: number; run: boolean } };
-      if (on) {
-        w.__overflow = { max: 0, run: true };
-        const tick = () => {
-          const o = w.__overflow!;
-          if (!o.run) return;
-          const host = document.querySelector('[data-testid="terminal"]:not([style*="display: none"]) .xterm')?.parentElement;
-          const screen = host?.querySelector(".xterm-screen");
-          if (host && screen) o.max = Math.max(o.max, screen.getBoundingClientRect().height - host.getBoundingClientRect().height);
+    if (on) {
+      await this.p.evaluate(`(() => {
+        window.__overflow = { below: 0, clippedMs: 0, last: 0, run: true };
+        // Sampled after each paint (a task queued from the frame's callback runs once it is drawn):
+        // a frame's callbacks run before its layout and resize observers, so geometry read in the
+        // callback itself can be a state that is never painted.
+        const sample = (now) => {
+          const o = window.__overflow;
+          const xterm = [...document.querySelectorAll(".xterm")].find((e) => e.offsetParent !== null);
+          const screen = xterm && xterm.querySelector(".xterm-screen");
+          if (screen) {
+            const s = screen.getBoundingClientRect();
+            const h = xterm.parentElement.getBoundingClientRect();
+            o.below = Math.max(o.below, s.bottom - h.bottom);
+            if (s.top < h.top - 0.5 && o.last) o.clippedMs += now - o.last;
+          }
+          o.last = now;
+        };
+        const tick = (now) => {
+          if (!window.__overflow.run) return;
+          setTimeout(() => sample(performance.now()), 0);
           requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
-        return 0;
-      }
-      w.__overflow!.run = false;
-      return Math.max(0, Math.round(w.__overflow!.max));
-    }, on);
+      })()`);
+      return { below: 0, clippedMs: 0 };
+    }
+    return (await this.p.evaluate(
+      `(() => { const o = window.__overflow; o.run = false; return { below: Math.max(0, Math.round(o.below)), clippedMs: Math.round(o.clippedMs) }; })()`,
+    )) as { below: number; clippedMs: number };
   }
 
   async terminalOffsets() {
-    return this.p.evaluate(() => {
-      const xterm = [...document.querySelectorAll(".xterm")].find((e) => (e as HTMLElement).offsetParent !== null) as HTMLElement;
-      const host = xterm.parentElement!.getBoundingClientRect();
-      const screen = xterm.querySelector(".xterm-screen")!.getBoundingClientRect();
+    return (await this.p.evaluate(`(() => {
+      const xterm = [...document.querySelectorAll(".xterm")].find((e) => e.offsetParent !== null);
+      const host = xterm.parentElement.getBoundingClientRect();
+      const screen = xterm.querySelector(".xterm-screen").getBoundingClientRect();
       const rows = xterm.querySelectorAll(".xterm-rows > div").length;
       return {
         left: Math.round(screen.left - host.left),
@@ -200,15 +219,15 @@ export class PlaywrightDriver implements Driver {
         bottom: Math.round(host.bottom - screen.bottom),
         cell: Math.ceil(screen.height / Math.max(1, rows)),
       };
-    });
+    })()`)) as { left: number; right: number; top: number; bottom: number; cell: number };
   }
 
   async terminalScrolled() {
-    return this.p.evaluate(() => {
-      const xterm = [...document.querySelectorAll(".xterm")].find((e) => (e as HTMLElement).offsetParent !== null) as HTMLElement;
-      const viewport = xterm.querySelector(".xterm-viewport") as HTMLElement;
-      return viewport.scrollTop !== 0 ? `its viewport is scrolled ${viewport.scrollTop} px` : null;
-    });
+    return (await this.p.evaluate(`(() => {
+      const xterm = [...document.querySelectorAll(".xterm")].find((e) => e.offsetParent !== null);
+      const viewport = xterm.querySelector(".xterm-viewport");
+      return viewport.scrollTop !== 0 ? "its viewport is scrolled " + viewport.scrollTop + " px" : null;
+    })()`)) as string | null;
   }
 
   async dump() {

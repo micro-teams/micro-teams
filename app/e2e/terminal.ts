@@ -7,7 +7,9 @@
  *     stay under OPEN_LIMIT_MS), and that the first size drawn is the size it keeps: no resize after
  *     the first paint, so the connecting note going away changed nothing;
  *   - the keyboard: opening it shrinks the terminal in one step and closing it grows it back in one,
- *     and (on the web) the terminal is never taller than its view meanwhile;
+ *     and (on the web) the terminal's bottom, where the prompt is, never leaves its view meanwhile
+ *     (until the smaller size arrives, the terminal keeps its bottom edge in view and its top is
+ *     cut off; how long is printed);
  *   - the lease: typing takes the input ("you are typing"), it is kept while the person types and
  *     is given back after a minute without input ("free"); a second viewer typing then holds it,
  *     and what the person types meanwhile is refused and said so;
@@ -97,8 +99,9 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   const closed = await settledSize(d);
   if (closed.resizes !== 2 || closed.rows !== first.rows) throw new Error(`the keyboard closing: ${JSON.stringify(closed)} after ${JSON.stringify(open)}`);
   const overflow = await d.watchOverflow?.(false);
-  if (overflow) throw new Error(`the terminal was ${overflow} px taller than its view while the keyboard moved`);
-  console.log(`  live screen: keyboard ${first.rows} → ${open.rows} → ${closed.rows} rows, one resize each way`);
+  if (overflow && overflow.below > 1) throw new Error(`the terminal's bottom went ${overflow.below} px below its view while the keyboard moved`);
+  const clipped = overflow ? `, top cut off for ${overflow.clippedMs} ms while the smaller size was on its way` : "";
+  console.log(`  live screen: keyboard ${first.rows} → ${open.rows} → ${closed.rows} rows, one resize each way${clipped}`);
   ctx.lap("live screen: the keyboard, one step each way");
 
   // -- the lease -----------------------------------------------------------------------------

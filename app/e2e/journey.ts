@@ -83,9 +83,10 @@ export interface Driver {
   typeInTerminal(text: string): Promise<void>;
   /** Scroll the live screen back: a wheel turn, or a finger dragged down on a touch screen. */
   scrollTerminal(): Promise<void>;
-  /** The web only: start measuring, every frame, how much taller than its view the terminal is;
-   * stopping returns the most it ever was, in px. */
-  watchOverflow?(on: boolean): Promise<number>;
+  /** The web only: start measuring, every frame, the terminal against its view; stopping returns
+   * how far its bottom edge (where the prompt is) ever went below the view, in px, and for how
+   * long its top was cut off, in ms (while a smaller size is on its way). */
+  watchOverflow?(on: boolean): Promise<{ below: number; clippedMs: number }>;
   /** The web only: the room around the terminal inside its view, in px, and a cell's height. */
   terminalOffsets?(): Promise<{ left: number; right: number; top: number; bottom: number; cell: number }>;
   /** The web only: what is wrong if the terminal has scrolled by itself or keeps lines above it. */
