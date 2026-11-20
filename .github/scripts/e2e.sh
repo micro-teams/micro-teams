@@ -155,9 +155,9 @@ docker exec "$MACHINE_CT" bash -c "set -e
 docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
 docker cp connector/linux-amd64/tmux "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/tmux"
 docker cp connector/linux-amd64/multipath-client "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/multipath-client"
-# On the leg that carries the upgrade (RELEASE_BIN set), the machine starts on the release that
-# machines run today, and this build waits beside it until it is installed over it, as install.sh
-# installs it over whatever runs.
+# On the leg that carries the upgrade (RELEASE_BIN set), the machine starts on a connector that ends
+# its sessions when it exits (see build.yml), and this build waits beside it until it is installed
+# over it, as install.sh installs it over whatever runs.
 if [ -n "${RELEASE_BIN:-}" ]; then
   docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/microteams-this-build"
   docker cp "$RELEASE_BIN" "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
@@ -193,7 +193,7 @@ step "connect the machine"
 docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -c "cat > /home/$MACHINE_USER/.config/microteams/config.json <<EOF
 {\"base\":\"http://nginx/mt\",\"token\":\"$MACHINE_TOKEN\",\"machine_id\":\"$MACHINE_ID\"}
 EOF"
-# The release says `link connect`, this build `start`; both install the system service with sudo.
+# That connector says `link connect`, this build `start`; both install the system service with sudo.
 CONNECT=start
 [ -n "${RELEASE_BIN:-}" ] && CONNECT="link connect"
 onmachine "\$HOME/.local/bin/microteams $CONNECT" ||
@@ -201,8 +201,8 @@ onmachine "\$HOME/.local/bin/microteams $CONNECT" ||
 docker exec "$MACHINE_CT" systemctl is-active -q microteams || fail "the microteams system service is not active"
 docker exec "$MACHINE_CT" grep -qx "User=$MACHINE_USER" /etc/systemd/system/microteams.service ||
   fail "the system service does not run as $MACHINE_USER"
-# This build's unit leaves the sessions alone on a stop; the release's does not, which the upgrade
-# below deals with.
+# This build's unit leaves the sessions alone on a stop; the other connector's does not, which the
+# upgrade below deals with.
 if [ -z "${RELEASE_BIN:-}" ]; then
   docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
     fail "the system service would end the sessions when it stops (no KillMode=process)"
@@ -214,14 +214,14 @@ for _ in $(seq 1 30); do
 done
 [ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat $CONNLOG; fail "machine never came online"; }
 # The stack's line list is http://nginx (MULTIPATH_ORIGIN in build.yml), which this machine reaches:
-# the control link must ride the multipath client, not go around it. The release says so in other
-# words, so on that leg this is asked once this build runs.
+# the control link must ride the multipath client, not go around it. The other connector says so in
+# other words, so on that leg this is asked once this build runs.
 over_multipath() {
   docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" $CONNLOG ||
     { docker exec "$MACHINE_CT" cat $CONNLOG; fail "the control link did not go through the multipath client"; }
   pass "machine is online, over its multipath client"
 }
-if [ -z "${RELEASE_BIN:-}" ]; then over_multipath; else pass "machine is online, on the release"; fi
+if [ -z "${RELEASE_BIN:-}" ]; then over_multipath; else pass "machine is online, on the other connector"; fi
 
 # --- an agent ---------------------------------------------------------------------------------
 step "open an agent on it"
@@ -368,17 +368,17 @@ survives() {
   still_the_same_agent "$what" "$before" "$viewed"
 }
 
-# The upgrade every machine goes through once: this build installed over the running release, as
-# install.sh does. The release's process ends every session when it exits and its unit kills the
-# service whole, so the first restart has to make the release hand itself over to this build in
-# place and rewrite the unit before it stops anything.
+# The upgrade every machine goes through once: this build installed over a running connector that
+# ends every session when it exits, under a unit that kills the service whole, as install.sh does.
+# The first restart has to make that connector hand itself over to this build in place, and rewrite
+# the unit, before it stops anything.
 if [ -n "${RELEASE_BIN:-}" ]; then
-  step "install this build over the running release"
+  step "install this build over the running connector"
   onmachine 'install -m 755 $HOME/microteams-this-build $HOME/.local/bin/microteams'
   survives "the first microteams restart after the upgrade" '$HOME/.local/bin/microteams restart >/tmp/restart.out 2>&1
     s=$?; cat /tmp/restart.out; [ $s = 0 ] && grep -q "updated itself in place" /tmp/restart.out'
   docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
-    fail "the first restart after the upgrade did not rewrite the release's unit"
+    fail "the first restart after the upgrade did not rewrite the unit"
   over_multipath
 fi
 survives "microteams restart" '$HOME/.local/bin/microteams restart'
