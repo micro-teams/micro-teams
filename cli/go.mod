@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/micro-teams/micro-connector/cli v0.1.7
-	github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120024607-e6e2bddfce03
+	github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120094106-465428115532
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.30.0
 )

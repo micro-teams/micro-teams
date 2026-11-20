@@ -4,9 +4,10 @@
  *
  * new Substrate(origin, dial) — starts the client at once when dial is true, otherwise on start()
  *   or the first request. The line list comes from the origin (/multipath/v3/lines) and replaces
- *   the one kept from last time, which is dialled while the fresh one is fetched, so a slow origin
- *   delays nothing when a line works. On React Native each answer is read whole and none is
- *   compressed: the platform has neither a streaming Response nor DecompressionStream.
+ *   the one kept from last time (stored with the origin that served it), which is dialled while
+ *   the fresh one is fetched, so a slow or unreachable origin delays nothing when a line works. On
+ *   React Native each answer is read whole and none is compressed: the platform has neither a
+ *   streaming Response nor DecompressionStream.
  * substrate.start() — starts the client if it has not started; for a server somebody just chose.
  * substrate.fetch(input, init) — fetch() over the lines. It goes to the network instead, logged
  *   with the reason and counted, when no session is live (waiting for one at most FALLBACK_AFTER
@@ -31,7 +32,7 @@
  * posted as the platform's own file upload — and an installer download (one large file for the
  * system to fetch). The page's own files ride the lines through the service worker (worker/sw.ts).
  */
-import { Client, createLineRouter, type ClientEvent, type ClientStats, type Line, type LineRouter } from "@micro-teams/multipath";
+import { Client, createLineRouter, type ClientEvent, type ClientStats, type LineRouter, type StoredLines } from "@micro-teams/multipath";
 import { isWeb } from "../platform/platform";
 import { storage } from "../platform/storage";
 import type { Wire } from "./updates/socket";
@@ -97,8 +98,8 @@ export class Substrate {
     const client = new Client({
       entry: this.origin,
       store: {
-        load: async () => storage.getJson<Line[]>(key) ?? [],
-        save: async (lines) => storage.setJson(key, lines),
+        load: async () => storage.getJson<StoredLines>(key),
+        save: async (stored) => storage.setJson(key, stored),
       },
       compression: !native,
       buffered: native,

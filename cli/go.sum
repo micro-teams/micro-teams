@@ -21,8 +21,8 @@ github.com/kardianos/service v1.3.0 h1:/LGy+xPP2TM+GLTiCZ2di7cy0Jd/qrawlTUfqKYFd
 github.com/kardianos/service v1.3.0/go.mod h1:E4V9ufUuY82F7Ztlu1eN9VXWIQxg8NoLQlmFe0MtrXc=
 github.com/micro-teams/micro-connector/cli v0.1.7 h1:l5lh63XBuRYGv6y2ntaTXoCsTM2xLQxs6iZQJy2MU1U=
 github.com/micro-teams/micro-connector/cli v0.1.7/go.mod h1:UM6oiE9Ydv1joPLiUP6rzIx2iXTuAHso/QXEHUK8awI=
-github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120024607-e6e2bddfce03 h1:wklQqNEAPdx1yNmdYJjFlUsjSSfzYQ2VjgVhnjiTQBc=
-github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120024607-e6e2bddfce03/go.mod h1:2BTdPubgLOO66z9jO8oq2fc8rsvtBzOZFzvz4HUP1v0=
+github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120094106-465428115532 h1:imlaXJTXd8WYWtYuXw/taYixxzuJU6CfryjzYDoXVTU=
+github.com/micro-teams/multipath/go v0.2.0-rc.7.0.20261120094106-465428115532/go.mod h1:2BTdPubgLOO66z9jO8oq2fc8rsvtBzOZFzvz4HUP1v0=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
