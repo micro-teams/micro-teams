@@ -19,7 +19,9 @@
  *               Waking is AgentService.wakeAgent (respawn in place, same session, resume=true), and
  *               it is rate-limited: a program that dies immediately on every start must not be
  *               relaunched in a loop, so repeated deaths back off and eventually give up until the
- *               screen proves it can stay alive.
+ *               screen proves it can stay alive. Only wakes sent to a connected machine count
+ *               against that budget, and the live-screen probe trusts silence only on the
+ *               connection it asked over.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -90,6 +92,10 @@ class AgentWakeup(
      * up rather than merely reaching a prompt before dying again. Resetting on "reported alive"
      * instead would defeat the whole thing: a program that starts, announces itself and dies a
      * second later would clear its own budget on every cycle and be relaunched forever.
+     *
+     * Only a wake actually sent to the machine counts. While the machine is offline nothing can be
+     * started, and a viewer retrying the live screen through an outage would otherwise use up the
+     * whole budget, leaving the agent unwakeable for [stableWindow] after its machine came back.
      */
     private val backoff = listOf(0L, 15L, 60L, 300L).map(Duration::ofSeconds)
 
@@ -256,6 +262,12 @@ class AgentWakeup(
      * still starting paints nothing either. Reserved for the live screen, where a stale screen is
      * what the human is staring at and a second of latency is affordable; the message path relies
      * on the reported signals instead of probing on every message.
+     *
+     * Silence is evidence only about the connection the question went out on. A machine whose CLI
+     * re-execs for an update connects again while its old connection is still open on this side,
+     * and a question sent on the old one is never answered although the screen is fine; reading
+     * that as death would respawn, and so kill, the program that just survived the update. So a
+     * machine that connected again while we waited proves nothing either way.
      */
     private fun probe(sid: String) {
         val screen = hub.screen(sid) ?: return
@@ -263,8 +275,9 @@ class AgentWakeup(
         // needs no confirming, and one that is starting has not had time to answer yet.
         if (screen.state == ScreenState.DEAD || screen.state == ScreenState.STARTING) return
         if (!hub.isOnline(screen.machineId)) return
+        val connectedAt = hub.connectedAtOf(screen.machineId)
         val answer = hub.callScreenAwait(screen.machineId, sid, "snapshot", timeoutSeconds = 2)
-        if (answer == null) {
+        if (answer == null && hub.connectedAtOf(screen.machineId) == connectedAt) {
             hub.markScreen(sid, ScreenState.DEAD, "the applet did not answer")
         }
     }
@@ -301,7 +314,8 @@ class AgentWakeup(
         if (!lock.tryLock()) return true // another thread is already waking it
         try {
             if (isAwake(agentUserId) || isStarting(agentUserId)) return true
-            if (agentScreenRepository.findByAgentUserId(agentUserId).isEmpty()) return false
+            val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull()
+            if (row == null || !hub.isOnline(row.machineId)) return false
             val attempt = attempts.computeIfAbsent(agentUserId) { WakeAttempts() }
             if (Duration.between(attempt.last, Instant.now()) > stableWindow) attempt.count = 0
             if (attempt.count >= maxAttempts) {
