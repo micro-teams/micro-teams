@@ -5,8 +5,10 @@
 //
 // It records what a test needs to know into a file, one line per event:
 //
-//   open <n>     the n-th connection opened
-//   data <n>     the n-th connection received its first screen bytes
+//   open <n>             the n-th connection opened
+//   data <n> <bytes>     the n-th connection received screen bytes (<bytes> so far); at most once
+//                        a second, so a count of these lines rising means the screen is still
+//                        reaching the viewer
 //   close <n> <code>
 //
 // Usage: node viewer.mjs <ws url> <log file>   (runs until killed)
@@ -22,7 +24,8 @@ const note = (line) => appendFileSync(log, line + '\n')
 let n = 0
 function dial() {
   const id = ++n
-  let painted = false
+  let bytes = 0
+  let noted = 0
   const ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => {
@@ -30,9 +33,11 @@ function dial() {
     ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 32 }))
   }
   ws.onmessage = (ev) => {
-    if (!painted && typeof ev.data !== 'string' && ev.data.byteLength > 0) {
-      painted = true
-      note(`data ${id}`)
+    if (typeof ev.data === 'string') return
+    bytes += ev.data.byteLength
+    if (Date.now() - noted >= 1000) {
+      noted = Date.now()
+      note(`data ${id} ${bytes}`)
     }
   }
   ws.onclose = (ev) => {
