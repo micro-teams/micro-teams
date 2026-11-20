@@ -38,6 +38,13 @@ updates:
     directory: '/app'
     schedule:
       interval: 'weekly'
+    ignore:
+      # openapi-typescript (codegen) requires the TypeScript 5/6 compiler API, which TypeScript 7 does not ship.
+      - dependency-name: 'typescript'
+        versions: ['>= 7']
+      # eslint-config-expo depends on eslint-plugin-react, which does not support ESLint 10.
+      - dependency-name: 'eslint'
+        versions: ['>= 10']
     groups:
       app-minor:
         update-types:
