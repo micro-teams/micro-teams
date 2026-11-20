@@ -1,8 +1,30 @@
-// Package state shares one small runtime fact between the long-running host and
-// the ad-hoc CLI commands: how many screens are currently hosted. The host
-// rewrites the file as screens come and go; commands like `microteams link
-// disconnect` read it to warn before killing live work. Best-effort by design —
-// a missing or stale file just reads as zero.
+// Package state shares the resident service's runtime facts with the short CLI commands, through
+// one small file beside the config: how many screens are hosted, whether the control link is
+// established (and why not), and where the service's MultiPath client listens. The service is the
+// only writer and rewrites the whole file whenever one of these changes; a missing or stale file
+// reads as nothing running.
+//
+//   - Path(cfgPath) is the file: state.json beside the config.
+//
+//   - Write(cfgPath, screens, client, link) records everything at once, with this process's pid.
+//     Clear(cfgPath) removes the file when the service stops.
+//
+//   - PID(cfgPath) is the service's pid if it is alive, else 0; RawPID(cfgPath) is the recorded pid
+//     without that check (uninstall needs it to make sure the process is gone).
+//
+//   - Screens(cfgPath) is the recorded screen count, 0 when the writer is gone.
+//
+//   - CurrentLink(cfgPath) is the control link (Link: up, since when, the last error), down when
+//     the writer is gone.
+//
+//   - CurrentClient(cfgPath) is the service's MultiPath client (Client: pid, stream and status
+//     addresses), empty when the writer is gone.
+//
+//   - CanRelink(cfgPath) reports whether the running service handles SIGHUP (start its client over),
+//     so `link retest` never signals a process that SIGHUP would kill.
+//
+//     state.Write(cfgPath, 2, state.Client{PID: 42, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, state.Link{Up: true, Since: time.Now()})
+//     if c := state.CurrentClient(cfgPath); c.Listen != "" { ... }
 package state
 
 import (
@@ -16,79 +38,45 @@ import (
 type snapshot struct {
 	Screens int `json:"screens"`
 	PID     int `json:"pid"`
-	// Every network path this machine's transport is carrying, and what each of them is doing.
-	//
-	// A list rather than one chosen line, because from MultiPath 0.2.0 there is no chosen line: the
-	// transport writes every byte to all of them at once and takes whichever copy arrives first. The
-	// interesting question stopped being "which one are we on" and became "which of them are still
-	// alive", and that one has to be asked out loud — a redundancy that is only visible when it has
-	// completely failed is a redundancy nobody can act on. Three of four lines can die in silence
-	// while everything works perfectly; this is where that shows.
-	Lines []LineState `json:"lines,omitempty"`
-	// Whether the control link is actually established right now, since when, and why the last
-	// attempt failed if it did.
-	//
-	// This exists because everything else that claimed to know was answering a different question.
-	// `link connect` printed "Connected." when the SERVICE MANAGER had started the process, and
-	// `status` said connected whenever that process was running — neither of which means the machine
-	// reached the control plane. A machine whose every dial failed reported success from both, and
-	// the live screen simply did not open. The host is the only thing that knows, so it says so
-	// here.
-	//
-	// LinkUp false with no LinkError is not a failure: a process that started half a second ago has
-	// not connected YET. Telling those apart is the whole point — one asks you to wait, the other
-	// hands you a reason.
+	// The control link as the service sees it: only the service knows whether it reached the
+	// server, which is a different question from whether its process runs. Down with no error is a
+	// service that has not connected yet, not a failure.
 	LinkUp    bool   `json:"linkUp,omitempty"`
 	LinkSince int64  `json:"linkSince,omitempty"`
 	LinkError string `json:"linkError,omitempty"`
-
-	// Whether the running host understands the signal that asks it to re-measure and re-dial.
-	//
-	// A capability rather than a version, because the question is never "which build is this" but
-	// "will it survive being asked". The binary on disk updates without the service restarting, so
-	// a new command can easily meet an old process — and SIGHUP to a process that does not handle
-	// it terminates it, taking the machine offline. The flag is how the command knows not to.
-	Relink bool `json:"relink,omitempty"`
+	Client    Client `json:"multipathClient,omitzero"`
+	Relink    bool   `json:"relink,omitempty"`
 }
 
-// Path derives the state file location from the config path (same directory).
+// Client is the service's MultiPath client: its pid, the address programs connect to, and the
+// address of its /status.
+type Client struct {
+	PID    int    `json:"pid,omitempty"`
+	Listen string `json:"listen,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// Link is what the service knows about the control connection.
+type Link struct {
+	Up    bool
+	Since time.Time // when the current connection came up; zero while it is down
+	Error string    // why the last attempt failed; empty after a success
+}
+
+// Path is the state file, beside the config.
 func Path(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), "state.json")
 }
 
-// LineState is one network path and what the transport last saw of it: "up", "connecting" (never
-// yet up) or "down" (was up, now reconnecting), how many times it has come back, and the reason it
-// last dropped.
-type LineState struct {
-	ID         string `json:"id"`
-	URL        string `json:"url,omitempty"`
-	State      string `json:"state"`
-	Reconnects int    `json:"reconnects,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-}
-
-// Link is what the host knows about the control connection, as opposed to what the service manager
-// knows about the process.
-type Link struct {
-	Up bool
-	// Since is when the current connection came up. Zero while it is down.
-	Since time.Time
-	// Error is why the last attempt failed, empty if the last thing that happened was a success.
-	Error string
-}
-
-// Write records the current number of hosted screens, the state of every line, and the control
-// link.
-//
-// All of it together, in one write, because the host is the only writer and knows all of it. Two
-// writers each owning a field would race on the file and each would occasionally erase the other's.
-func Write(cfgPath string, screens int, lines []LineState, link Link) {
+// Write records the screen count, the client and the control link in one write, so that no reader
+// ever sees one field updated and another stale.
+func Write(cfgPath string, screens int, client Client, link Link) {
 	snap := snapshot{
 		Screens:   screens,
 		PID:       os.Getpid(),
-		Lines:     lines,
 		LinkUp:    link.Up,
 		LinkError: link.Error,
+		Client:    client,
 		Relink:    true,
 	}
 	if !link.Since.IsZero() {
@@ -101,112 +89,77 @@ func Write(cfgPath string, screens int, lines []LineState, link Link) {
 	_ = os.WriteFile(Path(cfgPath), data, 0o600)
 }
 
-// Clear removes the state file (host shutdown).
+// Clear removes the state file.
 func Clear(cfgPath string) { _ = os.Remove(Path(cfgPath)) }
 
-// PID returns the process id of the running host (the `microteams run` service), or 0
-// if none is recorded or the recorded process is no longer alive. Used by `microteams
-// update` to signal the live service so the update happens in-process (preserving
-// its private tmux).
+func read(cfgPath string) (snapshot, bool) {
+	var s snapshot
+	data, err := os.ReadFile(Path(cfgPath))
+	if err != nil || json.Unmarshal(data, &s) != nil {
+		return snapshot{}, false
+	}
+	return s, true
+}
+
+func alive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	return err == nil && p.Signal(syscall.Signal(0)) == nil
+}
+
+// live reads the snapshot and reports whether its writer is still running.
+func live(cfgPath string) (snapshot, bool) {
+	s, ok := read(cfgPath)
+	return s, ok && (s.PID <= 0 || alive(s.PID))
+}
+
+// PID is the running service's pid, or 0.
 func PID(cfgPath string) int {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
-		return 0
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil || s.PID <= 0 {
-		return 0
-	}
-	if p, err := os.FindProcess(s.PID); err != nil || p.Signal(syscall.Signal(0)) != nil {
+	s, ok := read(cfgPath)
+	if !ok || s.PID <= 0 || !alive(s.PID) {
 		return 0
 	}
 	return s.PID
 }
 
-// RawPID returns the recorded host pid without a liveness check (0 if none). Unlike
-// PID it does not treat an unsignalable (EPERM) process as absent — `microteams uninstall`
-// needs the real pid to guarantee the process is stopped before deleting its files.
+// RawPID is the recorded pid without a liveness check (0 if none).
 func RawPID(cfgPath string) int {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
-		return 0
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil {
-		return 0
-	}
+	s, _ := read(cfgPath)
 	return s.PID
 }
 
-// Screens reports the recorded screen count, verifying the writer is still
-// alive so a crashed host doesn't leave a scary stale warning behind.
-// CanRelink reports whether the running host handles the re-measure-and-re-dial signal. False for
-// an older host, which must be restarted instead — signalling it would kill it.
+// CanRelink reports whether the running service handles SIGHUP.
 func CanRelink(cfgPath string) bool {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
-		return false
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil {
-		return false
-	}
+	s, _ := read(cfgPath)
 	return s.Relink
 }
 
-// CurrentLines reports every line the running host's transport is carrying and what each is doing,
-// or nothing when nothing is recorded — an older host, or none running.
-func CurrentLines(cfgPath string) []LineState {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
-		return nil
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil {
-		return nil
-	}
-	return s.Lines
-}
-
-// CurrentLink reports what the running host knows about the control connection.
-//
-// A host that is not running, or one too old to record this, reads as down with no error — which is
-// the honest answer in both cases: nothing here is claiming a connection exists.
+// CurrentLink is what the running service knows about the control connection.
 func CurrentLink(cfgPath string) Link {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
-		return Link{}
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil {
+	s, ok := live(cfgPath)
+	if !ok {
 		return Link{}
 	}
 	link := Link{Up: s.LinkUp, Error: s.LinkError}
 	if s.LinkSince > 0 {
 		link.Since = time.Unix(s.LinkSince, 0)
 	}
-	// A recorded connection whose writer is gone is not a connection.
-	if s.PID > 0 {
-		if p, err := os.FindProcess(s.PID); err != nil || p.Signal(syscall.Signal(0)) != nil {
-			return Link{}
-		}
-	}
 	return link
 }
 
+// CurrentClient is the running service's MultiPath client.
+func CurrentClient(cfgPath string) Client {
+	s, ok := live(cfgPath)
+	if !ok {
+		return Client{}
+	}
+	return s.Client
+}
+
+// Screens is the recorded screen count.
 func Screens(cfgPath string) int {
-	data, err := os.ReadFile(Path(cfgPath))
-	if err != nil {
+	s, ok := live(cfgPath)
+	if !ok {
 		return 0
-	}
-	var s snapshot
-	if json.Unmarshal(data, &s) != nil {
-		return 0
-	}
-	if s.PID > 0 {
-		if p, err := os.FindProcess(s.PID); err != nil || p.Signal(syscall.Signal(0)) != nil {
-			return 0
-		}
 	}
 	return s.Screens
 }

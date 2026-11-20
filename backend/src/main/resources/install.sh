@@ -3,8 +3,9 @@
 #
 #   curl -fsSL <origin>/install.sh | sh
 #
-# Downloads the right prebuilt `microteams` binary — and a private, static tmux — from
-# the same origin it was fetched from, so a fresh machine needs nothing pre-installed.
+# Downloads the right prebuilt `microteams` binary — with the multipath client it runs
+# beside it and a private, static tmux — from the same origin it was fetched from, so a
+# fresh machine needs nothing pre-installed.
 # It carries NO secrets and NO business logic: it only drops a binary and records the
 # server URL. Enrollment still happens through the device flow (`microteams link
 # auto-connect` → approve in the browser), so piping this to a shell never grants
@@ -111,7 +112,19 @@ case ":$PATH:" in
     ;;
 esac
 
-# --- 2. private tmux ---------------------------------------------------------
+# --- 2. multipath client ------------------------------------------------------
+# The service runs it beside microteams to reach the server over every network path the deployment
+# publishes at once. It lives with the private tmux, owned by the user the service runs as, so the
+# service can update it together with microteams.
+step "Installing the multipath client"
+mkdir -p "$CFG_DIR/bin"
+tmp="$(mktemp)"
+dl "$CONNECTOR_BASE/connector/latest/$target/multipath-client" "$tmp" \
+  || die "could not download $CONNECTOR_BASE/connector/latest/$target/multipath-client"
+install -m 0755 "$tmp" "$CFG_DIR/bin/multipath-client"; rm -f "$tmp"
+ok "$CFG_DIR/bin/multipath-client"
+
+# --- 3. private tmux ---------------------------------------------------------
 # microteams runs its screens in a private tmux so it never fights the machine's own.
 # Resolution order: (1) copy the machine's own tmux if it has one — the surest match
 # for the OS; (2) else download the static build the origin publishes (no
@@ -135,7 +148,7 @@ else
   rm -f "$tmp"
 fi
 
-# --- 3. git (for document trees) ---------------------------------------------
+# --- 4. git (for document trees) ---------------------------------------------
 # Agents work a team's document tree by running `git` on this machine. git is not needed
 # to install or enroll the connector, and non-document screens work fine without it, so a
 # missing git is a warning — not a failure.
@@ -148,7 +161,7 @@ else
   warn "please install git (e.g. apt/dnf/brew install git)."
 fi
 
-# --- 4. remember the server --------------------------------------------------
+# --- 5. remember the server --------------------------------------------------
 # Two separate endpoints, matching the two things this machine does:
 #   - "base" — login (device flow) and the request/response API. Always the friendly
 #     API base (<origin>/mt), the same endpoint the human approves devices on.
@@ -203,7 +216,7 @@ if [ "$(id -u)" = 0 ] && [ "$owner" != "root" ]; then
   chown -R "$owner" "$CFG_DIR" 2>/dev/null || true
 fi
 
-# --- 5. what now? ------------------------------------------------------------
+# --- 6. what now? ------------------------------------------------------------
 # One command connects: it logs this machine in (approve in the browser) and installs
 # the boot service — elevating to root for a system-wide service if needed.
 printf "\n${G}Installed.${Z} One more command to go online:\n\n"

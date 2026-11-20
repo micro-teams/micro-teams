@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -27,7 +28,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/micro-teams/micro-connector/cli/apiauth"
 	"github.com/micro-teams/micro-connector/cli/auth"
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
@@ -35,10 +35,11 @@ import (
 	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/hostlog"
-	"github.com/micro-teams/microteams/cli/internal/lines"
+	"github.com/micro-teams/microteams/cli/internal/mpclient"
 	"github.com/micro-teams/microteams/cli/internal/netcfg"
 	"github.com/micro-teams/microteams/cli/internal/state"
 	"github.com/micro-teams/microteams/cli/internal/ui"
+	"github.com/micro-teams/multipath/go/client"
 )
 
 // hostRunner is what this product's service actually does: dial the backend and let it open screens
@@ -383,110 +384,90 @@ func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 	return group
 }
 
-// retestCmd re-reads the line registry and asks the running service to carry its transport over
-// whatever the registry now says.
-//
-// It exists because the only way to make a machine reconsider its paths used to be `link disconnect`
-// + `connect`, and that stops the service — which kills every screen on the machine. "Pick up the
-// new line list" and "stop everything" should not be the same operation, and until now they were.
-//
-// What it no longer does is measure. Latency, ranking and choosing were answers to "which line
-// should this connection use", and from MultiPath 0.2.0 there is no such choice: the transport
-// carries every byte over every line at once and delivers whichever copy arrives first. So what is
-// worth printing changed with it — not what this short-lived process measured, but what the RESIDENT
-// one is actually seeing on each line right now, which is the only place a line that quietly died
-// shows up at all.
+// retestCmd asks the running service to start its MultiPath client over, so the client fetches
+// the line list now rather than at its next refresh, and prints what the new client sees. Nothing is
+// stopped: the screens keep running, and the control link is back within seconds.
 func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
 	return withConfig(&cobra.Command{
 		Use:   "retest",
-		Short: "Re-read the network path list and re-dial the link (sessions keep running)",
-		Long: "Re-reads the list of network paths this machine can reach the server over, then asks\n" +
-			"the running service to bring its transport up again over the new list.\n\n" +
+		Short: "Fetch the network path list again and re-dial the lines (sessions keep running)",
+		Long: "Asks the running service to start its multipath client over: the client fetches the\n" +
+			"list of network paths to the server again and dials every one of them.\n\n" +
 			"Sessions are not touched: nothing is stopped, so the terminals on this machine keep\n" +
-			"running throughout. A route added since the machine connected only takes effect on the\n" +
-			"next dial, and this is how to ask for one.",
+			"running throughout. The client also fetches the list every ten minutes on its own.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			base := apiauth.APIBase()
-
-			// Fetch first, so a line added five minutes ago is in the list the service picks up
-			// rather than waiting for its hourly refresh.
-			if err := lines.Refresh(ctx, base, *cfgPath); err != nil {
-				ui.Hint("could not refresh the line list (%v) — using what was cached", err)
-			}
-
 			pid := state.PID(*cfgPath)
 			if pid == 0 {
 				ui.Hint("no service is running, so there is no link to re-dial")
 				return nil
 			}
-			// The binary on disk updates without the service restarting, so this command can meet a
-			// process older than itself — and the signal it is about to send terminates a process
-			// that does not handle it. Refusing is the only safe answer: the alternative takes the
-			// machine offline to ask a question about routing.
+			// The binary on disk updates without the service restarting, and SIGHUP terminates a
+			// process that does not handle it.
 			if !state.CanRelink(*cfgPath) {
 				ui.Hint("the running service predates this command; restart it to pick up the new")
 				ui.Hint("build (`microteams link connect`), then this will work — note that stopping")
 				ui.Hint("the service also stops the sessions on this machine")
 				return nil
 			}
+			before := state.CurrentClient(*cfgPath)
 			if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
 				return fmt.Errorf("signal running service (pid %d): %w", pid, err)
 			}
-
-			// The service re-dials on its own clock; wait for it to publish a line table rather than
-			// guessing how long that takes.
 			deadline := time.Now().Add(15 * time.Second)
 			for time.Now().Before(deadline) {
-				if now := state.CurrentLines(*cfgPath); len(now) > 0 {
-					printLines(now)
-					return nil
+				if c := state.CurrentClient(*cfgPath); c.PID != 0 && c.PID != before.PID {
+					if _, err := mpclient.Lookup(c); err == nil {
+						printClient(c)
+						return nil
+					}
 				}
 				time.Sleep(250 * time.Millisecond)
 			}
-			ui.Hint("the service did not report its lines — `microteams status` to check")
+			ui.Hint("the new multipath client has no live session yet — `microteams status` to check")
 			return nil
 		},
 	})
 }
 
-// printLines renders what the running service sees on each path.
-//
-// Every line, not only the broken ones, and the recovery count alongside: redundancy means a line
-// can fail and come back repeatedly without anything above it noticing, so "up" on its own is not
-// the whole truth about a path that has flapped forty times this morning.
-func printLines(table []state.LineState) {
-	ui.Heading("network paths")
-	// Padded to the longest id rather than to a fixed width: the point of this output is reading
-	// down a column, and a line id can be as long as an operator likes.
-	width := 0
-	for _, line := range table {
-		if len(line.ID) > width {
-			width = len(line.ID)
-		}
+// printClient renders what the service's MultiPath client sees: its session and every line.
+func printClient(c state.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	st, err := mpclient.Status(ctx, c.Status)
+	if err != nil {
+		ui.Field("multipath", ui.Red("not answering")+" "+ui.Dim(err.Error()))
+		return
 	}
-	for _, line := range table {
-		fmt.Printf("  %s  %s\n", ui.Dim(fmt.Sprintf("%-*s", width, line.ID)), describe(line))
+	switch {
+	case st.Session == nil:
+		ui.Field("multipath", ui.Yellow("no session yet"))
+	case st.Session.State == "live":
+		ui.Field("multipath", ui.Green("live")+" "+ui.Dim(fmt.Sprintf("session %s for %s, %d started",
+			st.Session.ID, (time.Duration(st.Session.AgeMs)*time.Millisecond).Round(time.Second), st.SessionsStarted)))
+	default:
+		ui.Field("multipath", ui.Yellow(st.Session.State)+" "+ui.Dim(st.LastSessionEnd))
+	}
+	for _, l := range st.Lines {
+		ui.Field("line "+l.ID, describe(l))
 	}
 }
 
-// describe renders one line's state the way somebody asking "is this path working?" wants to read it.
-func describe(line state.LineState) string {
-	where := ui.Dim(line.URL)
-	if line.URL == "" {
-		where = ui.Dim("(this machine's own route to the server)")
-	}
+// describe renders one line the way somebody asking "is this path working?" reads it. The
+// reconnect count is part of the answer: a line can fail and come back many times without anything
+// above it noticing.
+func describe(l client.LineStatus) string {
+	where := ui.Dim(l.URL)
 	flapped := ""
-	if line.Reconnects > 0 {
-		flapped = ui.Dim(fmt.Sprintf("  (recovered %d×)", line.Reconnects))
+	if l.Reconnects > 0 {
+		flapped = ui.Dim(fmt.Sprintf("  (recovered %d×)", l.Reconnects))
 	}
-	switch line.State {
+	switch l.State {
 	case "up":
-		return ui.Bold("up") + " " + where + flapped
+		return ui.Bold("up") + " " + where + ui.Dim(fmt.Sprintf("  last byte %d ms ago", l.LastByteAgoMs)) + flapped
 	case "connecting":
 		return ui.Yellow("connecting") + " " + where + flapped
 	default:
-		reason := line.Reason
+		reason := l.LastReason
 		if reason == "" {
 			reason = "no reason given"
 		}
@@ -761,21 +742,17 @@ func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			}
 			ui.Field("screens", screens)
 
-			// Every network path, and what the service sees on each — not "which one are we on",
-			// because there is no longer such a thing: the transport carries every byte over all of
-			// them at once. That makes this the ONLY place a dead line is visible at all, since the
-			// redundancy is busy hiding exactly that from everything else. A machine can be down to
-			// its last working path and look perfect from every other angle.
-			if table := state.CurrentLines(*cfgPath); len(table) > 0 {
-				for _, line := range table {
-					ui.Field("line "+line.ID, describe(line))
-				}
+			// The client hides a dead line from everything above it, which is its purpose; this is
+			// where a machine down to its last working path shows it.
+			if c := state.CurrentClient(*cfgPath); c.Status != "" {
+				printClient(c)
+			} else if st == "running" {
+				ui.Field("multipath", ui.Yellow("no client running")+" "+ui.Dim("(the control link goes directly)"))
 			}
 
-			// Whether this machine goes through a proxy is invisible from outside the process, and
-			// it is the first thing worth knowing when a machine connects but cannot fetch the line
-			// registry. Show what the SERVICE will use (the configured one), not what this shell
-			// happens to have — those differ exactly when it matters.
+			// Whether this machine goes through a proxy is invisible from outside the process, and it
+			// is the first thing worth knowing when no line comes up. Shown is what the service uses
+			// (the configured one), not what this shell happens to have.
 			if px := netcfg.Load(*cfgPath); px.Proxy != "" {
 				ui.Field("proxy", redactProxy(px.Proxy))
 			}
@@ -833,7 +810,7 @@ func updateCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			if err != nil || cfg.Base == "" {
 				return fmt.Errorf("no server configured — run `microteams auth login` first")
 			}
-			fmt.Println("Downloading the latest microteams…")
+			fmt.Println("Downloading the latest microteams and multipath client…")
 			tmp, err := update.Fetch(context.Background(), cfg.Base)
 			if err != nil {
 				return err
@@ -843,6 +820,9 @@ func updateCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 				return err
 			}
 			if err := update.Replace(tmp, self); err != nil {
+				return err
+			}
+			if err := mpclient.Install(context.Background(), cfg.Base, mpclient.BinaryPath(filepath.Dir(*cfgPath))); err != nil {
 				return err
 			}
 			ui.OK("microteams updated.")
