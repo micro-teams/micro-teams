@@ -12,9 +12,12 @@
  *   UpdatesStore topics are watched in; presence is the registry avatars ask whether they are
  *   agents; close() ends its substrate when another server replaces it.
  *   The socket runs while somebody is signed in and is dialled again when the app comes back to
- *   the foreground. The substrate dials the server's lines as soon as the Connection exists; no
- *   request is sent before somebody signs in.
- * defaultServer — what a native client offers before anybody has chosen one.
+ *   the foreground. The substrate dials the server's lines as soon as the Connection exists for a
+ *   server somebody chose (the page's own, the one stored, or one with a stored session), and for
+ *   the default only once somebody signs in, signs up or asks for a sign-up code there; no request
+ *   is sent before somebody signs in.
+ * defaultServer — what a native client offers before anybody has chosen one. It is not dialled
+ *   until it is used, so a client pointed elsewhere (a test against its own stack) never reaches it.
  *
  * Example: const { mt, user } = useSession(); const { data } = await mt!.GET("/chat", {});
  *
@@ -57,8 +60,9 @@ export class Connection {
   constructor(
     readonly origin: string,
     private readonly queries: QueryClient,
+    chosen: boolean,
   ) {
-    this.substrate = new Substrate(origin);
+    this.substrate = new Substrate(origin, chosen || this.session !== null);
     this.mt = createMtClient({
       origin,
       fetch: this.substrate.fetch,
@@ -123,10 +127,12 @@ export class Connection {
   }
 
   async signIn(username: string, password: string) {
+    this.substrate.start();
     this.adopt(await auth.login(this.origin, username, password));
   }
 
   async signUp(form: SignUpForm) {
+    this.substrate.start();
     this.adopt(
       await auth.register(this.origin, {
         username: form.username,
@@ -139,6 +145,7 @@ export class Connection {
   }
 
   async sendSignUpCode(email: string) {
+    this.substrate.start();
     await auth.sendSignUpCode(this.origin, email);
   }
 
@@ -177,7 +184,10 @@ const Ctx = createContext<Value | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queries = useQueryClient();
-  const [conn, setConn] = useState(() => new Connection(pageOrigin() ?? storage.get(SERVER_KEY) ?? defaultServer, queries));
+  const [conn, setConn] = useState(() => {
+    const chosen = pageOrigin() ?? storage.get(SERVER_KEY);
+    return new Connection(chosen ?? defaultServer, queries, chosen !== null);
+  });
   const session = useSyncExternalStore(conn.subscribe, conn.current);
 
   const signedIn = session !== null;
@@ -211,7 +221,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setServer: (next) => {
       const clean = next.trim().replace(/\/+$/, "");
       storage.set(SERVER_KEY, clean);
-      const fresh = new Connection(clean, queries);
+      const fresh = new Connection(clean, queries, true);
       conn.close();
       setConn(fresh);
       return fresh;
