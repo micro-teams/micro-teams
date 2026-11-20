@@ -1,16 +1,18 @@
 /*
  * The live screen's terminal, on any platform.
  *
- * <TerminalView ref typing onMessage style /> — draws a terminal filling style's box. ref.write(bytes)
- *   puts screen bytes on it; onMessage gets what the terminal says (page.ts's FromTerminal: keys,
- *   resize, scroll). typing hands it the keyboard; without it nothing typed comes out.
+ * <TerminalView ref onMessage style /> — draws a terminal in style's box, at the size it is given,
+ *   centred. onMessage gets what the terminal says (page.ts's FromTerminal: its room, keys,
+ *   rendered bytes, text to copy).
  *
- * TerminalViewHandle, TerminalViewProps — the ref's write(bytes), and the props above.
+ * TerminalViewHandle — the ref: write(bytes) puts screen bytes on it, size(cols, rows) sets its size
+ *   after what was written before, reset() clears it for a new stream, focus(on) takes or gives up
+ *   the keyboard. TerminalViewProps — the props above.
  * <TerminalWarmup /> — one terminal nobody sees, kept from the moment it is mounted: the first
  *   WebView a process makes starts the browser engine behind every later one, which on a phone
  *   costs most of a second, so a live screen opened later starts in a fraction of that.
  *
- * Example: <TerminalView ref={term} typing={mode === "typing"} onMessage={handle} style={{ flex: 1 }} />
+ * Example: <TerminalView ref={term} onMessage={handle} style={{ flex: 1 }} />
  *
  * On a phone it is xterm.js in a WebView, from a page built into the app (tool/terminal-html.mjs
  * writes page.generated.ts): nothing is fetched, so it works wherever the app does. Bytes go in as
@@ -21,14 +23,17 @@ import type { ComponentType, Ref } from "react";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import WebView, { type WebViewProps } from "react-native-webview";
 import { TERMINAL_HTML } from "./page.generated";
+import type { ToPage } from "./host";
 import type { FromTerminal } from "./page";
 
 export interface TerminalViewHandle {
   write(bytes: Uint8Array): void;
+  size(cols: number, rows: number): void;
+  reset(): void;
+  focus(on: boolean): void;
 }
 
 export interface TerminalViewProps {
-  typing: boolean;
   onMessage: (m: FromTerminal) => void;
   style?: StyleProp<ViewStyle>;
 }
@@ -42,7 +47,7 @@ function base64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({ typing, onMessage, style }, ref) {
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({ onMessage, style }, ref) {
   const web = useRef<WebView>(null);
   const born = useRef(0);
   useEffect(() => {
@@ -50,13 +55,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
   }, []);
   const ready = useRef(false);
   const queued = useRef<string[]>([]);
-  const send = (m: object) => {
+  const send = (m: ToPage) => {
     const text = JSON.stringify(m);
     if (ready.current) web.current?.postMessage(text);
     else queued.current.push(text);
   };
-  useImperativeHandle(ref, () => ({ write: (bytes) => send({ type: "write", data: base64(bytes) }) }));
-  useEffect(() => send({ type: "typing", on: typing }), [typing]);
+  useImperativeHandle(ref, () => ({
+    write: (bytes) => send({ type: "write", data: base64(bytes) }),
+    size: (cols, rows) => send({ type: "size", cols, rows }),
+    reset: () => send({ type: "reset" }),
+    focus: (on) => send({ type: "focus", on }),
+  }));
   return (
     <Web
       ref={web}
@@ -88,7 +97,7 @@ export function TerminalWarmup() {
   // parent, so placed directly beside the app it would take half the window.
   return (
     <View pointerEvents="none" style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden" }}>
-      <TerminalView typing={false} onMessage={() => {}} style={{ flex: 1 }} />
+      <TerminalView onMessage={() => {}} style={{ flex: 1 }} />
     </View>
   );
 }
