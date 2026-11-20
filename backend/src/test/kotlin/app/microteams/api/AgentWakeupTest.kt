@@ -16,6 +16,11 @@
  *               2. A second death right after must NOT respawn again — a program that dies on every
  *                  start would otherwise be relaunched in a loop.
  *
+ *               It also covers the two ways a machine's comings and goings must not count as the
+ *               agent dying: a wake tried while the machine is offline spends none of that back-off
+ *               budget, and a live-screen probe that went unanswered on a connection the machine
+ *               has since replaced does not kill the program on the new one.
+ *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
  *
@@ -26,6 +31,7 @@ package app.microteams.api
 import app.microteams.agent.AgentLlmChange
 import app.microteams.agent.AgentLlmService
 import app.microteams.agent.AgentRegistry
+import app.microteams.agent.AgentWakeup
 import app.microteams.machine.enrollment.Machine
 import app.microteams.machine.enrollment.MachineRepository
 import app.microteams.machine.link.MachineHub
@@ -75,6 +81,7 @@ constructor(
     private val machineRepository: MachineRepository,
     private val teamMachineRepository: TeamMachineRepository,
     private val agentLlmService: AgentLlmService,
+    private val agentWakeup: AgentWakeup,
 ) {
     @LocalServerPort private var port: Int = 0
 
@@ -419,6 +426,115 @@ constructor(
             "and the agent must be reachable by chat again",
         )
         viewer.close()
+    }
+
+    /**
+     * A machine that is away cannot start anything, so trying to wake an agent there must not use
+     * up its back-off budget: otherwise a viewer retrying the live screen through an outage leaves
+     * the agent refusing to wake for half an hour after the machine is back.
+     */
+    @Test
+    @Order(6)
+    fun aWakeTriedWhileTheMachineIsOfflineSpendsNoAttempt() {
+        val (offSid, offUserId) = openAgent("Off")
+        send("""{"t":"var.push","sid":"$offSid","name":"status","value":"dead"}""")
+        Thread.sleep(300)
+        assertEquals(ScreenState.DEAD, machineHub.screen(offSid)!!.state)
+
+        machine.close()
+        awaitTrue("the machine must go offline") { !machineHub.isOnline(machineId) }
+        assertFalse(
+            agentWakeup.ensureAwake(offUserId),
+            "nothing can be woken on an offline machine",
+        )
+
+        collector = Collector()
+        machine = connect(collector)
+        awaitFrame("welcome")
+        assertTrue(
+            agentWakeup.ensureAwake(offUserId),
+            "the first wake after it is back must go out",
+        )
+        awaitFrameFor("session.close", offSid)
+        val respawn = awaitFrameFor("session.create", offSid)
+        assertFalse(
+            respawn.optBoolean("adopt", false),
+            "it is a wake, not the reconnect's re-adopt",
+        )
+    }
+
+    /**
+     * An updating CLI connects again while its old connection is still open here, and a probe sent
+     * on the old one goes unanswered although the screen is fine. That silence must not be read as
+     * death: respawning would kill the very program that survived the update.
+     */
+    @Test
+    @Order(7)
+    fun aProbeUnansweredOnAReplacedConnectionDoesNotKillTheScreen() {
+        val (liveSid, _) = openAgent("Echo")
+        send(
+            """{"t":"rpc.call","sid":"$liveSid","id":"c7","name":"screenReady",""" +
+                """"args":[{"driver":"claude"}]}""",
+        )
+        awaitTrue("the screen must be live") {
+            machineHub.screen(liveSid)!!.state == ScreenState.LIVE
+        }
+
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI("ws://localhost:$port/machine/screen/$liveSid?token=$humanToken"),
+                )
+        val probe = awaitFrameFor("rpc.call", liveSid)
+        assertEquals("snapshot", probe.getString("name"))
+
+        // The old connection never answers; the machine comes back on a new one meanwhile.
+        val old = machine
+        collector = Collector()
+        machine = connect(collector)
+        awaitFrame("welcome")
+        // The probe waits two seconds for its answer; watch well past that.
+        assertTrue(
+            noFrame("session.close", 4000),
+            "the program that survived must not be respawned",
+        )
+        assertEquals(
+            ScreenState.LIVE,
+            machineHub.screen(liveSid)!!.state,
+            "silence on a replaced connection says nothing about the screen",
+        )
+        viewer.get(5, TimeUnit.SECONDS).close()
+        old.close()
+    }
+
+    /** Open one more agent on the fake machine and return its screen id and user id. */
+    private fun openAgent(nickname: String): Pair<String, IdType> {
+        val res =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"nickname":"$nickname"}""",
+                        ),
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val body = JSONObject(res.response.contentAsString)
+        val openedSid = body.getString("sid")
+        awaitFrameFor("session.create", openedSid)
+        return openedSid to body.getLong("agentUserId")
+    }
+
+    private fun awaitTrue(what: String, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 5000
+        while (!condition()) {
+            if (System.currentTimeMillis() > deadline) error(what)
+            Thread.sleep(50)
+        }
     }
 
     private fun awaitFrameFor(type: String, sid: String, timeoutMs: Long = 8000): JSONObject {
