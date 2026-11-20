@@ -14,6 +14,12 @@
  *   same conversation a second time, watches the agent's live screen from the chat's
  *   roster (it draws, typing is a mode you choose, close puts it away), takes the agent out of the
  *   chat, renames it, sets its keepalive, and closes it.
+ *   With the stack's lines (params.lines), it then opens the lines panel and finds the three lines
+ *   up; kills one line silently and slows another, sees the dead one shown down within seconds and
+ *   the session kept, and a message from elsewhere arriving over what is left; mends them; and
+ *   restarts the multipath server, after which the app (and the machine, with one) is on a new
+ *   live session within seconds and a message from elsewhere arrives again. It prints how long each
+ *   of these took.
  *   Then it opens a dialog and closes it with back, signs out, signs a second person up who finds
  *   nothing of the first person's — not in their lists, and on the web not at the conversation's
  *   own address either — and signs them out; on the web it then checks the service worker (it
@@ -23,16 +29,19 @@
  *   drivers/webdriverio.ts for the Android build through Appium.
  * Params — the server to type in (null keeps the client's own), the stack as the machine running
  *   the journey reaches it, where the mail sink answers, a suffix that makes this run's names
- *   unique, and the machine waiting to be approved: its enrolment code, the driver to open the
+ *   unique, the machine waiting to be approved: its enrolment code, the driver to open the
  *   agent with (empty for the server's default), and heard(text), which resolves once the model on
- *   the machine has been given that text and rejects if it never is.
+ *   the machine has been given that text and rejects if it never is; and the stack's lines.
+ * Lines — fault(line, mode) gives line "b" or "c" a fault ("dead", "slow") or none ("pass");
+ *   restartServer() restarts the multipath server and resolves once it is back; machineSession()
+ *   is the id of the machine's live MultiPath session, or null.
  * outside(api, username, password) → { post(title, text), createTeam(name) → id, chatTitled(title)
  *   → id, approve(code, teamIds), agentNamed(teamId, name) → userId, untilIdle(teamId, userId) } —
  *   signs in over HTTP and acts as another client of the same person would; the ids are what the
  *   app's testIDs carry, and untilIdle waits for the agent's program to have finished starting.
  * codeFromMail(mail, email) — the sign-up code cheese-auth mailed to that address.
  *
- * Example: await journey(new PlaywrightDriver("http://localhost/app/"), { server: null, api, mail, run, machine: null });
+ * Example: await journey(new PlaywrightDriver("http://localhost/app/"), { server: null, api, mail, run, machine: null, lines: null });
  *
  * Elements are found by testID, which react-native-web renders as data-testid and React Native on
  * Android as the view's resource-id: one name, both clients.
@@ -54,6 +63,8 @@ export interface Driver {
   waitGone(id: string, timeoutMs?: number): Promise<void>;
   /** Whether some element on screen shows exactly this text, right now. */
   shows(text: string): Promise<boolean>;
+  /** The text of the element with this testID, now. */
+  text(id: string): Promise<string>;
   /** The web only: open the app at this address under where it is served ("chats/5"). */
   go?(path: string): Promise<void>;
   /** The web only: the service worker controls the page, routes over the substrate, and keeps the
@@ -70,6 +81,13 @@ export interface Params {
   mail: string;
   run: string;
   machine: Machine | null;
+  lines: Lines | null;
+}
+
+export interface Lines {
+  fault(line: "b" | "c", mode: "pass" | "dead" | "slow"): Promise<void>;
+  restartServer(): Promise<void>;
+  machineSession(): Promise<string | null>;
 }
 
 export interface Machine {
@@ -244,6 +262,7 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   lap("write a document");
 
   if (p.machine) await withAMachine(d, p.machine, { run: p.run, teamId, elsewhere, lap });
+  if (p.lines) await throughBrokenLines(d, p.lines, { run: p.run, chatId, chatTitle: renamed, elsewhere, lap, withMachine: p.machine !== null });
 
   // Back closes the dialog, not the page under it.
   await d.tap("destination-me");
@@ -369,4 +388,88 @@ async function withAMachine(
   await d.tap("confirm");
   await d.waitGone(`agent-${agentId}`, 30_000);
   lap("renamed, kept warm, closed");
+}
+
+/** Polls ok until it holds and returns how long that took, or fails after ms. */
+async function until(what: string, ok: () => Promise<boolean>, ms: number): Promise<number> {
+  const started = Date.now();
+  while (Date.now() - started < ms) {
+    if (await ok().catch(() => false)) return Date.now() - started;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`${what}: not within ${ms} ms`);
+}
+
+/** The part of the journey that breaks the lines under the app: line index 0 is "direct", 1 is
+ * "b", 2 is "c", in the order of the stack's line list. */
+async function throughBrokenLines(
+  d: Driver,
+  lines: Lines,
+  {
+    run,
+    chatId,
+    chatTitle,
+    elsewhere,
+    lap,
+    withMachine,
+  }: { run: string; chatId: number; chatTitle: string; elsewhere: Awaited<ReturnType<typeof outside>>; lap: (step: string) => void; withMachine: boolean },
+) {
+  const state = (id: string) => d.text(id);
+  const openLines = async () => {
+    await d.tap("destination-me");
+    await d.tap("version");
+    await d.tap("open-lines");
+    await d.waitFor("lines-session", 15_000);
+  };
+  const arrives = async (text: string) => {
+    await d.back();
+    await d.tap("destination-chats");
+    await elsewhere.post(chatTitle, text);
+    return until(`"${text}" in the conversation list`, async () => (await d.text(`chat-${chatId}-last`)).endsWith(text), 30_000);
+  };
+
+  await openLines();
+  await until("every line up", async () => (await Promise.all([0, 1, 2].map((i) => state(`line-${i}-state`)))).every((s) => s === "up"), 30_000);
+  const session = await state("lines-session-id");
+  lap("three lines up");
+
+  await lines.fault("c", "dead");
+  await lines.fault("b", "slow");
+  const noticed = await until("the dead line shown down", async () => (await state("line-2-state")) !== "up", 10_000);
+  if ((await state("lines-session-id")) !== session) throw new Error("a dead line ended the session");
+  console.log(`  the dead line shown down after ${noticed} ms, the session kept`);
+  const meanwhile = await arrives(`dead line ${run}`);
+  console.log(`  a message from elsewhere arrived ${meanwhile} ms after it was sent`);
+  lap("a dead line and a slow one");
+
+  await lines.fault("b", "pass");
+  await lines.fault("c", "pass");
+  await openLines();
+  const mended = await until("the dead line up again", async () => (await state("line-2-state")) === "up", 30_000);
+  console.log(`  the mended line up again after ${mended} ms`);
+  const before = await state("lines-session-id");
+  const machineBefore = withMachine ? await lines.machineSession() : null;
+  const restarting = Date.now();
+  await lines.restartServer();
+  const restartMs = Date.now() - restarting;
+  const back = await until(
+    "a new live session after the restart",
+    async () => (await state("lines-session-state")) === "live" && (await state("lines-session-id")) !== before,
+    20_000,
+  );
+  console.log(`  multipath server restarted in ${restartMs} ms; the app on a new live session ${back} ms later`);
+  if (withMachine) {
+    const m = await until(
+      "the machine on a new live session after the restart",
+      async () => {
+        const now = await lines.machineSession();
+        return now !== null && now !== machineBefore;
+      },
+      20_000,
+    );
+    console.log(`  the machine on a new live session ${m + back} ms after the server was back`);
+  }
+  const after = await arrives(`after the restart ${run}`);
+  console.log(`  a message from elsewhere arrived ${after} ms after it was sent`);
+  lap("a multipath server restart");
 }

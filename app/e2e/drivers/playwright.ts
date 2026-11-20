@@ -69,6 +69,10 @@ export class PlaywrightDriver implements Driver {
     return (await this.p.getByText(text, { exact: true }).filter({ visible: true }).count()) > 0;
   }
 
+  async text(id: string) {
+    return (await this.id(id).innerText({ timeout: 2000 })).trim();
+  }
+
   async go(path: string) {
     await this.p.goto(new URL(path, this.url).href);
   }
@@ -82,7 +86,7 @@ export class PlaywrightDriver implements Driver {
     const stats = () =>
       this.p.evaluate(async () => {
         const reg = await navigator.serviceWorker.ready;
-        return new Promise<{ build: string; lines: string[]; routed: number; direct: number }>((resolve) => {
+        return new Promise<{ build: string; routed: number; direct: number }>((resolve) => {
           const channel = new MessageChannel();
           channel.port1.onmessage = (e) => resolve(e.data);
           reg.active!.postMessage({ type: "stats" }, [channel.port2]);

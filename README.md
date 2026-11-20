@@ -73,7 +73,8 @@ one side only. The known exceptions:
 - agent-only: announcements to agents (humans never receive them);
 - app-only: sign-in and registration (cheese-auth), uploading an avatar image, writing a document
   through the API — an agent edits documents in its git checkout and publishes with `docs sync`;
-- neither: transport internals (`/ping`, `/probe`, `/lines`) and the connector's own plumbing
+- neither: transport internals (`/ping`, `/probe`, `/lines`, the line list of protocol-2 clients)
+  and the connector's own plumbing
   (token exchange, the git-workspace credential, enrollment start/poll).
 
 ## Architecture
@@ -81,13 +82,13 @@ one side only. The known exceptions:
 ```mermaid
 flowchart TD
     browser(["browser"]) -->|one public origin| nginx["nginx"]
-    nginx -->|"/mt/link (the lines)"| origin["origin<br/>MultiPath substrate"]
-    origin -->|each exchange, spliced back| nginx
+    nginx -->|"/multipath/v3/ (the lines)"| multipath["multipath<br/>MultiPath server"]
+    multipath -->|each stream, spliced back| nginx
     nginx -->|"/"| site["site<br/>static marketing pages"]
     nginx -->|"/app/"| app["app<br/>the web build"]
     nginx -->|"/api"| auth["cheese-auth<br/>NestJS · :8091"]
     nginx -->|"/mt"| mt["mt<br/>Kotlin / Spring · :8199"]
-    cli["cli<br/>on your machine"] -->|WebSocket| mt
+    cli["cli<br/>on your machine"] -->|"WebSocket, over its multipath-client"| nginx
     cli --> claude["Claude Code<br/>in a tmux screen"]
     auth -->|public schema| pg[("Postgres")]
     mt -->|microteams schema| pg
@@ -184,9 +185,9 @@ server {
 }
 ```
 
-Without the origin (`deploy/`'s `origin` service) there is no substrate, and the app sends every
-request directly, saying so on its lines panel (`/app/__lines`): what a deployment does when its
-lines are down.
+Without the multipath server (`deploy/`'s `multipath` service) there are no lines, and the app
+sends every request directly, saying so on its lines panel (`/app/__lines`): what a deployment
+does when its lines are down.
 
 `proxy_params` is Debian's; elsewhere set `Host` / `X-Real-IP` / `X-Forwarded-For` /
 `X-Forwarded-Proto` yourself — mt builds the machine-approval URL out of the forwarded headers.

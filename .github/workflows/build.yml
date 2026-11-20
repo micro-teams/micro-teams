@@ -17,10 +17,7 @@ on:
 jobs:
   build-jar:
     runs-on: ubuntu-latest
-    # No packages: read. The backend needed an authenticated GitHub Packages pull for exactly one
-    # dependency, the MultiPath starter, and 0.2.0 has no server-side middleware to depend on — so
-    # the backend now builds from Maven Central alone. The origin, which DOES need the package, is
-    # its own job below.
+    # No packages: read: the backend builds from Maven Central alone.
     permissions:
       contents: read
     defaults:
@@ -60,9 +57,9 @@ jobs:
           name: jar
           path: backend/target/*.jar
 
-  # The MultiPath origin: the server end of the substrate, a separate process that runs in front of
-  # the backend. It is the one thing in this repository built from GitHub Packages, which is why it
-  # carries the token plumbing.
+  # The MultiPath origin of protocol 2 (/mt/link), kept for the clients built before protocol 3. It
+  # is the one thing in this repository built from GitHub Packages, which is why it carries the
+  # token plumbing. The protocol-3 server and client are Go, built in build-cli.
   build-origin:
     runs-on: ubuntu-latest
     permissions:
@@ -151,12 +148,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: app
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -164,6 +158,12 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      # The multipath package in app/vendor is what the commit cli/go.mod pins builds to.
+      - run: ../scripts/multipath-pin.sh --check
       - run: npm ci
       - run: npm run codegen
       - run: npm run typecheck
@@ -183,14 +183,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: app
     # The signing secrets at the job, not the step: a step's own `if` cannot see env declared on that
     # same step, nor the secrets context at all. Empty in a repository without the key.
     env:
-      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -298,10 +296,9 @@ jobs:
         working-directory: cli
         run: |
           command -v tmux >/dev/null || sudo apt-get install -y -qq tmux
-          # -race: the connector now races requests across lines and measures them from a background
-          # loop while short commands read the same cache, so "does it work" and "does it work
-          # concurrently" have stopped being the same question. micro-connector and multipath both
-          # run their Go tests this way.
+          # -race: the service supervises its multipath client from several goroutines while the
+          # control link asks it where to dial. micro-connector and multipath run their Go tests the
+          # same way.
           go test -race ./...
       - name: Build binaries (one per OS/arch)
         run: |
@@ -319,7 +316,13 @@ jobs:
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
               go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o "dist/microteams-$os-$arch" .
+            # The multipath client the service runs beside it, from the module go.mod pins.
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" \
+              -o "dist/multipath-client-$os-$arch" github.com/micro-teams/multipath/go/cmd/multipath-client
           done
+          # The deployment's multipath server, from the same module, for the bundle's linux/amd64 host.
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" \
+            -o dist/multipath-server-linux-amd64 github.com/micro-teams/multipath/go/cmd/multipath-server
           ls -la dist
       - name: Upload cli binaries
         uses: actions/upload-artifact@v7
@@ -385,7 +388,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE=microteams-deploy
-          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/origin"
+          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/origin" "$STAGE/multipath"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
           cp -r deploy/init "$STAGE/"
           # Ship the JPA-generated schema at the bundle root. The stack still creates/updates its own
@@ -396,6 +399,10 @@ jobs:
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
           cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
+          # The multipath server; its line list (multipath/lines.json) is the deployment's own and
+          # never shipped.
+          cp artifacts/cli-binaries/multipath-server-linux-amd64 "$STAGE/multipath/multipath-server"
+          chmod +x "$STAGE/multipath/multipath-server"
           # The marketing site at "/", the web client under /app/, /version at the root, and the
           # Android client under /downloads/ with the manifest that lists it.
           VERSION="$(cat VERSION)-${GITHUB_SHA::7}"
@@ -406,8 +413,9 @@ jobs:
           node app/tool/add-clients.mjs "$STAGE/frontend/dist" "$VERSION" artifacts/android-apk/app-release.apk "$(cat artifacts/android-apk/signed.txt)"
           cp artifacts/applets/*.js "$STAGE/applets/"
           chmod +x "$STAGE/gen-env.sh"
-          # The CLI distribution the backend serves: the cross-compiled `microteams` binaries and the
-          # static tmux, laid out as connector/<target>/{microteams,tmux} (Go-style os-arch, matching
+          # The CLI distribution the backend serves: the cross-compiled `microteams` binaries, the
+          # multipath clients and the static tmux, laid out as
+          # connector/<target>/{microteams,multipath-client,tmux} (Go-style os-arch, matching
           # install.sh's `target` and update.go's platformDir). It's a shipped build artifact, so it
           # lives at the top level as connector/ — NOT under app_data/, which gen-env.sh creates fresh
           # at deploy time and holds only state you back up. compose bind-mounts connector/ to the
@@ -417,7 +425,8 @@ jobs:
             os="${t%-*}"; arch="${t#*-}"
             mkdir -p "$CONN/$t"
             cp "artifacts/cli-binaries/microteams-$os-$arch" "$CONN/$t/microteams"
-            chmod +x "$CONN/$t/microteams"
+            cp "artifacts/cli-binaries/multipath-client-$os-$arch" "$CONN/$t/multipath-client"
+            chmod +x "$CONN/$t/microteams" "$CONN/$t/multipath-client"
           done
           # Static tmux is Linux-only; macOS uses its own via install.sh's system-tmux fallback.
           # Each arch is its own artifact (tmux-linux-<arch>/tmux) from the matrix build.
@@ -500,10 +509,13 @@ jobs:
         with:
           name: microteams-deploy
           path: microteams-deploy
+      # The line list names http://nginx, the address the machine below reaches the stack at, so
+      # its control link rides the multipath client.
       - name: Bring the cluster up and wait for every service to be healthy
         working-directory: microteams-deploy
         run: |
-          bash gen-env.sh
+          MULTIPATH_ORIGIN=http://nginx bash gen-env.sh
+          chmod +x multipath/multipath-server
           docker compose up -d --wait --wait-timeout 360
       # Only the pinned leg exercises `microteams update`: it needs a distinctly-versioned connector
       # binary so the e2e can PROVE the running service re-execed into the freshly downloaded one
@@ -580,8 +592,10 @@ jobs:
         with:
           name: microteams-deploy
           path: microteams-deploy
-      - name: Bring the bundle up, with a mail sink for sign-up codes
-        run: bash app/e2e/stack.sh microteams-deploy
+      - name: Bring the bundle up, with three lines and a mail sink for sign-up codes
+        run: |
+          bash app/e2e/stack.sh microteams-deploy
+          bash app/e2e/counters.sh baseline
       - name: A machine waiting to be approved (${{ matrix.leg }})
         run: echo "ENROLL=$(bash app/e2e/machine.sh up microteams-deploy '${{ matrix.leg }}' | tail -1)" >> "$GITHUB_ENV"
       - run: npm ci
@@ -619,15 +633,23 @@ jobs:
           disable-animations: true
           # The emulator's own launcher sometimes stops answering under load, and the system's
           # "isn't responding" dialog then covers the app the journey is driving: hidden here.
-          script: adb shell settings put global hide_error_dialogs 1 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://10.0.2.2 || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1))
-      - name: The app's requests went over the substrate
+          # The app reaches the stack's three lines under the names every client uses
+          # (http://localhost, :8081, :8082); adbd as root may forward port 80. When the journey is
+          # over the app is stopped, so the server's counters can settle.
+          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1)) && adb shell am force-stop app.microteams.microteams
+      - name: The app's and the machine's requests went over the lines
         run: bash app/e2e/carried.sh
+      - name: Every client gone, the multipath server holds nothing
+        run: |
+          bash app/e2e/machine.sh stop
+          bash app/e2e/counters.sh settled
       - name: What went wrong
         if: failure()
         run: |
           tail -60 appium.log 2>/dev/null || true
           bash app/e2e/machine.sh logs
-          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend origin
+          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend multipath origin
+          docker logs --tail 40 e2e-lines
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
