@@ -1,7 +1,8 @@
 // A person watching a live screen, for e2e.sh: it opens the backend's viewer WebSocket the way the
-// app does, and dials again a second after every close, as the app does. Each attach makes the
-// backend probe the agent and wake it if it looks dead, so keeping a viewer attached through a
-// connector restart is what puts the wake-up in the path of a restart.
+// app does — its size in the address, every chunk acknowledged as drawn (the machine stops sending
+// to a viewer that does not) — and dials again a second after every close, as the app does. Each
+// attach makes the backend wake the agent if it is known dead, so keeping a viewer attached
+// through a connector restart is what puts the wake-up in the path of a restart.
 //
 // It records what a test needs to know into a file, one line per event:
 //
@@ -26,14 +27,14 @@ function dial() {
   const id = ++n
   let bytes = 0
   let noted = 0
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(`${url}&cols=120&rows=32`)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => {
     note(`open ${id}`)
-    ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 32 }))
   }
   ws.onmessage = (ev) => {
     if (typeof ev.data === 'string') return
+    ws.send(JSON.stringify({ type: 'ack', n: ev.data.byteLength }))
     bytes += ev.data.byteLength
     if (Date.now() - noted >= 1000) {
       noted = Date.now()

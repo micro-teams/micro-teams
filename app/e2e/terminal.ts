@@ -19,7 +19,7 @@
  *     the client never scrolls by itself (the web);
  *   - copy: the copy button shows the screen's text with its history, the agent's message in it;
  *   - usage: the usage button reaches the driver (Claude Code shows /usage in the pane; a driver
- *     without the command says so in the app);
+ *     without the command offers no button);
  *   and closes the screen.
  * ScreenCtx — the outside viewer factory and the machine's pane, from the journey.
  * Viewer — a second viewer over a plain WebSocket: its sizes, the lease states it was told, type(),
@@ -154,12 +154,13 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   ctx.lap("live screen: copy");
 
   // -- usage ---------------------------------------------------------------------------------
-  await d.tap("screen-usage");
   if (ctx.driver === "" || ctx.driver === "claude") {
+    await d.tap("screen-usage");
     await until("Claude Code shows its usage", async () => /usage/i.test((await ctx.pane()).text.split("\n").slice(-30).join("\n")), 30_000);
   } else {
-    await d.waitFor("screen-note", 15_000);
-    console.log(`  live screen: usage on ${ctx.driver}: ${await d.text("screen-note")}`);
+    // A driver without the command offers no button for it.
+    await d.waitGone("screen-usage", 5_000);
+    console.log(`  live screen: ${ctx.driver} has no usage button`);
   }
   ctx.lap("live screen: usage");
 
