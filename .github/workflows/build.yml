@@ -541,6 +541,16 @@ jobs:
           - client: web
             leg: npm:2.1.220
             driver: ""
+            browser: chromium
+            viewport: phone
+            experimental: false
+          # The live screen differs most between engines and between a touch phone and a desktop
+          # with a wheel and a mouse: the other engine, on a desktop.
+          - client: web
+            leg: npm:2.1.220
+            driver: ""
+            browser: firefox
+            viewport: desktop
             experimental: false
           - client: android
             leg: pi:0.87.0
@@ -549,12 +559,16 @@ jobs:
           - client: web
             leg: installer
             driver: ""
+            browser: chromium
+            viewport: phone
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
     env:
       RUN: j${{ github.run_id }}${{ strategy.job-index }}
       LEG: ${{ matrix.leg }}
       DRIVER: ${{ matrix.driver }}
+      BROWSER: ${{ matrix.browser }}
+      VIEWPORT: ${{ matrix.viewport }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -576,7 +590,7 @@ jobs:
         if: matrix.client == 'web'
         working-directory: app/e2e
         run: |
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium ${{ matrix.browser }}
           # Is everything where it is served (the site at /, the app under /app/, deep links, the
           # worker's scope, /version)? Then the journey through the app.
           npx tsx bundle.ts http://localhost

@@ -14,6 +14,9 @@
 #                                  /status, found through the state file), or nothing
 #   machine.sh api                 run a short command (`microteams api`) on the machine and print
 #                                  what it said on stderr
+#   machine.sh pane                the agent's pane as tmux sees it, one line:
+#                                  `<in copy-mode> <scroll position> <program wants the mouse>
+#                                  <alternate screen> <width>x<height>`, then its text
 #   machine.sh stop                stop the connector the way its service manager would (SIGTERM)
 #
 # <leg> is what plays the agent's program, as in .github/scripts/agent-leg.sh: `npm:<version>` (the
@@ -105,10 +108,18 @@ except Exception:
 api)
   onmachine 'microteams api >/dev/null 2>/tmp/api.err; cat /tmp/api.err'
   ;;
+pane)
+  onmachine 'for d in "${XDG_RUNTIME_DIR:-}/microteams" "$HOME/.local/state/microteams" "/tmp/microteams-$(id -u)"; do
+      [ -S "$d/t.sock" ] && S="$d/t.sock" && break
+    done
+    T="$HOME/.config/microteams/bin/tmux -S ${S:?no tmux socket on the machine}"
+    $T list-panes -a -F "#{pane_in_mode} #{scroll_position} #{mouse_any_flag} #{alternate_on} #{window_width}x#{window_height}" | head -1
+    $T capture-pane -p -J -S -200 -t "$($T list-sessions -F "#{session_name}" | head -1)"'
+  ;;
 stop)
   docker exec "$MACHINE_CT" pkill -TERM -f "microteams run" || true
   for _ in $(seq 1 20); do docker exec "$MACHINE_CT" pgrep -f "multipath-client|microteams run" >/dev/null || exit 0; sleep 0.5; done
   fail "the connector or its multipath client did not stop within 10 s"
   ;;
-*) echo "usage: machine.sh up <bundle> <leg> | saw <leg> <text> | logs | session | api | stop" >&2; exit 2 ;;
+*) echo "usage: machine.sh up <bundle> <leg> | saw <leg> <text> | logs | session | pane | api | stop" >&2; exit 2 ;;
 esac
