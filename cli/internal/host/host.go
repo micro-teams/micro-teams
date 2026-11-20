@@ -103,12 +103,13 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	}
 	h := &Host{tm: tm, cfgPath: cfgPath, base: cfg.Base, ctrl: ctrl, grace: clientGrace, logw: hostlog.Open(cfgPath)}
 	h.mp = mpclient.NewSupervisor(mpclient.Config{
-		Binary:   mpclient.BinaryPath(filepath.Dir(cfgPath)),
-		Base:     cfg.APIBase(),
-		Previous: state.CurrentClient(cfgPath),
-		Logf:     h.logf,
-		OnChange: func() { h.writeState(int(h.lastScreens.Load())) },
-		OnLive:   h.moveOntoClient,
+		Binary:     mpclient.BinaryPath(filepath.Dir(cfgPath)),
+		LinesCache: mpclient.LinesCachePath(filepath.Dir(cfgPath)),
+		Base:       cfg.APIBase(),
+		Previous:   state.CurrentClient(cfgPath),
+		Logf:       h.logf,
+		OnChange:   func() { h.writeState(int(h.lastScreens.Load())) },
+		OnLive:     h.moveOntoClient,
 	})
 	h.conn = ws.NewWithOptions(ctrl, cfg.Token, cfg.APIBase(), ws.Options{
 		ChooseURL: h.chooseURL,

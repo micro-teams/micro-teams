@@ -1,7 +1,7 @@
 // The supervisor against the real thing: the multipath-client binary built from the pinned module,
 // a MultiPath server in this process, and a plain HTTP target behind it. A request sent through
-// Transport must reach the target, a client that dies must be started again, and Fetch must refuse
-// a download that does not run.
+// Transport must reach the target, the client must keep the line list in its cache file, a client
+// that dies must be started again, and Fetch must refuse a download that does not run.
 package mpclient
 
 import (
@@ -99,7 +99,8 @@ func TestRequestsGoThroughASupervisedClientThatIsStartedAgainWhenItDies(t *testi
 	origin := deployment(t, strings.TrimPrefix(target.URL, "http://"))
 
 	var log logBuf
-	s := NewSupervisor(Config{Binary: buildClient(t), Base: origin + "/mt", Logf: log.logf})
+	cache := LinesCachePath(t.TempDir())
+	s := NewSupervisor(Config{Binary: buildClient(t), LinesCache: cache, Base: origin + "/mt", Logf: log.logf})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
@@ -118,6 +119,10 @@ func TestRequestsGoThroughASupervisedClientThatIsStartedAgainWhenItDies(t *testi
 	resp.Body.Close()
 	if string(body) != "GET /mt/ping host=api.example" {
 		t.Fatalf("the target saw %q", body)
+	}
+	kept, err := os.ReadFile(cache)
+	if err != nil || !strings.Contains(string(kept), `"entry":"`+origin+`"`) {
+		t.Fatalf("the client keeps no line list of %s in %s: %q, %v", origin, cache, kept, err)
 	}
 
 	if err := syscall.Kill(first.PID, syscall.SIGKILL); err != nil {

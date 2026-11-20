@@ -11,6 +11,10 @@
 //   - BinaryPath(cfgDir) is where the client lives: <config dir>/bin/multipath-client, beside the
 //     private tmux and owned by the user the service runs as, so the service can replace it.
 //
+//   - LinesCachePath(cfgDir) is where the client keeps the last line list the deployment served:
+//     <config dir>/multipath-lines.json. A client that starts while the deployment's origin is
+//     unreachable starts its session from it, over lines that may well be working.
+//
 //   - Fetch(ctx, base, dest) downloads the client for this platform from the server's
 //     /connector/latest/<os>-<arch>/multipath-client (where the microteams binary comes from) into a
 //     temporary file beside dest and checks that it runs; it returns the temporary file's path, which
@@ -18,13 +22,15 @@
 //
 //   - NewSupervisor(Config) and (*Supervisor).Run(ctx) keep a client running: it is installed first
 //     if missing, started on two free loopback ports (one for streams, one for its /status), polled
-//     every second, and started again whenever it exits (after 1 s, doubling to 30 s). Every start,
-//     exit and change of session is logged.
+//     every second, and started again whenever it exits (after 1 s, doubling to 30 s), always with
+//     the same line list cache (Config.LinesCache). Every start, exit and change of session is
+//     logged.
 //     Live() is the stream address while the client has a live session; Await(grace) waits for one
 //     unless grace has passed since the client started or last lost its session (so a session
 //     being replaced after a server restart is waited for, and a server that never answers is
 //     not); Why() is why there is none; Info() is what the state file records; Restart() makes
-//     the client start over with a fresh line list; Stop() ends it and returns once it has exited.
+//     the client start over and ask for the line list at once; Stop() ends it and returns once it
+//     has exited.
 //
 //   - Lookup(c) checks a client recorded in the state file the way a short command needs: its
 //     /status answers and its session is live. It returns the stream address, or why not.
@@ -36,7 +42,7 @@
 //   - Status(ctx, statusAddr) reads the client's /status.
 //
 //     sup := mpclient.NewSupervisor(mpclient.Config{Binary: mpclient.BinaryPath(dir),
-//     Base: "https://example.app/mt", Logf: log.Printf})
+//     LinesCache: mpclient.LinesCachePath(dir), Base: "https://example.app/mt", Logf: log.Printf})
 //     go sup.Run(ctx)
 //     if addr, ok := sup.Live(); ok {
 //     client := &http.Client{Transport: mpclient.Transport(addr)}
@@ -71,6 +77,9 @@ const Name = "multipath-client"
 
 // BinaryPath is where the client lives on this machine.
 func BinaryPath(cfgDir string) string { return filepath.Join(cfgDir, "bin", Name) }
+
+// LinesCachePath is where the client keeps the last line list.
+func LinesCachePath(cfgDir string) string { return filepath.Join(cfgDir, "multipath-lines.json") }
 
 // Fetch downloads the client for this platform into a temporary file beside dest and checks that
 // it runs. The caller renames the returned file onto dest, or removes it.
@@ -144,12 +153,13 @@ func Install(ctx context.Context, base, dest string) error {
 
 // Config configures a Supervisor.
 type Config struct {
-	Binary   string                           // the client executable (BinaryPath)
-	Base     string                           // the server's API base; the client's entry is its origin
-	Previous state.Client                     // the client the state file recorded, ended if it still runs
-	Logf     func(format string, args ...any) // the host log
-	OnChange func()                           // the client started, exited, or its session changed
-	OnLive   func()                           // a session became live
+	Binary     string                           // the client executable (BinaryPath)
+	LinesCache string                           // the client's line list cache (LinesCachePath)
+	Base       string                           // the server's API base; the client's entry is its origin
+	Previous   state.Client                     // the client the state file recorded, ended if it still runs
+	Logf       func(format string, args ...any) // the host log
+	OnChange   func()                           // the client started, exited, or its session changed
+	OnLive     func()                           // a session became live
 }
 
 // Supervisor keeps one client running.
@@ -248,7 +258,7 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(s.cfg.Binary, "-listen", listen, "-status", status, "-entry", s.entry)
+	cmd := exec.Command(s.cfg.Binary, "-listen", listen, "-status", status, "-entry", s.entry, "-lines-cache", s.cfg.LinesCache)
 	cmd.SysProcAttr = childAttr()
 	out := &lineLog{logf: s.cfg.Logf}
 	cmd.Stdout, cmd.Stderr = out, out
@@ -269,7 +279,7 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 		case <-ctx.Done():
 			return terminate(cmd, exited)
 		case <-s.restart:
-			s.cfg.Logf("multipath client: restarting it for a fresh line list")
+			s.cfg.Logf("multipath client: restarting it to ask for the line list now")
 			_ = terminate(cmd, exited)
 			return errors.New("restarted on request")
 		case <-tick.C:
@@ -385,7 +395,7 @@ func (s *Supervisor) Info() state.Client {
 	return s.info
 }
 
-// Restart makes the client start over, fetching the line list afresh.
+// Restart makes the client start over, asking for the line list at once.
 func (s *Supervisor) Restart() {
 	select {
 	case s.restart <- struct{}{}:
