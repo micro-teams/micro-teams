@@ -3,11 +3,15 @@
  *
  * <MeScreen /> — the "me" section's root frame: a card with your face, nickname and username; your
  *   user id and intro; this client's version (tap: everything about the client in one block to
- *   copy into a bug report, and the apps this deployment offers to download); and "log out", which asks first — a mis-tap that ends a
- *   session on a phone costs a password and a mailed code to undo.
- * <LinesScreen /> — drawn for a "lines" frame, reached only at the address __lines: every line this client dials and whether it is up,
- *   refreshed each second. Redundancy hides its own failures — a deployment can lose all but one of
- *   its paths with nobody seeing an error — so whether each line is up is shown somewhere.
+ *   copy into a bug report, the lines panel, and the apps this deployment offers to download); and
+ *   "log out", which asks first — a mis-tap that ends a session on a phone costs a password and a
+ *   mailed code to undo.
+ * <LinesScreen /> — drawn for a "lines" frame (from the client block, or at the address __lines):
+ *   the MultiPath session (id, state, age), every line (state, time since its last byte,
+ *   reconnects, last reason), the open streams, the fallbacks to the network with the last reason,
+ *   and on the web the service worker's own session and counts; refreshed each second, with a
+ *   button that copies all of it as JSON. Redundancy hides its own failures — a deployment can lose
+ *   all but one of its paths with nobody seeing an error — so this is where they show.
  *
  * Example: routes={{ me: MeScreen, lines: LinesScreen, ... }}
  */
@@ -20,7 +24,7 @@ import { useClientPackages } from "../../data/clients";
 import { useSession } from "../../data/session";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { DownloadLink } from "../../platform/DownloadLink";
-import { appVersion, clientPlatform } from "../../platform/platform";
+import { appVersion, clientPlatform, isWeb } from "../../platform/platform";
 import { Avatar } from "../../ui/Avatar";
 import { DialogActions, useAsk } from "../../ui/Dialog";
 import { Facts } from "../../ui/Facts";
@@ -36,31 +40,114 @@ function useEverySecond() {
   }, []);
 }
 
+/** What the service worker says about itself (worker/sw.ts), or null without one. */
+function workerStats(): Promise<unknown> {
+  const controller = isWeb ? navigator.serviceWorker?.controller : null;
+  if (!controller) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const t = setTimeout(() => resolve({ error: "the service worker did not answer within 1 s" }), 1000);
+    channel.port1.onmessage = (e) => (clearTimeout(t), resolve(e.data));
+    controller.postMessage({ type: "stats" }, [channel.port2]);
+  });
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+
 export function LinesScreen() {
   const self = useFrame();
   const { backFor } = useNav();
   const { substrate } = useSession();
+  const toast = useToast();
+  const [worker, setWorker] = useState<unknown>(null);
   useEverySecond();
-  const stats = substrate.stats();
+  useEffect(() => {
+    let on = true;
+    const ask = () => void workerStats().then((w) => on && setWorker(w));
+    ask();
+    const t = setInterval(ask, 1000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, []);
+  const d = substrate.diagnostics();
+  const session = d.client.session;
+  const last = d.fallbacks.recent[d.fallbacks.recent.length - 1];
+  const copy = () =>
+    void Clipboard.setStringAsync(JSON.stringify({ ...d, version: appVersion, platform: clientPlatform, worker }, null, 2)).then(() => toast("copied"));
   return (
     <View style={styles.root}>
       <Header title="lines" onBack={backFor(self)} />
       <ScrollView contentContainerStyle={styles.body}>
         <Facts
-          rows={substrate.linesInUse().map((url, i) => ({
-            label: `line ${i + 1}`,
-            testID: `line-${i}`,
-            value: (
-              <>
-                <Txt selectable style={styles.grow} numberOfLines={1}>
-                  {url}
+          rows={[
+            {
+              label: "session",
+              testID: "lines-session",
+              value: session ? (
+                <>
+                  <Txt selectable testID="lines-session-id">
+                    {session.id}
+                  </Txt>
+                  <Txt testID="lines-session-state" style={{ color: session.state === "live" ? colors.brand : colors.inkMuted }}>
+                    {session.state}
+                  </Txt>
+                  <Txt muted>{`for ${seconds(session.ageMs)}`}</Txt>
+                </>
+              ) : (
+                <Txt testID="lines-session-state" muted>
+                  none yet
                 </Txt>
-                <Txt style={{ color: stats[i]?.state === "up" ? colors.brand : colors.inkMuted }}>{stats[i]?.state ?? "not dialled"}</Txt>
-              </>
+              ),
+            },
+            { label: "server", value: session?.server || "—" },
+            { label: "sessions", value: `${d.client.sessionsStarted} started${d.client.lastSessionEnd ? `; the last ended: ${d.client.lastSessionEnd}` : ""}` },
+            { label: "fallbacks", testID: "lines-fallbacks", value: `${d.fallbacks.count}${last ? `; last: ${last.url}: ${last.reason}` : ""}` },
+          ]}
+        />
+        <Facts
+          rows={d.client.lines.map((l) => ({
+            label: `line ${l.id}`,
+            testID: `line-${l.index}`,
+            value: (
+              <View style={styles.grow}>
+                <View style={styles.app}>
+                  <Txt selectable style={styles.grow} numberOfLines={1}>
+                    {l.url}
+                  </Txt>
+                  <Txt testID={`line-${l.index}-state`} style={{ color: l.state === "up" ? colors.brand : colors.inkMuted }}>
+                    {l.state}
+                  </Txt>
+                </View>
+                <Txt variant="small" muted selectable>
+                  {[
+                    l.state === "up" ? `last byte ${seconds(l.lastByteAgoMs)} ago` : "",
+                    `${l.reconnects} reconnects`,
+                    `${l.bytesIn} B in, ${l.bytesOut} B out`,
+                    l.lastReason ? `last: ${l.lastReason}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Txt>
+              </View>
             ),
           }))}
         />
-        {substrate.error() ? <Txt style={{ color: colors.danger }}>{`no substrate: ${substrate.error()}`}</Txt> : null}
+        <Facts
+          rows={[
+            {
+              label: "streams",
+              value: d.client.streams.length
+                ? d.client.streams.map((st) => `#${st.id} ${st.bytesIn} B in, ${st.bytesOut} B out, ${st.buffered} B buffered, credit ${st.sendCredit}`).join("\n")
+                : "none open",
+            },
+            ...(isWeb ? [{ label: "worker", value: worker ? JSON.stringify(worker) : "not controlling this page" }] : []),
+          ]}
+        />
+        <View style={styles.right}>
+          <Button kind="text" icon="content-copy" testID="copy-diagnostics" label="copy diagnostics" onPress={copy} />
+        </View>
       </ScrollView>
     </View>
   );
@@ -74,6 +161,7 @@ export function LinesScreen() {
 function ClientInfo({ report, done }: { report: string; done: (v: boolean) => void }) {
   const toast = useToast();
   const ask = useAsk();
+  const { push } = useNav();
   // A download says nothing until the server answers, which can take seconds: said here instead.
   const coming = () =>
     void ask<boolean>("downloading", (ok) => (
@@ -93,7 +181,17 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
           {report}
         </Txt>
       </View>
-      <View style={styles.right}>
+      <View style={styles.actions}>
+        <Button
+          kind="text"
+          icon="lan"
+          testID="open-lines"
+          label="lines"
+          onPress={() => {
+            done(true);
+            push("lines", "detail");
+          }}
+        />
         <Button
           kind="text"
           icon="content-copy"
@@ -196,6 +294,7 @@ const styles = StyleSheet.create({
   report: { backgroundColor: colors.hover, borderWidth: 1, borderColor: colors.line, borderRadius: 6, padding: 12 },
   reportText: { lineHeight: 19 },
   right: { alignItems: "flex-end", marginTop: 8 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: 12 },
   app: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
   download: { padding: 6 },

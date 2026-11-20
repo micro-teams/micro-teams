@@ -1,6 +1,6 @@
 /*
  * The web client's service worker: keeps the app on the device, and fetches what the browser
- * itself asks for over the substrate.
+ * itself asks for over the lines.
  *
  * Built by tool/build-worker.mjs into the web bundle as sw.js, with BUILD (the build's version)
  * filled in; registered by the loader (worker/loader.js), which on a first visit waits for it to
@@ -16,23 +16,34 @@
  * new worker activates — which, without skipWaiting, is only once no page is using the old one, so
  * nothing mid-load loses the files it was loading.
  *
- * How it fetches. The page dials the substrate for its own requests, but the document, the scripts,
- * the fonts and the images are fetched by the browser, and a service worker is the only place they
- * can be intercepted. Here they go over multipath's line router: it dials at once over this origin
- * and the lines kept from last time, asks /mt/lines for the current ones in the background, and
- * adds each new one to the dial in progress; it falls back to the network when no line is up within
- * three seconds or the substrate failed a request. The list it keeps outlives builds. Install
- * fetches the document over the router, so the lines are being dialled while the worker activates.
- * Whatever fails in here — the router itself, the cache — ends in the request being sent directly,
- * logged and counted, never in a failed answer the network could have given.
+ * How it fetches. The page holds its own MultiPath client for its own requests, but the document,
+ * the scripts, the fonts and the images are fetched by the browser, and a service worker is the
+ * only place they can be intercepted. Here they go over multipath's line router: its client dials
+ * at once over the lines kept from last time (the Cache Storage cache microteams-lines, which
+ * outlives builds), while the origin's current list (/multipath/v3/lines) is fetched and replaces
+ * it. A request goes to the network instead, logged with its reason and counted, when no session
+ * is live within three seconds of the worker's start, or, for a GET, when the lines fail it or have
+ * not begun to answer within 15 s (the first screen's script is megabytes). Install fetches the
+ * document over the router, so the lines are being dialled while the worker activates. Whatever
+ * fails in here — the router itself, the cache — ends in the request being sent directly, logged
+ * and counted, never in a failed answer the network could have given.
+ *
+ * Integrity. A file whose name carries its content's hash is checked against it as it streams in,
+ * and one that does not match is not kept and is fetched from the network from then on: the fonts
+ * the build moved under _expo/static/fonts/ carry a SHA-256 prefix (tool/build-worker.mjs), every
+ * other script, stylesheet and asset of the export an MD5 one (Expo's own naming). A name with an @
+ * (a scaled image, @2x) is left out: Expo names those after the hash of all of an image's scales
+ * together, not of the file.
  *
  * What it says about itself: a message { type: "stats" } is answered, on the port it came with,
- * with { build, lines, routed, direct } — the build, the lines known, and how many requests went
- * over the substrate and how many to the network. The lines panel and the web journey ask.
+ * with { build, routed, direct, fallbacks, client } — the build, how many requests went over the
+ * lines and how many to the network, the last fallbacks with their reasons, and the router's
+ * client stats (session, lines, streams). The lines panel and the web journey ask.
  *
  * What it leaves alone: anything but GET, other origins, /api/ and /mt/ (the page carries those
- * over its own substrate, and an API answer must never come from a cache), /downloads/ (installers
- * are not part of the app), /version and unregister.html (the way out must come from the network).
+ * over its own client, and an API answer must never come from a cache), /multipath/ (the line list
+ * the page's client fetches must be the origin's current one), /downloads/ (installers are not part
+ * of the app), /version and unregister.html (the way out must come from the network).
  */
 import { cacheLineStore, createLineRouter } from "@micro-teams/multipath";
 
@@ -46,38 +57,28 @@ const LINES = "microteams-lines";
 // either would hide a deploy.
 const DOCUMENT = [BASE, `${BASE}index.html`, `${BASE}files.json`];
 
-const asWebSocket = (origin: string) => origin.replace(/^http/, "ws");
 const counts = { routed: 0, direct: 0 };
+const fallbacks: { at: string; url: string; reason: string }[] = [];
 
 const router = createLineRouter({
-  seed: [asWebSocket(self.location.origin)],
+  entry: self.location.origin,
   store: cacheLineStore(LINES, new URL("__lines", self.location.href).href),
-  discover: async () => {
-    const res = await fetch("/mt/lines", { cache: "no-store" });
-    if (!res.ok) throw new Error(`/mt/lines answered ${res.status}`);
-    const body = (await res.json()) as { lines?: { url?: string }[] };
-    return (body.lines ?? []).flatMap((l) => {
-      try {
-        return [asWebSocket(l.url ? new URL(l.url).origin : self.location.origin)];
-      } catch {
-        return []; // a malformed entry costs redundancy, never the app
-      }
-    });
-  },
   fallbackAfterMs: 3000,
-  // As the page's substrate (src/transport/substrate.ts): a dead line noticed and replaced in
-  // seconds. The bound on a request is on its whole answer, and the first screen's script is
-  // megabytes: 15 s carries it over a line of a few Mbit/s, where 2.5 s would send it directly
-  // after most of it had arrived.
-  pingIntervalMs: 2000,
-  deadAfterMs: 5000,
-  maxDelayMs: 2000,
   requestTimeoutMs: 15000,
+  integrity: [
+    { pattern: /\/_expo\/static\/fonts\/[^/@]+\.([0-9a-f]{32})\.\w+$/, algorithm: "SHA-256" },
+    { pattern: /\/_expo\/static\/(?:js|css|assets)\/(?:[^/]+\/)*[^/@]+[-.]([0-9a-f]{32})\.\w+$/, algorithm: "MD5" },
+  ],
   fallback: (request) => {
     counts.direct += 1;
     return fetch(request);
   },
-  onLines: (lines) => console.log(`sw: lines ${lines.join(", ")}`),
+  onEvent: (e) => {
+    if (e.type !== "fallback") return;
+    fallbacks.push({ at: new Date().toISOString(), url: e.url, reason: e.reason });
+    fallbacks.splice(0, fallbacks.length - 20);
+  },
+  log: (m) => console.warn(`sw: ${m}`),
 });
 
 /** Worth keeping: a whole, successful answer. A cached failure repeats after the cause is fixed. */
@@ -115,7 +116,14 @@ function leftAlone(request: Request): boolean {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return true;
   const p = url.pathname;
-  return p.startsWith("/api/") || p.startsWith("/mt/") || p.startsWith("/downloads/") || p === "/version" || p === `${BASE}unregister.html`;
+  return (
+    p.startsWith("/api/") ||
+    p.startsWith("/mt/") ||
+    p.startsWith("/multipath/") ||
+    p.startsWith("/downloads/") ||
+    p === "/version" ||
+    p === `${BASE}unregister.html`
+  );
 }
 
 /** Over the line router; directly, logged and counted, when the router itself fails. */
@@ -144,7 +152,7 @@ async function keep(key: Request | string, response: Response): Promise<void> {
 
 self.addEventListener("message", (event) => {
   if ((event.data as { type?: string } | null)?.type !== "stats") return;
-  event.ports[0]?.postMessage({ build: __MT_BUILD__, lines: router.lines(), ...counts });
+  event.ports[0]?.postMessage({ build: __MT_BUILD__, ...counts, fallbacks, client: router.stats() });
 });
 
 async function networkFirst(request: Request, fallbackKey?: string): Promise<Response> {
