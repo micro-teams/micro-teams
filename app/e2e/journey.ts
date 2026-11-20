@@ -187,7 +187,8 @@ export async function outside(api: string, username: string, password: string) {
 
 /** A second viewer of a live screen over a plain WebSocket, acknowledging all it is sent. */
 function watch(api: string, token: string, sid: string, cols: number, rows: number): Promise<Viewer> {
-  const url = `${api.replace(/^http/, "ws")}/mt/machine/screen/${encodeURIComponent(sid)}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}`;
+  // outside=1: not the app's own socket, which carried.sh requires to ride the lines.
+  const url = `${api.replace(/^http/, "ws")}/mt/machine/screen/${encodeURIComponent(sid)}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}&outside=1`;
   const ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
   const v: Viewer = {
