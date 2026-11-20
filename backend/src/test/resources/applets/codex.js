@@ -202,7 +202,7 @@
   }
 
   // src/drivers/codex.ts
-  var OPERATOR_PROMPT = "__MT_OPERATOR_PROMPT__";
+  var operatorPrompt = host.watch("operatorPrompt");
   var sentOperatorPrompt = false;
   defineDriver({
     name: "codex",
@@ -232,9 +232,10 @@
       return tm ? { elapsed: tm[0].replace(/\s+/g, "") } : null;
     },
     beforeSay: (text) => {
-      if (sentOperatorPrompt || OPERATOR_PROMPT.slice(0, 5) === "__MT_") return text;
+      const prompt = operatorPrompt.get();
+      if (sentOperatorPrompt || !prompt) return text;
       sentOperatorPrompt = true;
-      return OPERATOR_PROMPT + "\n\n" + text;
+      return prompt + "\n\n" + text;
     },
     // Codex paints its session and usage limits for /status.
     commands: { usage: () => send("/status") }

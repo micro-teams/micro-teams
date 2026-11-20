@@ -257,15 +257,9 @@
     version: 16,
     gates: [
       {
-        // The folder-trust gate on a fresh cwd. Wording varies by version, and so does the SHAPE.
-        //
-        // It used to be answered with a bare Enter, on the belief that the default was the safe
-        // option. Newer Claude Code paints it as an unnumbered list with the cursor on "No, exit" —
-        // so that Enter quit Claude Code, and the pane died three seconds after launch. Every agent
-        // on a folder it had not been trusted with before was dead on arrival.
-        //
-        // So: pick by LABEL, never by position, in whichever shape this version uses. A bare Enter
-        // is left only for the shape that has no cursor to move at all.
+        // The folder-trust gate on a fresh directory. Its wording and shape vary by version, and the
+        // cursor can start on "No, exit", so it is answered by label; only a dialog with no cursor
+        // at all is answered with Enter.
         name: "folder trust",
         when: /I trust this folder|created or one you trust|Do you trust/i,
         every: 1,
@@ -359,11 +353,10 @@
       if (tk) out.tokens = tk[1];
       return out;
     },
-    // Keep Claude in bypass-permissions mode — the peer of what --dangerously-skip-permissions starts
-    // in, and the most permissive. It drifts out of it over time, and an older driver actively cycled
-    // it AWAY into auto mode. Bypass is in the Shift+Tab cycle, so hunt for it; only if a full cycle
-    // passes without it appearing (it can be disabled) settle for auto. Only act while a mode line is
-    // actually on screen, so a transient frame cannot cycle away from a good mode.
+    // Keep Claude Code in bypass-permissions mode, the mode --dangerously-skip-permissions starts in,
+    // which it can drift out of. Bypass is in the Shift+Tab cycle, so cycle until it shows; when a
+    // full cycle passes without it (it can be disabled), settle for auto. Act only while a mode line
+    // is on screen, so a transient frame cannot cycle away from a good mode.
     onIdle: (ctx) => {
       if (inLoginMode()) {
         const urlNow = capturedUrl || findOAuthUrl(ctx.screen);
@@ -387,10 +380,8 @@
       }
     },
     commands: {
-      // Answer the dialog currently on screen by option NUMBER, for a control plane relaying a
-      // person's click. Resolved to that option's label and then moved to relatively — the number
-      // says which option, never how many keys to press. (The old driver counted keystrokes from an
-      // imagined top of the list, which is the bug that made it press "No, exit".)
+      // Answer the dialog on screen by option number, for a control plane relaying a person's click:
+      // the number names the option, whose label is then moved to relatively.
       choose: (n) => {
         const want = parseInt(String(n), 10) || 1;
         const screen = host.term.read();
