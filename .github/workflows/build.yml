@@ -57,46 +57,6 @@ jobs:
           name: jar
           path: backend/target/*.jar
 
-  # The MultiPath origin of protocol 2 (/mt/link), kept for the clients built before protocol 3. It
-  # is the one thing in this repository built from GitHub Packages, which is why it carries the
-  # token plumbing. The protocol-3 server and client are Go, built in build-cli.
-  build-origin:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    defaults:
-      run:
-        working-directory: origin
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up JDK 21
-        uses: actions/setup-java@v6
-        with:
-          java-version: "21"
-          distribution: "temurin"
-          cache: "maven"
-          cache-dependency-path: origin/pom.xml
-          # Credentials for the `github` repository declared in origin/pom.xml, written to
-          # ~/.m2/settings.xml — where Maven looks on its own, so `./mvnw package` stays `./mvnw
-          # package`.
-          server-id: github
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_TOKEN
-
-      - name: Build the origin
-        run: ./mvnw package
-        env:
-          MAVEN_USERNAME: ${{ github.actor }}
-          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload the origin jar
-        uses: actions/upload-artifact@v7
-        with:
-          retention-days: 1
-          name: origin-jar
-          path: origin/target/origin-*.jar
-
   # The backend's own tests. They are integration tests — every one of them talks to a real Postgres
   # and the real cheese-auth service — so they bring their dependencies up themselves rather than
   # borrowing the packaging job's runner. What belongs here is what has no picture in the product
@@ -374,7 +334,7 @@ jobs:
           path: dist/linux-${{ matrix.arch }}
 
   package-zip:
-    needs: [build-jar, build-origin, build-app, build-android, build-applet, build-cli, build-tmux]
+    needs: [build-jar, build-app, build-android, build-applet, build-cli, build-tmux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -388,7 +348,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE=microteams-deploy
-          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/origin" "$STAGE/multipath"
+          mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/multipath"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
           cp -r deploy/init "$STAGE/"
           # Ship the JPA-generated schema at the bundle root. The stack still creates/updates its own
@@ -398,7 +358,6 @@ jobs:
           # migration an upgrade needs. Committed in-repo (CI verifies it matches the entities).
           cp backend/CREATE.sql "$STAGE/CREATE.sql"
           cp artifacts/jar/*.jar "$STAGE/backend/backend.jar"
-          cp artifacts/origin-jar/origin-*.jar "$STAGE/origin/origin.jar"
           # The multipath server; its line list (multipath/lines.json) is the deployment's own and
           # never shipped.
           cp artifacts/cli-binaries/multipath-server-linux-amd64 "$STAGE/multipath/multipath-server"
@@ -635,8 +594,9 @@ jobs:
           # "isn't responding" dialog then covers the app the journey is driving: hidden here.
           # The app reaches the stack's three lines under the names every client uses
           # (http://localhost, :8081, :8082); adbd as root may forward port 80. When the journey is
-          # over the app is stopped, so the server's counters can settle.
-          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1)) && adb shell am force-stop app.microteams.microteams
+          # over, the app must have dialled the stack's lines alone (stayed-local.sh), and it is
+          # stopped so the server's counters can settle.
+          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1)) && bash stayed-local.sh ../../microteams-deploy/multipath/lines.json && adb shell am force-stop app.microteams.microteams
       - name: The app's and the machine's requests went over the lines
         run: bash app/e2e/carried.sh
       - name: Every client gone, the multipath server holds nothing
@@ -648,7 +608,7 @@ jobs:
         run: |
           tail -60 appium.log 2>/dev/null || true
           bash app/e2e/machine.sh logs
-          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend multipath origin
+          cd microteams-deploy && docker compose -p e2e logs --no-color --tail 80 cheese-auth backend multipath
           docker logs --tail 40 e2e-lines
       - if: failure()
         uses: actions/upload-artifact@v7

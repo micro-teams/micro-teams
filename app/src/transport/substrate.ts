@@ -2,11 +2,12 @@
  * The substrate: one MultiPath session (protocol 3) to the server, carried over every line the
  * deployment publishes, with each HTTP exchange and each WebSocket a stream of it.
  *
- * new Substrate(origin) — starts the client at once. The line list comes from the origin
- *   (/multipath/v3/lines) and replaces the one kept from last time, which is dialled while the
- *   fresh one is fetched, so a slow origin delays nothing when a line works. On React Native each
- *   answer is read whole and none is compressed: the platform has neither a streaming Response nor
- *   DecompressionStream.
+ * new Substrate(origin, dial) — starts the client at once when dial is true, otherwise on start()
+ *   or the first request. The line list comes from the origin (/multipath/v3/lines) and replaces
+ *   the one kept from last time, which is dialled while the fresh one is fetched, so a slow origin
+ *   delays nothing when a line works. On React Native each answer is read whole and none is
+ *   compressed: the platform has neither a streaming Response nor DecompressionStream.
+ * substrate.start() — starts the client if it has not started; for a server somebody just chose.
  * substrate.fetch(input, init) — fetch() over the lines. It goes to the network instead, logged
  *   with the reason and counted, when no session is live (waiting for one at most FALLBACK_AFTER
  *   after the start, and again whenever a session ended less than REPLACING ago, since its
@@ -19,9 +20,10 @@
  * substrate.diagnostics() → Diagnostics — everything the lines panel shows and copies: the client's
  *   stats (session, every line, every stream), the fallbacks with their reasons, and the latest
  *   events (lines up and down, sessions started and ended).
- * substrate.close() — says goodbye to the server; for a Connection being replaced.
+ * substrate.close() — says goodbye to the server, if the client started; for a Connection being
+ *   replaced.
  *
- * Example: const s = new Substrate(origin); const res = await s.fetch(`${origin}/mt/chat`);
+ * Example: const s = new Substrate(origin, true); const res = await s.fetch(`${origin}/mt/chat`);
  *
  * Everything the app fetches goes through here except two kinds, each for a reason: the calls to
  * cheese-auth (api/auth.ts) — signing in rides the httpOnly refresh cookie, which a browser attaches
@@ -68,23 +70,32 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | "late"> {
   });
 }
 
+type Started = { client: Client; router: LineRouter };
+
 export class Substrate {
-  private readonly client: Client;
-  private readonly router: LineRouter;
+  private started: Started | null = null;
   private readonly fallbacks: Diagnostics["fallbacks"] = { count: 0, recent: [] };
   private readonly events: Diagnostics["events"] = [];
   private endedAt = 0;
 
-  constructor(private readonly origin: string) {
-    const key = `multipath-lines:${origin}`;
+  constructor(
+    private readonly origin: string,
+    dial: boolean,
+  ) {
+    if (dial) this.start();
+  }
+
+  start(): Started {
+    if (this.started) return this.started;
+    const key = `multipath-lines:${this.origin}`;
     const onEvent = (event: ClientEvent) => {
       if (event.type === "fallback") return this.fellBack(event.url, event.reason);
       if (event.type === "session-end") this.endedAt = Date.now();
       this.events.push({ at: new Date().toISOString(), event });
       this.events.splice(0, this.events.length - KEPT);
     };
-    this.client = new Client({
-      entry: origin,
+    const client = new Client({
+      entry: this.origin,
       store: {
         load: async () => storage.getJson<Line[]>(key) ?? [],
         save: async (lines) => storage.setJson(key, lines),
@@ -93,14 +104,16 @@ export class Substrate {
       buffered: native,
       onEvent,
     });
-    this.router = createLineRouter({
-      entry: origin,
-      client: this.client,
+    const router = createLineRouter({
+      entry: this.origin,
+      client,
       fallbackAfterMs: FALLBACK_AFTER,
       requestTimeoutMs: REQUEST_WAIT,
       onEvent,
       log: (m) => console.warn(`multipath: ${m}`),
     });
+    this.started = { client, router };
+    return this.started;
   }
 
   private fellBack(url: string, reason: string) {
@@ -111,11 +124,13 @@ export class Substrate {
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request && !init ? input : new Request(input, init);
-    if (Date.now() - this.endedAt < REPLACING) await this.client.live(FALLBACK_AFTER);
-    return this.router.fetch(request);
+    const { client, router } = this.start();
+    if (Date.now() - this.endedAt < REPLACING) await client.live(FALLBACK_AFTER);
+    return router.fetch(request);
   };
 
   openSocket = (path: string): Wire => {
+    const { client } = this.start();
     let inner: Inner | null = null;
     let dropped = false;
     const wire: Wire = {
@@ -150,8 +165,8 @@ export class Substrate {
       attach(ws as unknown as Inner, false);
     };
     void (async () => {
-      if (!(await this.client.live(FALLBACK_AFTER))) return direct(`no live session within ${FALLBACK_AFTER} ms`);
-      const opening = this.client.openWebSocket(path);
+      if (!(await client.live(FALLBACK_AFTER))) return direct(`no live session within ${FALLBACK_AFTER} ms`);
+      const opening = client.openWebSocket(path);
       try {
         const ws = await within(opening, REQUEST_WAIT);
         if (ws === "late") {
@@ -171,13 +186,13 @@ export class Substrate {
     return {
       origin: this.origin,
       at: new Date().toISOString(),
-      client: this.client.stats(),
+      client: this.start().client.stats(),
       fallbacks: { count: this.fallbacks.count, recent: [...this.fallbacks.recent] },
       events: [...this.events],
     };
   }
 
   close() {
-    void this.client.close();
+    if (this.started) void this.started.client.close();
   }
 }

@@ -37,17 +37,9 @@
 
     <dependencies>
         <!--
-          No MultiPath dependency, on purpose.
-
-          Until 0.1.6 this carried `multipath-spring-boot-starter`, a servlet filter that
-          de-duplicated writes arriving twice by `Idempotency-Key`. From 0.2.0 there is nothing to
-          add: the substrate's redundant layer delivers every byte exactly once, and the origin —
-          a separate process in front of this one — splices a normal stream to this application on
-          loopback. The application is an ordinary server that never learns a line existed, which
-          is the whole point of the new architecture.
-
-          What stays ours: `application.multipath.lines`, served at /mt/lines, because WHICH routes
-          exist is deployment configuration and the clients ask us for it.
+          No MultiPath dependency, on purpose: the multipath server, a separate process, ends every
+          line and splices each stream into nginx, so this application is an ordinary server that
+          never learns a line existed. The line list belongs to the deployment (multipath/lines.json).
         -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

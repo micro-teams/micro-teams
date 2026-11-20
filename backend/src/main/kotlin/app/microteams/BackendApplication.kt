@@ -9,7 +9,6 @@
 
 package app.microteams
 
-import app.microteams.transport.LineRegistryProperties
 import org.rucca.cheese.common.config.ApplicationConfig
 import org.slf4j.LoggerFactory
 import org.springframework.boot.SpringApplication
@@ -44,7 +43,7 @@ import org.springframework.scheduling.annotation.EnableScheduling
             ),
         ],
 )
-@EnableConfigurationProperties(ApplicationConfig::class, LineRegistryProperties::class)
+@EnableConfigurationProperties(ApplicationConfig::class)
 @EnableScheduling
 class BackendApplication(private val applicationConfig: ApplicationConfig) {
     @Bean

@@ -104,7 +104,8 @@ the web leg is:
 The journey breaks the lines on the way (a dead one and a slow one, then a restart of the multipath
 server) and prints how long each client took to notice and recover. The Android leg is the same
 with an emulator, `adb root` and `adb reverse tcp:P tcp:P` for ports 80, 8081 and 8082, and
-`npx tsx run.ts android http://localhost`.
+`npx tsx run.ts android http://localhost`, then `bash e2e/stayed-local.sh <bundle>/multipath/lines.json`:
+the app dialled no line but the stack's (the default server is dialled only once somebody uses it).
 
 ## Things worth knowing before changing something
 

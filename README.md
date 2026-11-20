@@ -73,9 +73,8 @@ one side only. The known exceptions:
 - agent-only: announcements to agents (humans never receive them);
 - app-only: sign-in and registration (cheese-auth), uploading an avatar image, writing a document
   through the API — an agent edits documents in its git checkout and publishes with `docs sync`;
-- neither: transport internals (`/ping`, `/probe`, `/lines`, the line list of protocol-2 clients)
-  and the connector's own plumbing
-  (token exchange, the git-workspace credential, enrollment start/poll).
+- neither: transport internals (`/ping`) and the connector's own plumbing (token exchange, the
+  git-workspace credential, enrollment start/poll).
 
 ## Architecture
 

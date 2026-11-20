@@ -7,8 +7,8 @@ from a registry, and every image is pinned by digest so a deploy is reproducible
 ## What's in here
 
 ```
-docker-compose.yml     the six services (nginx, multipath, origin, backend, cheese-auth, postgres)
-nginx.conf             the domain-independent gateway (SPA + /api + /mt + /multipath/v3/ + /mt/link)
+docker-compose.yml     the five services (nginx, multipath, backend, cheese-auth, postgres)
+nginx.conf             the domain-independent gateway (SPA + /api + /mt + /multipath/v3/)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
@@ -18,8 +18,6 @@ multipath/             multipath-server (shipped, linux/amd64), the far end of e
                        back into nginx, so a request that arrived over a line lands exactly where
                        the same request over plain HTTP lands. Also lines.json, the deployment's
                        own line list (NOT shipped: gen-env.sh writes a first one; see "Lines")
-origin/origin.jar      the MultiPath origin of protocol 2 at /mt/link, for clients built before
-                       protocol 3, until they have all moved
 frontend/dist/         the marketing site at /, the built web client under /app/ (static,
                        domain-independent), /version, and the installable clients under /downloads/
 applets/               cli.js + claude.js (mounted into the backend, swappable)
@@ -364,27 +362,19 @@ backend is being recreated keeps an address that no longer exists, and every `/m
 fails with 502 until the next reload. So, after an upgrade: `docker compose up -d`, wait until
 `docker compose ps` shows every service healthy, then
 `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload`. (The multipath
-and origin upstreams are looked up at request time and are not affected.)
+upstream is looked up at request time and is not affected.)
 
-## The servers, and why nothing may be deployed on its own
+## The multipath server, and why nothing may be deployed on its own
 
-The `multipath` service is the server end of MultiPath protocol 3: clients bring up one session
-carried over every published line at once, and it terminates that, demultiplexes it, and splices
-each stream back into nginx. The `origin` service does the same for protocol 2 at `/mt/link`, for
-clients built before protocol 3; both run side by side until every client has moved.
+The `multipath` service is the server end of MultiPath: clients bring up one session carried over
+every published line at once, and it terminates that, demultiplexes it, and splices each stream back
+into nginx.
 
-**The whole bundle goes out together — the origin, the backend and all three clients.** This is not
-a preference, and neither half of it is safe on its own:
+**The whole bundle goes out together — the multipath server, the backend and all three clients.** A
+client reaches the deployment only through the multipath server, so a client deployed before the
+server it was built for has nothing at the other end of a line.
 
-- **The backend must not go first.** A client built before the substrate sends an `Idempotency-Key`
-  with every write and relies on the server recognising a repeat. The server side of that is gone,
-  because the substrate delivers each byte exactly once and there is nothing left to de-duplicate.
-  Deploy the backend alone and a write retried on a bad network is executed twice, silently.
-- **A client must not go first either.** A client built for protocol 3 reaches the deployment
-  through the multipath server, and before it is running there is nothing at the other end of a
-  line.
-
-Note what does NOT go away with the transport-level de-duplication: a write that was executed and
+The transport delivers every byte of a live session exactly once, but a write that was executed and
 whose answer was lost — the connection died before the response came back — is still a write the
 client may send again, and that is an application-level fact no transport can settle. Sending a
 message carries a `clientToken` for exactly this reason and the server de-duplicates on it. Anything

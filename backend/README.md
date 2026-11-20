@@ -49,7 +49,6 @@ team/       TeamController       membership/ documents/ machine/
 machine/    MachineController    enrollment/ link/ screen/   (+ MachineWebSocketConfig: raw WS)
 agent/      AgentController      screen/ driver/             (+ AgentAppletController, see §1)
 updates/    UpdatesWebSocketConfig   synced queries pushed to clients (map/ holds one file per topic)
-transport/  TransportController  the line registry (/lines) and /probe
 connector/  ConnectorController  install.sh and the connector binaries, at the origin root
 ops/        the operator surface, on the management port only
 user/       read-only mirrors of cheese-auth's tables + RolePermissionService (§5)
