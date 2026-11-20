@@ -3,7 +3,8 @@
  *
  * <TerminalView ref onMessage style /> — draws a terminal in style's box, at the size it is given,
  *   centred. onMessage gets what the terminal says (page.ts's FromTerminal: its room, keys,
- *   rendered bytes, text to copy).
+ *   rendered bytes, text to copy, focus), and { type: "lost" } when what was drawn is gone (on a
+ *   phone, Android ended the page's renderer and a new page stands in): draw it all again.
  *
  * TerminalViewHandle — the ref: write(bytes) puts screen bytes on it, size(cols, rows) sets its size
  *   after what was written before, reset() clears it for a new stream, focus(on) takes or gives up
@@ -22,7 +23,13 @@
  * input method's composition, Chinese among it, is the WebView's as usual). TerminalView.web.tsx
  * is the web half.
  */
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import type { ComponentType, Ref } from "react";
 import {
   StyleSheet,
@@ -45,7 +52,7 @@ export interface TerminalViewHandle {
 }
 
 export interface TerminalViewProps {
-  onMessage: (m: FromTerminal) => void;
+  onMessage: (m: FromTerminal | { type: "lost" }) => void;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -70,6 +77,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       born.current = Date.now();
     }, []);
     const ready = useRef(false);
+    // A new page after Android ended the last one's renderer.
+    const [page, setPage] = useState(0);
+    const lost = useRef(false);
     const queued = useRef<string[]>([]);
     const send = (m: ToPage) => {
       const text = JSON.stringify(m);
@@ -99,6 +109,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           }}
         />
         <Web
+          key={page}
           ref={web}
           testID="terminal"
           style={styles.web}
@@ -109,6 +120,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           overScrollMode="never"
           keyboardDisplayRequiresUserAction={false}
           hideKeyboardAccessoryView
+          // Android may end a WebView's renderer (memory, a crash); unhandled, that ends the app.
+          // The terminal is drawn again on a new page, and whoever draws on it is told so.
+          onRenderProcessGone={(e) => {
+            console.error(
+              `terminal: the WebView's renderer ended (crashed: ${e.nativeEvent.didCrash}); a new page`,
+            );
+            ready.current = false;
+            queued.current = [];
+            lost.current = true;
+            setPage((n) => n + 1);
+          }}
           onMessage={(e) => {
             const m = JSON.parse(e.nativeEvent.data) as
               FromTerminal | { type: "ready" };
@@ -117,6 +139,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
               ready.current = true;
               for (const t of queued.current.splice(0))
                 web.current?.postMessage(t);
+              if (lost.current) {
+                lost.current = false;
+                onMessage({ type: "lost" });
+              }
               return;
             }
             onMessage(m);

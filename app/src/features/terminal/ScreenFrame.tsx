@@ -186,6 +186,8 @@ export function ScreenFrame() {
               else if (m.type === "rendered") screen.rendered(m.n);
               else if (m.type === "copy") void toClipboard(m.text);
               else if (m.type === "focus") setFocused(m.on);
+              // A new terminal, empty: a new connection paints it whole.
+              else if (m.type === "lost") screen.retry();
               else if (m.type === "room") {
                 step("terminal");
                 screen.room(m.cols, m.rows);
