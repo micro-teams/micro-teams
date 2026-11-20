@@ -622,8 +622,9 @@ jobs:
           # The app reaches the stack's three lines under the names every client uses
           # (http://localhost, :8081, :8082); adbd as root may forward port 80. When the journey is
           # over, the app must have dialled the stack's lines alone (stayed-local.sh), and it is
-          # stopped so the server's counters can settle.
-          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1)) && bash stayed-local.sh ../../microteams-deploy/multipath/lines.json && adb shell am force-stop app.microteams.microteams
+          # stopped so the server's counters can settle. A failed journey prints the app's log, and
+          # why Android ended its process if it did (a crash, a killed WebView renderer).
+          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; adb logcat -d -s AndroidRuntime:E ActivityManager:I chromium:E DEBUG:F | grep -iE 'app.microteams|died|crash|fatal|renderer' | tail -80; exit 1)) && bash stayed-local.sh ../../microteams-deploy/multipath/lines.json && adb shell am force-stop app.microteams.microteams
       - name: The app's and the machine's requests went over the lines
         run: bash app/e2e/carried.sh
       - name: Every client gone, the multipath server holds nothing
