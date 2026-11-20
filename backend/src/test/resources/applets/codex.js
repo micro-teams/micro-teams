@@ -21,7 +21,15 @@
   var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
 
   // src/engine/host.ts
-  var host = globalThis.connector;
+  var raw = globalThis.connector;
+  var host = __spreadProps(__spreadValues({}, raw), {
+    term: {
+      read: () => raw.term.read(),
+      onChange: (fn) => raw.term.onChange(fn),
+      write: (data) => raw.term.write(data) !== false,
+      hold: (on) => raw.term.hold ? raw.term.hold(on) : true
+    }
+  });
 
   // src/engine/keys.ts
   var ESC = "\x1B";
