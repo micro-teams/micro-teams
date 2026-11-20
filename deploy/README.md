@@ -7,22 +7,25 @@ from a registry, and every image is pinned by digest so a deploy is reproducible
 ## What's in here
 
 ```
-docker-compose.yml     the five services (nginx, origin, backend, cheese-auth, postgres)
-nginx.conf             the domain-independent gateway (SPA + /api + /mt + /mt/link)
+docker-compose.yml     the six services (nginx, multipath, origin, backend, cheese-auth, postgres)
+nginx.conf             the domain-independent gateway (SPA + /api + /mt + /multipath/v3/ + /mt/link)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
-origin/origin.jar      the MultiPath origin: the server end of the substrate. Clients bring up one
-                       redundant stream over every published line at once and it terminates them,
-                       splicing each exchange back into nginx — so a request that arrived over a
-                       line lands exactly where the same request over plain HTTP lands. Nothing
-                       else in the stack knows more than one path to it exists.
+multipath/             multipath-server (shipped, linux/amd64), the far end of every line: clients
+                       bring up one session over every line at once and it splices each stream
+                       back into nginx, so a request that arrived over a line lands exactly where
+                       the same request over plain HTTP lands. Also lines.json, the deployment's
+                       own line list (NOT shipped: gen-env.sh writes a first one; see "Lines")
+origin/origin.jar      the MultiPath origin of protocol 2 at /mt/link, for clients built before
+                       protocol 3, until they have all moved
 frontend/dist/         the marketing site at /, the built web client under /app/ (static,
                        domain-independent), /version, and the installable clients under /downloads/
 applets/               cli.js + claude.js (mounted into the backend, swappable)
 connector/             the CLI distribution served to fresh machines: per-target dirs each
-                       holding the `microteams` binary + a static `tmux` (Linux only — see below)
+                       holding the `microteams` binary, the `multipath-client` it runs, and a
+                       static `tmux` (Linux only — see below)
 app_data/              NOT shipped — gen-env.sh creates it; all persistent state lives here (see below)
 ```
 
@@ -54,10 +57,10 @@ The binaries it downloads (`GET /connector/latest/<os>-<arch>/{microteams,tmux}`
 top-level `connector/` directory, which CI populates in the bundle:
 
 ```
-connector/linux-amd64/{microteams,tmux}
-connector/linux-arm64/{microteams,tmux}
-connector/darwin-amd64/microteams      # macOS static tmux is not published —
-connector/darwin-arm64/microteams      # install.sh copies the machine's own tmux
+connector/linux-amd64/{microteams,multipath-client,tmux}
+connector/linux-arm64/{microteams,multipath-client,tmux}
+connector/darwin-amd64/{microteams,multipath-client}   # macOS static tmux is not published —
+connector/darwin-arm64/{microteams,multipath-client}   # install.sh copies the machine's own tmux
 ```
 
 It is bind-mounted read-only into the backend at `/app/connector` (the default
@@ -69,13 +72,16 @@ self-update via `microteams update`.
 ## Deploy
 
 ```bash
-bash gen-env.sh         # once: writes .env (random secrets + config placeholders) and app_data/
+MULTIPATH_ORIGIN=https://<your-domain> bash gen-env.sh
+                        # once: writes .env (random secrets + config placeholders), app_data/
+                        # and multipath/lines.json (one line: your public origin; see "Lines")
 # --> now edit .env: fill in the EMAIL_SMTP_* values (see "Email" below)
+chmod +x multipath/multipath-server   # a downloaded bundle zip does not keep the executable bit
 docker compose up -d
 docker compose ps       # wait until every service shows "healthy"
 ```
 
-That's it. When all four services are healthy the stack is up, listening on **port 80**.
+That's it. When all six services are healthy the stack is up, listening on **port 80**.
 
 Nothing else is required to run this. If you also want to be able to see which machines are out
 there and what build each is running — and to push one of them an update — see
@@ -289,12 +295,83 @@ for the first time. That is a one-time bootstrap, not a permanent state.
 Back up `app_data/` and `.env` together — `.env` holds the secrets that decrypt nothing but
 authorize everything, and losing the JWT secret logs everyone out.
 
-## The origin, and why nothing may be deployed on its own
+## Lines (MultiPath)
 
-The `origin` service is the server end of the MultiPath substrate: clients bring up one redundant
-stream carried over every published line at once, and it terminates that, demultiplexes it, and
-splices each exchange back into nginx. Nothing else in the stack knows more than one path to it
-exists.
+A line is one network path from clients to this host: the public origin through its CDN, a direct
+DNS name, a tunnel. Clients (the web app, its service worker, the Android app, every machine's
+`multipath-client`) fetch the list from `<origin>/multipath/v3/lines`, dial every line's
+`/multipath/v3/link` at once and send every byte over all of them, so a dying line costs nothing as
+long as one works. The list is `multipath/lines.json`, served as it is by the multipath server
+(read on every request, so no restart is needed):
+
+```json
+{"lines": [
+  {"id": "origin", "url": "https://teams.example"},
+  {"id": "direct", "url": "https://direct.mt.teams.example:8443"}
+]}
+```
+
+Rules, enforced by the server (it refuses to start, and the line list answers 500, when the file
+breaks them) and by the clients:
+
+- Every `url` is a bare origin: scheme, host, optional port, no path and no trailing slash; ids are
+  unique and non-empty; at most 8 lines are used (the server's `-max-links`).
+- An `https` entry accepts only `https` lines.
+- Browsers accept only lines on the site they were loaded from: the entry's host or its subdomains
+  (`direct.mt.teams.example` for `teams.example`). The first line is normally the public origin
+  itself.
+- A client that loads the app from a host the list does not cover refuses the list, logs why, and
+  uses the network the ordinary way.
+
+To add a line:
+
+1. Make the path reach nginx on this host: a DNS record, a port mapping, a tunnel (frp, for example)
+   to the plain (`:80`) or the TLS server block. A TLS block must carry the same
+   `location /multipath/v3/` as `nginx.conf` (see "TLS in front", below).
+2. Check it on its own before publishing it:
+   `curl -fsS https://<line>/multipath/v3/lines` must print the current list, and
+   `curl -si -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://<line>/multipath/v3/link`
+   must answer `101 Switching Protocols`.
+3. Add it to `multipath/lines.json` (edit in place or replace the file: the directory is mounted, so
+   both are seen). Check: `curl -fsS https://<origin>/multipath/v3/lines`.
+4. Running clients pick it up within ten minutes (their refresh) or with their next session; a
+   machine at once with `microteams link retest`. Removing a line works the same way: clients
+   close its links once another line is up.
+
+Each client shows its lines: the web and Android apps under *me → version → lines* (with a button
+that copies every diagnostic as JSON), a machine in `microteams status`. The server logs every
+session, link and REJECT, and every minute a counters line
+(`docker compose logs multipath | grep status:`); the same counters are JSON on its status port,
+`docker compose exec multipath wget -qO- 127.0.0.1:9101`.
+
+PROXY protocol (the client's address passed on to nginx) is not enabled: nginx takes the header
+only on a listener of its own, so it would need a second server block with every location of this
+one. Until then nginx sees the multipath container as the address of every request that came over
+a line, and the client's address is in the multipath server's log.
+
+## TLS in front, and the order of a reload
+
+The bundle's `nginx.conf` is the plain server block on port 80. A deployment that terminates TLS in
+this nginx as well (for lines that reach the host directly) has its own copy of the server block for
+`:443` (on the production host, a hand-kept `nginx-tls.conf` mounted by
+`docker-compose.override.yml`). That copy must carry every location this file has — in particular
+`location /multipath/v3/`, the `log_format`/`access_log` and the `gzip` settings — and has to be
+brought in step by hand whenever `nginx.conf` changes.
+
+nginx resolves the literal upstream names (`backend`, `cheese-auth`) once, when it loads its
+configuration. **Reload nginx only after the containers it proxies to are up**: a reload while the
+backend is being recreated keeps an address that no longer exists, and every `/mt/` request then
+fails with 502 until the next reload. So, after an upgrade: `docker compose up -d`, wait until
+`docker compose ps` shows every service healthy, then
+`docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload`. (The multipath
+and origin upstreams are looked up at request time and are not affected.)
+
+## The servers, and why nothing may be deployed on its own
+
+The `multipath` service is the server end of MultiPath protocol 3: clients bring up one session
+carried over every published line at once, and it terminates that, demultiplexes it, and splices
+each stream back into nginx. The `origin` service does the same for protocol 2 at `/mt/link`, for
+clients built before protocol 3; both run side by side until every client has moved.
 
 **The whole bundle goes out together — the origin, the backend and all three clients.** This is not
 a preference, and neither half of it is safe on its own:
@@ -303,8 +380,9 @@ a preference, and neither half of it is safe on its own:
   with every write and relies on the server recognising a repeat. The server side of that is gone,
   because the substrate delivers each byte exactly once and there is nothing left to de-duplicate.
   Deploy the backend alone and a write retried on a bad network is executed twice, silently.
-- **A client must not go first either.** A client built for the substrate reaches the deployment
-  through the origin, and before the origin is running there is nothing at the other end of a line.
+- **A client must not go first either.** A client built for protocol 3 reaches the deployment
+  through the multipath server, and before it is running there is nothing at the other end of a
+  line.
 
 Note what does NOT go away with the transport-level de-duplication: a write that was executed and
 whose answer was lost — the connection died before the response came back — is still a write the
@@ -323,6 +401,11 @@ network.
   container and recreate it: the mount follows the original inode, so the container keeps serving
   the deleted one and you get `403 directory index forbidden` / `500` until you restart the
   container. In-place replacement needs no restart; the jar does (`docker compose restart backend`).
+  The multipath server is the exception to "in place": a running executable cannot be overwritten
+  (`Text file busy`), so copy the new one beside it and rename it over the old
+  (`cp new/multipath/multipath-server multipath/.new && chmod +x multipath/.new && mv multipath/.new multipath/multipath-server`),
+  then `docker compose restart multipath`. Every client notices within a second and starts a new
+  session within two; `lines.json` is never part of a bundle and stays as it is.
 - **Schema reference (`CREATE.sql`).** The bundle root carries the full table structure this build
   expects, generated from the backend's JPA entities. It is **not applied on deploy** — the backend
   manages its own tables (`ddl-auto=update` creates and adds, but never drops or rewrites). It's here
