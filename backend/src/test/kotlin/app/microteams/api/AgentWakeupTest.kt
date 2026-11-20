@@ -512,6 +512,43 @@ constructor(
         viewer.get(5, TimeUnit.SECONDS).close()
     }
 
+    /**
+     * A program that dies while a person stays on its screen is not restarted under them: it is
+     * woken by the next message or the next opening, as on any other screen.
+     */
+    @Test
+    @Order(8)
+    fun aDeathUnderAViewerWhoStaysWakesNothing() {
+        val (watchedSid, _) = openAgent("Kit")
+        send(
+            """{"t":"rpc.call","sid":"$watchedSid","id":"c8","name":"screenReady",""" +
+                """"args":[{"driver":"claude"}]}""",
+        )
+        awaitTrue("the screen must be live") {
+            machineHub.screen(watchedSid)!!.state == ScreenState.LIVE
+        }
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI(
+                        "ws://localhost:$port/machine/screen/$watchedSid?token=$humanToken&cols=90&rows=30",
+                    ),
+                )
+                .get(5, TimeUnit.SECONDS)
+        awaitFrameFor("screen.subscribe", watchedSid)
+
+        send(
+            """{"t":"session.error","sid":"$watchedSid","error":"the screen's tmux session ended"}""",
+        )
+        awaitTrue("the screen must be dead") {
+            machineHub.screen(watchedSid)!!.state == ScreenState.DEAD
+        }
+        assertTrue(noFrame("session.close", 2000), "a death under a viewer must not respawn")
+        viewer.close()
+    }
+
     /** Open one more agent on the fake machine and return its screen id and user id. */
     private fun openAgent(nickname: String): Pair<String, IdType> {
         val res =

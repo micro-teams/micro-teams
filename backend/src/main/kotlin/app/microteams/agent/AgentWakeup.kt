@@ -112,6 +112,13 @@ class AgentWakeup(
     /** What each agent still owes, oldest first. */
     private val outstanding = ConcurrentHashMap<IdType, MutableList<Say>>()
 
+    /**
+     * Agents whose screen a person opening it has just asked the machine about (an adopt of a
+     * screen this server had forgotten): the death that answer may report is a death somebody is
+     * waiting to see mended.
+     */
+    private val askedByViewer: MutableSet<IdType> = ConcurrentHashMap.newKeySet()
+
     private val attempts = ConcurrentHashMap<IdType, WakeAttempts>()
 
     private class WakeAttempts {
@@ -142,7 +149,10 @@ class AgentWakeup(
                     val agent = agentRegistry.bySid(screen.sid) ?: return
                     when (screen.state) {
                         // Back up and being driven: say everything that piled up while it was down.
-                        ScreenState.LIVE -> deliver(agent)
+                        ScreenState.LIVE -> {
+                            askedByViewer.remove(agent.userId)
+                            deliver(agent)
+                        }
                         ScreenState.DEAD -> {
                             logger.info(
                                 "agent {} died on screen {}: {}",
@@ -297,8 +307,10 @@ class AgentWakeup(
     }
 
     /**
-     * A death is worth a wake when somebody needs the agent: a message waits for it, or a person is
-     * watching its screen. A keepalive owed to a dead program is pointless and is dropped.
+     * A death is worth a wake when somebody needs the agent: a message waits for it, or a person
+     * opening its screen asked about it. A person who merely stays on a screen whose program dies
+     * sees it dead until a message or the next opening wakes it. A keepalive owed to a dead program
+     * is pointless and is dropped.
      */
     private fun onDeath(agent: ScreenAgent) {
         val q = outstanding[agent.userId]
@@ -308,8 +320,8 @@ class AgentWakeup(
                     q.removeAll { it.messageId == null }
                     q.isNotEmpty()
                 }
-        val watched = hub.screen(agent.sid)?.viewers?.isNotEmpty() == true
-        if (waiting || watched) ensureAwake(agent.userId)
+        val asked = askedByViewer.remove(agent.userId)
+        if (waiting || asked) ensureAwake(agent.userId)
     }
 
     /** Called holding the agent's queue, after removing [say] from it. */
@@ -396,6 +408,7 @@ class AgentWakeup(
         // adopt makes the machine report a session that is gone (session.error), without waiting.
         val driver = agentScreens.getObject().driverOf(row)
         if (!known && driver != null && hub.isOnline(row.machineId)) {
+            askedByViewer.add(row.agentUserId)
             hub.readoptScreen(
                 machineId = row.machineId,
                 sid = row.sid,
@@ -482,6 +495,7 @@ class AgentWakeup(
     fun forget(agentUserId: IdType) {
         failAll(agentUserId, "the agent was closed")
         outstanding.remove(agentUserId)
+        askedByViewer.remove(agentUserId)
         attempts.remove(agentUserId)
         locks.remove(agentUserId)
     }
