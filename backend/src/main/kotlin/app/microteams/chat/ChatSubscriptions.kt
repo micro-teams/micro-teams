@@ -31,7 +31,17 @@ interface ChatSubscriber {
     /** The user it subscribes as. It is told a message only where this user is a member. */
     val userId: IdType
 
-    fun onMessage(threadId: IdType, senderId: IdType, speaker: String, content: String)
+    /**
+     * [messageId] names the message, so a subscriber that learns it could not take it can say so
+     * with MessageService.markUndelivered.
+     */
+    fun onMessage(
+        threadId: IdType,
+        messageId: IdType,
+        senderId: IdType,
+        speaker: String,
+        content: String,
+    )
 }
 
 @Component
@@ -58,14 +68,14 @@ class ChatSubscriptions(
     fun onMessagePosted(event: MessagePostedEvent) {
         if (subscribers.isEmpty()) return
         try {
-            deliver(event.threadId, event.senderId, event.content)
+            deliver(event.threadId, event.messageId, event.senderId, event.content)
         } catch (e: Exception) {
             logger.warn("failed delivering message in thread {}", event.threadId, e)
         }
     }
 
     /** Returns how many subscribers were reached. */
-    fun deliver(threadId: IdType, senderId: IdType, content: String): Int {
+    fun deliver(threadId: IdType, messageId: IdType, senderId: IdType, content: String): Int {
         val members =
             threadMemberRepository.findByThreadId(threadId).mapNotNull { it.userId }.toSet()
         val speaker = nicknameOf(senderId)
@@ -74,7 +84,7 @@ class ChatSubscriptions(
             if (userId == senderId) continue // never echo a message back to its author
             if (userId !in members) continue // only groups it belongs to
             try {
-                subscriber.onMessage(threadId, senderId, speaker, content)
+                subscriber.onMessage(threadId, messageId, senderId, speaker, content)
                 reached++
             } catch (e: Exception) {
                 logger.warn("subscriber {} failed handling thread {}", userId, threadId, e)

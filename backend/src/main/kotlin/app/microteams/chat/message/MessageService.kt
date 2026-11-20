@@ -1,9 +1,18 @@
 /*
  *  Description: This file implements the MessageService class — the message half of the
- *               chat module: reading a thread's messages and posting to it. Posting also
- *               fans the message out over the STOMP broker and publishes a
- *               MessagePostedEvent, which is how an agent member of the thread is woken
- *               (the connector listens for it after commit).
+ *               chat module: reading a thread's messages, posting to it, and recording a
+ *               message that did not reach one of its recipients. Posting also fans the
+ *               message out over the STOMP broker and publishes a MessagePostedEvent, which is
+ *               how an agent member of the thread is told (ChatSubscriptions, after commit).
+ *
+ *               listMessages(threadId, pageStart, pageSize) -> (messages, page), newest page first.
+ *               postMessage(threadId, userId, body) -> the message, at most once per clientToken.
+ *               markUndelivered(messageId, userId, reason) — the message definitely did not reach
+ *                 [userId]; shown on the message's `undelivered`, announced with
+ *                 MessageUndeliveredEvent. Idempotent per (message, recipient).
+ *               MessageEntity.toDTO(undelivered) — the API shape.
+ *
+ *               Example: messageService.markUndelivered(41, agentUserId, "the agent was closed")
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -16,8 +25,10 @@ import app.microteams.common.helper.PageHelper
 import app.microteams.model.MessageDTO
 import app.microteams.model.PageDTO
 import app.microteams.model.PostMessageRequestDTO
+import app.microteams.model.UndeliveredDTO
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.messaging.simp.SimpMessagingTemplate
@@ -28,9 +39,12 @@ import org.springframework.transaction.annotation.Transactional
 @Transactional
 class MessageService(
     private val messageRepository: MessageRepository,
+    private val undeliveredRepository: UndeliveredRepository,
     private val messagingTemplate: SimpMessagingTemplate?,
     private val eventPublisher: ApplicationEventPublisher,
 ) {
+    private val logger = LoggerFactory.getLogger(MessageService::class.java)
+
     fun listMessages(
         threadId: Long,
         pageStart: Long?,
@@ -46,7 +60,9 @@ class MessageService(
         val messages = messageRepository.findByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId)
         val (page, pageInfo) =
             PageHelper.pageFromAll(messages, pageStart, pageSize, { it.id!! }, null)
-        return page.map { it.toDTO() }.reversed() to pageInfo
+        val undelivered =
+            undeliveredRepository.findByMessageIdIn(page.map { it.id!! }).groupBy { it.messageId!! }
+        return page.map { it.toDTO(undelivered[it.id!!].orEmpty()) }.reversed() to pageInfo
     }
 
     /**
@@ -91,11 +107,41 @@ class MessageService(
         return dto
     }
 
+    /**
+     * Record that message [messageId] definitely did not reach recipient [userId], and why. The
+     * thread's readers are told through MessageUndeliveredEvent; a second report for the same
+     * message and recipient changes nothing.
+     */
+    fun markUndelivered(messageId: Long, userId: Long, reason: String) {
+        val message = messageRepository.findById(messageId).orElse(null)
+        if (message == null) {
+            logger.warn(
+                "message {} not delivered to {} ({}), but it no longer exists",
+                messageId,
+                userId,
+                reason,
+            )
+            return
+        }
+        if (undeliveredRepository.existsByMessageIdAndUserId(messageId, userId)) return
+        undeliveredRepository.save(
+            Undelivered().also {
+                it.messageId = messageId
+                it.userId = userId
+                it.reason = reason
+            },
+        )
+        logger.info("message {} was not delivered to user {}: {}", messageId, userId, reason)
+        eventPublisher.publishEvent(MessageUndeliveredEvent(message.threadId!!, messageId, userId))
+    }
+
     private fun existing(threadId: Long, userId: Long, token: String): MessageDTO? =
-        messageRepository.findByThreadIdAndSenderIdAndClientToken(threadId, userId, token)?.toDTO()
+        messageRepository.findByThreadIdAndSenderIdAndClientToken(threadId, userId, token)?.let {
+            it.toDTO(undeliveredRepository.findByMessageIdIn(listOf(it.id!!)))
+        }
 }
 
-fun MessageEntity.toDTO() =
+fun MessageEntity.toDTO(undelivered: List<Undelivered> = emptyList()) =
     MessageDTO(
         id = id!!,
         threadId = threadId!!,
@@ -104,4 +150,6 @@ fun MessageEntity.toDTO() =
         createdAt = createdAt?.atOffset(ZoneOffset.UTC) ?: OffsetDateTime.now(),
         editedAt = editedAt?.atOffset(ZoneOffset.UTC),
         clientToken = clientToken,
+        undelivered =
+            undelivered.map { UndeliveredDTO(userId = it.userId!!, reason = it.reason!!) },
     )

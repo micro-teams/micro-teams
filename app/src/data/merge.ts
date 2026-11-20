@@ -2,8 +2,9 @@
  * How a conversation's messages are assembled from the two ways it is read: the newest page,
  * fetched again every few seconds, and older pages walked backwards as the reader scrolls up.
  *
- * mergeNewest(held, page) — inside the page's range the page wins (an edit or a delete there
- *   propagates); everything below it that is held stays, so scrolled-up history is never dropped.
+ * mergeNewest(held, page) — inside the page's range the page wins (an edit, a delete or a message
+ *   found undelivered there propagates); everything below it that is held stays, so scrolled-up
+ *   history is never dropped.
  * mergeOlder(held, page) — folds an older page in, ignoring ids already held (pages may overlap).
  * Message — one stored message, as the backend sends it.
  *
@@ -30,7 +31,13 @@ export function mergeNewest(held: Message[], page: Message[]): Message[] {
 }
 
 function same(a: Message, b: Message | undefined): boolean {
-  return !!b && a.id === b.id && a.content === b.content && a.editedAt === b.editedAt;
+  return (
+    !!b &&
+    a.id === b.id &&
+    a.content === b.content &&
+    a.editedAt === b.editedAt &&
+    (a.undelivered?.length ?? 0) === (b.undelivered?.length ?? 0)
+  );
 }
 
 /** Folds an older page in, dropping ids already held (pages may overlap). */

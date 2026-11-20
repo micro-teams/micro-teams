@@ -34,25 +34,22 @@ class AgentReadopt(
     private val agentRegistry: AgentRegistry,
     private val hub: MachineHub,
     private val agentScreens: AgentScreens,
+    private val wakeup: AgentWakeup,
 ) {
     private val logger = LoggerFactory.getLogger(AgentReadopt::class.java)
 
     /**
      * Re-adopt every agent screen this module has on the machine that just connected.
      *
-     * Every connect re-drives every screen, and only *registering* is conditional. It used to skip
-     * an agent already in the registry entirely, reading "we still have it in memory" as "its
-     * screen survived" — true when the server was what restarted, false when the MACHINE was. A
-     * machine that reboots loses its tmux (the socket lives under /tmp) while the server keeps its
-     * registry, so those agents were skipped, never probed, and became ghosts: registered, believed
-     * alive, with nothing behind them. Messages were typed into the void and the live screen opened
-     * onto a session the machine no longer had — and no signal could ever correct it, because the
-     * death notice is exactly what the skipped adopt would have produced.
+     * Every connect re-drives every screen, and only *registering* is conditional. "We still have
+     * it in memory" does not mean "its screen survived": a machine that reboots loses its tmux
+     * while the server keeps its registry, and only the adopt makes the machine say so
+     * (session.error).
      *
-     * Idempotent by design, because attachMachine (hence this event) fires on *every* connect:
+     * Idempotent by design, because this event fires on *every* connect:
      * - A machine with no agent rows is a no-op (the loop body never runs).
-     * - A screen whose tmux did survive is simply re-driven and its applet hot-reloaded, which is
-     *   what an adopt does to a live session anyway.
+     * - A screen whose tmux did survive is simply re-driven (its applet reloaded only by a
+     *   connector that lost it or runs another version of it).
      * - An agent already in the registry keeps its entry rather than being registered twice.
      */
     @EventListener
@@ -66,22 +63,22 @@ class AgentReadopt(
             val driver = agentScreens.driverOf(row) ?: continue
             agentScreens.adopt(row)
             // Then ask the machine whether the program is still there. Empty command is
-            // deliberate: it makes this a *pure adopt*. The frozen CLI adopts the tmux when the
-            // session survives (re-driving the running program and hot-reloading the applet), but
-            // if the session is gone it would otherwise SPAWN m.command fresh — which for a dead
-            // agent screen is a zombie resurrection with a blank transcript. An empty command turns
-            // that dead path into a harmless `terminal: empty command` session.error instead of a
-            // respawn: the screen is marked dead and waits to be woken, never revived blank.
+            // deliberate: it makes this a *pure adopt*. The connector adopts the tmux when the
+            // session survives, and reports session.error when it is gone instead of spawning a
+            // blank program: the screen is marked dead and waits to be woken, never revived blank.
             hub.readoptScreen(
                 machineId = row.machineId,
                 sid = row.sid,
                 command = emptyList(),
                 appletSource = driver.appletSource,
+                vars = driver.vars,
             )
             readopted++
         }
         if (readopted > 0) {
             logger.info("re-drove {} agent screen(s) on machine {}", readopted, event.machineId)
         }
+        // Messages whose send the old connection never confirmed go out on this one.
+        wakeup.deliverOn(event.machineId)
     }
 }

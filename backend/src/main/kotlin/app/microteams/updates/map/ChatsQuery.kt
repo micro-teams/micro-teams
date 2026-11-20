@@ -115,7 +115,7 @@ class ChatsQuery(
     /** One committed message moves the list of everyone in that group — including its author. */
     @TransactionalEventListener(fallbackExecution = true)
     fun onMessagePosted(event: MessagePostedEvent) {
-        val id = event.messageId ?: return
+        val id = event.messageId
         try {
             val members =
                 threadMemberRepository

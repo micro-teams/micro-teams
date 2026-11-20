@@ -16,7 +16,8 @@ package app.microteams.machine
 data class MachineForgottenEvent(val machineId: String)
 
 /**
- * A machine's control channel (re)connected and it is online again. Fired on every connect — the
+ * A machine's control channel (re)connected and it is online again: fired once its hello has
+ * arrived, so the protocol it speaks is known (MachineHub.protocolOf). Fired on every connect — the
  * very first one included — so a listener must be a no-op when it owns nothing on that machine.
  *
  * Its reason to exist is the hot-upgrade: after a backend redeploy (or a `microteams update`

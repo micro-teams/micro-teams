@@ -20,9 +20,10 @@ interface Agent {
     val userId: IdType
 
     /**
-     * Something was said to this agent in a group it belongs to. Delivery is best-effort and
-     * fire-and-forget: the agent answers, if it answers at all, by calling back in through the
-     * tool-door as itself — never by returning a value here.
+     * Message [messageId] was said to this agent in a group it belongs to. Nothing is returned: the
+     * agent answers, if at all, by calling back in through the tool-door as itself, and a message
+     * it definitely could not take is recorded on the message (MessageService.markUndelivered) for
+     * its sender to see.
      */
-    fun tell(threadId: IdType, speaker: String, text: String)
+    fun tell(threadId: IdType, messageId: IdType, speaker: String, text: String)
 }

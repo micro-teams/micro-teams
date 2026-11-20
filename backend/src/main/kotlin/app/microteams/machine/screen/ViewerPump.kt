@@ -25,13 +25,16 @@
  *               (a fresh tmux client paints the whole pane), so the picture comes back correct
  *               rather than subtly broken.
  *
- *               Former caveat, now fixed (T-091): that reattach used to only repaint when the
- *               reconnecting viewer was the only one on the screen, because the hub subscribed on
- *               the first viewer alone — a second watcher just waited for the screen to change on
- *               its own, sometimes indefinitely. MachineHub.attachViewer now sends screen.subscribe
- *               for every viewer, and the machine (once running the matching micro-connector fix)
- *               answers a subscribe on an already-attached screen with a synthesized snapshot
- *               instead of silence.
+ *               Text frames (the viewer's size, lease state, capture and command answers) go
+ *               through the same queue as the bytes, so a size is never overtaken by the data drawn
+ *               at that size, nor the other way round.
+ *
+ *               ViewerFrame.Bytes(data) / ViewerFrame.Text(json)  one outbound frame.
+ *               ViewerPump(label, capacityBytes?, write, giveUp, startThread?)
+ *                 offer(frame) -> false once given up; close(); backlogBytes(); isClosed().
+ *
+ *               Example: val pump = ViewerPump("v1", write = { send(it) }, giveUp = { close() })
+ *                        pump.offer(ViewerFrame.Text("""{"type":"size","cols":80,"rows":24}"""))
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -45,6 +48,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.slf4j.LoggerFactory
 
+/** One frame to a viewer: screen bytes (a binary frame) or a JSON text frame. */
+sealed interface ViewerFrame {
+    val size: Int
+
+    class Bytes(val data: ByteArray) : ViewerFrame {
+        override val size: Int
+            get() = data.size
+    }
+
+    class Text(val json: String) : ViewerFrame {
+        override val size: Int
+            get() = json.length
+    }
+}
+
 /** How much unwritten screen a single viewer may owe before we give up on it. */
 const val VIEWER_QUEUE_BYTES: Int = 4 * 1024 * 1024
 
@@ -52,7 +70,7 @@ class ViewerPump(
     private val label: String,
     private val capacityBytes: Int = VIEWER_QUEUE_BYTES,
     /** The blocking write. Called only from this pump's own thread, never from a caller's. */
-    private val write: (ByteArray) -> Unit,
+    private val write: (ViewerFrame) -> Unit,
     /**
      * Tear the viewer down — in production, close its WebSocket. Called at most once, never on the
      * caller's thread and never on the pump's own: a blocked write must not delay the hang-up, and
@@ -66,11 +84,11 @@ class ViewerPump(
 ) {
     private val logger = LoggerFactory.getLogger(ViewerPump::class.java)
 
-    private val queue = LinkedBlockingQueue<ByteArray>()
+    private val queue = LinkedBlockingQueue<ViewerFrame>()
     private val queued = AtomicInteger(0)
     private val closed = AtomicBoolean(false)
-    /** Ends the loop; a zero-length array is the only value that means "stop", never data. */
-    private val poison = ByteArray(0)
+    /** Ends the loop; compared by identity, so no real frame can mean "stop". */
+    private val poison: ViewerFrame = ViewerFrame.Bytes(ByteArray(0))
 
     init {
         startThread("viewer-pump-$label", Runnable { run() })
@@ -83,10 +101,10 @@ class ViewerPump(
      * Returns false once the viewer has been given up on, so a caller that keeps a viewer list can
      * drop it — but nothing depends on the caller noticing, since the pump closes the session too.
      */
-    fun offer(bytes: ByteArray): Boolean {
+    fun offer(frame: ViewerFrame): Boolean {
         if (closed.get()) return false
-        if (bytes.isEmpty()) return true
-        val total = queued.addAndGet(bytes.size)
+        if (frame.size == 0) return true
+        val total = queued.addAndGet(frame.size)
         if (total > capacityBytes) {
             // Hopelessly behind. Do not try to catch up by discarding part of the stream — see the
             // file header for why a hole is worse than a hang-up.
@@ -99,7 +117,7 @@ class ViewerPump(
             stop(hangUp = true)
             return false
         }
-        queue.put(bytes) // unbounded queue: put() cannot block
+        queue.put(frame) // unbounded queue: put() cannot block
         return true
     }
 

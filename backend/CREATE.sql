@@ -55,6 +55,11 @@ START WITH
     1 INCREMENT BY 50;
 
 CREATE
+    SEQUENCE microteams.message_undelivered_seq
+START WITH
+    1 INCREMENT BY 50;
+
+CREATE
     SEQUENCE microteams.team_machine_seq
 START WITH
     1 INCREMENT BY 50;
@@ -156,6 +161,23 @@ CREATE
                 thread_id,
                 sender_id,
                 client_token
+            )
+        );
+
+CREATE
+    TABLE
+        microteams.message_undelivered(
+            created_at TIMESTAMP(6) NOT NULL,
+            deleted_at TIMESTAMP(6),
+            id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL,
+            updated_at TIMESTAMP(6) NOT NULL,
+            user_id BIGINT NOT NULL,
+            reason TEXT NOT NULL,
+            PRIMARY KEY(id),
+            CONSTRAINT uq_message_undelivered UNIQUE(
+                message_id,
+                user_id
             )
         );
 
@@ -264,6 +286,10 @@ CREATE
         thread_id,
         created_at
     );
+
+CREATE
+    INDEX idx_message_undelivered_message ON
+    microteams.message_undelivered(message_id);
 
 CREATE
     INDEX IDXg2l9qqsoeuynt4r5ofdt1x2td ON

@@ -69,7 +69,7 @@ class AgentScreens(
      *
      * Note what this does NOT do: it never touches the machine. Whether the program is still
      * running there is a question only the machine can answer, and asking it is the caller's job —
-     * the connect path asks with an adopt, the viewer path asks the applet directly.
+     * the connect path asks with an adopt; otherwise the machine reports it (session.error).
      */
     fun adopt(row: AgentScreen): ScreenAgent? {
         val driver = driverOf(row) ?: return null
@@ -86,7 +86,6 @@ class AgentScreens(
                 teamId = row.teamId,
                 screenToken = row.token,
                 driver = driver,
-                hub = hub,
                 wakeup = agentWakeup.getObject(),
             )
         agentRegistry.register(agent)

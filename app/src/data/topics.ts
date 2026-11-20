@@ -7,8 +7,9 @@
  *   in the server's digest form, or null while loading.
  * threadTopic(id), chatsTopic(userId) — topic names, built here and nowhere else, mirroring the
  *   backend's Topic.kt.
- * threadDigest(messages, window) — "lastId:count" over the newest `window` messages, as the
- *   backend's ThreadQuery digests the same window.
+ * threadDigest(messages, window) — "lastId:count" over the newest `window` messages, with
+ *   ":u<n>" appended when those hold n undelivered entries, as the backend's ThreadQuery digests
+ *   the same window.
  *
  * Example: useTopic(threadTopic(5), () => refetch(), () => threadDigest(held, 100));
  *
@@ -26,7 +27,8 @@ export const chatsTopic = (userId: number) => `chats:${userId}`;
 export function threadDigest(messages: readonly Message[], window: number): string {
   if (!messages.length) return "empty";
   const page = messages.slice(-window);
-  return `${page[page.length - 1].id}:${page.length}`;
+  const undelivered = page.reduce((n, m) => n + (m.undelivered?.length ?? 0), 0);
+  return `${page[page.length - 1].id}:${page.length}${undelivered ? `:u${undelivered}` : ""}`;
 }
 
 export function useTopic(topic: string | null, onChange: (reason: SyncReason) => void, digest?: () => string | null) {

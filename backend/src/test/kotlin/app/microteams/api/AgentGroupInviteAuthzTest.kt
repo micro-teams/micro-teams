@@ -220,6 +220,8 @@ constructor(
         return StandardWebSocketClient(container)
             .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
             .get(5, TimeUnit.SECONDS)
+            // A connector's first word is its hello; the server answers nothing before it.
+            .also { it.sendMessage(TextMessage("""{"t":"hello","v":2}""")) }
     }
 
     private fun awaitFrame(collector: Collector, type: String): JSONObject {

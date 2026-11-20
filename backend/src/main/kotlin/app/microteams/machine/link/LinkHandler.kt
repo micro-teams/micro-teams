@@ -1,14 +1,20 @@
 /*
- *  Description: The machine control-channel WebSocket handler — the transport adapter
- *               between a raw Spring WebSocketSession and the transport-free MachineHub.
- *               The frozen CLI dials `ws(s)://<base>/agent` with an `X-Microteams-Session:
- *               <machine token>` header (resolved to a machine by the handshake
- *               interceptor); this handler wires that socket to the hub: welcome on
- *               connect, dispatch every inbound link.Msg, detach on close.
+ *  Description: The machine control-channel WebSocket handler — the transport adapter between a
+ *               raw Spring WebSocketSession and the transport-free MachineHub. A connector dials
+ *               `/machine/link` with an `X-Microteams-Session: <machine token>` header (resolved
+ *               to a machine by the handshake interceptor).
  *
- *               All server→machine writes flow through HubMachine.send, which holds a
- *               per-machine lock, so the single WebSocketSession is never written
- *               concurrently (Spring sessions are not safe for concurrent sends).
+ *               A connector's first message is `hello {v}`, and the version in it decides how the
+ *               hub speaks to that machine. So the machine is attached to the hub — and announced
+ *               with MachineConnectedEvent, which re-adopts its screens — only once its hello has
+ *               arrived; nothing screen-related can reach it before the server knows its version.
+ *               Anything a connector says before its hello is dropped and logged.
+ *
+ *               All server→machine writes flow through HubMachine.send, which holds a per-machine
+ *               lock, so the single WebSocketSession is never written concurrently.
+ *
+ *               LinkHandler(hub, objectMapper, eventPublisher) — registered by
+ *               ConnectorWebSocketConfig; Spring calls its WebSocket callbacks.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -39,7 +45,13 @@ class LinkHandler(
         const val MAX_MESSAGE_BYTES = 4 * 1024 * 1024
     }
 
-    private data class Bound(val machineId: String, val transport: MachineTransport)
+    private class Bound(
+        val machineId: String,
+        val origin: String?,
+        val transport: MachineTransport,
+    ) {
+        @Volatile var attached = false
+    }
 
     // session.id -> the machine + transport we attached for it, so close detaches the
     // exact same transport instance (attach/detach identity matters in the hub).
@@ -55,23 +67,15 @@ class LinkHandler(
         // Screen frames carry the full applet source (session.create) and base64
         // terminal chunks (screen.data), which exceed the 8 KB JSR-356 default. Raise the
         // inbound reassembly limit so large machine→server frames are not dropped. (Outbound
-        // large frames are auto-fragmented by the container; the frozen gorilla CLI
-        // reassembles them without a client-side cap.)
+        // large frames are auto-fragmented by the container; the connector reassembles them
+        // without a cap of its own.)
         session.textMessageSizeLimit = MAX_MESSAGE_BYTES
         session.binaryMessageSizeLimit = MAX_MESSAGE_BYTES
         val transport = MachineTransport { msg ->
             session.sendMessage(TextMessage(objectMapper.writeValueAsString(msg)))
         }
-        bound[session.id] = Bound(machineId, transport)
-        val origin = session.attributes["origin"] as? String
-        hub.attachMachine(machineId, transport, origin)
-        // Announce the machine is online so applications that pin in-memory state to its screens
-        // (the agent module) can re-adopt whatever survived a server restart. Published here rather
-        // than inside the hub because the hub is deliberately I/O-free (no Spring, faked in tests),
-        // and this handler is the one place a machine's control channel actually comes up. The
-        // agent module owns the reaction; the machine layer only says "a machine connected".
-        eventPublisher.publishEvent(MachineConnectedEvent(machineId))
-        logger.info("machine {} connected (session {})", machineId, session.id)
+        bound[session.id] = Bound(machineId, session.attributes["origin"] as? String, transport)
+        logger.info("machine {} connected (session {}), awaiting its hello", machineId, session.id)
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
@@ -83,12 +87,25 @@ class LinkHandler(
                 logger.debug("dropping unparseable frame from machine {}", b.machineId)
                 return
             }
-        hub.onMachineMessage(b.machineId, msg)
+        if (b.attached) {
+            hub.onMachineMessage(b.machineId, msg)
+            return
+        }
+        if (msg.t != "hello") {
+            logger.warn("machine {} sent '{}' before its hello; dropped", b.machineId, msg.t)
+            return
+        }
+        hub.attachMachine(b.machineId, b.transport, msg.v ?: PROTOCOL_V1, b.origin)
+        b.attached = true
+        // Announce the machine is online so applications that pin in-memory state to its screens
+        // (the agent module) re-adopt them. Published here rather than inside the hub because the
+        // hub is deliberately I/O-free, and this handler is where a channel comes up.
+        eventPublisher.publishEvent(MachineConnectedEvent(b.machineId))
     }
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val b = bound.remove(session.id) ?: return
-        hub.detachMachine(b.machineId, b.transport)
+        if (b.attached) hub.detachMachine(b.machineId, b.transport)
         logger.info("machine {} disconnected (session {}, {})", b.machineId, session.id, status)
     }
 }

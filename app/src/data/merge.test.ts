@@ -26,3 +26,11 @@ test("a refetch with nothing new keeps the same array", () => {
   expect(mergeNewest(held, [m(2), m(3)])).toBe(held);
   expect(mergeNewest(held, [m(2), m(4)])).not.toBe(held);
 });
+
+test("a message found undelivered replaces the one held", () => {
+  const held = mergeNewest([], [m(1), m(2)]);
+  const failed = { ...m(2), undelivered: [{ userId: 9, reason: "the agent was closed" }] };
+  const next = mergeNewest(held, [m(1), failed]);
+  expect(next).not.toBe(held);
+  expect(next[1].undelivered).toEqual(failed.undelivered);
+});

@@ -1,9 +1,9 @@
 /*
- *  Description: A domain event published after a chat message is committed. It decouples
- *               the chat module from the connector: ThreadService only publishes; the
- *               connector's AgentService listens (after commit) and forwards the message
- *               to any agent members of the thread. Keeping this an event avoids a
- *               chat <-> connector bean cycle.
+ *  Description: A domain event published after a chat message is committed. Chat only
+ *               publishes; ChatSubscriptions (the agents subscribed to the thread) and the
+ *               updates topics listen after commit.
+ *
+ *               MessagePostedEvent(threadId, senderId, content, messageId)
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -12,16 +12,10 @@
 
 package app.microteams.chat.message
 
-/**
- * Emitted by ThreadService.postMessage once the message row is persisted.
- *
- * `messageId` is nullable only because this event is also raised by paths that have no row to point
- * at; a listener that needs a cursor (the updates topic does) must treat null as "nothing to say"
- * rather than invent a number.
- */
+/** Emitted by MessageService.postMessage once the message row is persisted. */
 data class MessagePostedEvent(
     val threadId: Long,
     val senderId: Long,
     val content: String,
-    val messageId: Long? = null,
+    val messageId: Long,
 )

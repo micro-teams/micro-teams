@@ -1,8 +1,9 @@
 /*
- *  Description: Integration test for the machine control-channel WebSocket (`/agent`) and
- *               the MachineHub. Drives a REAL WebSocket client against a running server
- *               port: an enrolled machine dials in with its `X-Microteams-Session` token and
- *               must receive `welcome`; the server opens a screen and the client must
+ *  Description: Integration test for the machine control-channel WebSocket (`/machine/link`)
+ *               and the MachineHub. Drives a REAL WebSocket client against a running server
+ *               port: an enrolled machine dials in with its `X-Microteams-Session` token, says
+ *               hello, and must receive `welcome` with the version it will be spoken to in —
+ *               and nothing at all before its hello; the server opens a screen and the client must
  *               receive the exact `session.create`; an inbound `rpc.call` (screenReady)
  *               must be answered with `rpc.result`, and a `var.push` must be mirrored into
  *               the screen's variables. A bad token must fail the handshake.
@@ -72,7 +73,7 @@ constructor(
         return machineId to token
     }
 
-    private fun connect(token: String, collector: Collector): WebSocketSession {
+    private fun connect(token: String, collector: Collector, hello: Int? = 2): WebSocketSession {
         val headers = WebSocketHttpHeaders()
         headers.add("X-Microteams-Session", token)
         val container = jakarta.websocket.ContainerProvider.getWebSocketContainer()
@@ -80,6 +81,8 @@ constructor(
         return StandardWebSocketClient(container)
             .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
             .get(5, TimeUnit.SECONDS)
+            // A connector's first word is its hello; the server answers nothing before it.
+            .also { s -> hello?.let { s.sendMessage(TextMessage("""{"t":"hello","v":$it}""")) } }
     }
 
     private fun nextFrame(collector: Collector) =
@@ -96,7 +99,7 @@ constructor(
         // 1) welcome handshake
         val welcome = nextFrame(collector)
         assertEquals("welcome", welcome["t"].asText())
-        assertEquals(1, welcome["v"].asInt())
+        assertEquals(2, welcome["v"].asInt())
         assertTrue(machineHub.isOnline(machineId), "machine should be online after handshake")
 
         // …followed by the server asking which build this machine runs. Asked on attach rather than
@@ -163,6 +166,27 @@ constructor(
         }
         assertEquals("busy", mirrored)
 
+        session.close()
+    }
+
+    /**
+     * The version decides every screen message the machine is sent, so nothing goes out before the
+     * hello that names it, and the machine is not online until then.
+     */
+    @Test
+    fun welcomeFollowsTheHelloAndCarriesTheVersionSpoken() {
+        val (machineId, token) = enrollDevice()
+        val collector = Collector()
+        val session = connect(token, collector, hello = null)
+        assertEquals(null, collector.frames.poll(1, TimeUnit.SECONDS), "nothing before the hello")
+        assertTrue(!machineHub.isOnline(machineId), "not online before its hello")
+
+        session.sendMessage(TextMessage("""{"t":"hello","v":1}"""))
+        val welcome = nextFrame(collector)
+        assertEquals("welcome", welcome["t"].asText())
+        assertEquals(1, welcome["v"].asInt(), "a version 1 connector is spoken to in version 1")
+        assertTrue(machineHub.isOnline(machineId))
+        assertEquals(1, machineHub.protocolOf(machineId))
         session.close()
     }
 

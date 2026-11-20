@@ -1,8 +1,10 @@
 /*
  *  Description: Unit-ish test for the Codex driver (a real object, nothing mocked — like
- *               GitServiceTest). Pins the two Codex-specific choices: full-auto argv + operator
- *               prompt as the initial session prompt on a fresh launch, `resume --last` without
- *               re-injecting on reboot; and that its applet resolves to the bundled codex.js.
+ *               GitServiceTest). Pins the Codex-specific choices: full-auto argv with
+ *               no initial prompt on a fresh launch, `resume --last` on reboot; the bundled
+ *               codex.js as its applet, and the operator prompt as the applet's `operatorPrompt`
+ *               variable (the server sets it after each session.create; AgentLoopTest checks
+ *               the var.set on the wire).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -55,11 +57,8 @@ class CodexDriverTest {
     }
 
     @Test
-    fun appletSourceInjectsTheOperatorPromptIntoTheBundledCodexApplet() {
-        val src = driver.appletSource
-        assertTrue(src.contains("screenReady"), "should be the real bundled screen applet")
-        // The placeholder is replaced with the standing instructions (a fragment of them).
-        assertFalse(src.contains("__MT_OPERATOR_PROMPT__"), "placeholder should be replaced")
-        assertTrue(src.contains("microteams api say"), "operator prompt should be injected")
+    fun theOperatorPromptIsTheAppletsOperatorPromptVariable() {
+        assertTrue(driver.appletSource.contains("screenReady"), "should be the real bundled applet")
+        assertEquals(OperatorPrompt.TEXT, driver.vars["operatorPrompt"])
     }
 }

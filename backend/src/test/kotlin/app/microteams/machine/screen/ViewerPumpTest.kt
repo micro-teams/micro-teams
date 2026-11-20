@@ -2,7 +2,7 @@
  *  Description: Unit tests for ViewerPump — the queue that keeps a slow browser from freezing a
  *               machine. No Spring, no WebSocket, no database: the whole point of the class is that
  *               it is I/O-free enough to be tested with a write function that simply refuses to
- *               return, which is precisely the situation production could not survive before.
+ *               return.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -20,6 +20,11 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+
+/** The tests speak bytes; the pump carries frames. */
+private fun ViewerPump.offer(bytes: ByteArray) = offer(ViewerFrame.Bytes(bytes))
+
+private fun bytesOf(frame: ViewerFrame) = (frame as ViewerFrame.Bytes).data
 
 class ViewerPumpTest {
 
@@ -61,7 +66,8 @@ class ViewerPumpTest {
     @Test
     fun `bytes reach the socket in order`() {
         val written = LinkedBlockingQueue<String>()
-        val pump = ViewerPump(label = "order", write = { written.put(String(it)) }, giveUp = {})
+        val pump =
+            ViewerPump(label = "order", write = { written.put(String(bytesOf(it))) }, giveUp = {})
         try {
             listOf("a", "b", "c").forEach { pump.offer(it.toByteArray()) }
             assertEquals("a", written.poll(2, TimeUnit.SECONDS))
@@ -88,7 +94,7 @@ class ViewerPumpTest {
                 label = "slow",
                 capacityBytes = 1000,
                 write = {
-                    synchronized(delivered) { delivered.add(it) }
+                    synchronized(delivered) { delivered.add(bytesOf(it)) }
                     entered.countDown()
                     stuck.await()
                 },
@@ -204,11 +210,40 @@ class ViewerPumpTest {
     @Test
     fun `chunks are handed to the socket unchanged`() {
         val written = LinkedBlockingQueue<ByteArray>()
-        val pump = ViewerPump(label = "bytes", write = { written.put(it) }, giveUp = {})
+        val pump = ViewerPump(label = "bytes", write = { written.put(bytesOf(it)) }, giveUp = {})
         try {
             val esc = byteArrayOf(0x1b, 0x5b, 0x32, 0x4a) // ESC [ 2 J — clear screen
             pump.offer(esc)
             assertArrayEquals(esc, written.poll(2, TimeUnit.SECONDS))
+        } finally {
+            pump.close()
+        }
+    }
+
+    /** A size frame queued before screen bytes is written before them, and the reverse too. */
+    @Test
+    fun `text and bytes keep the order they were offered in`() {
+        val written = LinkedBlockingQueue<String>()
+        val pump =
+            ViewerPump(
+                label = "mixed",
+                write = {
+                    written.put(
+                        when (it) {
+                            is ViewerFrame.Text -> it.json
+                            is ViewerFrame.Bytes -> String(it.data)
+                        },
+                    )
+                },
+                giveUp = {},
+            )
+        try {
+            pump.offer(ViewerFrame.Text("size"))
+            pump.offer("data".toByteArray())
+            pump.offer(ViewerFrame.Text("size2"))
+            assertEquals("size", written.poll(2, TimeUnit.SECONDS))
+            assertEquals("data", written.poll(2, TimeUnit.SECONDS))
+            assertEquals("size2", written.poll(2, TimeUnit.SECONDS))
         } finally {
             pump.close()
         }

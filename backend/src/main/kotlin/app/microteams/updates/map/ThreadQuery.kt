@@ -14,6 +14,9 @@
  *
  *                 - a message arriving in this thread     -> yes, the newest id changes
  *                 - a message being deleted from the page -> yes, the count changes
+ *                 - a message on the page found undelivered -> yes, ":u<n>" is appended, n being
+ *                   how many (message, recipient) failures the page holds; a page with none
+ *                   digests as before
  *                 - a message being edited                -> NO
  *
  *               Edits are left out on purpose. The only way to include one is to compare a
@@ -22,6 +25,10 @@
  *               mechanism exists to catch rather than manufacture. Nothing edits a message today;
  *               when something does, it should publish an event of its own, which is a better
  *               answer than a digest anyway.
+ *
+ *               A message found undelivered moves no cursor (no message arrived), so it is said
+ *               with a `state` frame carrying the new digest, as ChatsQuery says a membership
+ *               change: a client holding the old answer disagrees and refetches.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -32,10 +39,13 @@ package app.microteams.updates.map
 
 import app.microteams.chat.message.MessagePostedEvent
 import app.microteams.chat.message.MessageRepository
+import app.microteams.chat.message.MessageUndeliveredEvent
+import app.microteams.chat.message.UndeliveredRepository
 import app.microteams.chat.thread.ThreadMemberRepository
 import app.microteams.updates.SyncedQuery
 import app.microteams.updates.Topic
 import app.microteams.updates.TopicState
+import app.microteams.updates.UpdateFrame
 import app.microteams.updates.UpdateKind
 import app.microteams.updates.UpdatesRegistry
 import org.slf4j.LoggerFactory
@@ -46,6 +56,7 @@ import org.springframework.transaction.event.TransactionalEventListener
 class ThreadQuery(
     private val registry: UpdatesRegistry,
     private val messageRepository: MessageRepository,
+    private val undeliveredRepository: UndeliveredRepository,
     private val threadMemberRepository: ThreadMemberRepository,
 ) : SyncedQuery<Topic.Thread> {
 
@@ -73,12 +84,14 @@ class ThreadQuery(
                 .take(DIGEST_PAGE)
         if (page.isEmpty()) return TopicState(seq = 0, digest = "empty")
         val newestId = page.first().id ?: 0
-        return TopicState(seq = newestId, digest = "$newestId:${page.size}")
+        val undelivered = undeliveredRepository.findByMessageIdIn(page.mapNotNull { it.id }).size
+        val suffix = if (undelivered > 0) ":u$undelivered" else ""
+        return TopicState(seq = newestId, digest = "$newestId:${page.size}$suffix")
     }
 
     @TransactionalEventListener(fallbackExecution = true)
     fun onMessagePosted(event: MessagePostedEvent) {
-        val id = event.messageId ?: return // nothing to point a cursor at
+        val id = event.messageId
         try {
             val members =
                 threadMemberRepository
@@ -95,6 +108,21 @@ class ThreadQuery(
             // A push that fails must never take the message with it: a missed event costs one
             // refetch, and the verifier will notice within its interval anyway.
             logger.warn("updates: failed publishing thread {} change", event.threadId, e)
+        }
+    }
+
+    @TransactionalEventListener(fallbackExecution = true)
+    fun onMessageUndelivered(event: MessageUndeliveredEvent) {
+        try {
+            val topic = Topic.Thread(event.threadId)
+            val state = digest(topic)
+            registry.broadcast(topic.name, UpdateFrame.state(topic.name, state.seq, state.digest))
+        } catch (e: Exception) {
+            logger.warn(
+                "updates: failed telling thread {} a message was undelivered",
+                event.threadId,
+                e,
+            )
         }
     }
 }

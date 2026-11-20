@@ -1,8 +1,8 @@
 /*
  *  Description: The seam that swapping Claude Code for Codex (or anything else) moves through.
  *               Everything that knows what the driven program *is* lives behind this interface,
- *               and it is exactly two things: how to launch it (the argv) and the applet that
- *               drives its terminal. Nothing else in the backend mentions Claude.
+ *               and it is exactly three things: how to launch it (the argv), the applet that
+ *               drives its terminal, and the variables that applet is given. Nothing else in the backend mentions Claude.
  *
  *               The applet is the interesting half: it is JavaScript that runs in the CLI's
  *               embedded VM on the machine, reads the program's terminal, and mirrors variables
@@ -10,6 +10,10 @@
  *               token count is painted — is knowledge about pixels, so it belongs there rather
  *               than here. A driver's applet reports its own name on screenReady, so the wire
  *               already carries which driver a screen is running.
+ *
+ *               AgentDriver: name, appletSource, vars, command(sessionId, cwd, resume).
+ *               Example: hub.openScreen(m, driver.command(s, cwd, false), kind, driver.appletSource,
+ *                        env, driver.vars)
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -25,6 +29,14 @@ interface AgentDriver {
 
     /** The applet source shipped into the screen to drive this program's terminal. */
     val appletSource: String
+
+    /**
+     * Control-plane variables the applet watches, set right after every session.create of this
+     * driver's screens (open, re-adopt, wake). Setting one again is harmless, so a re-adopted
+     * applet that already had them is unaffected.
+     */
+    val vars: Map<String, Any?>
+        get() = emptyMap()
 
     /**
      * The argv that launches (or resumes) one session of this program. We mint [sessionId]

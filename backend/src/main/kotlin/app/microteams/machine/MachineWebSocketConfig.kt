@@ -1,7 +1,7 @@
 /*
  *  Description: Wires the connector's two raw WebSocket endpoints: the machine control
- *               channel at `/agent` — the path the frozen CLI dials — and the browser's
- *               live-screen viewer at `/connector/session/{sid}/screen`. Both are raw (not STOMP)
+ *               channel at `/machine/link` — the path the connector dials — and the browser's
+ *               live-screen viewer at `/machine/screen/{sid}`. Both are raw (not STOMP)
  *               and share one handler mapping, so they stay in one config.
  *
  *               The chat module already owns `@EnableWebSocketMessageBroker`
@@ -25,6 +25,7 @@ import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.LinkHandler
 import app.microteams.machine.link.MachineHub
 import app.microteams.machine.screen.ViewerHandler
+import app.microteams.user.UserProfileRepository
 import org.rucca.cheese.auth.AuthorizationService
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -49,7 +50,7 @@ class ConnectorWebSocketConfig {
     ): LinkHandler = LinkHandler(hub, objectMapper, eventPublisher)
 
     /**
-     * The raw `/agent` request handler as a Spring bean, so its Lifecycle (start/stop) and
+     * The raw `/machine/link` request handler as a Spring bean, so its Lifecycle (start/stop) and
      * ServletContext wiring are managed. It carries the machine-token handshake interceptor.
      */
     @Bean
@@ -66,13 +67,14 @@ class ConnectorWebSocketConfig {
     fun connectorViewerHandler(
         hub: MachineHub,
         objectMapper: ObjectMapper,
+        profiles: UserProfileRepository,
         // Optional: a deployment with no module that owns screens has nothing to do before an
         // attach, and the viewer works exactly as before.
         preflight:
             org.springframework.beans.factory.ObjectProvider<
                 app.microteams.machine.screen.ScreenAttachPreflight,
             >,
-    ): ViewerHandler = ViewerHandler(hub, objectMapper, preflight.getIfAvailable())
+    ): ViewerHandler = ViewerHandler(hub, objectMapper, profiles, preflight.getIfAvailable())
 
     /** The live-screen viewer request handler, carrying the JWT + membership handshake authz. */
     @Bean
@@ -86,9 +88,9 @@ class ConnectorWebSocketConfig {
     }
 
     /**
-     * Map `/agent` (machine control) and the browser live-screen viewer at
-     * `/connector/session/{sid}/screen` to their handlers. Negative order so it is consulted before
-     * the STOMP mapping.
+     * Map `/machine/link` (machine control) and the browser live-screen viewer at
+     * `/machine/screen/{sid}` to their handlers. Negative order so it is consulted before the STOMP
+     * mapping.
      */
     @Bean
     fun connectorWsHandlerMapping(
@@ -129,11 +131,12 @@ class ViewerHandshakeInterceptor(private val authorizationService: Authorization
         val sid = if (idx >= 0 && idx + 1 < segments.size) segments[idx + 1] else null
         if (sid.isNullOrBlank()) return false
 
-        val token =
+        val query =
             request.uri.query
                 ?.split("&")
-                ?.firstOrNull { it.startsWith("token=") }
-                ?.removePrefix("token=")
+                ?.associate { it.substringBefore("=") to it.substringAfter("=", "") }
+                .orEmpty()
+        val token = query["token"]
         val auth =
             try {
                 authorizationService.verify(token)
@@ -153,6 +156,13 @@ class ViewerHandshakeInterceptor(private val authorizationService: Authorization
         }
         attributes["sid"] = sid
         attributes["userId"] = auth.userId
+        // The room the viewer has; absent from an older client (see ViewerHandler).
+        val cols = query["cols"]?.toIntOrNull()?.takeIf { it > 0 }
+        val rows = query["rows"]?.toIntOrNull()?.takeIf { it > 0 }
+        if (cols != null && rows != null) {
+            attributes["cols"] = cols
+            attributes["rows"] = rows
+        }
         return true
     }
 

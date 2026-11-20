@@ -226,6 +226,7 @@ class AgentService(
                 command = command,
                 appletSource = driver.appletSource,
                 env = screenEnv(row.machineId, row.teamId, agentUserId),
+                vars = driver.vars,
             )
         if (!respawned) {
             rebootAgent(agentUserId) // no live screen to respawn — open a new one for this session
@@ -289,6 +290,7 @@ class AgentService(
                 kind = AGENT_SCREEN_KIND,
                 appletSource = driver.appletSource,
                 env = env,
+                vars = driver.vars,
             )
         val row =
             AgentScreen(
@@ -320,8 +322,8 @@ class AgentService(
             agentScreenRepository.delete(row)
         }
         agentRegistry.unregister(agentUserId)
-        // Closed on purpose: forget the wake-up's bookkeeping too, so nothing queued for it is
-        // typed at some later agent and its death is never treated as one worth reviving.
+        // Closed on purpose: what it still owed is reported undelivered, and its death is never
+        // treated as one worth reviving.
         agentWakeup.forget(agentUserId)
         // Its model API key goes with it: nothing should hold a credential for an agent that is
         // gone.

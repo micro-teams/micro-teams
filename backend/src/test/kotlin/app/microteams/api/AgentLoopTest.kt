@@ -121,6 +121,8 @@ constructor(
         return StandardWebSocketClient(container)
             .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
             .get(5, TimeUnit.SECONDS)
+            // A connector's first word is its hello; the server answers nothing before it.
+            .also { it.sendMessage(TextMessage("""{"t":"hello","v":2}""")) }
     }
 
     private fun awaitFrame(collector: Collector, type: String): JSONObject {
@@ -332,6 +334,36 @@ constructor(
     private fun commandOf(create: JSONObject): String {
         val cmd = create.getJSONArray("command")
         return (0 until cmd.length()).joinToString(" ") { cmd.getString(it) }
+    }
+
+    /**
+     * Codex has no system prompt; its applet takes the standing instructions from the
+     * `operatorPrompt` variable, which the server sets right after the session.create, so the
+     * applet the create loads has it from its start.
+     */
+    @Test
+    fun aCodexScreenIsGivenItsOperatorPromptRightAfterItsCreate() {
+        val collector = Collector()
+        val session = connect(collector)
+        awaitFrame(collector, "welcome")
+        val res =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"driver":"codex"}""",
+                        ),
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val sid = sidOf(res.response.contentAsString)
+        awaitFrameFor(collector, "session.create", sid)
+        val set = awaitFrameFor(collector, "var.set", sid)
+        assertEquals("operatorPrompt", set.getString("name"))
+        assertTrue(set.getString("value").contains("microteams api say"))
+        session.close()
     }
 
     /**
