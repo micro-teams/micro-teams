@@ -3,7 +3,7 @@ module github.com/micro-teams/microteams/cli
 go 1.26.0
 
 require (
-	github.com/micro-teams/micro-connector/cli v0.1.12-0.20261120180850-1120e7808ab6
+	github.com/micro-teams/micro-connector/cli v0.1.12-0.20261120211518-9ad9835b5849
 	github.com/micro-teams/multipath/go v0.3.0-rc.2
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.30.0

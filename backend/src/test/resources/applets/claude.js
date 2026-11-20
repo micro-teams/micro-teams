@@ -190,7 +190,12 @@
       if (spec.report) spec.report(ctx, extra, o);
     });
     host.expose("snapshot", () => term.read());
+    const seen = /* @__PURE__ */ new Set();
     host.expose("say", (text, id) => {
+      if (id !== void 0) {
+        if (seen.has(String(id))) return "queued";
+        seen.add(String(id));
+      }
       const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
       inputQueue.push({ text: body, mode: "paste", id: id === void 0 ? void 0 : String(id) });
       return "queued";

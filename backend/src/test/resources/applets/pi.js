@@ -186,7 +186,12 @@
       if (spec.report) spec.report(ctx, extra, o);
     });
     host.expose("snapshot", () => term.read());
+    const seen = /* @__PURE__ */ new Set();
     host.expose("say", (text, id) => {
+      if (id !== void 0) {
+        if (seen.has(String(id))) return "queued";
+        seen.add(String(id));
+      }
       const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
       inputQueue.push({ text: body, mode: "paste", id: id === void 0 ? void 0 : String(id) });
       return "queued";
@@ -205,7 +210,7 @@
       const tail2 = tail(screen, 16).split("\n");
       const tailStr = tail2.join("\n");
       const working = /[⠁-⣿]/.test(tailStr) && /\bWorking\b/.test(tailStr);
-      const hasUI = /\d+(\.\d+)?%\/\d+[kKmM]?\s*\(/.test(tailStr) || tail2.filter((l) => l.trim()).length > 3;
+      const hasUI = /\d+(\.\d+)?%\/\d+[kKmM]?\s*\(/.test(tailStr) && !/Startup is still in progress/i.test(tailStr);
       return { kind: "open", working, hasUI };
     },
     // pi paints no per-turn elapsed or token count — the context line above is cumulative, and
