@@ -45,31 +45,46 @@ tell what it is used for — that is the point.
 
 ## Commands
 
-Two groups mirror the two ideas — who this machine is, and whether it is
-connected:
-
 ```
-microteams auth login [server-url]   log this machine in (device flow)
-microteams auth logout               forget the credential (disconnects first)
+microteams login [server-url]     log this machine in (device flow)
+microteams logout                 forget the credential (stops the connector and removes it from boot)
 
-microteams link connect [server-url] connect, and reconnect on every boot (runs login if needed)
-microteams link auto-connect         the same thing, said the other way
-microteams link disconnect           disconnect (warns if screens are running)
-microteams link no-auto-connect      disconnect and stop reconnecting on boot
+microteams start                  connect now; installs the background service if there is none
+microteams stop                   disconnect
+microteams restart                stop and start again
+microteams enable                 start at boot (or login), and now
+microteams disable                stop, and no longer start at boot
 
-microteams status                    login, connection and screen count at a glance
-microteams api <command> [args]      the server-defined command tree (see below)
-microteams update                    fetch a new binary and hand off to it, keeping screens alive
-microteams uninstall                 remove the CLI entirely (service, config, binary)
+microteams status [--json]        login, connection, service, sessions and lines on one screen
+microteams logs [-f]              the connector's own log
+microteams config                 this machine's settings: `config proxy [set <url> | no-proxy <list> | clear]`
+microteams update                 fetch a new binary and hand off to it
+microteams uninstall              remove the CLI entirely, ending its sessions (service, config, binary)
+microteams api <command> [args]   the server-defined command tree (see below)
 ```
 
-Commands meet the user where they are: `link connect` starts the login flow if
-the machine isn't logged in yet; `link disconnect` warns (and asks) when live
-screens would be killed; every success message says what to do next. The server
-URL is remembered after the first login — installers can pre-seed it, after
-which no command ever needs a URL.
+**Sessions outlive the connector.** They belong to the private tmux server, not to the process
+that started them: `stop`, `restart`, `disable`, `logout`, `update` and a crash all leave every
+program running, and the next connector re-adopts them when the backend asks. Only `uninstall` ends
+them, and it says so. The systemd unit says `KillMode=process` for the same reason; a unit written
+by an older build lacks it and would still end the sessions on a stop, so the service rewrites its
+own user unit when it starts, and a system unit is rewritten by any `start`, `restart`, `enable`,
+`stop` or `disable` run as root (under sudo) — until then the log and `status` say
+`run sudo microteams restart`, and a stop that would end running sessions asks once first.
 
-**Login is a device flow.** `microteams auth login` registers the machine, prints a
+Commands meet the user where they are: `start` runs the login flow if the machine isn't logged in
+yet; a system service (the default: it runs with nobody logged in) makes a command re-run itself
+under sudo; every success message says what to do next. The server URL is remembered after the
+first login — installers can pre-seed it, after which no command ever needs a URL. On WSL, `start`
+turns systemd on in `/etc/wsl.conf` when it is off and says that WSL must restart first.
+
+The service's name is the product's, not the config's: a lifecycle command run with a `--config`
+other than the one the installed unit runs refuses to act.
+
+`auth login|logout`, `link connect|disconnect|auto-connect|no-auto-connect` and `proxy …` are
+hidden aliases of these commands that print the new form; they are removed in the next version.
+
+**Login is a device flow.** `microteams login` registers the machine, prints a
 link, and blocks until a human opens it and approves. On approval the server
 hands back a durable credential representing this device (it does not expire —
 revoke it server-side). The credential is stored at
@@ -93,8 +108,8 @@ a child process on two free loopback ports recorded in the state file. The clien
 deployment's line list from `<origin>/multipath/v3/lines` and carries every connection made to its
 port over all lines at once. The control link and `microteams api` both connect to that port while
 the client has a live session; without one they go to the server directly, and the log (or stderr)
-says why. The service starts the client again whenever it exits, `microteams link retest` makes it
-fetch the line list now, `microteams status` shows its session and lines, and `microteams update`
+says why. The service starts the client again whenever it exits (and `microteams restart` starts
+it, and the line list, afresh), `microteams status` shows its session and lines, and `microteams update`
 and `install.sh` install it together with `microteams`; a service that finds it missing downloads it
 from `<origin>/connector/latest/<os>-<arch>/multipath-client`.
 
@@ -156,9 +171,11 @@ where an end-to-end test drives a real coding agent — and arrives here by bump
 applet** (server-supplied JavaScript). The two applet surfaces:
 
 - **Screen applets** (`claude.js`, `codex.js`, …) drive a program in a terminal with the
-  primitives described under _The model_. They are published from micro-connector as
-  `@micro-teams/connector-applets`, because understanding what a coding agent paints on a terminal
-  is the expensive part and it goes stale with every release of that agent.
+  primitives described under _The model_. They live in micro-connector's `applets/`, because
+  understanding what a coding agent paints on a terminal is the expensive part and it goes stale
+  with every release of that agent. They are built from the same micro-connector commit `go.mod`
+  pins (`scripts/connector-drivers.sh`), so the drivers and the connector that runs them are always
+  one version: bumping the dependency bumps both.
 - **The CLI applet** (`applets/src/cli/` → `cli.js`) defines the `microteams api` command tree.
   Primitives: `microteams.command` (declare a command), `microteams.http` (one **authenticated**
   backend call — the agent-token exchange is the connector's job, never the applet's),
@@ -188,11 +205,9 @@ credential from the backend, not from a new host binding.
 
 ### The command tree
 
-`auth`, `link`, `status`, `run`, `update`, `uninstall` and `api` are lifecycle, not features.
-**Stopping the service kills every session on the machine**, so a command that only wants the
-connector to reconsider something is never built on stop/start. `link retest` is the worked
-example: it signals the running process instead, and refuses to signal one that predates the
-handler, because SIGHUP to a process that ignores it is a kill.
+The commands above, `run` and `api` are lifecycle, not features. Because sessions outlive the
+connector, a command that wants the connector to reconsider something can be built on `restart`.
+`acp-screen` is hidden: it runs inside a session, started by a screen driver, never by a person.
 
 ### The wire protocol is frozen
 
@@ -218,6 +233,7 @@ additively; never break.
 This monorepo's **backend** (`../backend`, the `mt` service) is the server that drives this host:
 `agent/driver` picks a screen applet (`claude.js`) to run Claude Code in a screen, and
 `agent/AppletController` serves the CLI applet (`cli.js`) that defines `microteams api`. The CLI
-applet is authored in `../applets`; the screen applets come from the shared package. Nothing in the
+applet is authored in `../applets`; the screen applets are built from micro-connector at the
+version `go.mod` pins. Nothing in the
 connector knows any of that is about AI — read it and you cannot tell what it hosts, which is the
 point.

@@ -42,6 +42,13 @@
 # `microteams api say`, so the reply travels the whole way back into the thread — applet, pty, tmux,
 # connector, backend.
 #
+# The machine runs systemd, and the connector runs as the system service `microteams start`
+# installs, the way a real machine runs it. That is what lets this prove the bargain the connector
+# makes with its sessions: with a person watching the live screen (and so the backend's wake-up
+# probing the agent on every reattach), `microteams restart`, `stop` + `start`, a restart that has
+# to rewrite a unit written by an older build, and `microteams update` all leave the agent's program
+# running — the same tmux pane, the same process, not a respawned one.
+#
 # Usage: e2e.sh [npm:<version>|installer|pi:<version>]   (run from an unpacked bundle directory)
 set -euo pipefail
 
@@ -60,6 +67,9 @@ MOCK_CT=microteams-testmock
 # Claude Code refuses --dangerously-skip-permissions as root, and our own driver omits the flag
 # there — so the machine runs the connector as an ordinary user, the way a real one does.
 MACHINE_USER=agent
+# The connector's own log on the machine (internal/hostlog: beside its config).
+CONNLOG=/home/$MACHINE_USER/.config/microteams/microteams.log
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GW="http://localhost:$(grep -E '^NGINX_HTTP_PORT=' .env 2>/dev/null | cut -d= -f2 || echo 80)"
 API="$GW/api"   # cheese-auth (identity)
 MT="$GW/mt"     # this backend
@@ -72,6 +82,7 @@ json() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
 # KEEP=1 leaves the machine and mock containers up after a run, so a failure can be inspected
 # instead of re-run blind. CI never sets it.
 cleanup() {
+  [ -n "${VIEWER_PID:-}" ] && kill "$VIEWER_PID" 2>/dev/null
   [ "${KEEP:-0}" = "1" ] && { echo "(KEEP=1: leaving $MACHINE_CT and $MOCK_CT up)"; return; }
   docker rm -f "$MACHINE_CT" "$MOCK_CT" >/dev/null 2>&1 || true
 }
@@ -110,7 +121,7 @@ TEAM_ID="$(curl -fsS -X POST "$MT/team" -H "$AUTH" -H 'Content-Type: application
 pass "team $TEAM_ID"
 
 # --- a machine --------------------------------------------------------------------------------
-# A plain Debian container on the compose network, standing in for a customer's box. It gets the
+# A Debian container with systemd as its init, standing in for a customer's box. It gets the
 # connector, the multipath client and the static tmux from the bundle's own connector/ directory —
 # the same files the backend serves to a real machine, put where install.sh puts them — so a broken
 # or missing binary in the bundle fails here.
@@ -122,11 +133,24 @@ docker rm -f "$MACHINE_CT" >/dev/null 2>&1 || true
 # comes from the public internet, and the stack's own network is not the right place to depend on
 # for that (a blip there would be reported as a product failure). Once the installs are done the
 # container joins the stack and reaches it by service name.
-docker run -d --name "$MACHINE_CT" --hostname "$MACHINE_CT" debian:13 sleep infinity >/dev/null
+# systemd has to be PID 1, so it is installed into an image first; privileged, with a cgroup
+# namespace of its own, is what systemd needs to run inside a container. The machine user may sudo
+# without a password, as the person at a real machine can: `microteams start` elevates itself.
+docker build -q -t microteams-e2e-machine - >/dev/null <<'DOCKERFILE'
+FROM debian:13
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      systemd systemd-sysv dbus sudo ca-certificates curl procps python3 >/dev/null
+CMD ["/lib/systemd/systemd"]
+DOCKERFILE
+docker run -d --name "$MACHINE_CT" --hostname "$MACHINE_CT" --privileged --cgroupns=private \
+  --tmpfs /run --tmpfs /run/lock microteams-e2e-machine >/dev/null
+for _ in $(seq 1 30); do
+  case "$(docker exec "$MACHINE_CT" systemctl is-system-running 2>/dev/null)" in running|degraded) break ;; esac
+  sleep 1
+done
 docker exec "$MACHINE_CT" bash -c "set -e
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq && apt-get install -y -qq ca-certificates curl procps python3 >/dev/null
   useradd -m -s /bin/bash $MACHINE_USER
+  echo '$MACHINE_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$MACHINE_USER
   mkdir -p /home/$MACHINE_USER/.local/bin /home/$MACHINE_USER/.config/microteams/bin"
 docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
 docker cp connector/linux-amd64/tmux "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/tmux"
@@ -156,25 +180,29 @@ MACHINE_TOKEN="$(printf '%s' "$POLL" | json "d.get('token','')")"
 [ -n "$MACHINE_ID" ] && [ -n "$MACHINE_TOKEN" ] || fail "poll did not hand over a machine id + token: $POLL"
 pass "machine $MACHINE_ID enrolled"
 
-# `link connect` installs a systemd service, which a container has no init for — so the connector is
-# run the way that service would run it. Everything downstream (control channel, screens, tmux) is
-# identical; only the supervisor differs.
-step "connect the machine"
+# The credential the approval handed over goes where `microteams login` puts it; `microteams start`
+# then installs the system service (elevating with sudo) and starts it.
+step "connect the machine: microteams start"
 docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -c "cat > /home/$MACHINE_USER/.config/microteams/config.json <<EOF
 {\"base\":\"http://nginx/mt\",\"token\":\"$MACHINE_TOKEN\",\"machine_id\":\"$MACHINE_ID\"}
 EOF"
-docker exec -d -u "$MACHINE_USER" "$MACHINE_CT" bash -lc \
-  '$HOME/.local/bin/microteams run --config $HOME/.config/microteams/config.json >/tmp/connector.log 2>&1'
+onmachine '$HOME/.local/bin/microteams start' ||
+  { docker exec "$MACHINE_CT" journalctl -u microteams --no-pager | tail -40; fail "microteams start failed"; }
+docker exec "$MACHINE_CT" systemctl is-active -q microteams || fail "the microteams system service is not active"
+docker exec "$MACHINE_CT" grep -qx "User=$MACHINE_USER" /etc/systemd/system/microteams.service ||
+  fail "the system service does not run as $MACHINE_USER"
+docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
+  fail "the system service would end the sessions when it stops (no KillMode=process)"
 for _ in $(seq 1 30); do
   online="$(curl -fsS "$MT/machine/$MACHINE_ID" -H "$AUTH" | json "str(d.get('online',False))")"
   [ "$online" = "True" ] && break
   sleep 1
 done
-[ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat /tmp/connector.log; fail "machine never came online"; }
+[ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat $CONNLOG; fail "machine never came online"; }
 # The stack's line list is http://nginx (MULTIPATH_ORIGIN in build.yml), which this machine reaches:
 # the control link must ride the multipath client, not go around it.
-docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" /tmp/connector.log ||
-  { docker exec "$MACHINE_CT" cat /tmp/connector.log; fail "the control link did not go through the multipath client"; }
+docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" $CONNLOG ||
+  { docker exec "$MACHINE_CT" cat $CONNLOG; fail "the control link did not go through the multipath client"; }
 pass "machine is online, over its multipath client"
 
 # --- an agent ---------------------------------------------------------------------------------
@@ -208,7 +236,7 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 mtmux has-session -t "$SID" 2>/dev/null ||
-  { docker exec "$MACHINE_CT" cat /tmp/connector.log; fail "no tmux session for $SID on the machine"; }
+  { docker exec "$MACHINE_CT" cat $CONNLOG; fail "no tmux session for $SID on the machine"; }
 pass "tmux session $SID is live"
 
 # --- one message, end to end -------------------------------------------------------------------
@@ -265,7 +293,7 @@ round_trip() {
   done
 
   [ "$HEARD" = "1" ] || {
-    echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
+    echo "--- connector log ---"; docker exec "$MACHINE_CT" cat $CONNLOG || true
     echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
     echo "--- what the model was asked ---"
     docker exec "$MACHINE_CT" curl -s -X PUT "http://$MOCK_CT:1080/mockserver/retrieve?type=REQUESTS&format=JSON" \
@@ -275,6 +303,68 @@ round_trip() {
 }
 
 round_trip "agent already running"
+
+# --- the sessions outlive the connector ---------------------------------------------------------
+# A person watches the live screen through all of what follows. Every reattach makes the backend
+# probe the agent and wake it if it looks dead, so a connector that comes back slowly, or a backend
+# that misreads the gap, would respawn the program right here. It must instead be the very program
+# that was running: the same pane process, in a session created at the same moment.
+step "a viewer watches the live screen"
+VIEWLOG="$(mktemp)"
+node "$SCRIPTS/viewer.mjs" "ws://${GW#http://}/mt/machine/screen/$SID?token=$TOKEN" "$VIEWLOG" &
+VIEWER_PID=$!
+for _ in $(seq 1 30); do grep -q '^data' "$VIEWLOG" && break; sleep 1; done
+grep -q '^data' "$VIEWLOG" || { cat "$VIEWLOG"; fail "the viewer never saw the screen"; }
+pass "a viewer is attached to $SID"
+
+# The agent's identity: its pane's process and when its session was created. A respawn in place
+# keeps the session and changes the process; a new session changes both.
+agent_identity() { mtmux display-message -p -t "$SID" '#{pane_pid} #{session_created}' | tr -d '\r'; }
+
+# Wait for the machine to be online again, then prove the agent was neither ended nor respawned,
+# that it still answers, and that the viewer sees it again.
+still_the_same_agent() {
+  local what="$1" before="$2" viewed="$3" online="" after
+  for _ in $(seq 1 60); do
+    online="$(curl -fsS "$MT/machine/$MACHINE_ID" -H "$AUTH" | json "str(d.get('online',False))")"
+    [ "$online" = "True" ] && break
+    sleep 1
+  done
+  [ "$online" = "True" ] || { docker exec "$MACHINE_CT" tail -40 "$CONNLOG"; fail "the machine did not come back online after $what"; }
+  round_trip "after $what"
+  # Long enough for a wake-up that a reattach set off to have replaced the program.
+  sleep 10
+  after="$(agent_identity)" || fail "the agent's session is gone after $what"
+  [ "$after" = "$before" ] || fail "$what respawned the agent: pane pid and session start $before -> $after"
+  [ "$(grep -c '^data' "$VIEWLOG")" -gt "$viewed" ] || { cat "$VIEWLOG"; fail "the viewer saw nothing after $what"; }
+  pass "$what kept the agent: same pane process and session ($after), and the viewer sees it"
+}
+
+# Run a command on the machine and prove the agent survived it.
+survives() {
+  local what="$1" before viewed
+  step "$what keeps the agent running"
+  before="$(agent_identity)"
+  viewed="$(grep -c '^data' "$VIEWLOG")"
+  onmachine "$2" || fail "$what failed"
+  still_the_same_agent "$what" "$before" "$viewed"
+}
+
+survives "microteams restart" '$HOME/.local/bin/microteams restart'
+survives "microteams stop + start" '$HOME/.local/bin/microteams stop &&
+  ! systemctl is-active -q microteams && sleep 3 && $HOME/.local/bin/microteams start'
+
+# A machine updated from an older build still has the unit that build wrote, which ends the whole
+# service, sessions and all, on a stop. The connector says so in its log and in `status`, and a
+# restart run with sudo rewrites the unit first, so that very restart already keeps them.
+step "a unit from an older build is reported, and rewritten by the next restart"
+docker exec "$MACHINE_CT" bash -c "sed -i '/^KillMode=process\$/d' /etc/systemd/system/microteams.service && systemctl daemon-reload"
+STATUS="$(onmachine '$HOME/.local/bin/microteams status' 2>&1 || true)"
+printf '%s\n' "$STATUS"
+printf '%s' "$STATUS" | grep -q 'sudo microteams restart' || fail "status does not say how to fix an older unit"
+survives "microteams restart, rewriting an older unit" '$HOME/.local/bin/microteams restart'
+docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
+  fail "restart did not rewrite the older unit"
 
 # --- microteams update: the live-tmux-preserving in-process re-exec (T-025) ----------------------
 # `microteams update` on a machine with a LIVE service must take the SIGUSR2 in-process path: the
@@ -303,6 +393,8 @@ if [ -n "${UPDATE_MARKER_BIN:-}" ] && [ -f "${UPDATE_MARKER_BIN:-/nonexistent}" 
   chmod +x connector/linux-amd64/microteams
 
   PRE_VER="$(onmachine '$HOME/.local/bin/microteams --version' 2>&1 || true)"
+  BEFORE_UPDATE="$(agent_identity)"
+  VIEWED_BEFORE_UPDATE="$(grep -c '^data' "$VIEWLOG")"
 
   # Trigger update. It MUST take the in-process SIGUSR2 path (a live service is registered), not a
   # detached fetch-replace.
@@ -320,22 +412,10 @@ if [ -n "${UPDATE_MARKER_BIN:-}" ] && [ -f "${UPDATE_MARKER_BIN:-/nonexistent}" 
     sleep 1
   done
   printf '%s' "$NOW_VER" | grep -q "$UPDATE_MARKER_VERSION" ||
-    { docker exec "$MACHINE_CT" cat /tmp/connector.log || true; fail "after update the binary is not the freshly downloaded one (want $UPDATE_MARKER_VERSION; pre=$PRE_VER; now=$NOW_VER)"; }
+    { docker exec "$MACHINE_CT" cat $CONNLOG || true; fail "after update the binary is not the freshly downloaded one (want $UPDATE_MARKER_VERSION; pre=$PRE_VER; now=$NOW_VER)"; }
 
-  # The service must still be online (it re-execed, did not die).
-  online=""
-  for _ in $(seq 1 30); do
-    online="$(curl -fsS "$MT/machine/$MACHINE_ID" -H "$AUTH" | json "str(d.get('online',False))")"
-    [ "$online" = "True" ] && break
-    sleep 1
-  done
-  [ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat /tmp/connector.log || true; fail "machine went offline across the update"; }
-
-  # The SAME tmux session must still be alive — proving re-attach, not respawn from a killed session.
-  mtmux has-session -t "$SID" 2>/dev/null || fail "the live tmux session $SID did not survive microteams update"
-
-  # And a message must still round-trip through the re-adopted screen.
-  round_trip "after microteams update"
+  # Online again: the same program in the same session, answering, and watched.
+  still_the_same_agent "microteams update" "$BEFORE_UPDATE" "$VIEWED_BEFORE_UPDATE"
   pass "update ran in-process, preserved the live screen, and the running service is the freshly downloaded binary"
 else
   step "skip microteams update test (no UPDATE_MARKER_BIN — running a leg/bundle without a marker build)"
@@ -352,7 +432,7 @@ sleep 3
 # `microteams status` must stop claiming a running screen.
 STATUS="$(onmachine '$HOME/.local/bin/microteams status --config $HOME/.config/microteams/config.json' 2>&1 || true)"
 printf '%s\n' "$STATUS"
-printf '%s' "$STATUS" | grep -qE 'screens +(0|none)' ||
+printf '%s' "$STATUS" | grep -qE 'sessions +(0|none)' ||
   fail "status still reports running screens after the tmux server died"
 pass "the connector does not count a screen whose tmux is gone"
 
@@ -404,7 +484,7 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 [ "${LONG_IN:-0}" = "1" ] || {
-  echo "--- connector log ---"; docker exec "$MACHINE_CT" cat /tmp/connector.log || true
+  echo "--- connector log ---"; docker exec "$MACHINE_CT" cat $CONNLOG || true
   echo "--- what the pane shows ---"; mtmux capture-pane -p -t "$SID" || true
   fail "a ~25KB message never reached the model (T-058)"
 }

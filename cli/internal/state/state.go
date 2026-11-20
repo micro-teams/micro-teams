@@ -20,9 +20,6 @@
 //   - CurrentClient(cfgPath) is the service's MultiPath client (Client: pid, stream and status
 //     addresses), empty when the writer is gone.
 //
-//   - CanRelink(cfgPath) reports whether the running service handles SIGHUP (start its client over),
-//     so `link retest` never signals a process that SIGHUP would kill.
-//
 //     state.Write(cfgPath, 2, state.Client{PID: 42, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, state.Link{Up: true, Since: time.Now()})
 //     if c := state.CurrentClient(cfgPath); c.Listen != "" { ... }
 package state
@@ -45,7 +42,6 @@ type snapshot struct {
 	LinkSince int64  `json:"linkSince,omitempty"`
 	LinkError string `json:"linkError,omitempty"`
 	Client    Client `json:"multipathClient,omitzero"`
-	Relink    bool   `json:"relink,omitempty"`
 }
 
 // Client is the service's MultiPath client: its pid, the address programs connect to, and the
@@ -77,7 +73,6 @@ func Write(cfgPath string, screens int, client Client, link Link) {
 		LinkUp:    link.Up,
 		LinkError: link.Error,
 		Client:    client,
-		Relink:    true,
 	}
 	if !link.Since.IsZero() {
 		snap.LinkSince = link.Since.Unix()
@@ -125,12 +120,6 @@ func PID(cfgPath string) int {
 func RawPID(cfgPath string) int {
 	s, _ := read(cfgPath)
 	return s.PID
-}
-
-// CanRelink reports whether the running service handles SIGHUP.
-func CanRelink(cfgPath string) bool {
-	s, _ := read(cfgPath)
-	return s.Relink
 }
 
 // CurrentLink is what the running service knows about the control connection.

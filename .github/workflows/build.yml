@@ -206,11 +206,8 @@ jobs:
 
   build-applet:
     runs-on: ubuntu-latest
-    # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which
-    # requires an authenticated request even for a public package.
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: applets
@@ -226,11 +223,13 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: applets/package-lock.json
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@micro-teams"
+      # The screen drivers are built from the micro-connector commit cli/go.mod pins, which go
+      # resolves (scripts/connector-drivers.sh): the connector and its drivers are one version.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
       - name: Upload applets
         uses: actions/upload-artifact@v7
@@ -460,6 +459,10 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
+      # The viewer e2e.sh keeps on the live screen is a Node WebSocket client.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       # The artifact is the bundle directory (not a zip); download-artifact restores its files
       # directly into microteams-deploy/ — no unzip step, and no nested archive. Note: artifact
       # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash` and the

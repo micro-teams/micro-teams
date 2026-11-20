@@ -25,12 +25,11 @@
 //     every second, and started again whenever it exits (after 1 s, doubling to 30 s), always with
 //     the same line list cache (Config.LinesCache). Every start, exit and change of session is
 //     logged.
-//     Live() is the stream address while the client has a live session; Await(grace) waits for one
+//     Live() is the stream address while the client has a live session; Await(ctx, grace) waits for one
 //     unless grace has passed since the client started or last lost its session (so a session
 //     being replaced after a server restart is waited for, and a server that never answers is
-//     not); Why() is why there is none; Info() is what the state file records; Restart() makes
-//     the client start over and ask for the line list at once; Stop() ends it and returns once it
-//     has exited.
+//     not), and returns at once when ctx is done; Why() is why there is none; Info() is what the state file records; Stop() ends it and
+//     returns once it has exited.
 //
 //   - Lookup(c) checks a client recorded in the state file the way a short command needs: its
 //     /status answers and its session is live. It returns the stream address, or why not.
@@ -167,9 +166,8 @@ type Supervisor struct {
 	cfg   Config
 	entry string
 
-	restart chan struct{}
-	stop    context.CancelFunc
-	done    chan struct{}
+	stop context.CancelFunc
+	done chan struct{}
 
 	mu      sync.Mutex
 	info    state.Client
@@ -186,7 +184,7 @@ func NewSupervisor(cfg Config) *Supervisor {
 	if u, err := url.Parse(cfg.Base); err == nil && u.Host != "" {
 		entry = u.Scheme + "://" + u.Host
 	}
-	return &Supervisor{cfg: cfg, entry: entry, restart: make(chan struct{}, 1), since: time.Now(),
+	return &Supervisor{cfg: cfg, entry: entry, since: time.Now(),
 		why: "the multipath client has not started", changed: make(chan struct{})}
 }
 
@@ -214,7 +212,6 @@ func (s *Supervisor) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.restart:
 		case <-time.After(backoff):
 		}
 		backoff = min(2*backoff, 30*time.Second)
@@ -278,10 +275,6 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 			return fmt.Errorf("exited: %v", err)
 		case <-ctx.Done():
 			return terminate(cmd, exited)
-		case <-s.restart:
-			s.cfg.Logf("multipath client: restarting it to ask for the line list now")
-			_ = terminate(cmd, exited)
-			return errors.New("restarted on request")
 		case <-tick.C:
 			s.poll(cmd.Process.Pid, listen, status)
 		}
@@ -366,7 +359,7 @@ func (s *Supervisor) Live() (string, bool) {
 
 // Await waits for a live session unless grace has passed since the client started or last lost its
 // session, so that neither a client starting nor a session being replaced sends a dial directly.
-func (s *Supervisor) Await(grace time.Duration) (string, bool) {
+func (s *Supervisor) Await(ctx context.Context, grace time.Duration) (string, bool) {
 	for {
 		s.mu.Lock()
 		addr, live, changed, left := s.info.Listen, s.live, s.changed, grace-time.Since(s.since)
@@ -377,6 +370,8 @@ func (s *Supervisor) Await(grace time.Duration) (string, bool) {
 		select {
 		case <-changed:
 		case <-time.After(left):
+		case <-ctx.Done():
+			return addr, false
 		}
 	}
 }
@@ -393,14 +388,6 @@ func (s *Supervisor) Info() state.Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.info
-}
-
-// Restart makes the client start over, asking for the line list at once.
-func (s *Supervisor) Restart() {
-	select {
-	case s.restart <- struct{}{}:
-	default:
-	}
 }
 
 // Stop ends the client and returns once it has exited.

@@ -18,31 +18,47 @@
 //   - New(cfg, cfgPath) builds a Host; cfgPath locates the state file and the log ("" disables them).
 //
 //   - (*Host).Run(ctx) runs the client and the control link and serves screens until ctx is done.
-//     SIGUSR2 updates the binaries in place and hands off to the new one without stopping the
-//     screens; SIGHUP starts the client over, so it fetches the line list afresh.
+//     Screens outlive it: returning detaches from them, and the next start re-adopts them when the
+//     backend asks. SIGUSR2 updates the binaries in place and hands off to the new one the same way.
+//     On start it brings the installed service unit up to date (see EnsureUnit) or logs why not.
+//
+//   - EnsureUnit(cfgPath) (rewritten bool, advice string, err error) rewrites an installed service
+//     unit that would end the screens when the service stops, when this process may: a user unit as
+//     that user, a system unit as root under sudo, and only a unit that starts this very binary with
+//     cfgPath, since the rewrite writes those. Otherwise advice is UnitAdvice, the one line a person
+//     is shown; nothing installed, or a current unit, is ("", nil).
+//
+//   - UnitServes(cfgPath, userService) (bool, error) is false when the installed systemd unit of
+//     that variant starts the connector with another config. The service's name is the brand's, so
+//     a command run with another config must not act on it. True when there is no unit file.
 //
 //   - Build is what the binary calls itself, reported when the backend asks.
 //
 //     h, err := host.New(cfg, cfgPath)
 //     err = h.Run(ctx)
+//     if _, advice, _ := host.EnsureUnit(cfgPath); advice != "" { fmt.Println(advice) }
 package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/micro-teams/micro-connector/cli/brand"
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/protocol"
 	"github.com/micro-teams/micro-connector/cli/screen"
+	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/transport/ws"
 	"github.com/micro-teams/micro-connector/cli/update"
@@ -101,7 +117,7 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{tm: tm, cfgPath: cfgPath, base: cfg.Base, ctrl: ctrl, grace: clientGrace, logw: hostlog.Open(cfgPath)}
+	h := &Host{ctx: context.Background(), tm: tm, cfgPath: cfgPath, base: cfg.Base, ctrl: ctrl, grace: clientGrace, logw: hostlog.Open(cfgPath)}
 	h.mp = mpclient.NewSupervisor(mpclient.Config{
 		Binary:     mpclient.BinaryPath(filepath.Dir(cfgPath)),
 		LinesCache: mpclient.LinesCachePath(filepath.Dir(cfgPath)),
@@ -121,7 +137,7 @@ func New(cfg *config.Config, cfgPath string) (*Host, error) {
 // chooseURL is where the next dial of the control link goes: through the client while its session
 // is live, directly otherwise.
 func (h *Host) chooseURL() string {
-	addr, live := h.mp.Await(h.grace)
+	addr, live := h.mp.Await(h.ctx, h.grace)
 	if !live {
 		h.direct.Store(true)
 		h.sayRoute(fmt.Sprintf("the control link goes directly to the server: %s", h.mp.Why()))
@@ -247,26 +263,21 @@ func (h *Host) Run(ctx context.Context) error {
 	h.mgr = screen.NewManager(ctx, h.conn, h.tm)
 	h.mgr.OnScreensChanged = func(live int) { h.writeState(live) }
 	h.mgr.OnUpdateRequested = h.performUpdate
+	h.checkUnit()
 	h.publishState()
 	defer h.clearState()
-	defer h.mgr.CloseAll()
-	// Every screen on this machine dies with this process, and only here: a stop is a stop. An
-	// update hands off with syscall.Exec instead of returning (see performUpdate).
-	defer h.tm.KillServer()
+	// The screens outlive this process: a stop or restart leaves every program running, and the
+	// next start re-adopts them. Only `microteams uninstall` ends them.
+	defer h.mgr.Detach()
 
 	go h.mp.Run(ctx)
 	defer h.mp.Stop()
 
 	// `microteams update` signals SIGUSR2 so the update happens inside this process, which then
-	// hands off with syscall.Exec and keeps the private tmux and its screens.
+	// hands off with syscall.Exec.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR2)
 	defer signal.Stop(sig)
-	// `microteams link retest` signals SIGHUP: start the client over so it fetches the line list
-	// now. The screens are not touched.
-	relink := make(chan os.Signal, 1)
-	signal.Notify(relink, syscall.SIGHUP)
-	defer signal.Stop(relink)
 	go func() {
 		for {
 			select {
@@ -274,8 +285,6 @@ func (h *Host) Run(ctx context.Context) error {
 				return
 			case <-sig:
 				go h.performUpdate()
-			case <-relink:
-				h.mp.Restart()
 			}
 		}
 	}()
@@ -302,11 +311,10 @@ func (h *Host) dispatch(msg protocol.Msg) {
 }
 
 // performUpdate replaces the microteams binary and the multipath client in place and hands this
-// process off to the new binary without tearing down the private tmux, so the hosted screens
-// survive: download and verify both, replace both, stop the client (it says goodbye to the server),
-// then syscall.Exec, which replaces the process image so the deferred KillServer never runs. The
-// new binary starts a fresh client and re-adopts the screens. Any failure before the exec keeps the
-// current process running unchanged.
+// process off to the new binary: download and verify both, replace both, detach from the screens,
+// stop the client (it says goodbye to the server), then syscall.Exec. The new binary starts a fresh
+// client and re-adopts the screens. Any failure before the detach keeps the current process running
+// unchanged.
 func (h *Host) performUpdate() {
 	if !h.updating.CompareAndSwap(false, true) {
 		return
@@ -322,7 +330,7 @@ func (h *Host) performUpdate() {
 		h.logf("microteams: update: cannot locate self: %v", err)
 		return
 	}
-	bin, err := update.Fetch(h.ctx, h.base)
+	bin, err := update.Fetch(h.ctx, h.base, brand.Current.Name)
 	if err != nil {
 		h.logf("microteams: update aborted (kept running current build): %v", err)
 		return
@@ -342,22 +350,128 @@ func (h *Host) performUpdate() {
 	if err := os.Rename(clientBin, clientPath); err != nil {
 		h.logf("microteams: update: the new microteams is in place but the multipath client is not (%v); the next start downloads it", err)
 	}
-	// Detach live viewer clients (not the tmux sessions) before the exec: an attached viewer's tmux
-	// client would survive as an orphan and fight the viewer the new binary attaches.
-	h.mgr.CloseViewerClients()
+	// Detach before the exec: each viewer's tmux client would otherwise survive as an orphan and
+	// fight the one the new binary attaches.
+	h.mgr.Detach()
 	h.mp.Stop()
 	h.logf("microteams: binaries updated in place; handing off to the new build (screens preserved)")
-	// If the exec fails this process keeps running, so the screens live on; the replaced binary
-	// applies on the next start.
 	if err := syscall.Exec(self, os.Args, os.Environ()); err != nil {
+		// This process carries on. Dialling again makes the backend re-adopt the screens it just
+		// detached from; the replaced binary applies on the next start.
 		h.logf("microteams: exec into the new binary failed (applies on next start): %v", err)
 		go h.mp.Run(h.ctx)
+		if c, ok := h.conn.(interface{ Reconnect() }); ok {
+			c.Reconnect()
+		}
+	}
+}
+
+// UnitAdvice is what a person is told when the installed system unit ends every screen when the
+// service stops and this process cannot rewrite it.
+const UnitAdvice = "the system service ends every session when it stops; run `sudo microteams restart` once to let sessions survive restarts"
+
+// EnsureUnit rewrites an installed service unit that is not the one this build writes, when this
+// process may. See the package comment.
+func EnsureUnit(cfgPath string) (rewritten bool, advice string, err error) {
+	current, err := service.UnitCurrent(cfgPath)
+	if errors.Is(err, service.ErrNotInstalled) {
+		return false, "", nil
+	}
+	if err != nil || current {
+		return false, "", err
+	}
+	// A system unit runs as the user who installed it with sudo (User=), so only a rewrite under
+	// sudo writes the same unit again.
+	userService, _ := service.Installed(cfgPath)
+	if userService == (os.Geteuid() == 0) || !userService && os.Getenv("SUDO_USER") == "" {
+		return false, UnitAdvice, nil
+	}
+	if same, err := unitRunsThis(cfgPath, userService); err != nil || !same {
+		return false, UnitAdvice, err
+	}
+	if err := service.ControlInstalled(cfgPath, "uninstall"); err != nil {
+		return false, "", err
+	}
+	if err := service.Control(cfgPath, "install"); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
+}
+
+// UnitServes reports whether the installed systemd unit runs the connector with cfgPath.
+func UnitServes(cfgPath string, userService bool) (bool, error) {
+	unit, err := readUnit(userService)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return servesConfig(unit, cfgPath), nil
+}
+
+// unitRunsThis reports whether the installed systemd unit starts this binary with cfgPath: the
+// only unit this process writes again unchanged.
+func unitRunsThis(cfgPath string, userService bool) (bool, error) {
+	unit, err := readUnit(userService)
+	if err != nil {
+		return false, err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	return runsThis(unit, self, cfgPath), nil
+}
+
+// readUnit reads the systemd unit file of a variant, where kardianos writes it.
+func readUnit(userService bool) (string, error) {
+	path := filepath.Join("/etc/systemd/system", brand.Current.ServiceName+".service")
+	if userService {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(dir, "systemd", "user", brand.Current.ServiceName+".service")
+	}
+	unit, err := os.ReadFile(path)
+	return string(unit), err
+}
+
+// servesConfig reports whether a unit's text runs the connector with cfgPath, as kardianos writes it.
+func servesConfig(unit, cfgPath string) bool {
+	return strings.Contains(unit, `"--config" "`+cfgPath+`"`)
+}
+
+// runsThis reports whether a unit's text starts the binary self with cfgPath.
+func runsThis(unit, self, cfgPath string) bool {
+	return strings.Contains(unit, "\nExecStart="+self+" ") && servesConfig(unit, cfgPath)
+}
+
+// checkUnit runs EnsureUnit for the service this process runs as, and logs what it found.
+func (h *Host) checkUnit() {
+	if h.cfgPath == "" {
+		return
+	}
+	switch rewritten, advice, err := EnsureUnit(h.cfgPath); {
+	case err != nil:
+		h.logf("microteams: cannot check the service unit: %v", err)
+	case rewritten:
+		h.logf("microteams: rewrote the service unit so sessions survive a stop or restart")
+	case advice != "":
+		h.logf("microteams: %s", advice)
 	}
 }
 
 // publishState writes the live screen count, taken from tmux: a remembered count would go on
 // reporting screens of a tmux server that has died.
-func (h *Host) publishState() { h.writeState(h.tm.LiveSessions()) }
+func (h *Host) publishState() {
+	n, err := h.tm.LiveSessions()
+	if err != nil {
+		h.logf("microteams: cannot count the screens: %v", err)
+	}
+	h.writeState(n)
+}
 
 func (h *Host) writeState(live int) {
 	h.lastScreens.Store(int32(live))
