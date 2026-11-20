@@ -15,12 +15,13 @@
  * back; closing gives it back too. Input while someone else holds it is refused by the machine, and
  * the state says so for a few seconds.
  *
- * LiveScreen({ open, path(cols, rows), onState, now? }) — start() dials once the terminal has said its room (room()),
- *   close() ends it for good, retry() redials now. drawOn(sink) says where the stream goes: the
- *   sink's write(bytes), size(cols, rows) and reset() (each new connection starts on a clean
- *   terminal). input(data) sends input; rendered(n) reports drawn bytes; capture() resolves to the
- *   screen's text with its history; command(name) gives the lease back and asks the driver for
- *   "usage" or "compact"; release() gives the lease back.
+ * LiveScreen({ open, path(cols, rows), onState, now? }) — start() dials once the terminal has said
+ *   its room (room()), close() ends it for good, retry() redials now. drawOn(sink) says where the
+ *   stream goes: the sink's write(bytes), size(cols, rows) and reset() (each new connection starts
+ *   on a clean terminal). input(data, typed?) sends input, and only typed input keeps the lease;
+ *   rendered(n) reports drawn bytes; capture() resolves to the screen's text with its history;
+ *   command(name) gives the lease back and asks the driver for "usage" or "compact"; release()
+ *   gives the lease back.
  *   Reconnects forever: 0.5 s, doubling to 30 s, forgiven only once a connection has lasted 5 s.
  *   onState(ScreenState) on every change.
  * ScreenState — connected, reconnecting, doubtful (three attempts failed without one opening: the
@@ -140,8 +141,10 @@ export class LiveScreen {
     } else this.json({ type: "resize", cols, rows });
   }
 
-  input(data: string | Uint8Array) {
-    this.lastInput = this.now();
+  /** Input for the machine; typed is false for the terminal's own answers to tmux, which do not
+   * mean the person is there and so do not keep the lease. */
+  input(data: string | Uint8Array, typed = true) {
+    if (typed) this.lastInput = this.now();
     this.send(typeof data === "string" ? new TextEncoder().encode(data) : data);
   }
 

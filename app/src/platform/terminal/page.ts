@@ -6,8 +6,11 @@
  * mountTerminal(el, post, opts) → TerminalHandle. post receives FromTerminal:
  *   { type: "room", cols, rows }  how many cells the element has room for: once at mount, then
  *                                 after each change of the element's size has settled.
- *   { type: "keys", data }        what the person typed, pasted, or did with the mouse (mouse
- *                                 sequences, the wheel among them, only while tmux asks for them).
+ *   { type: "keys", data, typed } what goes to the machine: what the person typed, pasted or did
+ *                                 with the mouse (the wheel among it, only while tmux asks for
+ *                                 mouse input), typed true; or the terminal's own answers to
+ *                                 tmux's questions about it, typed false, which say nothing about
+ *                                 whether the person is there.
  *   { type: "rendered", n }       n more bytes of screen data have been drawn; the machine sends
  *                                 more only as these arrive.
  *   { type: "copy", text }        text for the clipboard: a program's OSC 52 (tmux sends one when a
@@ -35,7 +38,7 @@ import { Terminal } from "@xterm/xterm";
 
 export type FromTerminal =
   | { type: "room"; cols: number; rows: number }
-  | { type: "keys"; data: string }
+  | { type: "keys"; data: string; typed: boolean }
   | { type: "rendered"; n: number }
   | { type: "copy"; text: string };
 
@@ -57,6 +60,9 @@ const ACK_BYTES = 32 * 1024;
 /** A finger travelling this many cells is one wheel turn (tmux scrolls a few lines per turn). */
 const CELLS_PER_TURN = 2;
 const TAP_SLOP_PX = 8;
+/** Input this soon after a key, a paste or a pointer event is the person's; later, the terminal's. */
+const TYPED_MS = 1_000;
+const PERSON_EVENTS = ["keydown", "beforeinput", "paste", "compositionend", "mousedown", "mouseup", "wheel", "touchmove", "touchend"];
 
 const THEME = {
   cursor: "#FFFFFF",
@@ -100,8 +106,12 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   const xterm = term.element!;
   xterm.style.position = "absolute";
 
-  term.onData((data) => post({ type: "keys", data }));
-  term.onBinary((data) => post({ type: "keys", data }));
+  let personAt = 0;
+  const person = () => (personAt = Date.now());
+  for (const e of PERSON_EVENTS) box.addEventListener(e, person, { capture: true, passive: true });
+  const typed = () => Date.now() - personAt < TYPED_MS;
+  term.onData((data) => post({ type: "keys", data, typed: typed() }));
+  term.onBinary((data) => post({ type: "keys", data, typed: typed() }));
   // With no mouse reporting the wheel would become arrow keys in a full-screen program: it is
   // dropped instead, since scrolling is tmux's.
   term.attachCustomWheelEventHandler(() => term.modes.mouseTrackingMode !== "none");
@@ -150,8 +160,10 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     const h = box.clientHeight;
     const tw = xterm.offsetWidth;
     const th = xterm.offsetHeight;
-    if (held) top = h - th;
-    else if (!growing || th > h) top = Math.floor((h - th) / 2);
+    // Taller than its view (it has just shrunk): the bottom edge, where the prompt is, stays in
+    // view. After a growth it keeps its place until the new size comes, and is centred otherwise.
+    if (th > h) top = h - th;
+    else if (!growing) top = Math.floor((h - th) / 2);
     xterm.style.left = `${Math.max(0, Math.floor((w - tw) / 2))}px`;
     xterm.style.top = `${top}px`;
   };
@@ -165,7 +177,10 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   const measure = () => {
     const d = fit.proposeDimensions();
     if (!d || !d.cols || !d.rows) return;
-    if (d.cols === room.cols && d.rows === room.rows) return place();
+    if (d.cols === room.cols && d.rows === room.rows) {
+      growing = false;
+      return place();
+    }
     room = { cols: d.cols, rows: d.rows };
     if (room.cols < term.cols || room.rows < term.rows) {
       held ??= [];
@@ -188,7 +203,12 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     post({ type: "room", ...room });
   };
   let settle: ReturnType<typeof setTimeout> | null = null;
+  let boxHeight = 0;
   const observer = new ResizeObserver(() => {
+    // A view that grows keeps the terminal where it is until it is measured and the new size comes.
+    if (box.clientHeight > boxHeight && boxHeight > 0) growing = true;
+    boxHeight = box.clientHeight;
+    place();
     if (settle) clearTimeout(settle);
     settle = setTimeout(measure, SETTLE_MS);
   });
@@ -265,6 +285,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
       box.removeEventListener("touchstart", onTouchStart, { capture: true });
       box.removeEventListener("touchmove", onTouchMove, { capture: true });
       box.removeEventListener("touchend", onTouchEnd, { capture: true });
+      for (const e of PERSON_EVENTS) box.removeEventListener(e, person, { capture: true });
       term.dispose();
       box.remove();
     },

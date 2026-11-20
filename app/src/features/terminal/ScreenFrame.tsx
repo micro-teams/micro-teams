@@ -120,7 +120,8 @@ export function ScreenFrame() {
     if (state.drawn) step("drawn");
   }, [state.drawn]);
 
-  const send = (data: string) => {
+  const send = (data: string, typed = true) => {
+    if (!typed) return screen.input(data, false);
     screen.input(ctrl ? withCtrl(data) : data);
     if (ctrl) setCtrl(false);
   };
@@ -172,7 +173,7 @@ export function ScreenFrame() {
             ref={term}
             style={styles.fill}
             onMessage={(m) => {
-              if (m.type === "keys") send(m.data);
+              if (m.type === "keys") send(m.data, m.typed);
               else if (m.type === "rendered") screen.rendered(m.n);
               else if (m.type === "copy") void Clipboard.setStringAsync(m.text).then(() => notify("copied"));
               else if (m.type === "room") {

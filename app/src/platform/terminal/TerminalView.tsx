@@ -64,7 +64,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
     write: (bytes) => send({ type: "write", data: base64(bytes) }),
     size: (cols, rows) => send({ type: "size", cols, rows }),
     reset: () => send({ type: "reset" }),
-    focus: (on) => send({ type: "focus", on }),
+    focus: (on) => {
+      // The page's own focus raises the keyboard only while the WebView itself has the focus.
+      if (on) web.current?.requestFocus();
+      send({ type: "focus", on });
+    },
   }));
   return (
     <Web
