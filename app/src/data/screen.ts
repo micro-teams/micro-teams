@@ -5,32 +5,37 @@
  * view has goes with the dial, so the first paint is already at the size it will keep. Binary
  * frames are screen bytes in and input out (keys, pastes, mouse sequences: the wheel scrolls tmux).
  * Text frames out: {type:"resize",cols,rows}, {type:"ack",n} (bytes drawn; the machine sends more
- * only as these arrive), {type:"lease",op:"renew"|"release"}, {type:"capture",id},
- * {type:"command",id,name}. Text frames in: {type:"size",cols,rows} (the terminal's size from now
- * on, before any byte at that size), {type:"lease",holder,name,refused}, {type:"capture",id,text,
- * error}, {type:"command",id,error}, {type:"error",error}.
+ * only as these arrive), {type:"reply",data} (base64: the terminal's answers to tmux, outside the
+ * lease), {type:"lease",op:"renew"|"release"}, {type:"capture",id}, {type:"command",id,name}.
+ * Text frames in: {type:"size",cols,rows} (the terminal's size from now on, before any byte at that
+ * size), {type:"lease",holder,name,refused}, {type:"capture",id,text,error},
+ * {type:"command",id,error}, {type:"commands",names} (what the screen's driver offers),
+ * {type:"error",error}.
  *
  * Input is under a lease, held by one party at a time. The first input on a free screen takes it;
- * while the person keeps using it (input in the last minute) it is renewed every second, then given
- * back; closing gives it back too. Input while someone else holds it is refused by the machine, and
- * the state says so for a few seconds.
+ * it is renewed every second while the person types (a key in the last minute) or scrolls (a wheel
+ * turn in the last few seconds), then given back; leaving gives it back too. Input while someone
+ * else holds it is refused by the machine, and the state says so for a few seconds. Each connection
+ * starts with the lease free and nothing drawn.
  *
- * LiveScreen({ open, path(cols, rows), onState, now? }) — start() dials once the terminal has said
- *   its room (room()), close() ends it for good, retry() redials now. drawOn(sink) says where the
- *   stream goes: the sink's write(bytes), size(cols, rows) and reset() (each new connection starts
- *   on a clean terminal). input(data, typed?) sends input, and only typed input keeps the lease;
+ * LiveScreen({ open, path(cols, rows), onState, now? }) — path gives the address to dial, or null
+ *   when there is nobody signed in (then nothing is dialled and the state says so).
+ *   start() dials once the terminal has said its room (room(); a room under 20x5 is a view that is
+ *   not there and is ignored), close() ends it for good, retry() redials now. drawOn(sink) says
+ *   where the stream goes. input(data, typed?) sends input (typed false: a reply);
  *   rendered(n) reports drawn bytes; capture() resolves to the screen's text with its history;
  *   command(name) gives the lease back and asks the driver for "usage" or "compact"; release()
- *   gives the lease back.
- *   Reconnects forever: 0.5 s, doubling to 30 s, forgiven only once a connection has lasted 5 s.
+ *   gives the lease back. Reconnects forever, waiting LiveScreen.waitFor(attempt) — 0.5 s, doubling
+ *   to 30 s — and forgiving the count only once a connection has lasted 5 s.
  *   onState(ScreenState) on every change.
  * ScreenState — connected, reconnecting, doubtful (three attempts failed without one opening: the
  *   screen may be gone, or not this person's to watch), drawn (this connection's first bytes are on
  *   the terminal), size (the terminal's) and resizes (how many times it changed after the first
  *   paint of this view), lease (who holds the input), refused (who refused this person's input,
- *   for a few seconds), error (what the machine last said went wrong for this viewer).
+ *   for a few seconds), error (what went wrong for this viewer), commands (the driver's).
  * Lease — { holder: "free" | "self" | "driver" | "other", name }.
- * ScreenSink — what drawOn takes: write(bytes), size(cols, rows), reset().
+ * ScreenSink — what drawOn takes: write(bytes), size(cols, rows), reset() (each new connection
+ *   starts on a clean terminal).
  * useLiveScreen(sessionId) → { state, screen } — a LiveScreen over the session's substrate for the
  *   calling component's lifetime, redialled when the app returns to the foreground and giving the
  *   lease back when it leaves it.
@@ -53,6 +58,7 @@ export type ScreenState = {
   lease: Lease;
   refused: string | null;
   error: string | null;
+  commands: string[];
 };
 export interface ScreenSink {
   write(bytes: Uint8Array): void;
@@ -67,6 +73,14 @@ const RENEW_MS = 1_000;
 const IDLE_MS = 60_000;
 const REFUSED_MS = 3_000;
 const REPLY_MS = 15_000;
+/** A scroll holds the lease only this long after the last turn: typing holds it for IDLE_MS. */
+const SCROLL_HOLD_MS = 3_000;
+/** A smaller room is a view that is not really there (hidden, not laid out): it is not sent, so it
+ * can never shrink the window for everybody. */
+const MIN_COLS = 20;
+const MIN_ROWS = 5;
+/** Mouse sequences (SGR and X10): the wheel, which scrolls tmux. */
+const MOUSE = /^\x1b\[(<|M)/;
 
 const INITIAL: ScreenState = {
   connected: false,
@@ -78,6 +92,7 @@ const INITIAL: ScreenState = {
   lease: { holder: "free", name: null },
   refused: null,
   error: null,
+  commands: [],
 };
 
 type Pending = { resolve: (v: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
@@ -90,7 +105,11 @@ export class LiveScreen {
   private everOpened = false;
   private freshConnection = false;
   private firstPaint = true;
-  private lastInput = 0;
+  private lastTyped = -Infinity;
+  private lastScroll = -Infinity;
+  private dialedRoom = { cols: 0, rows: 0 };
+  private written = 0;
+  private acked = 0;
   private seq = 0;
   private pending = new Map<string, Pending>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,7 +122,7 @@ export class LiveScreen {
   constructor(
     private readonly opts: {
       open: (path: string) => Wire;
-      path: (cols: number, rows: number) => string;
+      path: (cols: number, rows: number) => string | null;
       onState?: (s: ScreenState) => void;
       now?: () => number;
     },
@@ -122,6 +141,8 @@ export class LiveScreen {
   close() {
     this.started = false;
     this.clearTimers();
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
+    this.refusedTimer = null;
     this.failPending("the screen was closed");
     this.drop();
   }
@@ -132,8 +153,13 @@ export class LiveScreen {
     this.dial();
   }
 
-  /** The room the view has, in cells. The first one starts the dial. */
+  /** The room the view has, in cells. The first real one starts the dial; one below MIN_COLS x
+   * MIN_ROWS is a view that is not there and is ignored. */
   room(cols: number, rows: number) {
+    if (cols < MIN_COLS || rows < MIN_ROWS) {
+      console.log(`screen: a ${cols}x${rows} room is not a real view; not sent`);
+      return;
+    }
     const first = this.roomSize.cols === 0;
     this.roomSize = { cols, rows };
     if (first) {
@@ -141,22 +167,33 @@ export class LiveScreen {
     } else this.json({ type: "resize", cols, rows });
   }
 
-  /** Input for the machine; typed is false for the terminal's own answers to tmux, which do not
-   * mean the person is there and so do not keep the lease. */
+  /**
+   * Input for the machine. typed is false for the terminal's own answers to tmux, which go as
+   * replies: they never take or keep the lease. Typing keeps the lease for a minute after the last
+   * key; mouse input (the wheel) only for a few seconds after the last turn.
+   */
   input(data: string | Uint8Array, typed = true) {
-    if (typed) this.lastInput = this.now();
-    this.send(typeof data === "string" ? new TextEncoder().encode(data) : data);
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    if (!typed) return this.json({ type: "reply", data: base64(bytes) });
+    if (MOUSE.test(new TextDecoder().decode(bytes.subarray(0, 3)))) this.lastScroll = this.now();
+    else this.lastTyped = this.now();
+    this.send(bytes);
   }
 
+  /** n more bytes of this connection's stream are drawn. An acknowledgement left over from an
+   * earlier connection is not passed on: it counts no byte of this one. */
   rendered(n: number) {
-    this.json({ type: "ack", n });
+    const count = Math.min(n, this.written - this.acked);
+    if (count <= 0) return;
+    this.acked += count;
+    this.json({ type: "ack", n: count });
     if (!this.state.drawn) this.set({ drawn: true });
   }
 
   /** Give the lease back now: the person has left (the app went to the background). */
   release() {
     if (this.state.lease.holder === "self") this.json({ type: "lease", op: "release" });
-    this.lastInput = 0;
+    this.lastTyped = this.lastScroll = -Infinity;
   }
 
   capture(): Promise<string> {
@@ -169,7 +206,7 @@ export class LiveScreen {
     return this.request({ type: "command", name });
   }
 
-  /** The wait before the next attempt: 0.5 s for the first retry, doubling to 30 s. */
+  /** The wait before the attempt-th redial: 0.5 s for the first, doubling up to 30 s. */
   static waitFor(attempt: number): number {
     return Math.min(MAX_WAIT, FIRST_WAIT * 2 ** Math.max(0, attempt - 1));
   }
@@ -203,7 +240,16 @@ export class LiveScreen {
     if (!this.started || this.roomSize.cols === 0) return;
     this.clearTimers();
     this.drop();
-    const wire = this.opts.open(this.opts.path(this.roomSize.cols, this.roomSize.rows));
+    // Nothing of the last connection holds for the next: not that it is open, not who has the lease.
+    this.written = this.acked = 0;
+    this.set({ connected: false, drawn: false, lease: { holder: "free", name: null }, commands: [] });
+    const path = this.opts.path(this.roomSize.cols, this.roomSize.rows);
+    if (path === null) {
+      this.set({ error: "signed out: sign in again to watch this screen" });
+      return;
+    }
+    this.dialedRoom = { ...this.roomSize };
+    const wire = this.opts.open(path);
     this.wire = wire;
     wire.onopen = () => {
       if (this.wire !== wire) return;
@@ -212,11 +258,14 @@ export class LiveScreen {
       this.stableTimer = setTimeout(() => (this.attempt = 0), STABLE_AFTER);
       this.renewTimer = setInterval(() => this.renew(), RENEW_MS);
       this.set({ connected: true, reconnecting: false, drawn: false, error: null });
+      // The room may have changed while the socket was opening; the dial carried the old one.
+      const { cols, rows } = this.roomSize;
+      if (cols !== this.dialedRoom.cols || rows !== this.dialedRoom.rows) this.json({ type: "resize", cols, rows });
     };
     wire.onmessage = ({ data }) => {
       if (this.wire !== wire) return;
-      if (data instanceof ArrayBuffer) this.sink.write(new Uint8Array(data));
-      else if (data instanceof Uint8Array) this.sink.write(data);
+      if (data instanceof ArrayBuffer) this.draw(new Uint8Array(data));
+      else if (data instanceof Uint8Array) this.draw(data);
       else if (typeof data === "string") this.onText(data);
     };
     const lost = () => {
@@ -235,6 +284,11 @@ export class LiveScreen {
     };
     wire.onclose = lost;
     wire.onerror = lost;
+  }
+
+  private draw(bytes: Uint8Array) {
+    this.written += bytes.length;
+    this.sink.write(bytes);
   }
 
   private onText(text: string) {
@@ -267,13 +321,16 @@ export class LiveScreen {
       else p.resolve(String(m.text ?? ""));
     } else if (m.type === "error") {
       this.set({ error: String(m.error) });
+    } else if (m.type === "commands") {
+      this.set({ commands: (m.names as string[]) ?? [] });
     }
   }
 
   private renew() {
     if (this.state.lease.holder !== "self") return;
-    if (this.now() - this.lastInput < IDLE_MS) this.json({ type: "lease", op: "renew" });
-    else this.json({ type: "lease", op: "release" });
+    const now = this.now();
+    const active = now - this.lastTyped < IDLE_MS || now - this.lastScroll < SCROLL_HOLD_MS;
+    this.json({ type: "lease", op: active ? "renew" : "release" });
   }
 
   private drop() {
@@ -281,11 +338,7 @@ export class LiveScreen {
     this.wire = null;
     if (w) {
       w.onclose = w.onerror = w.onmessage = w.onopen = null;
-      try {
-        w.close();
-      } catch {
-        // already closing
-      }
+      w.close();
     }
   }
 
@@ -302,17 +355,19 @@ export class LiveScreen {
   private send(data: string | Uint8Array) {
     // Nothing is queued while down: a new connection starts from the room and a fresh paint.
     if (!this.state.connected || !this.wire) return;
-    try {
-      this.wire.send(data);
-    } catch {
-      // dropped while closing
-    }
+    this.wire.send(data);
   }
 
   private set(change: Partial<ScreenState>) {
     this.state = { ...this.state, ...change };
     this.opts.onState?.(this.state);
   }
+}
+
+function base64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 export function useLiveScreen(sessionId: string) {
@@ -324,8 +379,10 @@ export function useLiveScreen(sessionId: string) {
         open: substrate.openSocket,
         // Read per dial: a reconnect with an expired token is refused, and a refusal looks exactly
         // like a machine that has gone quiet.
-        path: (cols, rows) =>
-          `/mt/machine/screen/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token() ?? "")}&cols=${cols}&rows=${rows}`,
+        path: (cols, rows) => {
+          const t = token();
+          return t ? `/mt/machine/screen/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(t)}&cols=${cols}&rows=${rows}` : null;
+        },
         onState: setState,
       }),
     [substrate, token, sessionId],

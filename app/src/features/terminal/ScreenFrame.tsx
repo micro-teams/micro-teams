@@ -21,11 +21,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLiveScreen, type ScreenState } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
-import { hasTouchKeyboard, useKeyboardInset } from "../../platform/keyboardInset";
+import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
 import { Txt } from "../../ui/kit";
 import { colors, fonts } from "../../ui/theme";
@@ -80,7 +80,7 @@ export function ScreenFrame() {
   const term = useRef<TerminalViewHandle>(null);
   const { state, screen } = useLiveScreen(sessionId);
   const [ctrl, setCtrl] = useState(false);
-  const [typing, setTyping] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +89,20 @@ export function ScreenFrame() {
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => setNote(null), NOTE_MS);
   };
+  useEffect(
+    () => () => {
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+    },
+    [],
+  );
+  const toClipboard = (text: string) =>
+    Clipboard.setStringAsync(text).then(
+      (ok) => notify(ok ? "copied" : "copy: the clipboard refused the text"),
+      (e: Error) => notify(`copy: ${e.message}`),
+    );
+  // The copy sheet opens at its end, where the latest lines are, once per text it is given.
+  const sheetAtEnd = useRef(false);
+  const sheet = useRef<ScrollViewInstance>(null);
   const opened = useRef({ at: 0, steps: [] as string[], done: false });
 
   useEffect(() => {
@@ -125,17 +139,9 @@ export function ScreenFrame() {
     screen.input(ctrl ? withCtrl(data) : data);
     if (ctrl) setCtrl(false);
   };
-  const focus = (on: boolean) => {
-    term.current?.focus(on);
-    setTyping(on);
-  };
-  const keyboardOpen = keyboard > 0 || typing;
-  // The system's own way of closing the keyboard (back, a swipe) also ends typing.
-  const hadKeyboard = useRef(false);
-  useEffect(() => {
-    if (hadKeyboard.current && keyboard === 0) setTyping(false);
-    hadKeyboard.current = keyboard > 0;
-  }, [keyboard]);
+  // Where the platform reports the keyboard itself, that is what the key shows; on the web, whether
+  // the terminal has the focus.
+  const keyboardOpen = keyboardInsetKnown ? keyboard > 0 : focused;
 
   const ask = (name: "usage" | "compact") =>
     screen.command(name).then(
@@ -144,7 +150,10 @@ export function ScreenFrame() {
     );
   const copy = () =>
     screen.capture().then(
-      (text) => setCopied(text.replace(/\s+$/, "")),
+      (text) => {
+        sheetAtEnd.current = false;
+        setCopied(text.replace(/\s+$/, ""));
+      },
       (e: Error) => notify(`copy: ${e.message}`),
     );
 
@@ -163,9 +172,9 @@ export function ScreenFrame() {
             </Txt>
           </View>
         )}
-        <Small testID="screen-usage" icon="data-usage" label="usage" onPress={() => void ask("usage")} />
+        {state.commands.includes("usage") && <Small testID="screen-usage" icon="data-usage" label="usage" onPress={() => void ask("usage")} />}
         <Small testID="screen-copy" icon="content-copy" label="copy" onPress={copy} />
-        <Small testID="screen-compact" icon="compress" label="compact" onPress={() => void ask("compact")} />
+        {state.commands.includes("compact") && <Small testID="screen-compact" icon="compress" label="compact" onPress={() => void ask("compact")} />}
       </View>
       <View style={[styles.body, { marginBottom: Math.max(insets.bottom, keyboard) }]}>
         <View style={styles.terminal}>
@@ -175,7 +184,8 @@ export function ScreenFrame() {
             onMessage={(m) => {
               if (m.type === "keys") send(m.data, m.typed);
               else if (m.type === "rendered") screen.rendered(m.n);
-              else if (m.type === "copy") void Clipboard.setStringAsync(m.text).then(() => notify("copied"));
+              else if (m.type === "copy") void toClipboard(m.text);
+              else if (m.type === "focus") setFocused(m.on);
               else if (m.type === "room") {
                 step("terminal");
                 screen.room(m.cols, m.rows);
@@ -226,7 +236,7 @@ export function ScreenFrame() {
                 <Txt variant="label">{k.label}</Txt>
               </Pressable>
             ))}
-            <Pressable testID="screen-keyboard" accessibilityLabel="keyboard" onPress={() => focus(!keyboardOpen)} style={styles.key}>
+            <Pressable testID="screen-keyboard" accessibilityLabel="keyboard" onPress={() => term.current?.focus(!keyboardOpen)} style={styles.key}>
               <MaterialIcons name={keyboardOpen ? "keyboard-hide" : "keyboard"} size={16} color={colors.ink} />
             </Pressable>
           </View>
@@ -236,11 +246,19 @@ export function ScreenFrame() {
             <View style={styles.chrome}>
               <Small testID="screen-copy-close" icon="close" label="close" onPress={() => setCopied(null)} />
               <View style={styles.spacer} />
-              <Pressable testID="screen-copy-all" onPress={() => void Clipboard.setStringAsync(copied).then(() => notify("copied"))} style={styles.key}>
+              <Pressable testID="screen-copy-all" onPress={() => void toClipboard(copied)} style={styles.key}>
                 <Txt variant="label">copy all</Txt>
               </Pressable>
             </View>
-            <ScrollView ref={(v) => v?.scrollToEnd({ animated: false })} contentContainerStyle={styles.sheetBody}>
+            <ScrollView
+              ref={sheet}
+              onContentSizeChange={() => {
+                if (sheetAtEnd.current) return;
+                sheetAtEnd.current = true;
+                sheet.current?.scrollToEnd({ animated: false });
+              }}
+              contentContainerStyle={styles.sheetBody}
+            >
               <Text testID="screen-copy-text" selectable style={styles.copyText}>
                 {copied}
               </Text>

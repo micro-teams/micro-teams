@@ -8,6 +8,8 @@
  *   never shrinks for the keyboard; this is how the live screen makes room.
  * hasTouchKeyboard → whether the person types on a screen keyboard, which has no Esc, Ctrl, Tab or
  *   arrows (true here; on the web, true for a coarse pointer).
+ * keyboardInsetKnown → whether useKeyboardInset tells when the keyboard is up (here it does; on
+ *   the web the page resizes instead and it is always 0).
  *
  * Example: const inset = useKeyboardInset(); <View style={{ marginBottom: Math.max(insets.bottom, inset) }} />
  */
@@ -15,6 +17,8 @@ import { useEffect, useState } from "react";
 import { KeyboardEvents } from "react-native-keyboard-controller";
 
 export const hasTouchKeyboard = true;
+
+export const keyboardInsetKnown = true;
 
 export function useKeyboardInset(): number {
   const [inset, setInset] = useState(0);

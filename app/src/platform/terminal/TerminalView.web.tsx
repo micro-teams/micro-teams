@@ -1,7 +1,12 @@
 /*
  * The web half of TerminalView: xterm.js straight into this document — the page is a browser
- * already, so there is nothing to embed, and nothing for TerminalWarmup to start. Same props and
- * handle as TerminalView.tsx.
+ * already, so there is nothing to embed.
+ *
+ * <TerminalView ref onMessage style /> — the same props and handle as TerminalView.tsx: a terminal
+ *   in style's box, mounted once the monospace face has loaded (xterm measures its cell once).
+ * <TerminalWarmup /> — renders nothing: there is no browser engine to start ahead of time.
+ *
+ * Example: <TerminalView ref={term} onMessage={handle} style={{ flex: 1 }} />
  */
 import "@xterm/xterm/css/xterm.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
@@ -21,7 +26,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
     // The face is loaded before the terminal measures its cell, or the cell is a fallback's.
     let gone = false;
     void Promise.all([document.fonts.load("13px LiberationMono"), document.fonts.load("bold 13px LiberationMono")])
-      .catch(() => undefined)
+      // A face that does not load is said in the console, and the terminal is drawn in the
+      // fallback face, which is visibly wrong rather than missing.
+      .catch((e: unknown) => console.error(`terminal: the face did not load: ${String(e)}`))
       .then(() => {
         if (!gone) term.current = mountTerminal(host.current!, (m) => post.current(m), { fontFamily: fonts.mono });
       });

@@ -15,6 +15,7 @@
  *                                 more only as these arrive.
  *   { type: "copy", text }        text for the clipboard: a program's OSC 52 (tmux sends one when a
  *                                 drag selects in it) or the local selection copied with Ctrl+C.
+ *   { type: "focus", on }         the terminal took or lost the keyboard.
  * The handle: write(bytes) draws screen bytes; size(cols, rows) sets the terminal's size, taking
  * effect after everything written before it; reset() starts a new stream on a clean terminal;
  * focus(on) takes or gives up the keyboard; dispose().
@@ -40,7 +41,8 @@ export type FromTerminal =
   | { type: "room"; cols: number; rows: number }
   | { type: "keys"; data: string; typed: boolean }
   | { type: "rendered"; n: number }
-  | { type: "copy"; text: string };
+  | { type: "copy"; text: string }
+  | { type: "focus"; on: boolean };
 
 export interface TerminalHandle {
   write(bytes: Uint8Array): void;
@@ -104,6 +106,10 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   term.loadAddon(new ClipboardAddon(undefined, { readText: () => "", writeText: (_s, text) => post({ type: "copy", text }) }));
   term.open(box);
   const xterm = term.element!;
+  const onFocus = () => post({ type: "focus", on: true });
+  const onBlur = () => post({ type: "focus", on: false });
+  term.textarea!.addEventListener("focus", onFocus);
+  term.textarea!.addEventListener("blur", onBlur);
   xterm.style.position = "absolute";
 
   let personAt = 0;
@@ -286,6 +292,8 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
       box.removeEventListener("touchmove", onTouchMove, { capture: true });
       box.removeEventListener("touchend", onTouchEnd, { capture: true });
       for (const e of PERSON_EVENTS) box.removeEventListener(e, person, { capture: true });
+      term.textarea!.removeEventListener("focus", onFocus);
+      term.textarea!.removeEventListener("blur", onBlur);
       term.dispose();
       box.remove();
     },

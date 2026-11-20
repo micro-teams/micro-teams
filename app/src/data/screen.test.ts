@@ -21,7 +21,7 @@ function fakeWire(path: string) {
   return w;
 }
 
-function rig() {
+function rig(signedIn = true) {
   const wires: ReturnType<typeof fakeWire>[] = [];
   const drawn: string[] = [];
   const states: ScreenState[] = [];
@@ -32,7 +32,7 @@ function rig() {
       wires.push(w);
       return w;
     },
-    path: (cols, rows) => `/s?cols=${cols}&rows=${rows}`,
+    path: (cols, rows) => (signedIn ? `/s?cols=${cols}&rows=${rows}` : null),
     onState: (s) => states.push(s),
     now: () => now,
   });
@@ -76,6 +76,7 @@ test("a later room is a resize; input and rendered bytes go out", () => {
   wires[0].onopen!();
   screen.room(80, 12);
   screen.input("ls\r");
+  wires[0].onmessage!({ data: new Uint8Array([104, 105]).buffer });
   screen.rendered(2);
   expect(json(wires[0])).toEqual([
     { type: "resize", cols: 80, rows: 12 },
@@ -156,4 +157,76 @@ test("the backoff is forgiven only once a connection has lasted", () => {
   wires[2].onclose!();
   jest.advanceTimersByTime(500);
   expect(wires).toHaveLength(4);
+});
+
+test("the terminal's answers to tmux go as replies, outside the lease", () => {
+  const { screen, wires, json } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  screen.input("\x1b[?1;2c", false);
+  expect(json(wires[0])).toEqual([{ type: "reply", data: btoa("\x1b[?1;2c") }]);
+  expect(wires[0].sent.filter((x) => typeof x !== "string")).toEqual([]);
+});
+
+test("a wheel turn holds the lease for a few seconds, not a minute", () => {
+  const { screen, wires, json, say, tick } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  screen.input("\x1b[<64;10;5M");
+  say(wires[0], { type: "lease", holder: "self", name: null, refused: false });
+  tick(1000);
+  expect(json(wires[0]).at(-1)).toEqual({ type: "lease", op: "renew" });
+  tick(3000);
+  expect(json(wires[0]).at(-1)).toEqual({ type: "lease", op: "release" });
+});
+
+test("a redial starts with the lease free and the room it has now", () => {
+  const { screen, wires, json, say, states } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  say(wires[0], { type: "lease", holder: "self", name: null, refused: false });
+  screen.retry();
+  expect(states.at(-1)).toMatchObject({ connected: false, lease: { holder: "free" } });
+  screen.room(80, 12); // while the new socket is still opening
+  wires[1].onopen!();
+  expect(json(wires[1])).toEqual([{ type: "resize", cols: 80, rows: 12 }]);
+});
+
+test("a room too small to be a real view is never sent", () => {
+  const { screen, wires } = rig();
+  screen.start();
+  screen.room(2, 1);
+  expect(wires).toHaveLength(0);
+  screen.room(80, 24);
+  expect(wires).toHaveLength(1);
+});
+
+test("an acknowledgement left over from the last connection does not count for this one", () => {
+  const { screen, wires, json, states } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  screen.rendered(512);
+  expect(json(wires[0])).toEqual([]);
+  expect(states.at(-1)!.drawn).toBe(false);
+});
+
+test("nobody signed in: nothing is dialled, and the state says why", () => {
+  const { screen, wires, states } = rig(false);
+  screen.room(80, 24);
+  screen.start();
+  expect(wires).toHaveLength(0);
+  expect(states.at(-1)!.error).toMatch(/signed out/);
+});
+
+test("the driver's commands are what the backend says it offers", () => {
+  const { screen, wires, say, states } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  say(wires[0], { type: "commands", names: ["usage"] });
+  expect(states.at(-1)!.commands).toEqual(["usage"]);
 });
