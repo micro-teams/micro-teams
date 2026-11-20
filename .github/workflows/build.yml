@@ -496,6 +496,15 @@ jobs:
           ( cd cli && go build -trimpath -ldflags "-X main.version=$MARKER" -o "$GITHUB_WORKSPACE/updated-microteams" . )
           echo "UPDATE_MARKER_BIN=$GITHUB_WORKSPACE/updated-microteams" >> "$GITHUB_ENV"
           echo "UPDATE_MARKER_VERSION=$MARKER" >> "$GITHUB_ENV"
+      # The same leg carries the upgrade from the release machines run today: the machine starts on
+      # it, and e2e.sh installs this build over it and restarts.
+      - name: Build the release machines run today (to prove upgrading from it keeps the sessions)
+        if: matrix.leg == 'npm:2.1.220'
+        run: |
+          git fetch -q --depth 1 origin tag v0.1.19
+          git worktree add -q "$RUNNER_TEMP/release" v0.1.19
+          ( cd "$RUNNER_TEMP/release/cli" && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=0.1.19" -o "$GITHUB_WORKSPACE/release-microteams" . )
+          echo "RELEASE_BIN=$GITHUB_WORKSPACE/release-microteams" >> "$GITHUB_ENV"
       - name: "End-to-end: machine + agent + a message that must arrive (${{ matrix.leg }})"
         working-directory: microteams-deploy
         run: bash "$GITHUB_WORKSPACE/.github/scripts/e2e.sh" "${{ matrix.leg }}"

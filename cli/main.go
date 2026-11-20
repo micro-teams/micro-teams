@@ -40,6 +40,10 @@ func init() { mtbrand.Use() }
 var version = "dev"
 
 func main() {
+	if err := daemoncmd.AsInvokingUser(); err != nil {
+		fmt.Fprintln(os.Stderr, "microteams:", err)
+		os.Exit(1)
+	}
 	root, apiCmd := newRoot()
 
 	// Only `microteams api …` needs the applet; fetching it costs a round trip, so the daemon

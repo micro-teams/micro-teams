@@ -8,13 +8,16 @@ package daemoncmd
 //
 // Uninstall is the one command that ends the sessions on this machine, and it says so before it
 // does: it removes the service, makes sure the connector process is gone, ends the tmux server, and
-// deletes the config and the binary.
+// deletes the config and the binary. It runs as the person whose sessions they are, never through
+// sudo, because only they can see their sessions; for a system service it runs `sudo microteams
+// disable` itself. Any step that fails stops it, and nothing after that step happens.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -75,6 +78,10 @@ func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Comman
 		Use:   "uninstall",
 		Short: "Remove microteams from this machine, ending its sessions (service, config, binary)",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if name := sudoUser(); name != "" {
+				return fmt.Errorf("run `microteams uninstall` as %s, without sudo: the sessions it ends are theirs, "+
+					"and it asks for sudo itself when the service needs it", name)
+			}
 			n, countErr := liveSessions()
 			switch {
 			case countErr != nil:
@@ -85,21 +92,17 @@ func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Comman
 			// The pid first: whatever the service manager does, the process must be gone before its
 			// config and binary are, or it keeps running on stale credentials, unmanageable.
 			pid := state.RawPID(*cfgPath)
-			if _, found := service.Installed(*cfgPath); found {
-				_ = service.ControlInstalled(*cfgPath, "stop")
-				_ = service.ControlInstalled(*cfgPath, "uninstall")
+			if err := removeService(*cfgPath); err != nil {
+				return fmt.Errorf("remove the service: %w; nothing else was removed", err)
 			}
-			// Stopping a system unit needs root, but the process runs as this user, so it can be
-			// stopped directly; if even that fails, nothing is removed.
 			if err := stopProcess(pid); err != nil {
-				return fmt.Errorf(
-					"the microteams connector is still running (pid %d) and could not be stopped; "+
-						"nothing was removed — re-run as: sudo microteams uninstall", pid)
+				return fmt.Errorf("the microteams connector is still running (pid %d) and could not be stopped "+
+					"(%v); the service is removed, nothing else is", pid, err)
 			}
 			if tm, err := terminal.NewManager(); err != nil {
-				return fmt.Errorf("cannot reach the sessions' tmux to end them: %w; nothing was removed", err)
+				return fmt.Errorf("cannot reach the sessions' tmux to end them: %w; the service is removed, nothing else is", err)
 			} else if err := tm.KillServer(); err != nil {
-				return fmt.Errorf("end the sessions: %w; nothing was removed", err)
+				return fmt.Errorf("end the sessions: %w; the service is removed, nothing else is", err)
 			}
 			dir := filepath.Dir(*cfgPath)
 			if err := os.RemoveAll(dir); err != nil {
@@ -116,6 +119,29 @@ func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Comman
 			return nil
 		},
 	})
+}
+
+// removeService stops and uninstalls the installed service. A system one needs root, which this
+// process gets by running `sudo microteams disable` rather than re-running itself.
+func removeService(cfgPath string) error {
+	userService, found := service.Installed(cfgPath)
+	switch {
+	case !found:
+		return nil
+	case userService || os.Geteuid() == 0:
+		if err := service.ControlInstalled(cfgPath, "stop"); err != nil {
+			return err
+		}
+		return service.ControlInstalled(cfgPath, "uninstall")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Removing the system-wide service (needs root) — running `sudo microteams disable`…")
+	cmd := exec.Command("sudo", self, "disable", "--yes", "--config", cfgPath)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 // procAlive reports whether pid names a live process; EPERM means it exists but is not ours.

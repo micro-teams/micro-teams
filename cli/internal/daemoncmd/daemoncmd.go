@@ -10,16 +10,25 @@
 //	microteams update | uninstall     the binary itself; only uninstall ends the sessions
 //
 // The sessions on a machine belong to its tmux server, which outlives the connector process, so no
-// command here ends them except `uninstall`. The one way a stop can still end them is a service unit
-// written by an older build; every command that stops or starts the service rewrites such a unit
-// when it can, and otherwise asks once before going ahead.
+// command here ends them except `uninstall`. A stop could still end them through a running
+// connector that ends its sessions when it exits, or a systemd unit without KillMode=process; every
+// command that stops the service deals with both first (see lifecycle.go).
 //
-// The forms these commands replace (`auth …`, `link connect|disconnect|auto-connect|
-// no-auto-connect`, `proxy …`) are hidden aliases that print the new form and then run it.
+// The forms these commands replace (`auth …`, `link …`, `proxy …`) are hidden aliases that print the
+// new form and then run it.
+//
+// Under sudo, a command acts for the person who ran sudo: the service runs as them, and their
+// config, state file, log and tmux are the ones that matter. tmux is reached only as that person,
+// so a root process never claims to know how many sessions they have.
+//
+//   - AsInvokingUser() error, called before anything resolves a path: under sudo, makes this
+//     process's home that of SUDO_USER, so every path derived from it is theirs. Nothing to do
+//     otherwise; an error when SUDO_USER names nobody.
 //
 //   - Commands() []*cobra.Command is every lifecycle command, visible and hidden, to add to the
 //     `microteams` root:
 //
+//     if err := daemoncmd.AsInvokingUser(); err != nil { ... }
 //     for _, c := range daemoncmd.Commands() { root.AddCommand(c) }
 package daemoncmd
 
@@ -30,13 +39,11 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/micro-teams/micro-connector/cli/brand"
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
@@ -48,7 +55,7 @@ import (
 func Commands() []*cobra.Command {
 	var cfgPath string
 	withConfig := func(c *cobra.Command) *cobra.Command {
-		c.Flags().StringVar(&cfgPath, "config", defaultConfig(), "path to this machine's microteams config")
+		c.Flags().StringVar(&cfgPath, "config", config.DefaultPath(), "path to this machine's microteams config")
 		return c
 	}
 	return []*cobra.Command{
@@ -71,24 +78,33 @@ func Commands() []*cobra.Command {
 	}
 }
 
-// defaultConfig is the config of the person at the keyboard. Under sudo that is the invoking
-// user's, not root's: the service runs as that user, and `sudo microteams restart` must act on the
-// same machine as `microteams restart`.
-func defaultConfig() string {
-	name := os.Getenv("SUDO_USER")
-	if os.Geteuid() != 0 || name == "" || name == "root" {
-		return config.DefaultPath()
+// sudoUser is the person who ran this process through sudo, or "" when it was not (or root did).
+func sudoUser() string {
+	if name := os.Getenv("SUDO_USER"); os.Geteuid() == 0 && name != "root" {
+		return name
+	}
+	return ""
+}
+
+// AsInvokingUser gives this process SUDO_USER's home. XDG_CONFIG_HOME is kept when sudo kept it: it
+// is then that person's own.
+func AsInvokingUser() error {
+	name := sudoUser()
+	if name == "" {
+		return nil
 	}
 	u, err := user.Lookup(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "microteams: cannot find the home of %s (%v); using %s\n", name, err, config.DefaultPath())
-		return config.DefaultPath()
+		return fmt.Errorf("run through sudo by %s, who has no account here: %w", name, err)
 	}
-	base := filepath.Join(u.HomeDir, ".config")
-	if runtime.GOOS == "darwin" {
-		base = filepath.Join(u.HomeDir, "Library", "Application Support")
+	if err := os.Setenv("HOME", u.HomeDir); err != nil {
+		return err
 	}
-	return filepath.Join(base, brand.Current.ConfigDir, "config.json")
+	runtimeDir := filepath.Join("/run/user", u.Uid)
+	if _, err := os.Stat(runtimeDir); err != nil {
+		return os.Unsetenv("XDG_RUNTIME_DIR")
+	}
+	return os.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 }
 
 // hostRunner is what this product's service does: dial the backend and let it open screens here.
@@ -123,8 +139,12 @@ func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *co
 }
 
 // liveSessions asks tmux how many sessions this machine hosts. The state file is not asked: a tmux
-// server that died since it was written would leave it claiming sessions nobody can open.
+// server that died since it was written would leave it claiming sessions nobody can open. Under sudo
+// it does not answer: the sessions are the invoking user's, in a tmux root may not find.
 func liveSessions() (int, error) {
+	if name := sudoUser(); name != "" {
+		return 0, fmt.Errorf("the sessions belong to %s and are counted only as %s, not through sudo", name, name)
+	}
 	tm, err := terminal.NewManager()
 	if err != nil {
 		return 0, err

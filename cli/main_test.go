@@ -32,6 +32,7 @@ func TestHiddenCommandsStillResolve(t *testing.T) {
 		{"acp-screen"}, {"run"},
 		{"auth", "login"}, {"auth", "logout"},
 		{"link", "connect"}, {"link", "auto-connect"}, {"link", "disconnect"}, {"link", "no-auto-connect"},
+		{"link", "retest"},
 		{"proxy"}, {"proxy", "set"}, {"proxy", "no-proxy"}, {"proxy", "clear"},
 		{"config", "proxy", "set"},
 	} {
@@ -43,9 +44,6 @@ func TestHiddenCommandsStillResolve(t *testing.T) {
 		if path[0] != "config" && !c.Hidden && (c.Parent() == root || !c.Parent().Hidden) {
 			t.Errorf("%v is shown in help", path)
 		}
-	}
-	if c, _, err := root.Find([]string{"link", "retest"}); err == nil && c.Name() == "retest" {
-		t.Error("link retest still exists")
 	}
 }
 

@@ -15,6 +15,9 @@
 //
 //   - LoadConfig(path) reads the machine's config.
 //
+//   - Host is one running connector: the control link, the multipath client, the screen manager and
+//     the state it publishes. It is made by New and used through Run alone.
+//
 //   - New(cfg, cfgPath) builds a Host; cfgPath locates the state file and the log ("" disables them).
 //
 //   - (*Host).Run(ctx) runs the client and the control link and serves screens until ctx is done.
@@ -25,8 +28,12 @@
 //   - EnsureUnit(cfgPath) (rewritten bool, advice string, err error) rewrites an installed service
 //     unit that would end the screens when the service stops, when this process may: a user unit as
 //     that user, a system unit as root under sudo, and only a unit that starts this very binary with
-//     cfgPath, since the rewrite writes those. Otherwise advice is UnitAdvice, the one line a person
-//     is shown; nothing installed, or a current unit, is ("", nil).
+//     cfgPath as the user running sudo, since the rewrite writes exactly those. A rewrite that fails
+//     puts the unit back as it was. Otherwise advice is UnitAdvice; nothing installed, or a current
+//     unit, is ("", nil).
+//
+//   - UnitAdvice is the one line a person is shown, in the log and in `microteams status`, about a
+//     unit this process may not rewrite: run `sudo microteams restart`.
 //
 //   - UnitServes(cfgPath, userService) (bool, error) is false when the installed systemd unit of
 //     that variant starts the connector with another config. The service's name is the brand's, so
@@ -46,6 +53,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -386,21 +394,56 @@ func EnsureUnit(cfgPath string) (rewritten bool, advice string, err error) {
 	if userService == (os.Geteuid() == 0) || !userService && os.Getenv("SUDO_USER") == "" {
 		return false, UnitAdvice, nil
 	}
-	if same, err := unitRunsThis(cfgPath, userService); err != nil || !same {
-		return false, UnitAdvice, err
+	path, unit, err := readUnit(userService)
+	if err != nil {
+		return false, "", err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return false, "", err
+	}
+	runAs := ""
+	if !userService {
+		runAs = os.Getenv("SUDO_USER")
+	}
+	if !writesSame(unit, self, cfgPath, runAs) {
+		return false, UnitAdvice, nil
 	}
 	if err := service.ControlInstalled(cfgPath, "uninstall"); err != nil {
 		return false, "", err
 	}
 	if err := service.Control(cfgPath, "install"); err != nil {
-		return false, "", err
+		if rerr := restoreUnit(path, unit, userService); rerr != nil {
+			return false, "", fmt.Errorf("rewrite the service unit: %w; putting the old one back failed too: %v", err, rerr)
+		}
+		return false, "", fmt.Errorf("rewrite the service unit: %w; the old unit is back in place", err)
 	}
 	return true, "", nil
 }
 
+// restoreUnit puts a unit's text back at path and makes systemd take it, as installing it did.
+func restoreUnit(path, unit string, userService bool) error {
+	if err := os.WriteFile(path, []byte(unit), 0o644); err != nil {
+		return err
+	}
+	systemctl := func(args ...string) error {
+		if userService {
+			args = append([]string{"--user"}, args...)
+		}
+		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err := systemctl("daemon-reload"); err != nil {
+		return err
+	}
+	return systemctl("enable", brand.Current.ServiceName)
+}
+
 // UnitServes reports whether the installed systemd unit runs the connector with cfgPath.
 func UnitServes(cfgPath string, userService bool) (bool, error) {
-	unit, err := readUnit(userService)
+	_, unit, err := readUnit(userService)
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
@@ -410,32 +453,18 @@ func UnitServes(cfgPath string, userService bool) (bool, error) {
 	return servesConfig(unit, cfgPath), nil
 }
 
-// unitRunsThis reports whether the installed systemd unit starts this binary with cfgPath: the
-// only unit this process writes again unchanged.
-func unitRunsThis(cfgPath string, userService bool) (bool, error) {
-	unit, err := readUnit(userService)
-	if err != nil {
-		return false, err
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return false, err
-	}
-	return runsThis(unit, self, cfgPath), nil
-}
-
 // readUnit reads the systemd unit file of a variant, where kardianos writes it.
-func readUnit(userService bool) (string, error) {
-	path := filepath.Join("/etc/systemd/system", brand.Current.ServiceName+".service")
+func readUnit(userService bool) (path, unit string, err error) {
+	path = filepath.Join("/etc/systemd/system", brand.Current.ServiceName+".service")
 	if userService {
 		dir, err := os.UserConfigDir()
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		path = filepath.Join(dir, "systemd", "user", brand.Current.ServiceName+".service")
 	}
-	unit, err := os.ReadFile(path)
-	return string(unit), err
+	b, err := os.ReadFile(path)
+	return path, string(b), err
 }
 
 // servesConfig reports whether a unit's text runs the connector with cfgPath, as kardianos writes it.
@@ -443,9 +472,20 @@ func servesConfig(unit, cfgPath string) bool {
 	return strings.Contains(unit, `"--config" "`+cfgPath+`"`)
 }
 
-// runsThis reports whether a unit's text starts the binary self with cfgPath.
-func runsThis(unit, self, cfgPath string) bool {
-	return strings.Contains(unit, "\nExecStart="+self+" ") && servesConfig(unit, cfgPath)
+// writesSame reports whether installing from this process writes the unit whose text is given: it
+// starts the binary self with cfgPath, as runAs ("" for a unit without User=, as a user unit and a
+// unit installed by root are).
+func writesSame(unit, self, cfgPath, runAs string) bool {
+	user := ""
+	for _, line := range strings.Split(unit, "\n") {
+		if v, ok := strings.CutPrefix(line, "User="); ok {
+			user = v
+		}
+	}
+	if runAs == "root" {
+		runAs = ""
+	}
+	return strings.Contains(unit, "\nExecStart="+self+" ") && servesConfig(unit, cfgPath) && user == runAs
 }
 
 // checkUnit runs EnsureUnit for the service this process runs as, and logs what it found.

@@ -1,12 +1,14 @@
 package daemoncmd
 
-// The command forms the flat verbs replace, kept for one version as hidden aliases: each prints the
-// new form on stderr and then runs it, so a script or a habit keeps working while it learns.
+// Hidden aliases in the command forms the flat verbs replace: each prints the new form on stderr
+// and then runs it, so a script or a habit keeps working while it learns. They go in the next
+// release.
 //
 //	auth login | auth logout          login | logout
 //	link connect | link auto-connect  start | enable
 //	link disconnect                   stop
 //	link no-auto-connect              disable
+//	link retest                       restart (it fetches the line list afresh; sessions keep running)
 //	proxy …                           config proxy …
 //
 // An alias is the new command built again under the old name.
@@ -35,6 +37,7 @@ func linkAlias(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 		alias(enableCmd(cfgPath, withConfig), "link auto-connect", "enable"),
 		alias(stopCmd(cfgPath, withConfig), "link disconnect", "stop"),
 		alias(disableCmd(cfgPath, withConfig), "link no-auto-connect", "disable"),
+		alias(restartCmd(cfgPath, withConfig), "link retest", "restart"),
 	)
 	return group
 }

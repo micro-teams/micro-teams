@@ -7,13 +7,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
-	"github.com/micro-teams/micro-connector/cli/brand"
 	"github.com/micro-teams/microteams/cli/internal/mtbrand"
 )
 
@@ -100,11 +101,34 @@ func TestStatusLoggedOut(t *testing.T) {
 	}
 }
 
-// Without sudo the config is this user's own.
-func TestDefaultConfigWithoutSudo(t *testing.T) {
+// A process that is not root acts as itself, whatever SUDO_USER says.
+func TestNotUnderSudo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("runs as root")
+	}
+	t.Setenv("SUDO_USER", "someone")
+	home := os.Getenv("HOME")
+	if sudoUser() != "" {
+		t.Fatal("a process that is not root is not acting through sudo")
+	}
+	if err := AsInvokingUser(); err != nil || os.Getenv("HOME") != home {
+		t.Fatalf("AsInvokingUser changed this process: %v, HOME=%s", err, os.Getenv("HOME"))
+	}
+}
+
+// No config is an empty one; a config that cannot be read is an error, never something to replace.
+func TestLoadConfig(t *testing.T) {
 	mtbrand.Use()
-	t.Setenv("SUDO_USER", "")
-	if got := defaultConfig(); !strings.HasSuffix(got, brand.Current.ConfigDir+"/config.json") {
-		t.Errorf("defaultConfig() = %s", got)
+	dir := t.TempDir()
+	cfg, err := loadConfig(filepath.Join(dir, "none.json"))
+	if err != nil || cfg.Token != "" {
+		t.Fatalf("missing config = %+v, %v", cfg, err)
+	}
+	broken := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(broken, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(broken); err == nil {
+		t.Fatal("a config that does not parse must be an error")
 	}
 }

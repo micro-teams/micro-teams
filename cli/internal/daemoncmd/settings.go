@@ -3,8 +3,8 @@ package daemoncmd
 // `config`: this machine's own settings, of which there is one, the proxy.
 //
 // The proxy lives in a file this product owns and the connector applies to itself at startup, so
-// it survives being started by an init system that scrubs the environment — which is how a
-// correctly configured global proxy used to not reach the service at all. See internal/netcfg.
+// it survives being started by an init system that scrubs the environment, which a proxy set in a
+// shell profile never reaches. See internal/netcfg.
 //
 //	microteams config                         every setting
 //	microteams config proxy                   the proxy

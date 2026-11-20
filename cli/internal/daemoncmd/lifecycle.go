@@ -10,8 +10,11 @@ package daemoncmd
 // The service manager installs a service and makes it start at boot in one step, so `start` on a
 // machine with no service installs one, and `disable` stops the connector as it removes it from
 // boot. None of this ends a session: the tmux server outlives the connector, and the next start
-// re-adopts every session. The exception is a unit written by an older build, which a stop still
-// kills whole; keepSessions rewrites it first when this process may, and otherwise asks once.
+// re-adopts every session. Two things could still end them on a stop, and both are dealt with
+// before anything is stopped. A running connector that does not record keepsSessions in the state
+// file ends every session when it exits; handOff makes it update itself in place first, which it
+// does without ending them. A systemd unit without KillMode=process kills the whole service,
+// tmux included; keepSessions rewrites it when this process may, and otherwise asks once.
 //
 // On WSL a service needs systemd, which WSL runs only when /etc/wsl.conf says so; installing turns
 // it on and says that WSL must restart before the connector can run.
@@ -22,11 +25,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/state"
@@ -156,8 +159,11 @@ func startService(cfgPath, serverArg string, userService bool) error {
 			return err
 		}
 	}
-	cfg, _ := config.Load(cfgPath)
-	if cfg == nil || cfg.Token == "" || serverArg != "" && cfg.Base != serverArg {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	if cfg.Token == "" || serverArg != "" && cfg.Base != serverArg {
 		fmt.Println("Not logged in yet — starting login first.")
 		if _, err := doLogin(cfgPath, serverArg); err != nil {
 			return err
@@ -193,6 +199,9 @@ func stopService(cfgPath string, yes bool, actions ...string) error {
 	if err := servesThisConfig(cfgPath, userService); err != nil {
 		return err
 	}
+	if err := handOff(cfgPath); err != nil {
+		return err
+	}
 	ok, err := keepSessions(cfgPath, yes)
 	if err != nil {
 		return err
@@ -206,6 +215,32 @@ func stopService(cfgPath string, yes bool, actions ...string) error {
 		}
 	}
 	return nil
+}
+
+// How long a running connector gets to hand itself over to this build: it downloads the binaries
+// from the server first.
+const handOffWait = 2 * time.Minute
+
+// handOff makes a running connector that ends every session when it exits update itself in place
+// (as `microteams update` does: download, replace, re-exec, sessions untouched), and waits until the
+// process recording the state is one that keeps them. A connector that already keeps them, or none
+// running, needs nothing.
+func handOff(cfgPath string) error {
+	pid := state.PID(cfgPath)
+	if pid == 0 || state.KeepsSessions(cfgPath) {
+		return nil
+	}
+	ui.Info("The running connector (pid %d) ends every session when it exits; asking it to update itself first…", pid)
+	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
+		return fmt.Errorf("signal the running connector (pid %d): %w; nothing was stopped", pid, err)
+	}
+	for deadline := time.Now().Add(handOffWait); time.Now().Before(deadline); time.Sleep(time.Second) {
+		if state.KeepsSessions(cfgPath) {
+			ui.OK("The running connector updated itself in place; its sessions keep running.")
+			return nil
+		}
+	}
+	return fmt.Errorf("the running connector (pid %d) did not update itself within %s, so nothing was stopped; `microteams logs` says why", pid, handOffWait)
 }
 
 // keepSessions makes sure stopping the installed service leaves the sessions running: it rewrites a

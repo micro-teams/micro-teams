@@ -9,7 +9,9 @@ package daemoncmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/spf13/cobra"
 
@@ -44,8 +46,11 @@ func logoutCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 		Use:   "logout",
 		Short: "Forget this machine's credential (stops the connector first)",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load(*cfgPath)
-			if err != nil || cfg.Token == "" {
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			if cfg.Token == "" {
 				fmt.Println("Already logged out.")
 				return nil
 			}
@@ -69,9 +74,9 @@ func logoutCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 // doLogin runs the device flow and persists the result. serverArg overrides the stored server; an
 // empty serverArg requires a stored one (e.g. from install.sh).
 func doLogin(cfgPath, serverArg string) (*config.Config, error) {
-	cfg, _ := config.Load(cfgPath)
-	if cfg == nil {
-		cfg = &config.Config{}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return nil, err
 	}
 	if serverArg != "" {
 		cfg.Base = serverArg
@@ -93,6 +98,16 @@ func doLogin(cfgPath, serverArg string) (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// loadConfig reads this machine's config; a machine with none has an empty one. A config that
+// exists and cannot be read is an error, never replaced: it holds the machine's credential.
+func loadConfig(cfgPath string) (*config.Config, error) {
+	cfg, err := config.Load(cfgPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return &config.Config{}, nil
+	}
+	return cfg, err
 }
 
 func firstArg(args []string) string {
