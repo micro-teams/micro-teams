@@ -3,7 +3,8 @@
  * and on Android by whichever Driver it is given.
  *
  * journey(driver, params) — signs up (reading the code from the mail sink), starts a chat, says
- *   something in it, sees it stored, sees a message posted from outside the app arrive without
+ *   something in it, sees it stored, says a word longer than a line (a key) and sees it wrap
+ *   within the screen, sees a message posted from outside the app arrive without
  *   touching anything (the updates socket), renames the chat from its info page and comes back to
  *   find the conversation under the new name, finds a team made elsewhere in the agents section,
  *   and writes a document in that team's docs and finds its commit in the history.
@@ -63,6 +64,8 @@ export interface Driver {
   waitGone(id: string, timeoutMs?: number): Promise<void>;
   /** Whether some element on screen shows exactly this text, right now. */
   shows(text: string): Promise<boolean>;
+  /** Whether the element showing exactly this text lies within the screen's width, now. */
+  fits(text: string): Promise<boolean>;
   /** The text of the element with this testID, now. */
   text(id: string): Promise<string>;
   /** The web only: open the app at this address under where it is served ("chats/5"). */
@@ -213,6 +216,15 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   await d.waitForText(said, 30_000);
   await d.waitGone("pending-message", 30_000);
   lap("send");
+
+  // One unbroken word wider than the screen, as a public key or a link is: it wraps in its bubble.
+  const unbroken = `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${"Kq7bX2kPz9mW".repeat(6)}${p.run} e2e@example`;
+  await d.fill("composer", unbroken);
+  await d.tap("send");
+  await d.waitForText(unbroken, 30_000);
+  await d.waitGone("pending-message", 30_000);
+  if (!(await d.fits(unbroken))) throw new Error("a message with a long unbroken word runs off the screen");
+  lap("long word wraps");
 
   // Nothing polls: this appears only because the updates socket said the conversation moved.
   const fromOutside = `outsidé ✓ ${p.run}`;
