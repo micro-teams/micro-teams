@@ -20,6 +20,7 @@
  *   - scrolling: a wheel turn (a swipe on a phone) puts tmux into its history, and the terminal on
  *     the client never scrolls by itself (the web);
  *   - copy: the copy button shows the screen's text with its history, the agent's message in it;
+ *     on a phone a held finger dragged selects, and the selection comes back as a copy;
  *   - usage: the usage button reaches the driver (Claude Code shows /usage in the pane; a driver
  *     without the command offers no button);
  *   and closes the screen.
@@ -170,6 +171,21 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   await d.tap("screen-copy-close");
   await d.waitGone("screen-copy-sheet");
   ctx.lap("live screen: copy");
+
+  // -- selecting by touch --------------------------------------------------------------------
+  // A held finger dragged is a mouse selection: tmux copies it on release, or the program that
+  // has the mouse (Claude Code) selects and copies it on its c key. Either way it comes back as
+  // OSC 52 and the app says it copied (or why the clipboard would not take it).
+  if (d.selectByHold && (await d.shows("PgDn"))) {
+    await d.selectByHold();
+    const noted = async () => /^cop/.test(await d.text("screen-note").catch(() => ""));
+    if (!(await until("a copy from a touch selection", noted, 2_000).then(() => true, () => false))) {
+      await d.typeInTerminal("c");
+      await until("a copy from a touch selection after c", noted, 10_000);
+    }
+    console.log(`  live screen: a touch selection copied (${await d.text("screen-note")})`);
+    ctx.lap("live screen: select by touch, copy");
+  }
 
   // -- usage ---------------------------------------------------------------------------------
   if (ctx.driver === "" || ctx.driver === "claude") {

@@ -181,6 +181,33 @@ export class PlaywrightDriver implements Driver {
     return (await this.p.evaluate(`document.activeElement === ${helper}`)) as boolean;
   }
 
+  async selectByHold() {
+    const box = await this.id("terminal").boundingBox();
+    if (!box) throw new Error("no terminal to select in");
+    const y = box.y + box.height / 2;
+    const x0 = box.x + box.width * 0.15;
+    const x1 = box.x + box.width * 0.6;
+    // Touches as a finger makes them, dispatched where the terminal listens for them.
+    const touch = (type: string, x: number) =>
+      this.p.evaluate(
+        ([type, x, y]) => {
+          const el = document.elementFromPoint(x as number, y as number);
+          if (!el) throw new Error("nothing under the finger");
+          const t = new Touch({ identifier: 1, target: el, clientX: x as number, clientY: y as number });
+          const list = type === "touchend" ? [] : [t];
+          el.dispatchEvent(new TouchEvent(type as string, { touches: list, targetTouches: list, changedTouches: [t], bubbles: true, cancelable: true }));
+        },
+        [type, x, y],
+      );
+    await touch("touchstart", x0);
+    await this.p.waitForTimeout(700);
+    for (let i = 1; i <= 8; i++) {
+      await touch("touchmove", x0 + ((x1 - x0) * i) / 8);
+      await this.p.waitForTimeout(40);
+    }
+    await touch("touchend", x1);
+  }
+
   async watchOverflow(on: boolean) {
     if (on) {
       await this.p.evaluate(`(() => {

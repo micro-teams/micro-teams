@@ -22,7 +22,10 @@
  *
  * The terminal is never taller than the element and never scrolls on its own: there is no
  * scrollback, and the wheel reaches tmux as mouse input or does nothing. A finger dragged over it is
- * turned into wheel turns for the same reason, and a tap takes the keyboard. While the element is
+ * turned into wheel turns for the same reason, and a tap takes the keyboard. A finger held still
+ * for SELECT_HOLD_MS and then dragged is the mouse's left button dragged, as in Termux: tmux
+ * selects with it, or passes it to a program that takes the mouse (Claude Code selects with it,
+ * and copies on its own key), and the copy comes back as OSC 52. While the element is
  * smaller than the terminal (it has just shrunk, and the machine has not answered with the new
  * size), nothing new is drawn and the terminal keeps its bottom edge, where a program's prompt is,
  * in view; after a growth it keeps its place until the new size arrives. Otherwise it is centred
@@ -62,6 +65,8 @@ const ACK_BYTES = 32 * 1024;
 /** A finger travelling this many cells is one wheel turn (tmux scrolls a few lines per turn). */
 const CELLS_PER_TURN = 2;
 const TAP_SLOP_PX = 8;
+/** A finger held this long without moving starts a selection instead of a scroll. */
+const SELECT_HOLD_MS = 400;
 /** Input this soon after a key, a paste or a pointer event is the person's; later, the terminal's. */
 const TYPED_MS = 1_000;
 const PERSON_EVENTS = ["keydown", "beforeinput", "paste", "compositionend", "mousedown", "mouseup", "wheel", "touchmove", "touchend"];
@@ -226,7 +231,16 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   let lastY = 0;
   let travel = 0;
   let moved = false;
+  let selecting = false;
+  let hold: ReturnType<typeof setTimeout> | undefined;
   const cellHeight = () => xterm.offsetHeight / Math.max(1, term.rows);
+  const screenEl = () => xterm.querySelector(".xterm-screen") ?? xterm;
+  // xterm turns these into the mouse reports tmux asked for; during a drag it listens on the
+  // document, so the moves and the release go there.
+  const mouse = (type: "mousedown" | "mousemove" | "mouseup", x: number, y: number) =>
+    (type === "mousedown" ? screenEl() : document).dispatchEvent(
+      new MouseEvent(type, { clientX: x, clientY: y, button: 0, buttons: type === "mouseup" ? 0 : 1, bubbles: true, cancelable: true }),
+    );
   const onTouchStart = (e: TouchEvent) => {
     const t = e.touches[0];
     if (!t || e.touches.length > 1) return;
@@ -234,16 +248,29 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     lastY = t.clientY;
     travel = 0;
     moved = false;
+    selecting = false;
+    clearTimeout(hold);
+    const at = start;
+    hold = setTimeout(() => {
+      if (moved || start !== at) return;
+      selecting = true;
+      if (typeof navigator.vibrate === "function") navigator.vibrate(10);
+      mouse("mousedown", at.x, at.y);
+    }, SELECT_HOLD_MS);
   };
   const onTouchMove = (e: TouchEvent) => {
     const t = e.touches[0];
     if (!t || !start) return;
     e.preventDefault();
+    if (selecting) {
+      mouse("mousemove", t.clientX, t.clientY);
+      return;
+    }
     if (Math.abs(t.clientY - start.y) > TAP_SLOP_PX || Math.abs(t.clientX - start.x) > TAP_SLOP_PX) moved = true;
     travel += t.clientY - lastY;
     lastY = t.clientY;
     const turn = cellHeight() * CELLS_PER_TURN;
-    const target = xterm.querySelector(".xterm-screen") ?? xterm;
+    const target = screenEl();
     while (Math.abs(travel) >= turn) {
       // Dragging down shows what is above, as pulling a page down does: a wheel turned up.
       const up = travel > 0;
@@ -258,7 +285,11 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     // A tap is for the keyboard, not a click for the program: the browser's synthesized mouse
     // events are cancelled.
     e.preventDefault();
-    if (!moved) term.focus();
+    clearTimeout(hold);
+    const t = e.changedTouches[0];
+    if (selecting) mouse("mouseup", t?.clientX ?? start.x, t?.clientY ?? start.y);
+    else if (!moved) term.focus();
+    selecting = false;
     start = null;
   };
   box.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
@@ -294,6 +325,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
       for (const e of PERSON_EVENTS) box.removeEventListener(e, person, { capture: true });
       term.textarea!.removeEventListener("focus", onFocus);
       term.textarea!.removeEventListener("blur", onBlur);
+      clearTimeout(hold);
       term.dispose();
       box.remove();
     },
