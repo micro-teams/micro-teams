@@ -6,6 +6,7 @@
  *   - opening: the time from the tap to the first drawn screen (the regression number, which must
  *     stay under OPEN_LIMIT_MS), and that the first size drawn is the size it keeps: no resize after
  *     the first paint, so the connecting note going away changed nothing;
+ *   - the key rows: tapping one keeps the terminal's focus, so a phone's keyboard stays open;
  *   - the keyboard: opening it shrinks the terminal in one step and closing it grows it back in one,
  *     and (on the web) the terminal's bottom, where the prompt is, never leaves its view meanwhile
  *     (until the smaller size arrives, the terminal keeps its bottom edge in view and its top is
@@ -103,6 +104,15 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   const clipped = overflow ? `, top cut off for ${overflow.clippedMs} ms while the smaller size was on its way` : "";
   console.log(`  live screen: keyboard ${first.rows} → ${open.rows} → ${closed.rows} rows, one resize each way${clipped}`);
   ctx.lap("live screen: the keyboard, one step each way");
+
+  // -- the key rows keep the keyboard ---------------------------------------------------------
+  if (d.keepsFocusOnTap && (await d.shows("PgDn"))) {
+    for (const k of ["screen-key-ctrl", "screen-key-ctrl", "screen-key-pgdn"]) {
+      if (!(await d.keepsFocusOnTap(k))) throw new Error(`tapping ${k} took the focus from the terminal, which closes a phone's keyboard`);
+    }
+    console.log("  live screen: the key rows keep the terminal's focus");
+    ctx.lap("live screen: the key rows keep the keyboard");
+  }
 
   // -- the lease -----------------------------------------------------------------------------
   await d.typeInTerminal(" \x7f");

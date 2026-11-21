@@ -173,6 +173,14 @@ export class PlaywrightDriver implements Driver {
   // The functions below run in the page. They are strings, not functions: the runner that compiles
   // this file adds helpers to functions that do not exist in the page.
 
+  async keepsFocusOnTap(id: string) {
+    const helper = `[...document.querySelectorAll(".xterm")].find((e) => e.offsetParent !== null).querySelector(".xterm-helper-textarea")`;
+    await this.p.evaluate(`${helper}.focus()`);
+    if (this.opts.viewport === "desktop") await this.id(id).click();
+    else await this.id(id).tap();
+    return (await this.p.evaluate(`document.activeElement === ${helper}`)) as boolean;
+  }
+
   async watchOverflow(on: boolean) {
     if (on) {
       await this.p.evaluate(`(() => {
