@@ -90,8 +90,8 @@ export interface Driver {
   /** With the terminal focused, tap the key with this test id the way a finger does, and say
    * whether the terminal still has the focus (on a phone, losing it closes the keyboard). */
   keepsFocusOnTap?(id: string): Promise<boolean>;
-  /** Hold a finger still on the terminal long enough to start a selection, then drag it along
-   * the middle row and lift it. */
+  /** Hold a finger still on the terminal long enough to start a selection, then drag it from
+   * near the top left to the middle and lift it. */
   selectByHold?(): Promise<void>;
   /** The web only: the room around the terminal inside its view, in px, and a cell's height. */
   terminalOffsets?(): Promise<{ left: number; right: number; top: number; bottom: number; cell: number }>;

@@ -184,11 +184,14 @@ export class PlaywrightDriver implements Driver {
   async selectByHold() {
     const box = await this.id("terminal").boundingBox();
     if (!box) throw new Error("no terminal to select in");
-    const y = box.y + box.height / 2;
-    const x0 = box.x + box.width * 0.15;
+    // From near the top left to the middle: across the lines a program paints first, so the
+    // selection holds text whatever the screen shows.
+    const x0 = box.x + box.width * 0.05;
+    const y0 = box.y + box.height * 0.04;
     const x1 = box.x + box.width * 0.6;
+    const y1 = box.y + box.height * 0.5;
     // Touches as a finger makes them, dispatched where the terminal listens for them.
-    const touch = (type: string, x: number) =>
+    const touch = (type: string, x: number, y: number) =>
       this.p.evaluate(
         ([type, x, y]) => {
           const el = document.elementFromPoint(x as number, y as number);
@@ -199,13 +202,13 @@ export class PlaywrightDriver implements Driver {
         },
         [type, x, y],
       );
-    await touch("touchstart", x0);
+    await touch("touchstart", x0, y0);
     await this.p.waitForTimeout(700);
     for (let i = 1; i <= 8; i++) {
-      await touch("touchmove", x0 + ((x1 - x0) * i) / 8);
+      await touch("touchmove", x0 + ((x1 - x0) * i) / 8, y0 + ((y1 - y0) * i) / 8);
       await this.p.waitForTimeout(40);
     }
-    await touch("touchend", x1);
+    await touch("touchend", x1, y1);
   }
 
   async watchOverflow(on: boolean) {
