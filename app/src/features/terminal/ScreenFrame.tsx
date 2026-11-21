@@ -280,13 +280,13 @@ export function ScreenFrame() {
                   };
                   const up = () => {
                     stopRepeat();
-                    press();
                     tick();
                   };
                   return (
                     <Pressable
                       key={k.testID}
                       testID={k.testID}
+                      onPress={press}
                       onPressIn={down}
                       onPressOut={up}
                       style={({ pressed }) => [styles.key, pressed && styles.keyDown]}
