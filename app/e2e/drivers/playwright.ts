@@ -69,6 +69,13 @@ export class PlaywrightDriver implements Driver {
     return (await this.p.getByText(text, { exact: true }).filter({ visible: true }).count()) > 0;
   }
 
+  async fits(text: string) {
+    const box = await this.p.getByText(text, { exact: true }).filter({ visible: true }).first().boundingBox();
+    const screen = this.p.viewportSize();
+    if (!box || !screen) throw new Error(`"${text}" is not on screen`);
+    return box.x >= 0 && box.x + box.width <= screen.width;
+  }
+
   async text(id: string) {
     return (await this.id(id).innerText({ timeout: 2000 })).trim();
   }
