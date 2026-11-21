@@ -116,6 +116,14 @@ export class WebdriverioDriver implements Driver {
     return (await this.byText(text)).isDisplayed().catch(() => false);
   }
 
+  async fits(text: string) {
+    const el = await this.byText(text);
+    const { x } = await el.getLocation();
+    const { width } = await el.getSize();
+    const screen = await this.browser.getWindowSize();
+    return x >= 0 && x + width <= screen.width;
+  }
+
   async text(id: string) {
     return (await (await this.byId(id)).getText()).trim();
   }

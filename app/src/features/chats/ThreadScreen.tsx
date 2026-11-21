@@ -281,7 +281,10 @@ const styles = StyleSheet.create({
   column: { flexShrink: 1, maxWidth: `${metrics.bubbleMaxFraction * 100}%` },
   name: { marginLeft: 4, marginBottom: 2 },
   faceSpace: { width: metrics.avatarInBubble, height: metrics.avatarInBubble },
+  // At most its column's width: a bubble pushed to one side in a browser's flex box is otherwise as
+  // wide as its longest unbroken word (a key, a link), and runs off the screen instead of wrapping.
   bubble: {
+    maxWidth: "100%",
     borderRadius: metrics.bubbleRadius,
     paddingHorizontal: metrics.bubblePadH,
     paddingVertical: metrics.bubblePadV,
