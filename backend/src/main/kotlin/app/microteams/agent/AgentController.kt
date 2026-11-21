@@ -230,7 +230,12 @@ class AgentController(
                     .filter { (live[it]?.machineId ?: rows[it]?.first()?.machineId) == m }
                     .toSet()
         }
-        online?.let { o -> candidates = candidates.filter { (it in live) == o }.toSet() }
+        online?.let { o ->
+            candidates =
+                candidates
+                    .filter { reachable(live[it]?.machineId ?: rows[it]?.first()?.machineId) == o }
+                    .toSet()
+        }
 
         val agents = candidates.sorted().map { toDTO(it, live[it], viewerAuth) }
         val page = agents.take(pageSize)
@@ -247,6 +252,14 @@ class AgentController(
             ),
         )
     }
+
+    // Online means reachable, not "a program is running this instant": a connected machine plus
+    // the agent's row is all it takes to (re)start it the moment somebody talks to it or watches
+    // it. It is derived from the machine's link alone, because the screens the hub keeps for a
+    // machine outlive its link (they wait to be re-adopted) and would otherwise keep an agent
+    // online on a machine that is gone.
+    private fun reachable(machineId: String?): Boolean =
+        machineId != null && hub.isOnline(machineId)
 
     private fun toDTO(
         uid: IdType,
@@ -278,10 +291,7 @@ class AgentController(
             userId = uid,
             nickname = profile?.nickname ?: "user$uid",
             avatarId = profile?.avatar?.id?.toLong(),
-            // Reachable, rather than "a program is running this instant": a connected machine plus
-            // a row is all it takes to (re)start the agent the moment somebody talks to it or
-            // watches it, and that is what a human means by asking whether it is there.
-            online = agent != null || (machineId != null && hub.isOnline(machineId)),
+            online = reachable(machineId),
             machineId = machineId,
             sid = if (watchable) sid else null,
             teamId = agent?.teamId ?: row?.teamId,
