@@ -2,16 +2,20 @@
  * The installable clients this deployment offers, as the deployment itself lists them in
  * /downloads/clients.json (written by CI beside the packages, so the list and the files agree).
  *
- * useClientPackages() → { packages, loaded } — each { platform, url, bytes, signed }; empty when
- *   the deployment ships none, or the list cannot be read (an ordinary state, not an error).
+ * useClientPackages() → { packages, loaded, from } — each { platform, url, bytes, signed }; empty
+ *   when the deployment ships none, or the list cannot be read (an ordinary state, not an error).
+ *   from is where to download them now, the substrate's quickestLine(): { origin, id }, id null
+ *   when it is the server's origin because no line has been measured yet. A package's address is
+ *   `${from.origin}${p.url}`; every line leads to the same nginx, which serves /downloads/.
  *
  * ClientPackage — one installable client in clients.json: platform, arch, url, size, and whether
  *   it is release- or debug-signed.
  *
- * Example: const { packages } = useClientPackages();
+ * Example: const { packages, from } = useClientPackages(); const href = `${from.origin}${packages[0].url}`;
  *
- * The list rides the lines; the download it links to does not — one large file is the browser's
- * or the system's download manager's to fetch.
+ * The list rides the lines; the download it links to goes to the browser's or the system's
+ * download manager, over the one line that answers fastest: one large file over every line at once
+ * would cost each line the whole file.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "./session";
@@ -34,5 +38,5 @@ export function useClientPackages() {
       }
     },
   });
-  return { packages: q.data ?? [], loaded: q.isFetched };
+  return { packages: q.data ?? [], loaded: q.isFetched, from: substrate.quickestLine() };
 }

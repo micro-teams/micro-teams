@@ -122,7 +122,8 @@ the app dialled no line but the stack's (the default server is dialled only once
   list keeps its height and is given the keyboard's height as extra room to scroll into.
 - **An avatar is one component.** Nothing else draws a face.
 - **Every request rides the lines but two kinds.** The calls to cheese-auth (`src/api/auth.ts`)
-  and an installer download go directly; why is in `src/transport/substrate.ts`. A request the
+  go directly, and an installer download goes to the system's downloader over the one line that
+  answers fastest (`quickestLine()`); why is in `src/transport/substrate.ts`. A request the
   lines cannot carry goes directly too, and says so in the console and on the lines panel
   (*me → version → lines*, or `/app/__lines`), whose "copy diagnostics" button copies everything
   the client knows about its session, lines, streams and fallbacks.

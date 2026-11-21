@@ -305,7 +305,9 @@ func (h *Host) dispatch(msg protocol.Msg) {
 }
 
 // performUpdate replaces the microteams binary and the multipath client in place and hands this
-// process off to the new binary: download and verify both, replace both, detach from the screens,
+// process off to the new binary: download and verify both (from the quickest line the client
+// measures, or the server's own origin while it measures none, which the log says), replace both,
+// detach from the screens,
 // stop the client (it says goodbye to the server), then syscall.Exec. The new binary starts a fresh
 // client and re-adopts the screens. Any failure before the detach keeps the current process running
 // unchanged.
@@ -324,13 +326,20 @@ func (h *Host) performUpdate() {
 		h.logf("microteams: update: cannot locate self: %v", err)
 		return
 	}
-	bin, err := update.Fetch(h.ctx, h.base, brand.Current.Name)
+	from := h.base
+	if l, ok := h.mp.Quickest(); ok {
+		from = l.URL
+		h.logf("microteams: update: downloading from line %s (%s, round trip %d ms), the quickest now", l.ID, l.URL, l.RTTMs)
+	} else {
+		h.logf("microteams: update: downloading from the server's origin: the multipath client has measured no line")
+	}
+	bin, err := update.Fetch(h.ctx, from, brand.Current.Name)
 	if err != nil {
 		h.logf("microteams: update aborted (kept running current build): %v", err)
 		return
 	}
 	clientPath := mpclient.BinaryPath(filepath.Dir(h.cfgPath))
-	clientBin, err := mpclient.Fetch(h.ctx, h.base, clientPath)
+	clientBin, err := mpclient.Fetch(h.ctx, from, clientPath)
 	if err != nil {
 		_ = os.Remove(bin) // the update is abandoned; the error says why
 		h.logf("microteams: update aborted (kept running current build): %v", err)

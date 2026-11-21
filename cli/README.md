@@ -116,7 +116,11 @@ the client has a live session; without one they go to the server directly, and t
 says why. The service starts the client again whenever it exits (and `microteams restart` starts
 it, and the line list, afresh), `microteams status` shows its session and lines, and `microteams update`
 and `install.sh` install it together with `microteams`; a service that finds it missing downloads it
-from `<origin>/connector/latest/<os>-<arch>/multipath-client`.
+from `<origin>/connector/latest/<os>-<arch>/multipath-client`. An update the service performs
+downloads both binaries from the line its client measures as quickest (the answering line with the
+smallest round trip), over that one line rather than through the client, which would carry each
+file over every line; with no line measured, and for `microteams update` without a running service,
+they come from the origin, and the log or the command says so.
 
 **`microteams api`** runs the server-hosted **CLI applet** (`cli.js`): the applet
 declares the whole command tree with `microteams.command`, and the host turns that
