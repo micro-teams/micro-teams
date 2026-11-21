@@ -27,12 +27,14 @@ import app.microteams.agent.AgentLlmService
 import app.microteams.agent.AgentRegistry
 import app.microteams.agent.AgentWakeup
 import app.microteams.agent.driver.AgentDriver
+import app.microteams.chat.thread.ThreadMemberRepository
 import app.microteams.chat.thread.ThreadService
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.MachineHub
 import app.microteams.model.CreateThreadRequestDTO
 import app.microteams.team.chat.TeamChatService
 import app.microteams.team.machine.TeamMachineService
+import app.microteams.team.membership.TeamAccess
 import app.microteams.team.membership.TeamService
 import app.microteams.user.Avatar
 import app.microteams.user.User
@@ -64,6 +66,8 @@ class AgentService(
     private val teamMachineService: TeamMachineService,
     private val teamService: TeamService,
     private val teamChatService: TeamChatService,
+    private val teamAccess: TeamAccess,
+    private val threadMemberRepository: ThreadMemberRepository,
     private val threadService: ThreadService,
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
@@ -331,6 +335,15 @@ class AgentService(
         // Its model API key goes with it: nothing should hold a credential for an agent that is
         // gone.
         agentLlmService.forget(agentUserId)
+        // A closed agent is gone, not a member that stopped answering: it leaves every team and
+        // every chat it was in (each chat records it leaving).
+        teamAccess.memberTeamIds(agentUserId).forEach { teamService.removeMember(it, agentUserId) }
+        threadMemberRepository
+            .findByUserId(agentUserId)
+            .mapNotNull { it.threadId }
+            .forEach {
+                threadService.removeMember(it, agentUserId)
+            }
     }
 
     /**
