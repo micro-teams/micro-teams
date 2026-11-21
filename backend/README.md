@@ -60,10 +60,9 @@ org/rucca/cheese/   the authorization framework: JWT, the @Guard aspect, custom-
 Why the machine/agent split has three layers:
 
 - **`machine/` knows nothing about agents.** It is a host running our CLI: a control channel
-  (`link/`, the connector protocol in its two versions + `MachineHub`) and screens (`screen/` — a hosted
-  process, its terminal, an optional applet). A screen is **not** an agent: it carries an
-  opaque `kind`, not a user id, so a shared shell or a vscode-server is expressible with no
-  agent involved. Never reach from here into chat or agent — publish an event instead
+  (`link/`, the connector protocol + `MachineHub`) and screens (`screen/` — a hosted process,
+  its terminal, an optional applet). A screen is **not** an agent: it carries an opaque `kind`,
+  not a user id, so a shared shell or a vscode-server is expressible with no agent involved. Never reach from here into chat or agent — publish an event instead
   (`MachineForgottenEvent`) and let the owner clean up.
 - **`team/machine/` owns *whose* a machine is.** `mayAccess(userId, machineId)` is the single
   access question the rest of the backend asks about a machine.

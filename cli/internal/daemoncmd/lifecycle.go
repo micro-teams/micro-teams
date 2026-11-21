@@ -9,12 +9,14 @@ package daemoncmd
 //
 // The service manager installs a service and makes it start at boot in one step, so `start` on a
 // machine with no service installs one, and `disable` stops the connector as it removes it from
-// boot. None of this ends a session: the tmux server outlives the connector, and the next start
-// re-adopts every session. Two things could still end them on a stop, and both are dealt with
-// before anything is stopped. A running connector that does not record keepsSessions in the state
-// file ends every session when it exits; handOff makes it update itself in place first, which it
-// does without ending them. A systemd unit without KillMode=process kills the whole service,
-// tmux included; keepSessions rewrites it when this process may, and otherwise asks once.
+// boot. None of this ends a session: the unit stops only the connector process (KillMode=process),
+// the tmux server outlives it, and the next start re-adopts every session.
+//
+// Elevating runs this binary again under sudo by its absolute path (sudoSelf), since sudo's
+// secure_path rarely holds the directory a person installed it in; the line it runs is printed
+// first, so a person can paste it as it is.
+//
+//	sudoSelf(args...) (cmd *exec.Cmd, line string, err error)  this binary under sudo with args.
 //
 // On WSL a service needs systemd, which WSL runs only when /etc/wsl.conf says so; installing turns
 // it on and says that WSL must restart before the connector can run.
@@ -24,8 +26,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -72,15 +74,14 @@ func enableCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 }
 
 func stopCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	var yes bool
-	c := withConfig(&cobra.Command{
+	return withConfig(&cobra.Command{
 		Use:   "stop",
 		Short: "Disconnect this machine (sessions keep running)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !installedOrSay(*cfgPath) {
 				return nil
 			}
-			if err := stopService(*cfgPath, yes, "stop"); err != nil {
+			if err := stopService(*cfgPath, "stop"); err != nil {
 				return err
 			}
 			ui.OK("Stopped. Sessions on this machine keep running.")
@@ -88,40 +89,34 @@ func stopCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *c
 			return nil
 		},
 	})
-	yesFlag(c, &yes)
-	return c
 }
 
 func restartCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	var yes bool
-	c := withConfig(&cobra.Command{
+	return withConfig(&cobra.Command{
 		Use:   "restart",
 		Short: "Restart the connector (sessions keep running)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !installedOrSay(*cfgPath) {
 				return nil
 			}
-			if err := stopService(*cfgPath, yes, "restart"); err != nil {
+			if err := stopService(*cfgPath, "restart"); err != nil {
 				return err
 			}
 			reportLink(*cfgPath, "Restarted")
 			return nil
 		},
 	})
-	yesFlag(c, &yes)
-	return c
 }
 
 func disableCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	var yes bool
-	c := withConfig(&cobra.Command{
+	return withConfig(&cobra.Command{
 		Use:   "disable",
 		Short: "Stop the connector and stop starting it at boot (sessions keep running)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !installedOrSay(*cfgPath) {
 				return nil
 			}
-			if err := stopService(*cfgPath, yes, "stop", "uninstall"); err != nil {
+			if err := stopService(*cfgPath, "stop", "uninstall"); err != nil {
 				return err
 			}
 			ui.OK("Stopped, and no longer started at boot. Sessions on this machine keep running.")
@@ -129,20 +124,11 @@ func disableCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command)
 			return nil
 		},
 	})
-	yesFlag(c, &yes)
-	return c
 }
 
 func userFlag(c *cobra.Command, v *bool) {
 	c.Flags().BoolVar(v, "user", false, "install a user-level service instead of system-wide")
 	_ = c.Flags().MarkHidden("user")
-}
-
-// yesFlag adds --yes, and --force, its spelling in the forms these commands replace.
-func yesFlag(c *cobra.Command, v *bool) {
-	c.Flags().BoolVarP(v, "yes", "y", false, "do not ask, even if sessions would end")
-	c.Flags().BoolVar(v, "force", false, "the same as --yes")
-	_ = c.Flags().MarkHidden("force")
 }
 
 // startService logs in if needed, installs the service if there is none, and starts it.
@@ -170,11 +156,7 @@ func startService(cfgPath, serverArg string, userService bool) error {
 		}
 		ui.OK("Logged in.")
 	}
-	if installed {
-		if _, err := keepSessions(cfgPath, true); err != nil {
-			return err
-		}
-	} else {
+	if !installed {
 		if err := ensureSystemd(); err != nil {
 			return err
 		}
@@ -189,9 +171,8 @@ func startService(cfgPath, serverArg string, userService bool) error {
 	return nil
 }
 
-// stopService runs actions on the installed service once nothing they do would end a session, or
-// the person agreed that it may.
-func stopService(cfgPath string, yes bool, actions ...string) error {
+// stopService runs actions on the installed service.
+func stopService(cfgPath string, actions ...string) error {
 	userService, _ := service.Installed(cfgPath)
 	if err := elevate(userService, cfgPath); err != nil {
 		return err
@@ -199,75 +180,12 @@ func stopService(cfgPath string, yes bool, actions ...string) error {
 	if err := servesThisConfig(cfgPath, userService); err != nil {
 		return err
 	}
-	if err := handOff(cfgPath); err != nil {
-		return err
-	}
-	ok, err := keepSessions(cfgPath, yes)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("aborted; nothing was changed (--yes skips this question)")
-	}
 	for _, action := range actions {
 		if err := service.ControlInstalled(cfgPath, action); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// How long a running connector gets to hand itself over to this build: it downloads the binaries
-// from the server first.
-const handOffWait = 2 * time.Minute
-
-// handOff makes a running connector that ends every session when it exits update itself in place
-// (as `microteams update` does: download, replace, re-exec, sessions untouched), and waits until the
-// process recording the state is one that keeps them. A connector that already keeps them, or none
-// running, needs nothing.
-func handOff(cfgPath string) error {
-	pid := state.PID(cfgPath)
-	if pid == 0 || state.KeepsSessions(cfgPath) {
-		return nil
-	}
-	ui.Info("The running connector (pid %d) ends every session when it exits; asking it to update itself first…", pid)
-	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
-		return fmt.Errorf("signal the running connector (pid %d): %w; nothing was stopped", pid, err)
-	}
-	for deadline := time.Now().Add(handOffWait); time.Now().Before(deadline); time.Sleep(time.Second) {
-		if state.KeepsSessions(cfgPath) {
-			ui.OK("The running connector updated itself in place; its sessions keep running.")
-			return nil
-		}
-	}
-	return fmt.Errorf("the running connector (pid %d) did not update itself within %s, so nothing was stopped; `microteams logs` says why", pid, handOffWait)
-}
-
-// keepSessions makes sure stopping the installed service leaves the sessions running: it rewrites a
-// unit that would kill them, when this process may. When it may not and sessions are running, it
-// asks — once — whether to go ahead anyway. It reports whether to proceed.
-func keepSessions(cfgPath string, yes bool) (bool, error) {
-	rewritten, advice, err := host.EnsureUnit(cfgPath)
-	if err != nil {
-		return false, err
-	}
-	if rewritten {
-		ui.OK("Rewrote the service unit so sessions survive a stop or restart.")
-	}
-	if advice == "" {
-		return true, nil
-	}
-	ui.Warn("%s", advice)
-	n, err := liveSessions()
-	if !mustAsk(n, err, yes) {
-		return true, nil
-	}
-	if err != nil {
-		fmt.Printf("Cannot tell whether sessions are running (%v); stopping this service would end them.\n", err)
-	} else {
-		fmt.Printf("%d session(s) are running; stopping this service ends them.\n", n)
-	}
-	return confirm("Go ahead anyway?"), nil
 }
 
 // servesThisConfig refuses to act on an installed service that runs another config: the service's
@@ -282,12 +200,6 @@ func servesThisConfig(cfgPath string, userService bool) error {
 		return fmt.Errorf("the installed microteams service runs with another config than %s; nothing was changed", cfgPath)
 	}
 	return nil
-}
-
-// mustAsk decides whether a stop that would end every session needs a person's yes: only when
-// there may be a session to end and nobody said yes already.
-func mustAsk(sessions int, countErr error, yes bool) bool {
-	return !yes && (countErr != nil || sessions > 0)
 }
 
 // installedOrSay reports whether a service is installed, and says what to do when it is not.
@@ -349,25 +261,21 @@ func elevate(userService bool, cfgPath string) error {
 	if userService || os.Geteuid() == 0 {
 		return nil
 	}
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
+	if _, err := exec.LookPath("sudo"); err != nil {
 		ui.Hint("no sudo found — acting on a user-level service instead of the system one")
 		return nil
 	}
-	self, err := os.Executable()
+	// The config path is forwarded so the elevated process reads and writes this user's config, and
+	// the unit it writes runs `microteams run --config <that>` as this user.
+	args := os.Args[1:]
+	if !hasFlag(args, "--config") {
+		args = append(args, "--config", cfgPath)
+	}
+	cmd, line, err := sudoSelf(args...)
 	if err != nil {
 		return err
 	}
-	fmt.Println("The system-wide service needs root — elevating with sudo…")
-	// The absolute self path means sudo's secure_path cannot hide it; the config path is forwarded
-	// so the elevated process reads and writes this user's config, and the unit it writes runs
-	// `microteams run --config <that>` as this user.
-	args := append([]string{self}, os.Args[1:]...)
-	if !hasFlag(os.Args[1:], "--config") {
-		args = append(args, "--config", cfgPath)
-	}
-	cmd := exec.Command(sudo, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	fmt.Printf("The system-wide service needs root — running: %s\n", line)
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -377,6 +285,35 @@ func elevate(userService bool, cfgPath string) error {
 	}
 	os.Exit(0)
 	return nil
+}
+
+// sudoSelf is this binary run under sudo with args, wired to this terminal, and the same command as
+// a line a person can paste into a shell. The binary is named by its absolute path with symlinks
+// resolved, so neither sudo's secure_path nor a link that moves can make it another program.
+func sudoSelf(args ...string) (*exec.Cmd, string, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, "", err
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return nil, "", err
+	}
+	argv := append([]string{"sudo", self}, args...)
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shellQuote(a)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd, strings.Join(quoted, " "), nil
+}
+
+// shellQuote leaves a word of safe characters as it is and single-quotes anything else.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:=@+,") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // hasFlag reports whether argv already carries the flag (as `--flag` or `--flag=value`).

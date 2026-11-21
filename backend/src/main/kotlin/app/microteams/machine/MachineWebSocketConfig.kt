@@ -165,7 +165,7 @@ class ViewerHandshakeInterceptor(private val authorizationService: Authorization
         }
         attributes["sid"] = sid
         attributes["userId"] = auth.userId
-        // The room the viewer has; absent from an older client (see ViewerHandler).
+        // The room the viewer has; absent from a viewer that only reads (see ViewerHandler).
         val cols = query["cols"]?.toIntOrNull()?.takeIf { it > 0 }
         val rows = query["rows"]?.toIntOrNull()?.takeIf { it > 0 }
         if (cols != null && rows != null) {

@@ -45,9 +45,9 @@
 # The machine runs systemd, and the connector runs as the system service `microteams start`
 # installs, the way a real machine runs it. That is what lets this prove the bargain the connector
 # makes with its sessions: with a person watching the live screen (and so the backend's wake-up
-# probing the agent on every reattach), `microteams restart`, `stop` + `start`, a restart that has
-# to rewrite a unit without KillMode=process, and `microteams update` all leave the agent's program
-# running — the same tmux pane, the same process, not a respawned one.
+# probing the agent on every reattach), `microteams restart`, `stop` + `start` and `microteams
+# update` all leave the agent's program running — the same tmux pane, the same process, not a
+# respawned one.
 #
 # Usage: e2e.sh [npm:<version>|installer|pi:<version>]   (run from an unpacked bundle directory)
 set -euo pipefail
@@ -155,13 +155,6 @@ docker exec "$MACHINE_CT" bash -c "set -e
 docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
 docker cp connector/linux-amd64/tmux "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/tmux"
 docker cp connector/linux-amd64/multipath-client "$MACHINE_CT:/home/$MACHINE_USER/.config/microteams/bin/multipath-client"
-# On the leg that carries the upgrade (RELEASE_BIN set), the machine starts on a connector that ends
-# its sessions when it exits (see build.yml), and this build waits beside it until it is installed
-# over it, as install.sh installs it over whatever runs.
-if [ -n "${RELEASE_BIN:-}" ]; then
-  docker cp connector/linux-amd64/microteams "$MACHINE_CT:/home/$MACHINE_USER/microteams-this-build"
-  docker cp "$RELEASE_BIN" "$MACHINE_CT:/home/$MACHINE_USER/.local/bin/microteams"
-fi
 docker exec "$MACHINE_CT" bash -c "chmod +x /home/$MACHINE_USER/.local/bin/microteams \
   /home/$MACHINE_USER/.config/microteams/bin/tmux /home/$MACHINE_USER/.config/microteams/bin/multipath-client
   chown -R $MACHINE_USER: /home/$MACHINE_USER"
@@ -193,20 +186,19 @@ step "connect the machine"
 docker exec -u "$MACHINE_USER" "$MACHINE_CT" bash -c "cat > /home/$MACHINE_USER/.config/microteams/config.json <<EOF
 {\"base\":\"http://nginx/mt\",\"token\":\"$MACHINE_TOKEN\",\"machine_id\":\"$MACHINE_ID\"}
 EOF"
-# That connector says `link connect`, this build `start`; both install the system service with sudo.
-CONNECT=start
-[ -n "${RELEASE_BIN:-}" ] && CONNECT="link connect"
-onmachine "\$HOME/.local/bin/microteams $CONNECT" ||
-  { docker exec "$MACHINE_CT" journalctl -u microteams --no-pager | tail -40; fail "microteams $CONNECT failed"; }
+START_OUT="$(onmachine "\$HOME/.local/bin/microteams start" 2>&1)" ||
+  { printf '%s\n' "$START_OUT"; docker exec "$MACHINE_CT" journalctl -u microteams --no-pager | tail -40; fail "microteams start failed"; }
+printf '%s\n' "$START_OUT"
+# The line it elevated with names the binary by its absolute path, so it pastes as it is: sudo's
+# secure_path does not hold ~/.local/bin.
+printf '%s' "$START_OUT" | grep -qF "running: sudo /home/$MACHINE_USER/.local/bin/microteams start --config /home/$MACHINE_USER/.config/microteams/config.json" ||
+  fail "start did not show the sudo line it ran with the binary's absolute path"
 docker exec "$MACHINE_CT" systemctl is-active -q microteams || fail "the microteams system service is not active"
 docker exec "$MACHINE_CT" grep -qx "User=$MACHINE_USER" /etc/systemd/system/microteams.service ||
   fail "the system service does not run as $MACHINE_USER"
-# This build's unit leaves the sessions alone on a stop; the other connector's does not, which the
-# upgrade below deals with.
-if [ -z "${RELEASE_BIN:-}" ]; then
-  docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
-    fail "the system service would end the sessions when it stops (no KillMode=process)"
-fi
+# The unit stops only the connector, leaving the sessions alone.
+docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
+  fail "the system service would end the sessions when it stops (no KillMode=process)"
 for _ in $(seq 1 30); do
   online="$(curl -fsS "$MT/machine/$MACHINE_ID" -H "$AUTH" | json "str(d.get('online',False))")"
   [ "$online" = "True" ] && break
@@ -214,14 +206,10 @@ for _ in $(seq 1 30); do
 done
 [ "$online" = "True" ] || { docker exec "$MACHINE_CT" cat $CONNLOG; fail "machine never came online"; }
 # The stack's line list is http://nginx (MULTIPATH_ORIGIN in build.yml), which this machine reaches:
-# the control link must ride the multipath client, not go around it. The other connector says so in
-# other words, so on that leg this is asked once this build runs.
-over_multipath() {
-  docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" $CONNLOG ||
-    { docker exec "$MACHINE_CT" cat $CONNLOG; fail "the control link did not go through the multipath client"; }
-  pass "machine is online, over its multipath client"
-}
-if [ -z "${RELEASE_BIN:-}" ]; then over_multipath; else pass "machine is online, on the other connector"; fi
+# the control link must ride the multipath client, not go around it.
+docker exec "$MACHINE_CT" grep -q "the control link goes through the multipath client" $CONNLOG ||
+  { docker exec "$MACHINE_CT" cat $CONNLOG; fail "the control link did not go through the multipath client"; }
+pass "machine is online, over its multipath client"
 
 # --- an agent ---------------------------------------------------------------------------------
 step "open an agent on it"
@@ -235,18 +223,8 @@ SID="$(printf '%s' "$OPENED" | json "d['sid']")"
 pass "agent $AGENT_ID on screen $SID"
 
 step "the screen really exists on the machine"
-# The connector keeps its tmux on a private socket in $XDG_RUNTIME_DIR or $HOME/.local/state, and
-# in /tmp only as a last resort (/tmp is world-writable and emptied on boot). Asked rather than
-# assumed, in the connector's own order of preference, and the first that exists wins: a machine
-# updated in place may still be using the socket an earlier build opened, and a hardcoded path
-# reports "no tmux session" about a machine that has one.
-SOCK="$(docker exec -u "$MACHINE_USER" "$MACHINE_CT" sh -c '
-  for d in "${XDG_RUNTIME_DIR:-}/microteams" "$HOME/.local/state/microteams" "/tmp/microteams-$(id -u)"; do
-    [ -S "$d/t.sock" ] && { printf %s "$d/t.sock"; exit 0; }
-  done
-  printf %s "$HOME/.local/state/microteams/t.sock"
-' | tr -d '\r')"
-printf 'the machine keeps its tmux at %s\n' "$SOCK"
+# The connector keeps its tmux on a private socket under $HOME/.local/state.
+SOCK="/home/$MACHINE_USER/.local/state/microteams/t.sock"
 mtmux() { docker exec -u "$MACHINE_USER" "$MACHINE_CT" \
   "/home/$MACHINE_USER/.config/microteams/bin/tmux" -S "$SOCK" "$@"; }
 for _ in $(seq 1 30); do
@@ -368,33 +346,9 @@ survives() {
   still_the_same_agent "$what" "$before" "$viewed"
 }
 
-# The upgrade every machine goes through once: this build installed over a running connector that
-# ends every session when it exits, under a unit that kills the service whole, as install.sh does.
-# The first restart has to make that connector hand itself over to this build in place, and rewrite
-# the unit, before it stops anything.
-if [ -n "${RELEASE_BIN:-}" ]; then
-  step "install this build over the running connector"
-  onmachine 'install -m 755 $HOME/microteams-this-build $HOME/.local/bin/microteams'
-  survives "the first microteams restart after the upgrade" '$HOME/.local/bin/microteams restart >/tmp/restart.out 2>&1
-    s=$?; cat /tmp/restart.out; [ $s = 0 ] && grep -q "updated itself in place" /tmp/restart.out'
-  docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
-    fail "the first restart after the upgrade did not rewrite the unit"
-  over_multipath
-fi
 survives "microteams restart" '$HOME/.local/bin/microteams restart'
 survives "microteams stop + start" '$HOME/.local/bin/microteams stop &&
   ! systemctl is-active -q microteams && sleep 3 && $HOME/.local/bin/microteams start'
-
-# A unit without KillMode=process ends the whole service, sessions and all, on a stop. The connector says so in its log and in `status`, and a
-# restart run with sudo rewrites the unit first, so that very restart already keeps them.
-step "a unit without KillMode=process is reported, and rewritten by the next restart"
-docker exec "$MACHINE_CT" bash -c "sed -i '/^KillMode=process\$/d' /etc/systemd/system/microteams.service && systemctl daemon-reload"
-STATUS="$(onmachine '$HOME/.local/bin/microteams status' 2>&1 || true)"
-printf '%s\n' "$STATUS"
-printf '%s' "$STATUS" | grep -q 'sudo microteams restart' || fail "status does not say how to fix the unit"
-survives "microteams restart, rewriting the unit" '$HOME/.local/bin/microteams restart'
-docker exec "$MACHINE_CT" grep -qx "KillMode=process" /etc/systemd/system/microteams.service ||
-  fail "restart did not rewrite the unit"
 
 # --- microteams update: the live-tmux-preserving in-process re-exec (T-025) ----------------------
 # `microteams update` on a machine with a LIVE service must take the SIGUSR2 in-process path: the

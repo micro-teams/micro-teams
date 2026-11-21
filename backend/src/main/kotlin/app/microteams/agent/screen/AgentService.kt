@@ -69,8 +69,9 @@ class AgentService(
     private val userProfileRepository: UserProfileRepository,
     private val agentLlmService: AgentLlmService,
     drivers: List<AgentDriver>,
-    // Fallback MICROTEAMS_API, used only for a machine that connected without reporting its own
-    // endpoint (an older CLI). Normally the origin comes from the machine's live connection, so the
+    // The MICROTEAMS_API for a machine that connected without reporting its own endpoint (the
+    // connector reports it whenever it knows it). Normally the origin comes from the machine's live
+    // connection, so the
     // server never assumes its own address. See MachineHub.origin.
     @Value("\${application.connector-origin:http://127.0.0.1:8080}")
     private val connectorOrigin: String,

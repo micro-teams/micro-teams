@@ -66,20 +66,19 @@ microteams api <command> [args]   the server-defined command tree (see below)
 **Sessions outlive the connector.** They belong to the private tmux server, not to the process
 that started them: `stop`, `restart`, `disable`, `logout`, `update` and a crash all leave every
 program running, and the next connector re-adopts them when the backend asks. Only `uninstall` ends
-them, and it says so. Two things could still end them on a stop, and every command that stops the
-service deals with both first:
+them, and it says so. The service unit stops only the connector process (`KillMode=process`), so
+stopping the service leaves tmux alone.
 
-- a running connector that ends its sessions when it exits (one that does not record
-  `keepsSessions` in the state file) is asked to update itself in place, which it does without
-  ending them, and the stop waits until it has;
-- a systemd unit without `KillMode=process` kills the whole service, tmux included. The service
-  rewrites its own user unit when it starts, and a system unit is rewritten by any `start`,
-  `restart`, `enable`, `stop` or `disable` run under sudo; until then the log and `status` say
-  `run sudo microteams restart`, and a stop that would end running sessions asks once first.
+`status` counts the sessions with the service's own tmux. A shell's environment
+(`$MICROTEAMS_TMUX`, `$XDG_RUNTIME_DIR`, the config and temp dirs) can resolve another binary or
+socket than the service's, so the running service records in the state file what it resolved its
+tmux from — the binary, `$XDG_RUNTIME_DIR` and the temp dir — and `status` resolves from those.
 
 Under sudo, a command acts for the person who ran sudo (their config, state, log and tmux).
 `uninstall` runs as that person, not through sudo, and asks for sudo itself to remove a system
-service.
+service. Whenever a command runs itself under sudo it names itself by its absolute path, symlinks
+resolved, and prints the exact line it runs: sudo's `secure_path` does not hold `~/.local/bin`, so
+`sudo microteams …` would not find it.
 
 Commands meet the user where they are: `start` runs the login flow if the machine isn't logged in
 yet; a system service (the default: it runs with nobody logged in) makes a command re-run itself
@@ -89,9 +88,6 @@ turns systemd on in `/etc/wsl.conf` when it is off and says that WSL must restar
 
 The service's name is the product's, not the config's: a lifecycle command run with a `--config`
 other than the one the installed unit runs refuses to act.
-
-`auth login|logout`, `link connect|disconnect|auto-connect|no-auto-connect|retest` and `proxy …`
-are hidden aliases of these commands that print the new form; they go in the next release.
 
 **Login is a device flow.** `microteams login` registers the machine, prints a
 link, and blocks until a human opens it and approves. On approval the server

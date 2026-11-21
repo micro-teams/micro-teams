@@ -1,7 +1,7 @@
 package main
 
-// The command tree a person sees: the flat verbs in the help, and every form they replace still
-// accepted but hidden, so the help shows one way to do each thing.
+// The command tree a person sees: the flat verbs in the help, and the commands only programs run
+// (`run` for the service manager, `acp-screen` inside an agent's screen) hidden from it.
 
 import (
 	"bytes"
@@ -26,14 +26,10 @@ func TestVisibleCommands(t *testing.T) {
 	}
 }
 
-func TestHiddenCommandsStillResolve(t *testing.T) {
+func TestHiddenCommandsResolve(t *testing.T) {
 	root, _ := newRoot()
 	for _, path := range [][]string{
 		{"acp-screen"}, {"run"},
-		{"auth", "login"}, {"auth", "logout"},
-		{"link", "connect"}, {"link", "auto-connect"}, {"link", "disconnect"}, {"link", "no-auto-connect"},
-		{"link", "retest"},
-		{"proxy"}, {"proxy", "set"}, {"proxy", "no-proxy"}, {"proxy", "clear"},
 		{"config", "proxy", "set"},
 	} {
 		c, _, err := root.Find(path)
@@ -55,7 +51,7 @@ func TestHelpListsNoAlias(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"auth", "link", "proxy", "acp-screen", "run "} {
+	for _, name := range []string{"acp-screen", "run "} {
 		if strings.Contains(out.String(), "  "+name) {
 			t.Errorf("help lists %q:\n%s", name, out.String())
 		}

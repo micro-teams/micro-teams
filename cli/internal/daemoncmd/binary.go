@@ -9,15 +9,14 @@ package daemoncmd
 // Uninstall is the one command that ends the sessions on this machine, and it says so before it
 // does: it removes the service, makes sure the connector process is gone, ends the tmux server, and
 // deletes the config and the binary. It runs as the person whose sessions they are, never through
-// sudo, because only they can see their sessions; for a system service it runs `sudo microteams
-// disable` itself. Any step that fails stops it, and nothing after that step happens.
+// sudo, because only they can see their sessions; for a system service it runs this binary's
+// `disable` under sudo itself (sudoSelf). Any step that fails stops it, and nothing after that step happens.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -82,7 +81,7 @@ func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Comman
 				return fmt.Errorf("run `microteams uninstall` as %s, without sudo: the sessions it ends are theirs, "+
 					"and it asks for sudo itself when the service needs it", name)
 			}
-			n, countErr := liveSessions()
+			n, countErr := liveSessions(*cfgPath)
 			switch {
 			case countErr != nil:
 				ui.Warn("Every session on this machine will be ended (cannot count them: %v).", countErr)
@@ -122,7 +121,7 @@ func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Comman
 }
 
 // removeService stops and uninstalls the installed service. A system one needs root, which this
-// process gets by running `sudo microteams disable` rather than re-running itself.
+// process gets by running this binary's `disable` under sudo rather than re-running itself.
 func removeService(cfgPath string) error {
 	userService, found := service.Installed(cfgPath)
 	switch {
@@ -134,13 +133,11 @@ func removeService(cfgPath string) error {
 		}
 		return service.ControlInstalled(cfgPath, "uninstall")
 	}
-	self, err := os.Executable()
+	cmd, line, err := sudoSelf("disable", "--config", cfgPath)
 	if err != nil {
 		return err
 	}
-	fmt.Println("Removing the system-wide service (needs root) — running `sudo microteams disable`…")
-	cmd := exec.Command("sudo", self, "disable", "--yes", "--config", cfgPath)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	fmt.Printf("Removing the system-wide service (needs root) — running: %s\n", line)
 	return cmd.Run()
 }
 

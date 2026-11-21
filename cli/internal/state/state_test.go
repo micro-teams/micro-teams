@@ -19,7 +19,7 @@ func TestLinkUpIsRecordedAndReadBack(t *testing.T) {
 	cfg := tempCfg(t)
 	at := time.Now().Truncate(time.Second)
 
-	Write(cfg, 2, Client{}, Link{Up: true, Since: at})
+	Write(cfg, 2, Client{}, Link{Up: true, Since: at}, Tmux{})
 
 	link := CurrentLink(cfg)
 	if !link.Up {
@@ -34,7 +34,7 @@ func TestLinkUpIsRecordedAndReadBack(t *testing.T) {
 func TestLinkDownKeepsTheReason(t *testing.T) {
 	cfg := tempCfg(t)
 
-	Write(cfg, 0, Client{}, Link{Up: false, Error: "dial tcp 10.0.0.1:443: i/o timeout"})
+	Write(cfg, 0, Client{}, Link{Up: false, Error: "dial tcp 10.0.0.1:443: i/o timeout"}, Tmux{})
 
 	link := CurrentLink(cfg)
 	if link.Up {
@@ -53,7 +53,7 @@ func TestLinkDownKeepsTheReason(t *testing.T) {
 func TestNotConnectedYetIsNotAnError(t *testing.T) {
 	cfg := tempCfg(t)
 
-	Write(cfg, 0, Client{}, Link{})
+	Write(cfg, 0, Client{}, Link{}, Tmux{})
 
 	link := CurrentLink(cfg)
 	if link.Up || link.Error != "" {
@@ -65,7 +65,7 @@ func TestNotConnectedYetIsNotAnError(t *testing.T) {
 // outlives the process, and "connected" from a dead writer is the same wrong answer in a new place.
 func TestARecordedLinkFromADeadWriterIsNotBelieved(t *testing.T) {
 	cfg := tempCfg(t)
-	Write(cfg, 1, Client{PID: 7, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, Link{Up: true, Since: time.Now()})
+	Write(cfg, 1, Client{PID: 7, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, Link{Up: true, Since: time.Now()}, Tmux{})
 
 	// Rewrite the snapshot with a pid that cannot be alive.
 	data, err := os.ReadFile(Path(cfg))
@@ -92,21 +92,42 @@ func TestMissingFileReadsAsNotConnected(t *testing.T) {
 	}
 }
 
-// An older host writes a snapshot with no link fields at all. It must read as "not connected" and
-// not as an error — we genuinely do not know, and saying so is the honest answer.
-func TestAnOlderHostReadsAsUnknownRatherThanBroken(t *testing.T) {
+// The service's tmux is read back as it was written, and a writer that is gone has none.
+func TestTheServicesTmuxIsRecordedAndReadBack(t *testing.T) {
 	cfg := tempCfg(t)
-	old := `{"screens":3,"pid":` + itoa(os.Getpid()) + `,"lineId":"eu"}`
-	if err := os.WriteFile(Path(cfg), []byte(old), 0o600); err != nil {
+	if got := CurrentTmux(cfg); got != (Tmux{}) {
+		t.Fatalf("no file is no tmux: %+v", got)
+	}
+	want := Tmux{Bin: "/home/u/.config/microteams/bin/tmux", TempDir: "/tmp"}
+	Write(cfg, 3, Client{}, Link{}, want)
+	if got := CurrentTmux(cfg); got != want {
+		t.Fatalf("tmux = %+v, want %+v", got, want)
+	}
+	data, err := os.ReadFile(Path(cfg))
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	link := CurrentLink(cfg)
-	if link.Up || link.Error != "" {
-		t.Fatalf("want unknown, got %+v", link)
+	if err := os.WriteFile(Path(cfg), []byte(replacePID(t, string(data))), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := Screens(cfg); got != 3 {
-		t.Fatalf("the rest of the file must still be read: screens = %d", got)
+	if got := CurrentTmux(cfg); got != (Tmux{}) {
+		t.Fatalf("a tmux recorded by a process that no longer exists must not be used: %+v", got)
+	}
+}
+
+// Apply gives this process the service's environment for tmux, unsetting what the service lacked.
+func TestApplySetsTheServicesEnvironment(t *testing.T) {
+	t.Setenv("CONNECTOR_TMUX", "")
+	t.Setenv("TMPDIR", "/somewhere")
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	if err := (Tmux{Bin: "/b/tmux", TempDir: "/tmp"}).Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("CONNECTOR_TMUX") != "/b/tmux" || os.TempDir() != "/tmp" {
+		t.Fatalf("env = %q %q", os.Getenv("CONNECTOR_TMUX"), os.TempDir())
+	}
+	if _, set := os.LookupEnv("XDG_RUNTIME_DIR"); set {
+		t.Fatal("XDG_RUNTIME_DIR must be unset when the service had none")
 	}
 }
 
@@ -137,50 +158,11 @@ func indexOf(haystack, needle string) int {
 	return -1
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := ""
-	for n > 0 {
-		digits = string(rune('0'+n%10)) + digits
-		n /= 10
-	}
-	return digits
-}
-
 func TestTheClientIsRecordedAndReadBack(t *testing.T) {
 	cfg := tempCfg(t)
 	want := Client{PID: 42, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}
-	Write(cfg, 0, want, Link{})
+	Write(cfg, 0, want, Link{}, Tmux{})
 	if got := CurrentClient(cfg); got != want {
 		t.Fatalf("client = %+v, want %+v", got, want)
-	}
-}
-
-// A service that predates the client records none; that reads as no client, not as an error.
-func TestAServiceWithoutAClientRecordsNone(t *testing.T) {
-	cfg := tempCfg(t)
-	if err := os.WriteFile(Path(cfg), []byte(`{"screens":1,"pid":`+itoa(os.Getpid())+`}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := CurrentClient(cfg); got != (Client{}) {
-		t.Errorf("expected no client, got %+v", got)
-	}
-}
-
-// A writer of this build says it keeps the sessions; a file written by a connector that does not
-// say so (any build that ends them on a stop) reads as not keeping them.
-func TestKeepsSessions(t *testing.T) {
-	cfg := tempCfg(t)
-	Write(cfg, 1, Client{}, Link{})
-	if !KeepsSessions(cfg) {
-		t.Fatal("this build's state should say it keeps the sessions")
-	}
-	if err := os.WriteFile(Path(cfg), []byte(`{"screens":1,"pid":`+itoa(os.Getpid())+`}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if KeepsSessions(cfg) {
-		t.Fatal("a state file that does not say so must read as ending the sessions")
 	}
 }

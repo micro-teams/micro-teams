@@ -17,8 +17,8 @@ data class MachineForgottenEvent(val machineId: String)
 
 /**
  * A machine's control channel (re)connected and it is online again: fired once its hello has
- * arrived, so the protocol it speaks is known (MachineHub.protocolOf). Fired on every connect — the
- * very first one included — so a listener must be a no-op when it owns nothing on that machine.
+ * arrived. Fired on every connect — the very first one included — so a listener must be a no-op
+ * when it owns nothing on that machine.
  *
  * Its reason to exist is the hot-upgrade: after a backend redeploy (or a `microteams update`
  * re-exec) the CLI keeps its tmux screens running and reconnects within seconds, but the server has

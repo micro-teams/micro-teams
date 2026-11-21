@@ -55,7 +55,7 @@ func logoutCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 				return nil
 			}
 			if _, found := service.Installed(*cfgPath); found {
-				if err := stopService(*cfgPath, false, "stop", "uninstall"); err != nil {
+				if err := stopService(*cfgPath, "stop", "uninstall"); err != nil {
 					return fmt.Errorf("could not stop the connector, so the credential was kept: %w", err)
 				}
 			}

@@ -35,7 +35,6 @@ class MachineHubSendIsolationTest {
         hub.attachMachine(
             "m1",
             MachineTransport { throw IllegalStateException("session has been closed") },
-            PROTOCOL_V2,
         )
         val screen = hub.openScreen("m1", listOf("bash"), kind = "test", appletSource = "// src")
         hub.attachViewer(screen.sid, HubViewer("va", NoSink, 80, 24))
@@ -49,7 +48,6 @@ class MachineHubSendIsolationTest {
         hub.attachMachine(
             "m1",
             MachineTransport { throw IllegalStateException("session has been closed") },
-            PROTOCOL_V2,
         )
         val screen = hub.openScreen("m1", listOf("bash"), kind = "test", appletSource = "// src")
 

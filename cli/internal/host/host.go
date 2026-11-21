@@ -23,17 +23,6 @@
 //   - (*Host).Run(ctx) runs the client and the control link and serves screens until ctx is done.
 //     Screens outlive it: returning detaches from them, and the next start re-adopts them when the
 //     backend asks. SIGUSR2 updates the binaries in place and hands off to the new one the same way.
-//     On start it brings the installed service unit up to date (see EnsureUnit) or logs why not.
-//
-//   - EnsureUnit(cfgPath) (rewritten bool, advice string, err error) rewrites an installed service
-//     unit that would end the screens when the service stops, when this process may: a user unit as
-//     that user, a system unit as root under sudo, and only a unit that starts this very binary with
-//     cfgPath as the user running sudo, since the rewrite writes exactly those. A rewrite that fails
-//     puts the unit back as it was. Otherwise advice is UnitAdvice; nothing installed, or a current
-//     unit, is ("", nil).
-//
-//   - UnitAdvice is the one line a person is shown, in the log and in `microteams status`, about a
-//     unit this process may not rewrite: run `sudo microteams restart`.
 //
 //   - UnitServes(cfgPath, userService) (bool, error) is false when the installed systemd unit of
 //     that variant starts the connector with another config. The service's name is the brand's, so
@@ -43,7 +32,7 @@
 //
 //     h, err := host.New(cfg, cfgPath)
 //     err = h.Run(ctx)
-//     if _, advice, _ := host.EnsureUnit(cfgPath); advice != "" { fmt.Println(advice) }
+//     if ok, _ := host.UnitServes(cfgPath, false); !ok { ... }
 package host
 
 import (
@@ -53,7 +42,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -66,7 +54,6 @@ import (
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/protocol"
 	"github.com/micro-teams/micro-connector/cli/screen"
-	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/micro-connector/cli/transport/ws"
 	"github.com/micro-teams/micro-connector/cli/update"
@@ -271,7 +258,6 @@ func (h *Host) Run(ctx context.Context) error {
 	h.mgr = screen.NewManager(ctx, h.conn, h.tm)
 	h.mgr.OnScreensChanged = func(live int) { h.writeState(live) }
 	h.mgr.OnUpdateRequested = h.performUpdate
-	h.checkUnit()
 	h.publishState()
 	defer h.clearState()
 	// The screens outlive this process: a stop or restart leaves every program running, and the
@@ -374,76 +360,9 @@ func (h *Host) performUpdate() {
 	}
 }
 
-// UnitAdvice is what a person is told when the installed system unit ends every screen when the
-// service stops and this process cannot rewrite it.
-const UnitAdvice = "the system service ends every session when it stops; run `sudo microteams restart` once to let sessions survive restarts"
-
-// EnsureUnit rewrites an installed service unit that is not the one this build writes, when this
-// process may. See the package comment.
-func EnsureUnit(cfgPath string) (rewritten bool, advice string, err error) {
-	current, err := service.UnitCurrent(cfgPath)
-	if errors.Is(err, service.ErrNotInstalled) {
-		return false, "", nil
-	}
-	if err != nil || current {
-		return false, "", err
-	}
-	// A system unit runs as the user who installed it with sudo (User=), so only a rewrite under
-	// sudo writes the same unit again.
-	userService, _ := service.Installed(cfgPath)
-	if userService == (os.Geteuid() == 0) || !userService && os.Getenv("SUDO_USER") == "" {
-		return false, UnitAdvice, nil
-	}
-	path, unit, err := readUnit(userService)
-	if err != nil {
-		return false, "", err
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return false, "", err
-	}
-	runAs := ""
-	if !userService {
-		runAs = os.Getenv("SUDO_USER")
-	}
-	if !writesSame(unit, self, cfgPath, runAs) {
-		return false, UnitAdvice, nil
-	}
-	if err := service.ControlInstalled(cfgPath, "uninstall"); err != nil {
-		return false, "", err
-	}
-	if err := service.Control(cfgPath, "install"); err != nil {
-		if rerr := restoreUnit(path, unit, userService); rerr != nil {
-			return false, "", fmt.Errorf("rewrite the service unit: %w; putting the old one back failed too: %v", err, rerr)
-		}
-		return false, "", fmt.Errorf("rewrite the service unit: %w; the old unit is back in place", err)
-	}
-	return true, "", nil
-}
-
-// restoreUnit puts a unit's text back at path and makes systemd take it, as installing it did.
-func restoreUnit(path, unit string, userService bool) error {
-	if err := os.WriteFile(path, []byte(unit), 0o644); err != nil {
-		return err
-	}
-	systemctl := func(args ...string) error {
-		if userService {
-			args = append([]string{"--user"}, args...)
-		}
-		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
-			return fmt.Errorf("systemctl %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-		}
-		return nil
-	}
-	if err := systemctl("daemon-reload"); err != nil {
-		return err
-	}
-	return systemctl("enable", brand.Current.ServiceName)
-}
-
 // UnitServes reports whether the installed systemd unit runs the connector with cfgPath.
 func UnitServes(cfgPath string, userService bool) (bool, error) {
-	_, unit, err := readUnit(userService)
+	unit, err := readUnit(userService)
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
@@ -454,53 +373,22 @@ func UnitServes(cfgPath string, userService bool) (bool, error) {
 }
 
 // readUnit reads the systemd unit file of a variant, where kardianos writes it.
-func readUnit(userService bool) (path, unit string, err error) {
-	path = filepath.Join("/etc/systemd/system", brand.Current.ServiceName+".service")
+func readUnit(userService bool) (string, error) {
+	path := filepath.Join("/etc/systemd/system", brand.Current.ServiceName+".service")
 	if userService {
 		dir, err := os.UserConfigDir()
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		path = filepath.Join(dir, "systemd", "user", brand.Current.ServiceName+".service")
 	}
 	b, err := os.ReadFile(path)
-	return path, string(b), err
+	return string(b), err
 }
 
 // servesConfig reports whether a unit's text runs the connector with cfgPath, as kardianos writes it.
 func servesConfig(unit, cfgPath string) bool {
 	return strings.Contains(unit, `"--config" "`+cfgPath+`"`)
-}
-
-// writesSame reports whether installing from this process writes the unit whose text is given: it
-// starts the binary self with cfgPath, as runAs ("" for a unit without User=, as a user unit and a
-// unit installed by root are).
-func writesSame(unit, self, cfgPath, runAs string) bool {
-	user := ""
-	for _, line := range strings.Split(unit, "\n") {
-		if v, ok := strings.CutPrefix(line, "User="); ok {
-			user = v
-		}
-	}
-	if runAs == "root" {
-		runAs = ""
-	}
-	return strings.Contains(unit, "\nExecStart="+self+" ") && servesConfig(unit, cfgPath) && user == runAs
-}
-
-// checkUnit runs EnsureUnit for the service this process runs as, and logs what it found.
-func (h *Host) checkUnit() {
-	if h.cfgPath == "" {
-		return
-	}
-	switch rewritten, advice, err := EnsureUnit(h.cfgPath); {
-	case err != nil:
-		h.logf("microteams: cannot check the service unit: %v", err)
-	case rewritten:
-		h.logf("microteams: rewrote the service unit so sessions survive a stop or restart")
-	case advice != "":
-		h.logf("microteams: %s", advice)
-	}
 }
 
 // publishState writes the live screen count, taken from tmux: a remembered count would go on
@@ -518,7 +406,7 @@ func (h *Host) writeState(live int) {
 	if h.cfgPath == "" {
 		return
 	}
-	state.Write(h.cfgPath, live, h.mp.Info(), h.currentLink())
+	state.Write(h.cfgPath, live, h.mp.Info(), h.currentLink(), state.TmuxOf(h.tm.Bin()))
 }
 
 func (h *Host) clearState() {

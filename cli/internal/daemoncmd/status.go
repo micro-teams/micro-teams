@@ -5,8 +5,8 @@ package daemoncmd
 //
 // Three sources answer, and each answers only what it knows: the service manager whether the
 // process runs, the process (through the state file) whether it reached the server, and tmux how
-// many sessions there are. collect asks all three into one report; the text and the JSON are two
-// renderings of it.
+// many sessions there are — the service's tmux, which the state file names (liveSessions). collect
+// asks all three into one report; the text and the JSON are two renderings of it.
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
-	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/mpclient"
 	"github.com/micro-teams/microteams/cli/internal/netcfg"
 	"github.com/micro-teams/microteams/cli/internal/state"
@@ -52,7 +51,6 @@ type svc struct {
 	Installed bool   `json:"installed"`
 	Scope     string `json:"scope,omitempty"` // "user" or "system"
 	State     string `json:"state"`           // running, stopped, not installed or unknown
-	Advice    string `json:"advice,omitempty"`
 }
 
 func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
@@ -85,9 +83,6 @@ func collect(cfgPath string) report {
 	if userService, found := service.Installed(cfgPath); found {
 		r.Service.Installed = true
 		r.Service.Scope = map[bool]string{true: "user", false: "system"}[userService]
-		if current, err := service.UnitCurrent(cfgPath); err == nil && !current {
-			r.Service.Advice = host.UnitAdvice
-		}
 	}
 	st, err := service.Status(cfgPath)
 	if err != nil {
@@ -103,7 +98,7 @@ func collect(cfgPath string) report {
 		}
 	}
 
-	if n, err := liveSessions(); err != nil {
+	if n, err := liveSessions(cfgPath); err != nil {
 		r.SessionErr = err.Error()
 	} else {
 		r.Sessions = &n
@@ -161,9 +156,6 @@ func render(w io.Writer, r report) {
 		field("service", ui.Green("running")+" "+ui.Dim(r.Service.Scope+" service, starts at boot"))
 	default:
 		field("service", ui.Yellow(r.Service.State)+" "+ui.Dim(r.Service.Scope+" service, starts at boot"))
-	}
-	if r.Service.Advice != "" {
-		field("", ui.Yellow(r.Service.Advice))
 	}
 
 	switch {

@@ -1,6 +1,6 @@
 /*
- *  Description: Integration test for the live-screen viewer WebSocket against a protocol 2 fake
- *               machine: the contract a browser sees.
+ *  Description: Integration test for the live-screen viewer WebSocket against a fake machine:
+ *               the contract a browser sees.
  *
  *               - A viewer that says its size is subscribed at once under its own viewer id at that
  *                 size; what the machine says for it arrives in order, the size before the data.
@@ -11,7 +11,7 @@
  *               - A terminal reply goes to the machine as input that bypasses the lease.
  *               - A lease state is a refusal only when it answers this viewer's input or take.
  *               - Capture is answered.
- *               - An older viewer that sends no size is subscribed at 120x32 and the server
+ *               - A viewer that sends no size is subscribed at 120x32 and the server
  *                 acknowledges the bytes it writes to it.
  *
  *  Author(s):
@@ -288,7 +288,7 @@ constructor(
 
     @Test
     @Order(3)
-    fun anOlderViewerGetsTheDefaultSizeAndIsAcknowledgedByTheServer() {
+    fun aSizelessViewerGetsTheDefaultSizeAndIsAcknowledgedByTheServer() {
         val browser = Browser()
         val socket = open(aliceToken, null, browser)
         val sub = await("screen.subscribe")

@@ -11,7 +11,6 @@
  *                 - an rpc error -> undelivered;
  *                 - never answered, and the machine connects again -> said again on the new
  *                   connection;
- *                 - a protocol 1 machine likewise: true is delivery, `false` a failure;
  *                 - what a server still owed when it stopped is marked undelivered when the next
  *                   one starts (reportLostOnRestart, which startup runs).
  *
@@ -115,7 +114,7 @@ constructor(
             Machine(machineId = machineId, name = "delivery", token = machineToken),
         )
         teamMachineRepository.save(TeamMachine(machineId = machineId, teamId = teamId))
-        connect(2)
+        connect()
 
         val openRes =
             mockMvc
@@ -147,8 +146,8 @@ constructor(
         threadId = JSONObject(threadRes.response.contentAsString).getLong("id")
     }
 
-    /** Dial in as a connector speaking protocol [v], replacing any earlier connection. */
-    private fun connect(v: Int) {
+    /** Dial in as a connector, replacing any earlier connection. */
+    private fun connect() {
         collector = Collector()
         val headers = WebSocketHttpHeaders()
         headers.add("X-Microteams-Session", machineToken)
@@ -158,7 +157,7 @@ constructor(
             StandardWebSocketClient(container)
                 .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
                 .get(5, TimeUnit.SECONDS)
-        send("""{"t":"hello","v":$v}""")
+        send("""{"t":"hello","v":2}""")
         await("welcome")
     }
 
@@ -284,7 +283,7 @@ constructor(
     @Order(4)
     fun aSayNeverAnsweredIsSaidAgainOnTheNextConnection() {
         val (messageId, _) = postAndAwaitSay("fourth")
-        connect(2)
+        connect()
         val again = await("rpc.call", "say")
         assertTrue(again.getJSONArray("args").getString(0).contains("fourth"))
         answer(again, "true")
@@ -297,7 +296,7 @@ constructor(
         val (messageId, say) = postAndAwaitSay("fifth")
         answer(say, "true")
         Thread.sleep(300)
-        connect(2) // the re-adopt sends a new session.create
+        connect() // the re-adopt sends a new session.create
         await("session.create")
         ready()
         assertEquals(null, poll("rpc.call", "say", 1500), "delivered, so never said again")
@@ -306,29 +305,6 @@ constructor(
 
     @Test
     @Order(6)
-    fun aProtocol1AppletsAcceptanceIsDelivery() {
-        connect(1)
-        await("session.create")
-        ready()
-        val (messageId, say) = postAndAwaitSay("sixth")
-        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":true}""")
-        Thread.sleep(300)
-        connect(1)
-        await("session.create")
-        assertEquals(null, poll("rpc.call", "say", 1500), "delivered, so never said again")
-        stillDelivered(messageId)
-    }
-
-    @Test
-    @Order(7)
-    fun aProtocol1AppletAnsweringFalseDidNotTakeIt() {
-        val (messageId, say) = postAndAwaitSay("seventh")
-        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":false}""")
-        assertTrue(awaitUndelivered(messageId).getString("reason").contains("could not take it"))
-    }
-
-    @Test
-    @Order(8)
     fun theLiveScreenOffersTheDriversCommands() {
         val frames = LinkedBlockingQueue<String>()
         val viewer =
@@ -345,10 +321,7 @@ constructor(
                     ),
                 )
                 .get(5, TimeUnit.SECONDS)
-        // On this protocol 1 machine the size echo comes with the subscribe; the commands follow.
-        var commands = JSONObject(frames.poll(5, TimeUnit.SECONDS) ?: error("no frame"))
-        if (commands.getString("type") == "size")
-            commands = JSONObject(frames.poll(5, TimeUnit.SECONDS) ?: error("no commands frame"))
+        val commands = JSONObject(frames.poll(5, TimeUnit.SECONDS) ?: error("no frame"))
         assertEquals("commands", commands.getString("type"))
         val names = commands.getJSONArray("names")
         assertEquals(
@@ -361,7 +334,7 @@ constructor(
     }
 
     @Test
-    @Order(9)
+    @Order(7)
     fun whatAServerStillOwedWhenItStoppedIsUndelivered() {
         val (messageId, _) = postAndAwaitSay("ninth")
         // What the next server's startup does with the rows this one left.

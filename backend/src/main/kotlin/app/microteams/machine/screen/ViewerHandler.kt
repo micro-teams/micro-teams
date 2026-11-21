@@ -17,9 +17,7 @@
  *                 {"type":"capture","id":"..."}           ask for the screen's text
  *                 {"type":"command","id":"...","name":N}  call applet function N, one of the
  *                                                         names the `commands` frame listed
- *                 anything else is ignored, except that on a protocol 1 machine the older client's
- *                 {"type":"control","level"} and {"type":"scroll","dir"} are still honoured, and
- *                 {"type":"compact"} is honoured on both when compact is listed.
+ *                 anything else is ignored.
  *
  *               Server -> client, all through the viewer's one ViewerPump so nothing overtakes:
  *                 {"type":"commands","names":[...]}       first: the applet functions this
@@ -31,9 +29,10 @@
  *                 {"type":"command","id","error"}
  *                 {"type":"error","error"}
  *
- *               A connection without cols/rows is an older client: it is subscribed at 120x32,
- *               which is logged, and since it never acknowledges, the server acknowledges each
- *               chunk on its behalf as the pump writes it to the socket.
+ *               A connection without cols/rows is a viewer that only reads (a probe such as the
+ *               end-to-end test's): it is subscribed at 120x32, which is logged, and since it
+ *               never acknowledges, the server acknowledges each chunk on its behalf as the pump
+ *               writes it to the socket.
  *
  *               "refused" is how a viewer learns its input or take was turned down. The connector
  *               answers a refused input or take with the lease state, unchanged, to that viewer
@@ -91,9 +90,9 @@ fun interface ScreenCommands {
     fun commandsOf(sid: String): List<String>
 }
 
-/** The room an older client that says nothing about its size is given. */
-private const val LEGACY_COLS = 120
-private const val LEGACY_ROWS = 32
+/** The room a viewer that says nothing about its size is given. */
+private const val DEFAULT_COLS = 120
+private const val DEFAULT_ROWS = 32
 
 /** How long a command call waits for the applet before the viewer is told it failed. */
 private const val COMMAND_TIMEOUT_SECONDS = 10L
@@ -179,11 +178,11 @@ class ViewerHandler(
         val acks = cols != null && rows != null
         if (!acks) {
             logger.info(
-                "live screen: viewer {} of {} sent no size (an older client); {}x{}, acknowledged by the server",
+                "live screen: viewer {} of {} sent no size; {}x{}, acknowledged by the server",
                 session.id,
                 screen.sid,
-                LEGACY_COLS,
-                LEGACY_ROWS,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
             )
         }
         val id = "v" + UUID.randomUUID().toString().replace("-", "").take(8)
@@ -222,7 +221,7 @@ class ViewerHandler(
         (session.attributes["userId"] as? IdType)?.let { nicknames[id] = nicknameOf(it) }
         hub.attachViewer(
             screen.sid,
-            HubViewer(id, viewer, cols ?: LEGACY_COLS, rows ?: LEGACY_ROWS),
+            HubViewer(id, viewer, cols ?: DEFAULT_COLS, rows ?: DEFAULT_ROWS),
         )
         viewer.text(mapOf("type" to "commands", "names" to viewer.commands))
     }
@@ -270,13 +269,6 @@ class ViewerHandler(
             }
             "capture" -> hub.viewerCapture(sid, viewer.id, msg.path("id").asText())
             "command" -> command(viewer, msg.path("id").asText(), msg.path("name").asText())
-            "compact" ->
-                if ("compact" in viewer.commands)
-                    hub.screen(sid)?.let {
-                        hub.callScreen(it.machineId, sid, "compact", emptyList())
-                    }
-            "control" -> hub.viewerControl(sid, msg.path("level").asText("passive"))
-            "scroll" -> hub.viewerScroll(sid, msg.path("dir").asText("bottom"))
         }
     }
 
