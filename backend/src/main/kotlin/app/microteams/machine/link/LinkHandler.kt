@@ -4,11 +4,12 @@
  *               `/machine/link` with an `X-Microteams-Session: <machine token>` header (resolved
  *               to a machine by the handshake interceptor).
  *
- *               A connector's first message is `hello {v}`, and the version in it decides how the
- *               hub speaks to that machine. So the machine is attached to the hub — and announced
- *               with MachineConnectedEvent, which re-adopts its screens — only once its hello has
- *               arrived; nothing screen-related can reach it before the server knows its version.
- *               Anything a connector says before its hello is dropped and logged.
+ *               A connector's first message is `hello {v}`. The machine is attached to the hub —
+ *               and announced with MachineConnectedEvent, which re-adopts its screens — only once
+ *               a hello in PROTOCOL_VERSION has arrived; nothing screen-related reaches it before.
+ *               A hello in any other version is refused: logged, and the connection closed with a
+ *               reason that names both versions. Anything a connector says before its hello is
+ *               dropped and logged.
  *
  *               All server→machine writes flow through HubMachine.send, which holds a per-machine
  *               lock, so the single WebSocketSession is never written concurrently.
@@ -95,7 +96,14 @@ class LinkHandler(
             logger.warn("machine {} sent '{}' before its hello; dropped", b.machineId, msg.t)
             return
         }
-        hub.attachMachine(b.machineId, b.transport, msg.v ?: PROTOCOL_V1, b.origin)
+        if (msg.v != PROTOCOL_VERSION) {
+            val reason =
+                "this server speaks protocol $PROTOCOL_VERSION, not ${msg.v}; update the connector"
+            logger.warn("machine {} refused: its hello announced protocol {}", b.machineId, msg.v)
+            session.close(CloseStatus.POLICY_VIOLATION.withReason(reason))
+            return
+        }
+        hub.attachMachine(b.machineId, b.transport, b.origin)
         b.attached = true
         // Announce the machine is online so applications that pin in-memory state to its screens
         // (the agent module) re-adopt them. Published here rather than inside the hub because the

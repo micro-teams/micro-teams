@@ -8,10 +8,10 @@
  *               results, variables, screenReady. So the machine thread only hands frames to this
  *               queue and returns; one thread per viewer does the blocking write.
  *
- *               Flow control is the connector's: a protocol 2 viewer acknowledges what it has
- *               rendered, and the connector stops reading a viewer's client while 256 KiB are
- *               unacknowledged, so this queue stays short. It is bounded anyway, for a protocol 1
- *               machine (no flow control) and for a browser that stops reading. Dropping bytes
+ *               Flow control is the connector's: a viewer acknowledges what it has rendered, and
+ *               the connector stops reading a viewer's client while 256 KiB are unacknowledged, so
+ *               this queue stays short. It is bounded anyway, for a browser that stops reading
+ *               while the server acknowledges for it (see ViewerHandler). Dropping bytes
  *               would be wrong — the stream is escape sequences mutating a parser, and a hole can
  *               leave the picture wrong for good — so past `capacityBytes` the viewer is hung up
  *               on. Its client dials again, and a fresh subscription is a full repaint.

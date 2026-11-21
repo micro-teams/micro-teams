@@ -214,8 +214,8 @@ curl -s -H "X-Ops-Token: $OPS_TOKEN" http://127.0.0.1:9090/ops/machines | jq
 ```
 
 `build` is what the machine itself reported. **`null` means it has not told us — not that it is
-old.** A connector predating this feature never answers the question, and so does a machine that has
-not reconnected since you upgraded the backend. Treat null as "unknown" and go and look.
+old**: a machine that has not reconnected since the backend started has not been asked yet. Treat
+null as "unknown" and go and look.
 
 `connectedAt` is when the machine last attached *to this backend process*, so it resets when you
 restart the backend. That is exactly what you want when checking whether a machine came back.
@@ -274,13 +274,10 @@ Refusals you should expect, all of them deliberate:
 | `401` | Bad or missing `X-Ops-Token`. |
 | `404` on **every** ops path | The surface is off — no token configured, or you are talking to the public port. |
 
-### First time through
+### After a backend start
 
-Version reporting is answered by the connector, so right after you deploy this the `build` column is
-`null` everywhere until each machine reconnects. Restarting the backend is enough to make them all
-reconnect and report. Machines still running a connector older than this feature never report at all
-— for those, the first update is necessarily blind, and after they come back you will see a version
-for the first time. That is a one-time bootstrap, not a permanent state.
+Version reporting is answered by the connector when it attaches, so right after the backend starts
+the `build` column is `null` until each machine reconnects, which it does within seconds.
 
 ## State (all under `app_data/`, plain host directories — no docker volumes)
 

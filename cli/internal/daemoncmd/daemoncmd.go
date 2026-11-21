@@ -9,13 +9,9 @@
 //	microteams config                 this machine's settings (proxy)
 //	microteams update | uninstall     the binary itself; only uninstall ends the sessions
 //
-// The sessions on a machine belong to its tmux server, which outlives the connector process, so no
-// command here ends them except `uninstall`. A stop could still end them through a running
-// connector that ends its sessions when it exits, or a systemd unit without KillMode=process; every
-// command that stops the service deals with both first (see lifecycle.go).
-//
-// The forms these commands replace (`auth …`, `link …`, `proxy …`) are hidden aliases that print the
-// new form and then run it.
+// The sessions on a machine belong to its tmux server, which outlives the connector process (the
+// service unit stops only the connector: KillMode=process), so no command here ends them except
+// `uninstall`.
 //
 // Under sudo, a command acts for the person who ran sudo: the service runs as them, and their
 // config, state file, log and tmux are the ones that matter. tmux is reached only as that person,
@@ -25,8 +21,8 @@
 //     process's home that of SUDO_USER, so every path derived from it is theirs. Nothing to do
 //     otherwise; an error when SUDO_USER names nobody.
 //
-//   - Commands() []*cobra.Command is every lifecycle command, visible and hidden, to add to the
-//     `microteams` root:
+//   - Commands() []*cobra.Command is every lifecycle command, visible and hidden (`run`, which the
+//     service manager starts), to add to the `microteams` root:
 //
 //     if err := daemoncmd.AsInvokingUser(); err != nil { ... }
 //     for _, c := range daemoncmd.Commands() { root.AddCommand(c) }
@@ -49,6 +45,7 @@ import (
 	"github.com/micro-teams/micro-connector/cli/terminal"
 	"github.com/micro-teams/microteams/cli/internal/host"
 	"github.com/micro-teams/microteams/cli/internal/netcfg"
+	"github.com/micro-teams/microteams/cli/internal/state"
 )
 
 // Commands returns every lifecycle command to add to the `microteams` root.
@@ -72,9 +69,6 @@ func Commands() []*cobra.Command {
 		updateCmd(&cfgPath, withConfig),
 		uninstallCmd(&cfgPath, withConfig),
 		runCmd(&cfgPath, withConfig),
-		authAlias(&cfgPath, withConfig),
-		linkAlias(&cfgPath, withConfig),
-		alias(proxyCmd(&cfgPath, withConfig), "proxy", "config proxy"),
 	}
 }
 
@@ -138,10 +132,18 @@ func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *co
 	})
 }
 
-// liveSessions asks tmux how many sessions this machine hosts. The state file is not asked: a tmux
-// server that died since it was written would leave it claiming sessions nobody can open. Under sudo
-// it does not answer: the sessions are the invoking user's, in a tmux root may not find.
-func liveSessions() (int, error) {
+// liveSessions asks tmux how many sessions this machine hosts. The state file's count is not asked:
+// a tmux server that died since it was written would leave it claiming sessions nobody can open.
+// The tmux asked is the running service's: its state file says what it resolved its tmux from, and
+// this process takes that on (state.Tmux), because a shell's environment ($MICROTEAMS_TMUX,
+// $XDG_RUNTIME_DIR, the temp dir) may resolve another binary or socket. Under sudo it does not
+// answer: the sessions are the invoking user's, in a tmux root may not find.
+func liveSessions(cfgPath string) (int, error) {
+	if t := state.CurrentTmux(cfgPath); t.Bin != "" {
+		if err := t.Apply(); err != nil {
+			return 0, err
+		}
+	}
 	if name := sudoUser(); name != "" {
 		return 0, fmt.Errorf("the sessions belong to %s and are counted only as %s, not through sudo", name, name)
 	}

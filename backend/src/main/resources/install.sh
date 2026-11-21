@@ -96,19 +96,24 @@ ok "$BIN_DIR/microteams"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
-    # Not on PATH — give the exact copy-paste line, targeting the login shell's rc file so the
-    # command actually sticks (zsh users editing ~/.bashrc is a classic dead end).
-    case "${SHELL##*/}" in
-      zsh)  rc="$HOME/.zshrc" ;;
-      fish) rc="$HOME/.config/fish/config.fish" ;;
-      *)    rc="$HOME/.bashrc" ;;
-    esac
-    warn "$BIN_DIR is not on your PATH. To fix it, run:"
-    if [ "${SHELL##*/}" = fish ]; then
-      printf '\n    fish_add_path %s\n\n' "$BIN_DIR" >&2
-    else
-      printf '\n    echo '\''export PATH="%s:$PATH"'\'' >> %s && . %s\n\n' "$BIN_DIR" "$rc" "$rc" >&2
+    # Not on PATH — give the exact copy-paste line for the login shell, so the command actually
+    # sticks (zsh users editing ~/.bashrc is a classic dead end). The login shell is $SHELL, or the
+    # account's own entry where $SHELL is unset (`docker exec`, cron, `env -i`). A shell this does
+    # not know, or none found, gets the line to add without a guess at the file it belongs in.
+    login_shell="${SHELL:-}"
+    if [ -z "$login_shell" ] && command -v getent >/dev/null 2>&1; then
+      login_shell="$(getent passwd "$owner" | cut -d: -f7)"
     fi
+    warn "$BIN_DIR is not on your PATH. To fix it, run:"
+    case "${login_shell##*/}" in
+      zsh)  printf '\n    echo '\''export PATH="%s:$PATH"'\'' >> %s && . %s\n\n' "$BIN_DIR" "$HOME/.zshrc" "$HOME/.zshrc" >&2 ;;
+      bash) printf '\n    echo '\''export PATH="%s:$PATH"'\'' >> %s && . %s\n\n' "$BIN_DIR" "$HOME/.bashrc" "$HOME/.bashrc" >&2 ;;
+      fish) printf '\n    fish_add_path %s\n\n' "$BIN_DIR" >&2 ;;
+      *)
+        printf '\n    export PATH="%s:$PATH"\n\n' "$BIN_DIR" >&2
+        warn "and add that line to your shell's startup file (login shell: ${login_shell:-unknown})."
+        ;;
+    esac
     ;;
 esac
 

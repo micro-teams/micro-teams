@@ -1,9 +1,8 @@
 // Whether this machine is CONNECTED, as opposed to whether a process is running.
 //
-// Those had been the same answer for as long as the product existed: `link connect` printed
-// "Connected." once the service manager returned, and `status` said connected whenever that process
-// was alive. A machine whose every dial failed reported success from both while its live screen
-// refused to open — three surfaces agreeing on something none of them had checked.
+// The two are easy to confuse: a command that said "Connected." once the service manager returned,
+// and a `status` that said connected whenever that process was alive, would both report success for
+// a machine whose every dial failed while its live screen refused to open.
 //
 // So these tests are about one thing: the host only claims a connection when the server has
 // actually spoken to it, and when it has not, it keeps the reason.

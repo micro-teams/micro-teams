@@ -97,6 +97,23 @@ constructor(
             .andExpect(jsonPath("$.agents[0].userId").value(agentUserId))
     }
 
+    /** Online is the machine's link: an agent whose machine is not connected is never online. */
+    @Test
+    fun theOnlineFilterFollowsTheMachine() {
+        mockMvc
+            .perform(
+                get("/agent?teamId=$teamId&online=false").header("Authorization", "Bearer $token"),
+            )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.agents[0].userId").value(agentUserId))
+        mockMvc
+            .perform(
+                get("/agent?teamId=$teamId&online=true").header("Authorization", "Bearer $token"),
+            )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.agents.length()").value(0))
+    }
+
     private fun createTeam(name: String): IdType {
         val res =
             mockMvc

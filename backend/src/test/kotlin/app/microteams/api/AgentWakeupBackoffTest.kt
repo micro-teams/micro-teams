@@ -95,7 +95,7 @@ constructor(
         connect()
     }
 
-    /** Dial in as a protocol 2 connector, replacing any earlier connection. */
+    /** Dial in as a connector, replacing any earlier connection. */
     private fun connect() {
         val inbox = LinkedBlockingQueue<String>()
         val headers = WebSocketHttpHeaders()

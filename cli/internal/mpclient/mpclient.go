@@ -448,7 +448,7 @@ func freePort() (string, error) {
 // Lookup checks a recorded client: it answers and its session is live.
 func Lookup(c state.Client) (string, error) {
 	if c.PID == 0 || c.Status == "" {
-		return "", errors.New("no multipath client is running (the service is not running, or predates it)")
+		return "", errors.New("no multipath client is running (the service is not running)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

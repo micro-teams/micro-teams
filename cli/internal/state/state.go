@@ -1,12 +1,12 @@
 // Package state shares the resident service's runtime facts with the short CLI commands, through
-// one small file beside the config: how many screens are hosted, whether the control link is
-// established (and why not), and where the service's MultiPath client listens. The service is the
+// one small file beside the config: how many screens are hosted, which tmux hosts them, whether the
+// control link is established (and why not), and where the service's MultiPath client listens. The service is the
 // only writer and rewrites the whole file whenever one of these changes; a missing or stale file
 // reads as nothing running.
 //
 //   - Path(cfgPath) is the file: state.json beside the config.
 //
-//   - Write(cfgPath, screens, client, link) records everything at once, with this process's pid.
+//   - Write(cfgPath, screens, client, link, tmux) records everything at once, with this process's pid.
 //     Clear(cfgPath) removes the file when the service stops.
 //
 //   - PID(cfgPath) is the service's pid if it is alive, else 0; RawPID(cfgPath) is the recorded pid
@@ -20,12 +20,15 @@
 //   - CurrentClient(cfgPath) is the service's MultiPath client (Client: pid, stream and status
 //     addresses), empty when the writer is gone.
 //
-//   - KeepsSessions(cfgPath) reports whether the running service leaves the sessions running when
-//     it stops. Every writer of this build does; a running connector that does not say so ends
-//     them, and has to be handed over to this build before it is stopped.
+//   - Tmux is the tmux the service hosts its screens on, given as what terminal.NewManager resolves
+//     it from: the binary, and the two variables that place its socket ($XDG_RUNTIME_DIR, the temp
+//     dir). TmuxOf(bin) is that of this process with the binary it found; CurrentTmux(cfgPath) the
+//     running service's, zero when the writer is gone; (Tmux).Apply() sets this process's
+//     environment to it, so that terminal.NewManager here finds the service's binary and socket
+//     whatever this process's own environment says.
 //
-//     state.Write(cfgPath, 2, state.Client{PID: 42, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, state.Link{Up: true, Since: time.Now()})
-//     if c := state.CurrentClient(cfgPath); c.Listen != "" { ... }
+//     state.Write(cfgPath, 2, state.Client{PID: 42, Listen: "127.0.0.1:7000", Status: "127.0.0.1:7001"}, state.Link{Up: true, Since: time.Now()}, state.TmuxOf(tm.Bin()))
+//     if t := state.CurrentTmux(cfgPath); t.Bin != "" { err = t.Apply() }
 package state
 
 import (
@@ -34,6 +37,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/micro-teams/micro-connector/cli/brand"
 )
 
 type snapshot struct {
@@ -46,8 +51,34 @@ type snapshot struct {
 	LinkSince int64  `json:"linkSince,omitempty"`
 	LinkError string `json:"linkError,omitempty"`
 	Client    Client `json:"multipathClient,omitzero"`
-	// KeepsSessions is what the writer does with the sessions when it stops: true is leave them.
-	KeepsSessions bool `json:"keepsSessions,omitempty"`
+	Tmux      Tmux   `json:"tmux,omitzero"`
+}
+
+// Tmux is what decides which tmux binary and socket terminal.NewManager uses.
+type Tmux struct {
+	Bin           string `json:"bin"`
+	XDGRuntimeDir string `json:"xdgRuntimeDir,omitempty"`
+	TempDir       string `json:"tempDir"`
+}
+
+// TmuxOf is the tmux bin with this process's socket-placing environment.
+func TmuxOf(bin string) Tmux {
+	return Tmux{Bin: bin, XDGRuntimeDir: os.Getenv("XDG_RUNTIME_DIR"), TempDir: os.TempDir()}
+}
+
+// Apply makes this process resolve t: the brand's TMUX variable names the binary, and
+// XDG_RUNTIME_DIR and TMPDIR are the service's (XDG_RUNTIME_DIR unset when it had none).
+func (t Tmux) Apply() error {
+	if err := os.Setenv(brand.Current.Env("TMUX"), t.Bin); err != nil {
+		return err
+	}
+	if err := os.Setenv("TMPDIR", t.TempDir); err != nil {
+		return err
+	}
+	if t.XDGRuntimeDir == "" {
+		return os.Unsetenv("XDG_RUNTIME_DIR")
+	}
+	return os.Setenv("XDG_RUNTIME_DIR", t.XDGRuntimeDir)
 }
 
 // Client is the service's MultiPath client: its pid, the address programs connect to, and the
@@ -72,15 +103,14 @@ func Path(cfgPath string) string {
 
 // Write records the screen count, the client and the control link in one write, so that no reader
 // ever sees one field updated and another stale.
-func Write(cfgPath string, screens int, client Client, link Link) {
+func Write(cfgPath string, screens int, client Client, link Link, tmux Tmux) {
 	snap := snapshot{
 		Screens:   screens,
 		PID:       os.Getpid(),
 		LinkUp:    link.Up,
 		LinkError: link.Error,
 		Client:    client,
-
-		KeepsSessions: true,
+		Tmux:      tmux,
 	}
 	if !link.Since.IsZero() {
 		snap.LinkSince = link.Since.Unix()
@@ -130,12 +160,6 @@ func RawPID(cfgPath string) int {
 	return s.PID
 }
 
-// KeepsSessions reports whether the running service leaves the sessions running when it stops.
-func KeepsSessions(cfgPath string) bool {
-	s, ok := live(cfgPath)
-	return ok && s.KeepsSessions
-}
-
 // CurrentLink is what the running service knows about the control connection.
 func CurrentLink(cfgPath string) Link {
 	s, ok := live(cfgPath)
@@ -156,6 +180,15 @@ func CurrentClient(cfgPath string) Client {
 		return Client{}
 	}
 	return s.Client
+}
+
+// CurrentTmux is the tmux the running service hosts its screens on.
+func CurrentTmux(cfgPath string) Tmux {
+	s, ok := live(cfgPath)
+	if !ok || s.PID <= 0 {
+		return Tmux{}
+	}
+	return s.Tmux
 }
 
 // Screens is the recorded screen count.

@@ -2,8 +2,9 @@
  *  Description: Integration test for the machine control-channel WebSocket (`/machine/link`)
  *               and the MachineHub. Drives a REAL WebSocket client against a running server
  *               port: an enrolled machine dials in with its `X-Microteams-Session` token, says
- *               hello, and must receive `welcome` with the version it will be spoken to in —
- *               and nothing at all before its hello; the server opens a screen and the client must
+ *               hello, and must receive `welcome` with the server's version — and nothing at all
+ *               before its hello; a hello in any other version is refused, the connection closed
+ *               with a reason naming both versions and the machine never online; the server opens a screen and the client must
  *               receive the exact `session.create`, then `viewerLevel` passive; an inbound
  *               `rpc.call` (screenReady) must be answered with `viewerLevel` again and its
  *               `rpc.result`, and a `var.push` must be mirrored into
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketHttpHeaders
 import org.springframework.web.socket.WebSocketSession
@@ -54,6 +56,7 @@ constructor(
     /** Collects every text frame the server pushes, for the test to assert against. */
     private class Collector : TextWebSocketHandler() {
         val frames = LinkedBlockingQueue<String>()
+        val closed = LinkedBlockingQueue<CloseStatus>()
         @Volatile var session: WebSocketSession? = null
 
         override fun afterConnectionEstablished(session: WebSocketSession) {
@@ -62,6 +65,10 @@ constructor(
 
         override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
             frames.add(message.payload)
+        }
+
+        override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
+            closed.add(status)
         }
     }
 
@@ -105,7 +112,7 @@ constructor(
 
         // …followed by the server asking which build this machine runs. Asked on attach rather than
         // announced, so the answer is refreshed exactly when it matters most: after an update has
-        // replaced the process. A connector too old to know the question simply never answers.
+        // replaced the process.
         val ask = nextFrame(collector)
         assertEquals("machine.info", ask["t"].asText())
 
@@ -175,24 +182,34 @@ constructor(
     }
 
     /**
-     * The version decides every screen message the machine is sent, so nothing goes out before the
-     * hello that names it, and the machine is not online until then.
+     * Nothing goes out before the hello, and the machine is not online until then; a hello in
+     * another version than the server's is refused and leaves the machine offline.
      */
     @Test
-    fun welcomeFollowsTheHelloAndCarriesTheVersionSpoken() {
+    fun welcomeFollowsTheHelloAndAnotherVersionIsRefused() {
         val (machineId, token) = enrollDevice()
         val collector = Collector()
         val session = connect(token, collector, hello = null)
         assertEquals(null, collector.frames.poll(1, TimeUnit.SECONDS), "nothing before the hello")
         assertTrue(!machineHub.isOnline(machineId), "not online before its hello")
-
-        session.sendMessage(TextMessage("""{"t":"hello","v":1}"""))
+        session.sendMessage(TextMessage("""{"t":"hello","v":2}"""))
         val welcome = nextFrame(collector)
         assertEquals("welcome", welcome["t"].asText())
-        assertEquals(1, welcome["v"].asInt(), "a version 1 connector is spoken to in version 1")
+        assertEquals(2, welcome["v"].asInt())
         assertTrue(machineHub.isOnline(machineId))
-        assertEquals(1, machineHub.protocolOf(machineId))
         session.close()
+
+        val (otherId, otherToken) = enrollDevice()
+        val refused = Collector()
+        connect(otherToken, refused, hello = 1)
+        val status = refused.closed.poll(5, TimeUnit.SECONDS) ?: error("not closed in time")
+        assertEquals(CloseStatus.POLICY_VIOLATION.code, status.code)
+        assertEquals(
+            "this server speaks protocol 2, not 1; update the connector",
+            status.reason,
+        )
+        assertEquals(null, refused.frames.poll(), "no welcome")
+        assertTrue(!machineHub.isOnline(otherId))
     }
 
     @Test
