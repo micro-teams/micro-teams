@@ -19,8 +19,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/kardianos/service v1.3.0 h1:/LGy+xPP2TM+GLTiCZ2di7cy0Jd/qrawlTUfqKYFdTI=
 github.com/kardianos/service v1.3.0/go.mod h1:E4V9ufUuY82F7Ztlu1eN9VXWIQxg8NoLQlmFe0MtrXc=
-github.com/micro-teams/micro-connector/cli v0.1.12-0.20261120212804-74a49c4691b5 h1:3QOZyqS6T8sxCHCByqzjK+feZ+p0m0vv/qpbyFYyC68=
-github.com/micro-teams/micro-connector/cli v0.1.12-0.20261120212804-74a49c4691b5/go.mod h1:UM6oiE9Ydv1joPLiUP6rzIx2iXTuAHso/QXEHUK8awI=
+github.com/micro-teams/micro-connector/cli v0.1.12-0.20261121045205-f1889b5e5a09 h1:qKBz7M/tDX1NYoFa3ya6kBq3j/BfGrXCefs/GyUljVc=
+github.com/micro-teams/micro-connector/cli v0.1.12-0.20261121045205-f1889b5e5a09/go.mod h1:UM6oiE9Ydv1joPLiUP6rzIx2iXTuAHso/QXEHUK8awI=
 github.com/micro-teams/multipath/go v0.3.0-rc.2 h1:rmZPFe0VK6YaoptGaNh/mpPV2gmyGowXYlVDylzjQJk=
 github.com/micro-teams/multipath/go v0.3.0-rc.2/go.mod h1:2BTdPubgLOO66z9jO8oq2fc8rsvtBzOZFzvz4HUP1v0=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
