@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: micro-agent-teams backend API
-  version: "0.1"
+  version: "0.2"
 servers:
   - url: "http://localhost:8080"
 
@@ -75,7 +75,7 @@ paths:
     post:
       tags: [chat]
       operationId: createThread
-      summary: Create a thread (caller becomes owner)
+      summary: Create a thread in no team (its members are who may read it); the caller is a member
       requestBody:
         content:
           application/json:
@@ -111,7 +111,7 @@ paths:
     patch:
       tags: [chat]
       operationId: renameThread
-      summary: Rename a thread (admin+)
+      summary: Rename a thread (any member)
       parameters:
         - name: id
           in: path
@@ -134,7 +134,7 @@ paths:
     delete:
       tags: [chat]
       operationId: dissolveThread
-      summary: Dissolve a thread (owner only)
+      summary: Delete a thread (any member)
       parameters:
         - name: id
           in: path
@@ -227,7 +227,9 @@ paths:
     post:
       tags: [chat]
       operationId: addThreadMember
-      summary: Add a member to a thread (admin+)
+      summary: >
+        Add a member to a thread (any member may). The addition is written into the thread as a
+        JOINED line.
       parameters:
         - name: id
           in: path
@@ -244,11 +246,31 @@ paths:
         "204":
           description: Added
 
+  /chat/{id}/join:
+    post:
+      tags: [chat]
+      operationId: joinThread
+      summary: >
+        Join a thread you can read through one of its teams, written into it as a JOINED line.
+        Speaking needs membership; reading does not.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Joined
+
   /chat/{id}/members/{userId}:
     delete:
       tags: [chat]
       operationId: removeThreadMember
-      summary: Remove a member from a thread (admin+)
+      summary: >
+        Remove a member from a thread (any member may; anyone may remove themselves, which is
+        leaving). The removal is written into the thread as a LEFT line.
       parameters:
         - name: id
           in: path
@@ -265,31 +287,6 @@ paths:
       responses:
         "204":
           description: Removed
-    patch:
-      tags: [chat]
-      operationId: changeThreadMemberRole
-      summary: Change a thread member's role (owner only)
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ChangeRoleRequest"
-      responses:
-        "204":
-          description: Role changed
 
   # -- Teams ----------------------------------------------------------------
 
@@ -299,11 +296,6 @@ paths:
       operationId: listTeams
       summary: List teams the current user is a member of
       parameters:
-        - name: role
-          in: query
-          description: Only teams where the caller has this role (OWNER/ADMIN/MEMBER)
-          schema:
-            type: string
         - name: page_start
           in: query
           description: id of the first team on the page (cursor)
@@ -325,7 +317,9 @@ paths:
     post:
       tags: [team]
       operationId: createTeam
-      summary: Create a team (caller becomes owner)
+      summary: >
+        Create a team; the caller is its first member. With parentId it is created inside that
+        team (which the caller must be able to access).
       requestBody:
         content:
           application/json:
@@ -420,7 +414,9 @@ paths:
     post:
       tags: [team]
       operationId: addTeamMember
-      summary: Add a member to a team (admin+)
+      summary: >
+        Add a person or an agent to a team. Adding an agent needs access to it as well, and puts
+        its machine into the team too.
       parameters:
         - name: id
           in: path
@@ -438,10 +434,10 @@ paths:
           description: Added
 
   /team/{id}/members/{userId}:
-    patch:
+    delete:
       tags: [team]
-      operationId: changeMemberRole
-      summary: Change a member's role (admin+)
+      operationId: removeTeamMember
+      summary: Remove a member from a team (anyone who can access it; anyone may leave)
       parameters:
         - name: id
           in: path
@@ -450,6 +446,24 @@ paths:
             type: integer
             format: int64
         - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Removed
+
+  /team/{id}/subteams:
+    post:
+      tags: [team]
+      operationId: addSubteam
+      summary: >
+        Put a team inside this one (the caller must access both); refused if this team is already
+        inside it.
+      parameters:
+        - name: id
           in: path
           required: true
           schema:
@@ -459,14 +473,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ChangeRoleRequest"
+              $ref: "#/components/schemas/AddSubteamRequest"
       responses:
         "204":
-          description: Role changed
+          description: Nested
+
+  /team/{id}/subteams/{childId}:
     delete:
       tags: [team]
-      operationId: removeTeamMember
-      summary: Remove a member from a team (admin+)
+      operationId: removeSubteam
+      summary: Take a team out of this one (anyone who can access this one)
       parameters:
         - name: id
           in: path
@@ -474,7 +490,78 @@ paths:
           schema:
             type: integer
             format: int64
-        - name: userId
+        - name: childId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Removed
+
+  /team/{id}/chats:
+    get:
+      tags: [team]
+      operationId: listTeamChats
+      summary: The team's chats, most recent activity first, whether or not the caller is a member
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: queryIsMemberAgent
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListChatsResponse"
+    post:
+      tags: [team]
+      operationId: addTeamChat
+      summary: >
+        Put an existing thread into the team (the caller must access both), or create one in it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamChatRequest"
+      responses:
+        "200":
+          description: The thread now in the team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thread"
+
+  /team/{id}/chats/{threadId}:
+    delete:
+      tags: [team]
+      operationId: removeTeamChat
+      summary: Take a thread out of the team (anyone who can access the team)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: threadId
           in: path
           required: true
           schema:
@@ -744,6 +831,93 @@ paths:
       responses:
         "204":
           description: Forgotten
+  /machine/{id}/terminal:
+    get:
+      tags: [machine]
+      operationId: listTerminals
+      summary: The machine's terminals and commands (anyone who can access the machine)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTerminalsResponse"
+    post:
+      tags: [machine]
+      operationId: openTerminal
+      summary: >
+        Open a terminal on the machine (a login shell, watched through the live screen), or, with
+        a command, run that command. Terminals belong to the machine, not to any team.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenTerminalRequest"
+      responses:
+        "201":
+          description: Opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Terminal"
+
+  /machine/{id}/terminal/{sid}:
+    get:
+      tags: [machine]
+      operationId: getTerminal
+      summary: >
+        One terminal or command, with its screen text (output) when the machine is online; a
+        command also reports whether it finished and its exit code.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalDetail"
+    delete:
+      tags: [machine]
+      operationId: closeTerminal
+      summary: Close a terminal, or kill a command
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Closed
+
   /machine/enroll/start:
     post:
       tags: [machine]
@@ -1073,6 +1247,13 @@ paths:
     get:
       tags: [agent]
       operationId: getGitWorkspace
+      parameters:
+        - name: teamId
+          in: query
+          description: Which of the agent's teams; may be omitted when the agent is in exactly one.
+          schema:
+            type: integer
+            format: int64
       summary: >
         The calling agent's document-tree git workspace: the URL of its team's git remote and a
         fresh token to authenticate git against it. The applet's `docs` commands call this (already
@@ -1204,6 +1385,9 @@ components:
           type: string
           format: date-time
           description: Last activity (last message time, else the chat's creation time)
+        isMember:
+          type: boolean
+          description: Whether the caller is a member; a team's chat list also shows the others.
 
     SetAgentAvatarRequest:
       type: object
@@ -1370,6 +1554,8 @@ components:
       required:
         - thread
         - members
+        - teams
+        - isMember
       properties:
         thread:
           $ref: "#/components/schemas/Thread"
@@ -1377,6 +1563,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ThreadMember"
+        teams:
+          type: array
+          description: The teams the thread is in; anyone who can access one of them can read it.
+          items:
+            $ref: "#/components/schemas/Team"
+        isMember:
+          type: boolean
+          description: Whether the caller is a member (may speak), not only a reader.
 
     ThreadMember:
       type: object
@@ -1385,7 +1579,6 @@ components:
         - id
         - threadId
         - userId
-        - role
         - joinedAt
       properties:
         id:
@@ -1397,12 +1590,6 @@ components:
         userId:
           type: integer
           format: int64
-        role:
-          type: string
-          enum: [MEMBER, ADMIN, OWNER]
-          description: 0=MEMBER, 1=ADMIN, 2=OWNER
-          minimum: 0
-          maximum: 2
         joinedAt:
           type: string
           format: date-time
@@ -1424,12 +1611,18 @@ components:
         - threadId
         - senderId
         - content
-        - type
+        - kind
         - createdAt
       properties:
         id:
           type: integer
           format: int64
+        kind:
+          type: string
+          enum: [TEXT, JOINED, LEFT]
+          description: >
+            TEXT is something said; JOINED and LEFT record that the sender joined or left the
+            thread (content is empty).
         threadId:
           type: integer
           format: int64
@@ -1518,18 +1711,6 @@ components:
         userId:
           type: integer
           format: int64
-        role:
-          type: string
-          enum: [MEMBER, ADMIN, OWNER]
-
-    ChangeRoleRequest:
-      type: object
-      required:
-        - role
-      properties:
-        role:
-          type: string
-          enum: [OWNER, ADMIN, MEMBER]
 
     # -- Teams -------------------------------------------------------------
 
@@ -1564,7 +1745,7 @@ components:
 
     TeamDetail:
       type: object
-      required: [team, members]
+      required: [team, members, parents, subteams, isMember]
       properties:
         team:
           $ref: "#/components/schemas/Team"
@@ -1572,19 +1753,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TeamMember"
+        parents:
+          type: array
+          description: The teams this team is inside (their members can access it).
+          items:
+            $ref: "#/components/schemas/Team"
+        subteams:
+          type: array
+          description: The teams inside this one.
+          items:
+            $ref: "#/components/schemas/Team"
+        isMember:
+          type: boolean
+          description: Whether the caller is a member, rather than reaching it through a parent.
 
     TeamMember:
       type: object
-      required: [userId, role]
+      required: [userId]
       properties:
         userId:
           type: integer
           format: int64
         nickname:
           type: string
-        role:
-          type: string
-          enum: [OWNER, ADMIN, MEMBER]
+        avatarId:
+          type: integer
+          format: int64
+        isAgent:
+          type: boolean
 
     CreateTeamRequest:
       type: object
@@ -1593,6 +1789,32 @@ components:
       properties:
         name:
           type: string
+        parentId:
+          type: integer
+          format: int64
+
+    AddSubteamRequest:
+      type: object
+      required: [teamId]
+      properties:
+        teamId:
+          type: integer
+          format: int64
+
+    TeamChatRequest:
+      type: object
+      description: Either threadId (put an existing thread into the team) or title (create one in it).
+      properties:
+        threadId:
+          type: integer
+          format: int64
+        title:
+          type: string
+        memberIds:
+          type: array
+          items:
+            type: integer
+            format: int64
 
     RenameTeamRequest:
       type: object
@@ -1606,14 +1828,10 @@ components:
       type: object
       required:
         - userId
-        - role
       properties:
         userId:
           type: integer
           format: int64
-        role:
-          type: string
-          enum: [OWNER, ADMIN, MEMBER]
 
 
     # -- Documents ---------------------------------------------------------
@@ -1687,7 +1905,7 @@ components:
     Machine:
       type: object
       description: An enrolled host running our CLI. It hosts screens; it knows nothing of agents.
-      required: [id, name, online, teamIds]
+      required: [id, name, online, teams]
       properties:
         id:
           type: string
@@ -1696,15 +1914,70 @@ components:
         online:
           type: boolean
           description: Whether its control channel is connected right now
-        teamIds:
+        teams:
           type: array
-          description: The teams it serves. Symmetric and owner-less -- a machine may serve many.
+          description: The teams it is in; anyone who can access one of them can use it.
           items:
-            type: integer
-            format: int64
+            $ref: "#/components/schemas/Team"
         createdAt:
           type: string
           format: date-time
+
+    ListTerminalsResponse:
+      type: object
+      required: [terminals]
+      properties:
+        terminals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Terminal"
+
+    Terminal:
+      type: object
+      description: A terminal or a command on a machine. Watch it through the live screen with its sid.
+      required: [sid, machineId, kind, openedBy, createdAt]
+      properties:
+        sid:
+          type: string
+        machineId:
+          type: string
+        kind:
+          type: string
+          enum: [TERMINAL, COMMAND]
+        command:
+          type: string
+          description: The command a COMMAND runs.
+        openedBy:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
+        exitCode:
+          type: integer
+          description: A finished command's exit code.
+
+    TerminalDetail:
+      type: object
+      required: [terminal, finished]
+      properties:
+        terminal:
+          $ref: "#/components/schemas/Terminal"
+        finished:
+          type: boolean
+          description: Whether a command has finished (always false for a terminal).
+        output:
+          type: string
+          description: The screen's text; absent while the machine is offline.
+
+    OpenTerminalRequest:
+      type: object
+      properties:
+        command:
+          type: string
+          description: Run this command (through sh -c) instead of opening a login shell.
+        cwd:
+          type: string
 
     RenameMachineRequest:
       type: object
@@ -1803,9 +2076,16 @@ components:
         sid:
           type: string
           description: The live screen id -- present only if the caller may watch it
-        teamId:
-          type: integer
-          format: int64
+        teams:
+          type: array
+          description: The teams the agent is in.
+          items:
+            $ref: "#/components/schemas/Team"
+        chats:
+          type: array
+          description: The chats the agent is a member of.
+          items:
+            $ref: "#/components/schemas/Thread"
         driver:
           type: string
           description: Which driver runs it (claude, codex, ...)

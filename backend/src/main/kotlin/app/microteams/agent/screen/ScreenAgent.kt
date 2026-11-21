@@ -27,7 +27,6 @@ class ScreenAgent(
     override val userId: IdType,
     val sid: String,
     val machineId: String,
-    val teamId: IdType?,
     val screenToken: String,
     val driver: AgentDriver,
     private val wakeup: AgentWakeup,

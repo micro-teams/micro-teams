@@ -36,6 +36,7 @@ import tools.jackson.databind.ObjectMapper
 
 class LinkHandler(
     private val hub: MachineHub,
+    private val presence: MachinePresence,
     private val objectMapper: ObjectMapper,
     private val eventPublisher: ApplicationEventPublisher,
 ) : TextWebSocketHandler() {
@@ -105,6 +106,7 @@ class LinkHandler(
         }
         hub.attachMachine(b.machineId, b.transport, b.origin)
         b.attached = true
+        presence.connected(b.machineId, b.origin)
         // Announce the machine is online so applications that pin in-memory state to its screens
         // (the agent module) re-adopt them. Published here rather than inside the hub because the
         // hub is deliberately I/O-free, and this handler is where a channel comes up.
@@ -113,7 +115,8 @@ class LinkHandler(
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val b = bound.remove(session.id) ?: return
-        if (b.attached) hub.detachMachine(b.machineId, b.transport)
+        if (b.attached && hub.detachMachine(b.machineId, b.transport))
+            presence.disconnected(b.machineId)
         logger.info("machine {} disconnected (session {}, {})", b.machineId, session.id, status)
     }
 }

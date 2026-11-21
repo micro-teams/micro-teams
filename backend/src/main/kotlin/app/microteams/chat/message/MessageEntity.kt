@@ -5,6 +5,16 @@ import java.time.LocalDateTime
 import org.rucca.cheese.common.persistent.BaseEntity
 import org.springframework.data.jpa.repository.JpaRepository
 
+/**
+ * What a message is: something said (TEXT), or the record that its sender joined (JOINED) or left
+ * (LEFT) the thread, which the app draws as a grey line and an agent receives with the next TEXT.
+ */
+enum class MessageKind {
+    TEXT,
+    JOINED,
+    LEFT,
+}
+
 @Entity
 @Table(
     name = "message",
@@ -21,6 +31,10 @@ import org.springframework.data.jpa.repository.JpaRepository
         ],
 )
 open class MessageEntity : BaseEntity() {
+    @Enumerated(EnumType.STRING)
+    @Column(name = "kind", nullable = false)
+    open var kind: MessageKind = MessageKind.TEXT
+
     @Column(name = "thread_id", nullable = false) open var threadId: Long? = null
     @Column(name = "sender_id", nullable = false) open var senderId: Long? = null
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
@@ -43,8 +57,30 @@ interface MessageRepository : JpaRepository<MessageEntity, Long> {
      */
     fun findByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId: Long): List<MessageEntity>
 
-    /** The most recent (highest-id) live message in a thread — for the chat-list preview. */
-    fun findTopByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId: Long): MessageEntity?
+    /** The most recent (highest-id) live message of [kind] in a thread — the chat-list preview. */
+    fun findTopByThreadIdAndKindAndDeletedAtIsNullOrderByIdDesc(
+        threadId: Long,
+        kind: MessageKind,
+    ): MessageEntity?
+
+    /**
+     * The membership lines of a thread with ids in
+     * [afterId, beforeId): those an agent receives together with message [beforeId] (see
+     * ChatSubscriptions).
+     */
+    fun findByThreadIdAndKindInAndIdGreaterThanAndIdLessThanOrderById(
+        threadId: Long,
+        kinds: Collection<MessageKind>,
+        afterId: Long,
+        beforeId: Long,
+    ): List<MessageEntity>
+
+    /** The newest TEXT message of a thread before [beforeId], if any. */
+    fun findTopByThreadIdAndKindAndIdLessThanOrderByIdDesc(
+        threadId: Long,
+        kind: MessageKind,
+        beforeId: Long,
+    ): MessageEntity?
 
     /**
      * The message this sender already posted under [clientToken], if any. Deliberately NOT filtered

@@ -11,6 +11,9 @@
  *               so this is that seam a third time, declared in `user` because "is this user an
  *               agent" is a fact about a user and both sides already depend on `user`.
  *
+ *               The same seam answers which machine an agent runs on, for the team module, which
+ *               may not import the agent module either.
+ *
  *               Batched on purpose: a caller answers a whole page of members in one call rather
  *               than asking per member, which is what keeps this from becoming an N+1.
  *
@@ -23,7 +26,13 @@ package app.microteams.user
 
 import org.rucca.cheese.common.persistent.IdType
 
-fun interface AgentUsers {
+interface AgentUsers {
     /** Of [userIds], those that are agents. Ids that are not agents are simply absent. */
     fun agentsAmong(userIds: Collection<IdType>): Set<IdType>
+
+    /**
+     * The machine each of [userIds] that is an agent runs on. The team module asks it to keep its
+     * invariant: an agent in a team has its machine in that team too.
+     */
+    fun machinesOf(userIds: Collection<IdType>): Map<IdType, String>
 }

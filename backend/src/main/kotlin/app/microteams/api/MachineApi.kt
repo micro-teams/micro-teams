@@ -6,12 +6,16 @@ package app.microteams.api
 
 import app.microteams.model.ApproveEnrollmentRequestDTO
 import app.microteams.model.ListMachinesResponseDTO
+import app.microteams.model.ListTerminalsResponseDTO
 import app.microteams.model.MachineDTO
+import app.microteams.model.OpenTerminalRequestDTO
 import app.microteams.model.PollEnrollmentRequestDTO
 import app.microteams.model.PollEnrollmentResponseDTO
 import app.microteams.model.RenameMachineRequestDTO
 import app.microteams.model.StartEnrollmentRequestDTO
 import app.microteams.model.StartEnrollmentResponseDTO
+import app.microteams.model.TerminalDTO
+import app.microteams.model.TerminalDetailDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
 import io.swagger.v3.oas.annotations.media.*
@@ -55,6 +59,29 @@ interface MachineApi {
         @RequestBody
         approveEnrollmentRequestDTO: ApproveEnrollmentRequestDTO,
     ): ResponseEntity<MachineDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["machine"],
+        summary = "Close a terminal, or kill a command",
+        operationId = "closeTerminal",
+        description = """""",
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Closed"),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.DELETE],
+        // "/machine/{id}/terminal/{sid}"
+        value = [PATH_CLOSE_TERMINAL],
+    )
+    fun closeTerminal(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
+        @Parameter(description = "", required = true) @PathVariable("sid") sid: kotlin.String,
+    ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 
@@ -110,6 +137,35 @@ interface MachineApi {
     @Operation(
         tags = ["machine"],
         summary =
+            "One terminal or command, with its screen text (output) when the machine is online; a command also reports whether it finished and its exit code. ",
+        operationId = "getTerminal",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "OK",
+                    content = [Content(schema = Schema(implementation = TerminalDetailDTO::class))],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.GET],
+        // "/machine/{id}/terminal/{sid}"
+        value = [PATH_GET_TERMINAL],
+        produces = ["application/json"],
+    )
+    fun getTerminal(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
+        @Parameter(description = "", required = true) @PathVariable("sid") sid: kotlin.String,
+    ): ResponseEntity<TerminalDetailDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["machine"],
+        summary =
             "Machines visible to the caller, narrowed by any combination of the filters below. Adding a way to slice machines means adding a filter here, never a new endpoint. ",
         operationId = "listMachines",
         description = """""",
@@ -148,6 +204,71 @@ interface MachineApi {
         @RequestParam(value = "page_size", required = false, defaultValue = "50")
         pageSize: kotlin.Int,
     ): ResponseEntity<ListMachinesResponseDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["machine"],
+        summary = "The machine's terminals and commands (anyone who can access the machine)",
+        operationId = "listTerminals",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "OK",
+                    content =
+                        [
+                            Content(
+                                schema = Schema(implementation = ListTerminalsResponseDTO::class),
+                            ),
+                        ],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.GET],
+        // "/machine/{id}/terminal"
+        value = [PATH_LIST_TERMINALS],
+        produces = ["application/json"],
+    )
+    fun listTerminals(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
+    ): ResponseEntity<ListTerminalsResponseDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["machine"],
+        summary =
+            "Open a terminal on the machine (a login shell, watched through the live screen), or, with a command, run that command. Terminals belong to the machine, not to any team. ",
+        operationId = "openTerminal",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "201",
+                    description = "Opened",
+                    content = [Content(schema = Schema(implementation = TerminalDTO::class))],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.POST],
+        // "/machine/{id}/terminal"
+        value = [PATH_OPEN_TERMINAL],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun openTerminal(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.String,
+        @Parameter(description = "")
+        @Valid
+        @RequestBody(required = false)
+        openTerminalRequestDTO: OpenTerminalRequestDTO?,
+    ): ResponseEntity<TerminalDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 
@@ -256,9 +377,13 @@ interface MachineApi {
     companion object {
         // for your own safety never directly reuse these path definitions in tests
         const val PATH_APPROVE_ENROLLMENT: String = "/machine/enroll/approve"
+        const val PATH_CLOSE_TERMINAL: String = "/machine/{id}/terminal/{sid}"
         const val PATH_FORGET_MACHINE: String = "/machine/{id}"
         const val PATH_GET_MACHINE: String = "/machine/{id}"
+        const val PATH_GET_TERMINAL: String = "/machine/{id}/terminal/{sid}"
         const val PATH_LIST_MACHINES: String = "/machine"
+        const val PATH_LIST_TERMINALS: String = "/machine/{id}/terminal"
+        const val PATH_OPEN_TERMINAL: String = "/machine/{id}/terminal"
         const val PATH_POLL_ENROLLMENT: String = "/machine/enroll/poll"
         const val PATH_RENAME_MACHINE: String = "/machine/{id}"
         const val PATH_START_ENROLLMENT: String = "/machine/enroll/start"
