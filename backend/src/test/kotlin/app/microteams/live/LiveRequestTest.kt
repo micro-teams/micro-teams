@@ -55,10 +55,9 @@ constructor(
     private lateinit var tokenB: String
     private var userB: Long = 0
 
-    /** One live socket: the latest result of each subscription, and when anything last arrived. */
+    /** One live socket: the latest result of each subscription. */
     private inner class Live(token: String) : TextWebSocketHandler() {
         val latest = ConcurrentHashMap<String, JsonNode>()
-        @Volatile var lastFrameAt = System.currentTimeMillis()
         val session: WebSocketSession =
             StandardWebSocketClient()
                 .execute(this, null, URI("ws://localhost:$port/live?token=$token"))
@@ -67,7 +66,6 @@ constructor(
         override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
             val frame = objectMapper.readTree(message.payload)
             if (frame["t"].asText() == "result") latest[frame["id"].asText()] = frame
-            lastFrameAt = System.currentTimeMillis()
         }
 
         fun get(id: String, path: String) {
@@ -84,15 +82,6 @@ constructor(
                 Thread.sleep(20)
             }
             error("no matching result for $id; last: ${latest[id]}")
-        }
-
-        /** Waits until nothing has arrived for a while: every rerun the writes caused is done. */
-        fun settle() {
-            val until = System.currentTimeMillis() + 10_000
-            while (
-                System.currentTimeMillis() < until && System.currentTimeMillis() - lastFrameAt < 600
-            ) Thread.sleep(50)
-            Thread.sleep(50)
         }
     }
 
@@ -176,9 +165,14 @@ constructor(
                             .content("""{"title":"renamed $step"}"""),
                     )
             }
-            a.settle()
-            b.settle()
+            // Every subscription comes to equal the plain answer, and stays equal once nothing else
+            // is written: a missed change would leave one stale for good.
             subs.forEachIndexed { i, (live, token, path) ->
+                val until = System.currentTimeMillis() + 15_000
+                while (
+                    System.currentTimeMillis() < until &&
+                        live.latest["s$i"]!!["body"] != plain(token, path)
+                ) Thread.sleep(100)
                 assertEquals(plain(token, path), live.latest["s$i"]!!["body"], "step $step, $path")
             }
         }

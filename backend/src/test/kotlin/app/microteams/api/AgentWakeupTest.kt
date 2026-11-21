@@ -471,7 +471,10 @@ constructor(
             "the first wake after it is back must go out",
         )
         awaitFrameFor("session.close", offSid)
-        val respawn = awaitFrameFor("session.create", offSid)
+        // The reconnect also re-adopts the screen (an `adopt` create), in whichever order the two
+        // reach the machine; the wake is the create that spawns.
+        var respawn = awaitFrameFor("session.create", offSid)
+        if (respawn.optBoolean("adopt", false)) respawn = awaitFrameFor("session.create", offSid)
         assertFalse(
             respawn.optBoolean("adopt", false),
             "it is a wake, not the reconnect's re-adopt",
