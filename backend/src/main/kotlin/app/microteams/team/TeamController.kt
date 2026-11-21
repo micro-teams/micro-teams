@@ -3,8 +3,10 @@
  *               operation generated from MicroTeams-API.yml, nothing more. It serves the whole
  *               /team surface: the team itself and its membership (delegated to
  *               membership/TeamService) and the team's documents (delegated to
- *               documents/DocumentService), and registers the team authorization logics
- *               (owner resolver, member/admin predicates).
+ *               documents/DocumentService), the teams inside it, its chats (team/chat) and
+ *               its machines, and registers the team authorization predicates: whether the
+ *               caller can access a team (TeamAccess), a thread (through its teams), or is
+ *               acting on themselves (leaving).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -14,10 +16,13 @@
 package app.microteams.team
 
 import app.microteams.api.TeamApi
+import app.microteams.chat.thread.ThreadService
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.model.*
+import app.microteams.team.chat.TeamChatService
 import app.microteams.team.documents.DocumentService
-import app.microteams.team.membership.*
+import app.microteams.team.membership.TeamAccess
+import app.microteams.team.membership.TeamService
 import jakarta.annotation.PostConstruct
 import javax.validation.Valid
 import org.rucca.cheese.auth.AuthenticationService
@@ -36,6 +41,9 @@ import org.springframework.web.bind.annotation.*
 @RestController
 class TeamController(
     private val teamService: TeamService,
+    private val teamAccess: TeamAccess,
+    private val teamChatService: TeamChatService,
+    private val threadService: ThreadService,
     private val documentService: DocumentService,
     private val machineService: MachineService,
     private val authorizationService: AuthorizationService,
@@ -43,26 +51,55 @@ class TeamController(
 ) : TeamApi {
     @PostConstruct
     fun initialize() {
-        authorizationService.ownerIds.register("team", teamService::getTeamOwner)
-        authorizationService.customAuthLogics.register("is-team-member") {
-            userId: IdType,
-            _: AuthorizedAction,
-            _: String,
-            resourceId: IdType?,
-            _: Map<String, Any>,
-            _: IdGetter?,
-            _: Any? ->
-            resourceId != null && teamService.isTeamMember(resourceId, userId)
+        /** The caller can access the team the request addresses (resource id). */
+        register("can-access-team") { userId, resourceId, _ ->
+            resourceId != null && teamAccess.mayAccess(userId, resourceId)
         }
-        authorizationService.customAuthLogics.register("is-team-admin") {
+
+        /**
+         * A team being created inside another: the caller can access that parent (or there is
+         * none).
+         */
+        register("can-access-parent-team") { userId, _, authInfo ->
+            val parent = (authInfo["createTeam"] as? CreateTeamRequestDTO)?.parentId
+            parent == null || teamAccess.mayAccess(userId, parent)
+        }
+
+        /** The team being put inside this one is a team the caller can access. */
+        register("can-access-nested-team") { userId, _, authInfo ->
+            val child = (authInfo["subteam"] as? AddSubteamRequestDTO)?.teamId
+            child != null && teamAccess.mayAccess(userId, child)
+        }
+
+        /** The thread being put into this team (if an existing one) is one the caller can read. */
+        register("can-read-placed-thread") { userId, _, authInfo ->
+            val thread = (authInfo["teamChat"] as? TeamChatRequestDTO)?.threadId
+            thread == null || teamChatService.mayRead(userId, thread)
+        }
+
+        /**
+         * The caller can read the thread the request addresses: a member, or through one of its
+         * teams.
+         */
+        register("can-read-thread") { userId, resourceId, _ ->
+            resourceId != null && teamChatService.mayRead(userId, resourceId)
+        }
+
+        /** The user the request removes is the caller: leaving. */
+        register("is-removing-self") { userId, _, authInfo -> authInfo["userId"] == userId }
+    }
+
+    /** Registers one atomic fact, hiding the seven-parameter handler shape. */
+    private fun register(name: String, fact: (IdType, IdType?, Map<String, Any>) -> Boolean) {
+        authorizationService.customAuthLogics.register(name) {
             userId: IdType,
             _: AuthorizedAction,
             _: String,
             resourceId: IdType?,
-            _: Map<String, Any>,
+            authInfo: Map<String, Any>,
             _: IdGetter?,
             _: Any? ->
-            resourceId != null && teamService.isTeamAdmin(resourceId, userId)
+            fact(userId, resourceId, authInfo)
         }
     }
 
@@ -70,32 +107,24 @@ class TeamController(
 
     @Guard("create-team", "team")
     override fun createTeam(
-        @Valid @RequestBody(required = false) dto: CreateTeamRequestDTO?,
+        @AuthInfo("createTeam") createTeamRequestDTO: CreateTeamRequestDTO?,
     ): ResponseEntity<TeamDTO> {
-        val name = dto?.name ?: return ResponseEntity.badRequest().build()
+        val dto = createTeamRequestDTO ?: return ResponseEntity.badRequest().build()
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(teamService.createTeam(name, currentUserId()))
+            .body(teamService.createTeam(dto.name, currentUserId(), dto.parentId))
     }
 
     @Guard("enumerate-my-teams", "team")
-    override fun listTeams(
-        role: String?,
-        pageStart: Long?,
-        pageSize: Int,
-    ): ResponseEntity<ListTeamsResponseDTO> {
-        val roleFilter = role?.let {
-            runCatching { TeamMemberRole.valueOf(it) }
-                .getOrElse { throw BadRequestError("invalid role: $role") }
-        }
-        val (teams, page) =
-            teamService.listMyTeams(currentUserId(), roleFilter, pageStart, pageSize)
+    override fun listTeams(pageStart: Long?, pageSize: Int): ResponseEntity<ListTeamsResponseDTO> {
+        val (teams, page) = teamService.listMyTeams(currentUserId(), pageStart, pageSize)
         return ResponseEntity.ok(ListTeamsResponseDTO(teams = teams, page = page))
     }
 
     @Guard("query-team", "team")
     override fun getTeam(
         @PathVariable("id") @ResourceId id: IdType,
-    ): ResponseEntity<TeamDetailDTO> = ResponseEntity.ok(teamService.getTeamDetail(id))
+    ): ResponseEntity<TeamDetailDTO> =
+        ResponseEntity.ok(teamService.getTeamDetail(id, currentUserId()))
 
     @Guard("rename-team", "team")
     override fun renameTeam(
@@ -120,34 +149,92 @@ class TeamController(
     @Guard("add-team-member", "team")
     override fun addTeamMember(
         @PathVariable("id") @ResourceId id: IdType,
-        @Valid @RequestBody(required = false) dto: AddTeamMemberRequestDTO?,
+        @AuthInfo("addTeamMember") addTeamMemberRequestDTO: AddTeamMemberRequestDTO?,
     ): ResponseEntity<Unit> {
-        if (dto == null) return ResponseEntity.badRequest().build()
-        teamService.addMember(id, dto.userId, dto.role.convert())
-        return ResponseEntity(HttpStatus.NO_CONTENT)
-    }
-
-    @Guard("change-team-member-role", "team")
-    override fun changeMemberRole(
-        @PathVariable("id") @ResourceId id: IdType,
-        @PathVariable("userId") userId: IdType,
-        @Valid @RequestBody(required = false) dto: ChangeRoleRequestDTO?,
-    ): ResponseEntity<Unit> {
-        val role = dto?.role?.convert() ?: return ResponseEntity.badRequest().build()
-        teamService.changeRole(id, userId, role)
+        val dto = addTeamMemberRequestDTO ?: return ResponseEntity.badRequest().build()
+        teamService.addMember(id, dto.userId)
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 
     @Guard("remove-team-member", "team")
     override fun removeTeamMember(
         @PathVariable("id") @ResourceId id: IdType,
-        @PathVariable("userId") userId: IdType,
+        @PathVariable("userId") @AuthInfo("userId") userId: IdType,
     ): ResponseEntity<Unit> {
         teamService.removeMember(id, userId)
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 
-    // -- Machines (which machines this team owns; enumerate via GET /machine?teamId=) ----
+    // -- Teams inside this one ----------------------------------------------
+
+    @Guard("add-subteam", "team")
+    override fun addSubteam(
+        @PathVariable("id") @ResourceId id: IdType,
+        @AuthInfo("subteam") addSubteamRequestDTO: AddSubteamRequestDTO?,
+    ): ResponseEntity<Unit> {
+        val dto = addSubteamRequestDTO ?: return ResponseEntity.badRequest().build()
+        teamService.addSubteam(id, dto.teamId)
+        return ResponseEntity(HttpStatus.NO_CONTENT)
+    }
+
+    @Guard("remove-subteam", "team")
+    override fun removeSubteam(
+        @PathVariable("id") @ResourceId id: IdType,
+        @PathVariable("childId") childId: IdType,
+    ): ResponseEntity<Unit> {
+        teamService.removeSubteam(id, childId)
+        return ResponseEntity(HttpStatus.NO_CONTENT)
+    }
+
+    // -- Chats in this team -------------------------------------------------
+
+    @Guard("enumerate-team-chats", "team")
+    override fun listTeamChats(
+        @PathVariable("id") @ResourceId id: IdType,
+        queryIsMemberAgent: Boolean,
+    ): ResponseEntity<ListChatsResponseDTO> {
+        val chats =
+            threadService.summaries(
+                teamChatService.threadIdsOf(id),
+                currentUserId(),
+                queryIsMemberAgent,
+            )
+        val page = PageDTO(pageStart = 0, pageSize = chats.size, hasPrev = false, hasMore = false)
+        return ResponseEntity.ok(ListChatsResponseDTO(chats = chats, page = page))
+    }
+
+    @Guard("add-team-chat", "team")
+    override fun addTeamChat(
+        @PathVariable("id") @ResourceId id: IdType,
+        @AuthInfo("teamChat") teamChatRequestDTO: TeamChatRequestDTO?,
+    ): ResponseEntity<ThreadDTO> {
+        val dto = teamChatRequestDTO ?: return ResponseEntity.badRequest().build()
+        val threadId =
+            dto.threadId
+                ?: threadService
+                    .createThread(
+                        currentUserId(),
+                        CreateThreadRequestDTO(
+                            title =
+                                dto.title ?: throw BadRequestError("give a threadId or a title"),
+                            memberIds = dto.memberIds,
+                        ),
+                    )
+                    .id
+        teamChatService.place(id, threadId)
+        return ResponseEntity.ok(threadService.getThread(threadId, currentUserId()).thread)
+    }
+
+    @Guard("remove-team-chat", "team")
+    override fun removeTeamChat(
+        @PathVariable("id") @ResourceId id: IdType,
+        @PathVariable("threadId") threadId: IdType,
+    ): ResponseEntity<Unit> {
+        teamChatService.unplace(id, threadId)
+        return ResponseEntity(HttpStatus.NO_CONTENT)
+    }
+
+    // -- Machines in this team (enumerate via GET /machine?teamId=) ----------
 
     @Guard("bind-machine-to-team", "team")
     override fun bindTeamMachine(

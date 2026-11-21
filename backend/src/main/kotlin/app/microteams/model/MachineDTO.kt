@@ -2,6 +2,7 @@ package app.microteams.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import io.swagger.v3.oas.annotations.media.Schema
+import javax.validation.Valid
 
 /**
  * An enrolled host running our CLI. It hosts screens; it knows nothing of agents.
@@ -9,7 +10,7 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param id
  * @param name
  * @param online Whether its control channel is connected right now
- * @param teamIds The teams it serves. Symmetric and owner-less -- a machine may serve many.
+ * @param teams The teams it is in; anyone who can access one of them can use it.
  * @param createdAt
  */
 data class MachineDTO(
@@ -25,13 +26,14 @@ data class MachineDTO(
     @param:JsonProperty("online", required = true)
     @get:JsonProperty("online", required = true)
     val online: kotlin.Boolean,
+    @field:Valid
     @Schema(
         required = true,
-        description = "The teams it serves. Symmetric and owner-less -- a machine may serve many.",
+        description = "The teams it is in; anyone who can access one of them can use it.",
     )
-    @param:JsonProperty("teamIds", required = true)
-    @get:JsonProperty("teamIds", required = true)
-    val teamIds: kotlin.collections.List<kotlin.Long>,
+    @param:JsonProperty("teams", required = true)
+    @get:JsonProperty("teams", required = true)
+    val teams: kotlin.collections.List<TeamDTO>,
     @Schema(description = "")
     @param:JsonProperty("createdAt")
     @get:JsonProperty("createdAt")

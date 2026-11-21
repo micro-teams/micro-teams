@@ -83,7 +83,6 @@ class AgentScreens(
                 userId = row.agentUserId,
                 sid = row.sid,
                 machineId = row.machineId,
-                teamId = row.teamId,
                 screenToken = row.token,
                 driver = driver,
                 wakeup = agentWakeup.getObject(),

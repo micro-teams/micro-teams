@@ -22,13 +22,14 @@
 
   // src/api/ops.ts
   var OPS = {
+    addSubteam: { method: "POST", path: "/team/{id}/subteams", pathParams: ["id"], queryParams: [], bodyKey: "AddSubteamRequest", bodyType: "application/json" },
+    addTeamChat: { method: "POST", path: "/team/{id}/chats", pathParams: ["id"], queryParams: [], bodyKey: "TeamChatRequest", bodyType: "application/json" },
     addTeamMember: { method: "POST", path: "/team/{id}/members", pathParams: ["id"], queryParams: [], bodyKey: "AddTeamMemberRequest", bodyType: "application/json" },
     addThreadMember: { method: "POST", path: "/chat/{id}/members", pathParams: ["id"], queryParams: [], bodyKey: "AddMemberRequest", bodyType: "application/json" },
     approveEnrollment: { method: "POST", path: "/machine/enroll/approve", pathParams: [], queryParams: [], bodyKey: "ApproveEnrollmentRequest", bodyType: "application/json" },
     bindTeamMachine: { method: "POST", path: "/team/{id}/machine", pathParams: ["id"], queryParams: [], bodyKey: "BindMachineRequest", bodyType: "application/json" },
-    changeMemberRole: { method: "PATCH", path: "/team/{id}/members/{userId}", pathParams: ["id", "userId"], queryParams: [], bodyKey: "ChangeRoleRequest", bodyType: "application/json" },
-    changeThreadMemberRole: { method: "PATCH", path: "/chat/{id}/members/{userId}", pathParams: ["id", "userId"], queryParams: [], bodyKey: "ChangeRoleRequest", bodyType: "application/json" },
     closeAgent: { method: "DELETE", path: "/agent/{userId}", pathParams: ["userId"], queryParams: [], bodyKey: null, bodyType: null },
+    closeTerminal: { method: "DELETE", path: "/machine/{id}/terminal/{sid}", pathParams: ["id", "sid"], queryParams: [], bodyKey: null, bodyType: null },
     createTeam: { method: "POST", path: "/team", pathParams: [], queryParams: [], bodyKey: "CreateTeamRequest", bodyType: "application/json" },
     createThread: { method: "POST", path: "/chat", pathParams: [], queryParams: [], bodyKey: "CreateThreadRequest", bodyType: "application/json" },
     deleteDocument: { method: "DELETE", path: "/team/{id}/document", pathParams: ["id"], queryParams: ["path"], bodyKey: null, bodyType: null },
@@ -37,26 +38,31 @@
     exchangeAgentToken: { method: "POST", path: "/agent/token", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
     forgetMachine: { method: "DELETE", path: "/machine/{id}", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
     getDocument: { method: "GET", path: "/team/{id}/document", pathParams: ["id"], queryParams: ["path", "recursive", "content", "history", "diff"], bodyKey: null, bodyType: null },
-    getGitWorkspace: { method: "GET", path: "/agent/git-workspace", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
+    getGitWorkspace: { method: "GET", path: "/agent/git-workspace", pathParams: [], queryParams: ["teamId"], bodyKey: null, bodyType: null },
     getMachine: { method: "GET", path: "/machine/{id}", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
     getTeam: { method: "GET", path: "/team/{id}", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
+    getTerminal: { method: "GET", path: "/machine/{id}/terminal/{sid}", pathParams: ["id", "sid"], queryParams: [], bodyKey: null, bodyType: null },
     getThread: { method: "GET", path: "/chat/{id}", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
+    joinThread: { method: "POST", path: "/chat/{id}/join", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
     listAgentDrivers: { method: "GET", path: "/agent/drivers", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
     listAgents: { method: "GET", path: "/agent", pathParams: [], queryParams: ["userId", "threadId", "teamId", "machineId", "online", "page_start", "page_size"], bodyKey: null, bodyType: null },
     listChats: { method: "GET", path: "/chat", pathParams: [], queryParams: ["page_start", "page_size", "queryIsMemberAgent"], bodyKey: null, bodyType: null },
-    listLines: { method: "GET", path: "/lines", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
     listMachines: { method: "GET", path: "/machine", pathParams: [], queryParams: ["teamId", "online", "page_start", "page_size"], bodyKey: null, bodyType: null },
     listMessages: { method: "GET", path: "/chat/{id}/messages", pathParams: ["id"], queryParams: ["page_start", "page_size"], bodyKey: null, bodyType: null },
+    listTeamChats: { method: "GET", path: "/team/{id}/chats", pathParams: ["id"], queryParams: ["queryIsMemberAgent"], bodyKey: null, bodyType: null },
     listTeamMembers: { method: "GET", path: "/team/{id}/members", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
-    listTeams: { method: "GET", path: "/team", pathParams: [], queryParams: ["role", "page_start", "page_size"], bodyKey: null, bodyType: null },
+    listTeams: { method: "GET", path: "/team", pathParams: [], queryParams: ["page_start", "page_size"], bodyKey: null, bodyType: null },
+    listTerminals: { method: "GET", path: "/machine/{id}/terminal", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
     listThreadMembers: { method: "GET", path: "/chat/{id}/members", pathParams: ["id"], queryParams: [], bodyKey: null, bodyType: null },
     moveDocument: { method: "PATCH", path: "/team/{id}/document", pathParams: ["id"], queryParams: ["path"], bodyKey: "MoveDocumentRequest", bodyType: "application/json" },
     openAgent: { method: "POST", path: "/agent", pathParams: [], queryParams: [], bodyKey: "OpenAgentRequest", bodyType: "application/json" },
+    openTerminal: { method: "POST", path: "/machine/{id}/terminal", pathParams: ["id"], queryParams: [], bodyKey: "OpenTerminalRequest", bodyType: "application/json" },
     ping: { method: "GET", path: "/ping", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
     pollEnrollment: { method: "POST", path: "/machine/enroll/poll", pathParams: [], queryParams: [], bodyKey: "PollEnrollmentRequest", bodyType: "application/json" },
     postMessage: { method: "POST", path: "/chat/{id}/messages", pathParams: ["id"], queryParams: [], bodyKey: "PostMessageRequest", bodyType: "application/json" },
-    probe: { method: "GET", path: "/probe", pathParams: [], queryParams: [], bodyKey: null, bodyType: null },
     rebootAgent: { method: "POST", path: "/agent/{userId}/reboot", pathParams: ["userId"], queryParams: [], bodyKey: null, bodyType: null },
+    removeSubteam: { method: "DELETE", path: "/team/{id}/subteams/{childId}", pathParams: ["id", "childId"], queryParams: [], bodyKey: null, bodyType: null },
+    removeTeamChat: { method: "DELETE", path: "/team/{id}/chats/{threadId}", pathParams: ["id", "threadId"], queryParams: [], bodyKey: null, bodyType: null },
     removeTeamMember: { method: "DELETE", path: "/team/{id}/members/{userId}", pathParams: ["id", "userId"], queryParams: [], bodyKey: null, bodyType: null },
     removeThreadMember: { method: "DELETE", path: "/chat/{id}/members/{userId}", pathParams: ["id", "userId"], queryParams: [], bodyKey: null, bodyType: null },
     renameMachine: { method: "PATCH", path: "/machine/{id}", pathParams: ["id"], queryParams: [], bodyKey: "RenameMachineRequest", bodyType: "application/json" },
@@ -130,12 +136,6 @@
   }
   function done(what) {
     microteams.print(what);
-  }
-  var ROLES = ["OWNER", "ADMIN", "MEMBER"];
-  function role(value) {
-    const r = value.toUpperCase();
-    if (ROLES.indexOf(r) < 0) throw new Error(`role must be one of ${ROLES.join(", ")}`);
-    return r;
   }
   function teamId(ref) {
     var _a;
@@ -271,7 +271,8 @@
       for (const m of (_b = detail.members) != null ? _b : []) nameById[m.userId] = (_c = m.nickname) != null ? _c : `#${m.userId}`;
       for (const m of messages2) {
         const who = (_d = nameById[m.senderId]) != null ? _d : `#${m.senderId}`;
-        microteams.print(`${m.createdAt} ${who}\uFF1A${m.content}`);
+        if (m.kind === "TEXT") microteams.print(`${m.createdAt} ${who}\uFF1A${m.content}`);
+        else microteams.print(`${m.createdAt} (${who} ${m.kind === "JOINED" ? "joined" : "left"})`);
       }
       const page = resp.page;
       if (page.has_more && page.next_start != null) {
@@ -285,11 +286,6 @@
     name: "list",
     short: "List the group chats you're in, most recently active first",
     flags: [
-      {
-        name: "thread-id",
-        type: "int",
-        help: "deprecated: use `chat show --thread-id N`"
-      },
       { name: "limit", type: "int", help: "how many groups to list (default 20, max 100)" },
       {
         name: "page-start",
@@ -301,10 +297,6 @@
     ],
     run: (ctx) => {
       var _a;
-      if (ctx.flags["thread-id"] != null) {
-        chatDetail(Number(ctx.flags["thread-id"]), wantsJson(ctx));
-        return;
-      }
       const resp = call("listChats", { page_size: limit(ctx, 20), page_start: int(ctx, "page-start") });
       if (wantsJson(ctx)) {
         microteams.print(JSON.stringify(resp));
@@ -330,7 +322,8 @@
     const thread = detail.thread;
     const members3 = (_a = detail.members) != null ? _a : [];
     const title = (thread == null ? void 0 : thread.title) || members3.map((m) => m.nickname).join("\u3001") || `thread #${threadId}`;
-    microteams.print(`#${threadId} ${title}`);
+    microteams.print(`#${threadId} ${title}${detail.isMember ? "" : " (not joined: `chat join` to speak)"}`);
+    microteams.print(detail.teams.length ? `in teams: ${detail.teams.map((t) => `#${t.id} ${t.name}`).join(", ")}` : "in no team");
     if (thread == null ? void 0 : thread.createdAt) microteams.print(`created ${thread.createdAt}`);
     const latest = (_b = call("listMessages", { id: threadId, page_size: 1 }).messages) == null ? void 0 : _b[0];
     if (latest) {
@@ -342,11 +335,7 @@
       microteams.print("no messages yet");
     }
     microteams.print(`${members3.length} member(s):`);
-    for (const m of members3) {
-      const name = (_f = m.nickname) != null ? _f : `#${m.userId}`;
-      const role2 = m.role && m.role !== "MEMBER" ? ` ${m.role}` : "";
-      microteams.print(`  ${name} (#${m.userId})${role2}`);
-    }
+    for (const m of members3) microteams.print(`  ${(_f = m.nickname) != null ? _f : `#${m.userId}`} (#${m.userId})`);
   }
   function chatLine(c, withMembers) {
     var _a, _b, _c, _d;
@@ -368,13 +357,13 @@
   }
   var show = {
     name: "show",
-    short: "One group in detail: its title, last message, and every member with their role",
+    short: "One group in detail: its title, its teams, last message, and every member",
     flags: [THREAD, JSON_FLAG],
     run: (ctx) => chatDetail(Number(need(ctx, "thread-id")), wantsJson(ctx))
   };
   var create = {
     name: "create",
-    short: "Start a new group chat (you become its owner)",
+    short: "Start a new group chat in no team (only its members can read it); `team add-chat` starts one in a team",
     flags: [
       { name: "title", type: "string", required: true, help: "the group's title" },
       { name: "members", type: "string", help: "comma-separated user ids to add besides yourself" },
@@ -410,24 +399,23 @@
   };
   var members = {
     name: "members",
-    short: "List a group's members with their roles",
+    short: "List a group's members",
     flags: [THREAD, JSON_FLAG],
     run: (ctx) => {
       var _a;
       const ms = call("listThreadMembers", { id: Number(need(ctx, "thread-id")) });
       if (wantsJson(ctx)) return microteams.print(JSON.stringify(ms));
-      for (const m of ms) microteams.print(`#${m.userId} ${(_a = m.nickname) != null ? _a : ""} ${m.role}`);
+      for (const m of ms) microteams.print(`#${m.userId} ${(_a = m.nickname) != null ? _a : ""}`);
     }
   };
   var addMember = {
     name: "add-member",
     short: "Add someone to a group",
-    flags: [THREAD, USER, { name: "role", type: "string", help: "OWNER, ADMIN or MEMBER (default MEMBER)" }],
+    flags: [THREAD, USER],
     run: (ctx) => {
-      var _a;
       const id = Number(need(ctx, "thread-id"));
       const userId = Number(need(ctx, "user-id"));
-      call("addThreadMember", { id, AddMemberRequest: { userId, role: role(String((_a = ctx.flags["role"]) != null ? _a : "MEMBER")) } });
+      call("addThreadMember", { id, AddMemberRequest: { userId } });
       done(`added #${userId} to group #${id}`);
     }
   };
@@ -442,41 +430,34 @@
       done(`removed #${userId} from group #${id}`);
     }
   };
-  var setRole = {
-    name: "set-role",
-    short: "Change a member's role in a group",
-    flags: [THREAD, USER, { name: "role", type: "string", required: true, help: "OWNER, ADMIN or MEMBER" }],
+  var join = {
+    name: "join",
+    short: "Join a group you can read through one of its teams (members speak; readers only read)",
+    flags: [THREAD],
     run: (ctx) => {
       const id = Number(need(ctx, "thread-id"));
-      const userId = Number(need(ctx, "user-id"));
-      const r = role(need(ctx, "role"));
-      call("changeThreadMemberRole", { id, userId, ChangeRoleRequest: { role: r } });
-      done(`#${userId} is now ${r} in group #${id}`);
+      call("joinThread", { id });
+      done(`joined group #${id}`);
     }
   };
   microteams.command({
     name: "chat",
-    short: "Group chats: list, read, create, rename, dissolve, and manage members",
-    commands: [list, show, messages, create, rename, dissolve, members, addMember, removeMember, setRole]
+    short: "Group chats: list, read, create, rename, dissolve, join, and manage members",
+    commands: [list, show, messages, create, rename, dissolve, members, addMember, removeMember, join]
   });
-  function deprecated(spec, old, now) {
-    var _a;
-    return __spreadProps(__spreadValues({}, spec), {
-      name: old,
-      short: `(deprecated: use \`${now}\`) ${(_a = spec.short) != null ? _a : ""}`,
-      run: (ctx) => {
-        spec.run(ctx);
-        microteams.print(`(note: \`microteams api ${old}\` is now \`microteams api ${now}\`; the old name goes away next release)`);
-      }
-    });
-  }
-  microteams.command(deprecated(list, "chats", "chat list"));
-  microteams.command(deprecated(messages, "messages", "chat messages"));
 
   // src/cli/docs.ts
-  function gitWorkspace() {
-    return call("getGitWorkspace", {});
+  function gitWorkspace(team) {
+    if (team != null) return call("getGitWorkspace", { teamId: teamId(team) });
+    const remote = microteams.exec("git", ["remote", "get-url", "origin"]);
+    const cloned = remote.code === 0 ? /\/git\/(\d+)(\.git)?\/?$/.exec(remote.stdout.trim()) : null;
+    return call("getGitWorkspace", { teamId: cloned ? Number(cloned[1]) : void 0 });
   }
+  var TEAM_FLAG = {
+    name: "team",
+    type: "string",
+    help: "which team's tree (id or name); needed for a first clone when you are in several teams"
+  };
   var GIT_IDENTITY = ["-c", "user.name=agent", "-c", "user.email=agent@microteams.local"];
   function authedGit(token, args) {
     return microteams.exec("git", ["-c", `http.extraHeader=Authorization: Bearer ${token}`, ...args]);
@@ -486,13 +467,14 @@
   }
   var gitCommands = {
     name: "docs",
-    short: "Work with your team's shared document tree",
+    short: "Work with a team's shared document tree (one checkout per team)",
     commands: [
       {
         name: "sync",
         short: "Fetch the latest document tree and publish your recorded changes (pull + push)",
-        run: () => {
-          const ws = gitWorkspace();
+        flags: [TEAM_FLAG],
+        run: (ctx) => {
+          const ws = gitWorkspace(str(ctx, "team"));
           if (!insideRepo()) {
             const cloned = authedGit(ws.token, ["clone", ws.gitUrl, "."]);
             if (cloned.code !== 0) throw new Error("docs sync (clone) failed: " + cloned.stderr);
@@ -615,7 +597,7 @@
   };
   function readTeam(ctx) {
     const t = str(ctx, "team");
-    return t != null ? teamId(t) : gitWorkspace().teamId;
+    return t != null ? teamId(t) : gitWorkspace(void 0).teamId;
   }
   var TEAM = { name: "team", type: "string", help: "a team id or name (default: your own team)" };
   var PATH = { name: "path", type: "string", help: "a path in the tree (default: the root)" };
@@ -667,16 +649,13 @@
     name: "list",
     short: "List the teams you're in",
     flags: [
-      { name: "role", type: "string", help: "only teams where you have this role (OWNER, ADMIN, MEMBER)" },
       { name: "limit", type: "int", help: "how many to list (default 50, max 100)" },
       { name: "page-start", type: "int", help: "continue from the cursor printed by a previous call" },
       JSON_FLAG
     ],
     run: (ctx) => {
       var _a;
-      const r = str(ctx, "role");
       const resp = call("listTeams", {
-        role: r != null ? role(r) : void 0,
         page_size: limit(ctx, 50),
         page_start: int(ctx, "page-start")
       });
@@ -689,27 +668,38 @@
   };
   var show3 = {
     name: "show",
-    short: "One team: its members with their roles, and the machines that serve it",
+    short: "One team: the teams it is inside and the teams inside it, its members, machines and chats",
     flags: [TEAM2, JSON_FLAG],
     run: (ctx) => {
-      var _a, _b;
+      var _a, _b, _c;
       const id = teamId(need(ctx, "team"));
       const detail = call("getTeam", { id });
       const machines = (_a = call("listMachines", { teamId: id, page_size: 100 }).machines) != null ? _a : [];
-      if (wantsJson(ctx)) return microteams.print(JSON.stringify(__spreadProps(__spreadValues({}, detail), { machines })));
-      microteams.print(`#${detail.team.id} ${detail.team.name}`);
+      const chats = (_b = call("listTeamChats", { id }).chats) != null ? _b : [];
+      if (wantsJson(ctx)) return microteams.print(JSON.stringify(__spreadProps(__spreadValues({}, detail), { machines, chats })));
+      microteams.print(`#${detail.team.id} ${detail.team.name}${detail.isMember ? "" : " (reached through a team it is inside)"}`);
+      if (detail.parents.length) microteams.print(`inside: ${detail.parents.map((t) => `#${t.id} ${t.name}`).join(", ")}`);
+      microteams.print(`${detail.subteams.length} team(s) inside:`);
+      for (const t of detail.subteams) microteams.print(`  #${t.id} ${t.name}`);
       microteams.print(`${detail.members.length} member(s):`);
-      for (const m of detail.members) microteams.print(`  ${(_b = m.nickname) != null ? _b : ""} (#${m.userId}) ${m.role}`);
+      for (const m of detail.members) microteams.print(`  ${(_c = m.nickname) != null ? _c : ""} (#${m.userId})${m.isAgent ? " agent" : ""}`);
       microteams.print(`${machines.length} machine(s):`);
       for (const m of machines) microteams.print(`  ${m.name} (${m.id}) ${m.online ? "online" : "offline"}`);
+      microteams.print(`${chats.length} chat(s):`);
+      for (const c of chats) microteams.print(`  #${c.id} ${c.title}${c.isMember ? "" : " (not joined)"}`);
     }
   };
   var create2 = {
     name: "create",
-    short: "Found a new team (you become its owner)",
-    flags: [{ name: "name", type: "string", required: true, help: "the team's name" }, JSON_FLAG],
+    short: "Make a new team (you are its first member), optionally inside another",
+    flags: [
+      { name: "name", type: "string", required: true, help: "the team's name" },
+      { name: "parent", type: "string", help: "make it inside this team (an id or name)" },
+      JSON_FLAG
+    ],
     run: (ctx) => {
-      const t = call("createTeam", { CreateTeamRequest: { name: need(ctx, "name") } });
+      const parent = ctx.flags["parent"] == null ? void 0 : teamId(String(ctx.flags["parent"]));
+      const t = call("createTeam", { CreateTeamRequest: { name: need(ctx, "name"), parentId: parent } });
       if (wantsJson(ctx)) return microteams.print(JSON.stringify(t));
       done(`created team #${t.id} ${t.name}`);
     }
@@ -725,7 +715,7 @@
   };
   var del = {
     name: "delete",
-    short: "Delete a team (owner only); there is no undo",
+    short: "Delete a team; there is no undo",
     flags: [TEAM2],
     run: (ctx) => {
       const id = teamId(need(ctx, "team"));
@@ -735,30 +725,29 @@
   };
   var members2 = {
     name: "members",
-    short: "List a team's members with their roles",
+    short: "List a team's members, people and agents",
     flags: [TEAM2, JSON_FLAG],
     run: (ctx) => {
       var _a;
       const ms = call("listTeamMembers", { id: teamId(need(ctx, "team")) });
       if (wantsJson(ctx)) return microteams.print(JSON.stringify(ms));
-      for (const m of ms) microteams.print(`#${m.userId} ${(_a = m.nickname) != null ? _a : ""} ${m.role}`);
+      for (const m of ms) microteams.print(`#${m.userId} ${(_a = m.nickname) != null ? _a : ""}${m.isAgent ? " agent" : ""}`);
     }
   };
   var addMember2 = {
     name: "add-member",
-    short: "Add someone to a team",
-    flags: [TEAM2, USER2, { name: "role", type: "string", help: "OWNER, ADMIN or MEMBER (default MEMBER)" }],
+    short: "Add a person or an agent to a team (an agent brings its machine along)",
+    flags: [TEAM2, USER2],
     run: (ctx) => {
-      var _a;
       const id = teamId(need(ctx, "team"));
       const userId = Number(need(ctx, "user-id"));
-      call("addTeamMember", { id, AddTeamMemberRequest: { userId, role: role(String((_a = ctx.flags["role"]) != null ? _a : "MEMBER")) } });
+      call("addTeamMember", { id, AddTeamMemberRequest: { userId } });
       done(`added #${userId} to team #${id}`);
     }
   };
   var removeMember2 = {
     name: "remove-member",
-    short: "Remove someone from a team",
+    short: "Remove someone from a team (your own id leaves it)",
     flags: [TEAM2, USER2],
     run: (ctx) => {
       const id = teamId(need(ctx, "team"));
@@ -767,45 +756,97 @@
       done(`removed #${userId} from team #${id}`);
     }
   };
-  var setRole2 = {
-    name: "set-role",
-    short: "Change a member's role in a team",
-    flags: [TEAM2, USER2, { name: "role", type: "string", required: true, help: "OWNER, ADMIN or MEMBER" }],
+  var CHILD = { name: "child", type: "string", required: true, help: "the inner team (an id or name)" };
+  var addSubteam = {
+    name: "add-subteam",
+    short: "Put a team inside this one: its members can then reach everything in it",
+    flags: [TEAM2, CHILD],
     run: (ctx) => {
       const id = teamId(need(ctx, "team"));
-      const userId = Number(need(ctx, "user-id"));
-      const r = role(need(ctx, "role"));
-      call("changeMemberRole", { id, userId, ChangeRoleRequest: { role: r } });
-      done(`#${userId} is now ${r} in team #${id}`);
+      const child = teamId(need(ctx, "child"));
+      call("addSubteam", { id, AddSubteamRequest: { teamId: child } });
+      done(`team #${child} is now inside team #${id}`);
+    }
+  };
+  var removeSubteam = {
+    name: "remove-subteam",
+    short: "Take a team out of this one",
+    flags: [TEAM2, CHILD],
+    run: (ctx) => {
+      const id = teamId(need(ctx, "team"));
+      const child = teamId(need(ctx, "child"));
+      call("removeSubteam", { id, childId: child });
+      done(`team #${child} is no longer inside team #${id}`);
+    }
+  };
+  var CHAT = { name: "chat", type: "int", help: "an existing chat's id" };
+  var addChat = {
+    name: "add-chat",
+    short: "Put an existing chat into a team (--chat), or start a new one in it (--title)",
+    flags: [TEAM2, CHAT, { name: "title", type: "string", help: "the new chat's title" }, JSON_FLAG],
+    run: (ctx) => {
+      const id = teamId(need(ctx, "team"));
+      const threadId = int(ctx, "chat");
+      const title = ctx.flags["title"] == null ? void 0 : String(ctx.flags["title"]);
+      if (threadId == null && title == null) throw new Error("give --chat or --title");
+      const t = call("addTeamChat", { id, TeamChatRequest: { threadId, title } });
+      if (wantsJson(ctx)) return microteams.print(JSON.stringify(t));
+      done(`chat #${t.id} is in team #${id}`);
+    }
+  };
+  var removeChat = {
+    name: "remove-chat",
+    short: "Take a chat out of a team",
+    flags: [TEAM2, __spreadProps(__spreadValues({}, CHAT), { required: true })],
+    run: (ctx) => {
+      const id = teamId(need(ctx, "team"));
+      const threadId = Number(need(ctx, "chat"));
+      call("removeTeamChat", { id, threadId });
+      done(`chat #${threadId} is no longer in team #${id}`);
     }
   };
   var MACHINE = { name: "machine", type: "string", required: true, help: "a machine id or name" };
   var bindMachine = {
     name: "bind-machine",
-    short: "Let a machine serve this team (you must already be able to use the machine)",
+    short: "Put a machine into this team (you must already be able to use the machine)",
     flags: [TEAM2, MACHINE],
     run: (ctx) => {
       const id = teamId(need(ctx, "team"));
       const m = machineId(need(ctx, "machine"));
       call("bindTeamMachine", { id, BindMachineRequest: { machineId: m } });
-      done(`machine ${m} now serves team #${id}`);
+      done(`machine ${m} is now in team #${id}`);
     }
   };
   var unbindMachine = {
     name: "unbind-machine",
-    short: "Stop a machine serving this team",
+    short: "Take a machine out of this team (refused for its last team)",
     flags: [TEAM2, MACHINE],
     run: (ctx) => {
       const id = teamId(need(ctx, "team"));
       const m = machineId(need(ctx, "machine"));
       call("unbindTeamMachine", { id, machineId: m });
-      done(`machine ${m} no longer serves team #${id}`);
+      done(`machine ${m} is no longer in team #${id}`);
     }
   };
   microteams.command({
     name: "team",
-    short: "Teams: list, show, create, rename, delete, members and roles, which machines serve them",
-    commands: [list2, show3, create2, rename2, del, members2, addMember2, removeMember2, setRole2, bindMachine, unbindMachine]
+    short: "Teams: list, show, create, rename, delete, members, teams inside, machines and chats",
+    commands: [
+      list2,
+      show3,
+      create2,
+      rename2,
+      del,
+      members2,
+      addMember2,
+      removeMember2,
+      addSubteam,
+      removeSubteam,
+      addChat,
+      removeChat,
+      bindMachine,
+      unbindMachine
+    ]
   });
 
   // src/cli/agent.ts
@@ -857,7 +898,7 @@
     name: "list",
     short: "List agents, optionally only those of a team, a machine or a group chat",
     flags: [
-      { name: "team", type: "string", help: "only agents working for this team (id or name)" },
+      { name: "team", type: "string", help: "only agents in this team (id or name)" },
       { name: "machine", type: "string", help: "only agents running on this machine (id or name)" },
       { name: "thread-id", type: "int", help: "only agents in this group chat" },
       { name: "online", type: "bool", help: "only agents running right now" },
@@ -866,7 +907,7 @@
       JSON_FLAG
     ],
     run: (ctx) => {
-      var _a;
+      var _a, _b;
       const team = str(ctx, "team");
       const machine = str(ctx, "machine");
       const resp = call("listAgents", {
@@ -882,7 +923,7 @@
       if (agents.length === 0) return microteams.print("(no agents)");
       for (const a of agents) {
         const where = a.machineId ? ` \xB7 on ${a.machineId}` : "";
-        const team2 = a.teamId != null ? ` \xB7 team #${a.teamId}` : "";
+        const team2 = ((_b = a.teams) == null ? void 0 : _b.length) ? ` \xB7 teams ${a.teams.map((t) => "#" + t.id).join(", ")}` : "";
         microteams.print(`#${a.userId} ${a.nickname} \xB7 ${a.online ? "online" : "offline"}${team2}${where}${a.driver ? " \xB7 " + a.driver : ""}`);
       }
       moreHint(resp.page, (n) => `microteams api agent list --page-start ${n}`, "agents");
@@ -890,16 +931,20 @@
   };
   var show4 = {
     name: "show",
-    short: "One agent: where it runs, for which team, with which driver, and its keepalive",
+    short: "One agent: where it runs, its teams and chats, its driver, and its keepalive",
     flags: [AGENT, JSON_FLAG],
     run: (ctx) => {
-      var _a;
+      var _a, _b, _c;
       const userId = Number(need(ctx, "user-id"));
       const a = ((_a = call("listAgents", { userId: [userId] }).agents) != null ? _a : [])[0];
       if (!a) throw new Error(`no agent #${userId}`);
       if (wantsJson(ctx)) return microteams.print(JSON.stringify(a));
       microteams.print(`#${a.userId} ${a.nickname} \xB7 ${a.online ? "online" : "offline"}`);
-      if (a.teamId != null) microteams.print(`team #${a.teamId}`);
+      microteams.print(`teams: ${((_b = a.teams) != null ? _b : []).map((t) => `#${t.id} ${t.name}`).join(", ") || "(none)"}`);
+      microteams.print(`chats: ${((_c = a.chats) != null ? _c : []).map((c) => {
+        var _a2;
+        return `#${c.id} ${(_a2 = c.title) != null ? _a2 : ""}`;
+      }).join(", ") || "(none)"}`);
       if (a.machineId) microteams.print(`machine ${a.machineId}${a.sid ? " \xB7 screen " + a.sid : ""}`);
       if (a.driver) microteams.print(`driver ${a.driver}`);
       if (a.keepalive) microteams.print(`keepalive ${JSON.stringify(a.keepalive)}`);
@@ -1020,7 +1065,7 @@
   var MACHINE2 = { name: "machine", type: "string", required: true, help: "a machine id or name" };
   var list4 = {
     name: "list",
-    short: "List the machines you can use (those serving any of your teams)",
+    short: "List the machines you can use (those in any team you can reach)",
     flags: [
       { name: "team", type: "string", help: "only machines serving this team (id or name)" },
       { name: "online", type: "bool", help: "only machines connected right now" },
@@ -1041,22 +1086,25 @@
       const machines = (_a = resp.machines) != null ? _a : [];
       if (machines.length === 0) return microteams.print("(no machines)");
       for (const m of machines)
-        microteams.print(`${m.id} ${m.name} \xB7 ${m.online ? "online" : "offline"} \xB7 teams ${m.teamIds.map((t) => "#" + t).join(", ")}`);
+        microteams.print(`${m.id} ${m.name} \xB7 ${m.online ? "online" : "offline"} \xB7 teams ${m.teams.map((t) => `#${t.id} ${t.name}`).join(", ")}`);
       moreHint(resp.page, (n) => `microteams api machine list --page-start ${n}`, "machines");
     }
   };
   var show5 = {
     name: "show",
-    short: "One machine: whether it is online, which teams it serves, and the agents on it",
+    short: "One machine: whether it is online, which teams it is in, its terminals, and the agents on it",
     flags: [MACHINE2, JSON_FLAG],
     run: (ctx) => {
-      var _a;
+      var _a, _b;
       const id = machineId(need(ctx, "machine"));
       const m = call("getMachine", { id });
       const agents = (_a = call("listAgents", { machineId: id, page_size: 100 }).agents) != null ? _a : [];
-      if (wantsJson(ctx)) return microteams.print(JSON.stringify(__spreadProps(__spreadValues({}, m), { agents })));
+      const terminals2 = (_b = call("listTerminals", { id }).terminals) != null ? _b : [];
+      if (wantsJson(ctx)) return microteams.print(JSON.stringify(__spreadProps(__spreadValues({}, m), { agents, terminals: terminals2 })));
       microteams.print(`${m.id} ${m.name} \xB7 ${m.online ? "online" : "offline"}`);
-      microteams.print(`serves teams: ${m.teamIds.map((t) => "#" + t).join(", ") || "(none)"}`);
+      microteams.print(`in teams: ${m.teams.map((t) => `#${t.id} ${t.name}`).join(", ") || "(none)"}`);
+      microteams.print(`${terminals2.length} terminal(s):`);
+      for (const t of terminals2) microteams.print(`  ${termLine(t)}`);
       microteams.print(`${agents.length} agent(s):`);
       for (const a of agents) microteams.print(`  ${a.nickname} (#${a.userId}) ${a.online ? "online" : "offline"}`);
     }
@@ -1082,7 +1130,7 @@
   };
   var approve = {
     name: "approve",
-    short: "Approve a machine that is enrolling (`microteams link connect` printed its code) into teams",
+    short: "Approve a machine that is enrolling (`microteams start` printed its code) into teams",
     flags: [
       { name: "code", type: "string", required: true, help: "the one-time code from the enrolling machine" },
       { name: "teams", type: "string", required: true, help: "comma-separated team ids or names it should serve" }
@@ -1093,9 +1141,85 @@
       done(`approved machine ${m.id} ${m.name} for teams ${teamIds.map((t) => "#" + t).join(", ")}`);
     }
   };
+  function termLine(t) {
+    var _a;
+    const what = t.kind === "COMMAND" ? `command: ${(_a = t.command) != null ? _a : ""}` : "terminal";
+    return `${t.sid} ${what}${t.exitCode != null ? ` (exit ${t.exitCode})` : ""}`;
+  }
+  var SID = { name: "sid", type: "string", required: true, help: "the terminal or command id" };
+  var terminals = {
+    name: "terminals",
+    short: "List a machine's terminals and commands",
+    flags: [MACHINE2, JSON_FLAG],
+    run: (ctx) => {
+      var _a;
+      const id = machineId(need(ctx, "machine"));
+      const ts = (_a = call("listTerminals", { id }).terminals) != null ? _a : [];
+      if (wantsJson(ctx)) return microteams.print(JSON.stringify(ts));
+      if (ts.length === 0) return microteams.print("(no terminals)");
+      for (const t of ts) microteams.print(termLine(t));
+    }
+  };
+  var openTerminal = {
+    name: "open-terminal",
+    short: "Open a login shell on a machine; people watch and type into it from the app",
+    flags: [MACHINE2, { name: "cwd", type: "string", help: "the directory it starts in (default: home)" }],
+    run: (ctx) => {
+      const id = machineId(need(ctx, "machine"));
+      const t = call("openTerminal", { id, OpenTerminalRequest: { cwd: str(ctx, "cwd") } });
+      done(`opened terminal ${t.sid} on ${id}`);
+    }
+  };
+  var closeTerminal = {
+    name: "close-terminal",
+    short: "Close a terminal, or kill a command",
+    flags: [MACHINE2, SID],
+    run: (ctx) => {
+      const id = machineId(need(ctx, "machine"));
+      call("closeTerminal", { id, sid: need(ctx, "sid") });
+      done(`closed ${need(ctx, "sid")}`);
+    }
+  };
+  var output = {
+    name: "output",
+    short: "A terminal's or command's screen text, and a command's exit code once it finished",
+    flags: [MACHINE2, SID, JSON_FLAG],
+    run: (ctx) => {
+      var _a;
+      const id = machineId(need(ctx, "machine"));
+      const d = call("getTerminal", { id, sid: need(ctx, "sid") });
+      if (wantsJson(ctx)) return microteams.print(JSON.stringify(d));
+      microteams.print((_a = d.output) != null ? _a : "(no output: the machine is not connected)");
+      if (d.finished) microteams.print(`(exit ${d.terminal.exitCode})`);
+    }
+  };
+  var run = {
+    name: "run",
+    short: "Run one command on a machine and print its output and exit code when it finishes",
+    flags: [
+      MACHINE2,
+      { name: "command", type: "string", required: true, help: "the command, run through sh" },
+      { name: "cwd", type: "string", help: "the directory it runs in (default: home)" },
+      { name: "wait", type: "int", help: "seconds to wait for it to finish (default 60); it keeps running after" }
+    ],
+    run: (ctx) => {
+      var _a, _b;
+      const id = machineId(need(ctx, "machine"));
+      const t = call("openTerminal", { id, OpenTerminalRequest: { command: need(ctx, "command"), cwd: str(ctx, "cwd") } });
+      const until = Date.now() + 1e3 * (Number((_a = ctx.flags["wait"]) != null ? _a : 60) || 60);
+      let d = call("getTerminal", { id, sid: t.sid });
+      while (!d.finished && Date.now() < until) {
+        microteams.exec("sleep", ["1"]);
+        d = call("getTerminal", { id, sid: t.sid });
+      }
+      microteams.print((_b = d.output) != null ? _b : "");
+      if (d.finished) microteams.print(`(exit ${d.terminal.exitCode}; \`machine close-terminal --sid ${t.sid}\` clears it)`);
+      else microteams.print(`(still running as ${t.sid}; \`machine output --sid ${t.sid}\` reads it again)`);
+    }
+  };
   microteams.command({
     name: "machine",
-    short: "Machines: list, show, rename, forget, and approve one that is enrolling",
-    commands: [list4, show5, rename4, forget, approve]
+    short: "Machines: list, show, rename, forget, approve one enrolling, and its terminals and commands",
+    commands: [list4, show5, rename4, forget, approve, terminals, openTerminal, closeTerminal, run, output]
   });
 })();

@@ -24,6 +24,7 @@ package app.microteams.machine
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.LinkHandler
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.MachinePresence
 import app.microteams.machine.screen.ScreenCommands
 import app.microteams.machine.screen.ViewerHandler
 import app.microteams.user.UserProfileRepository
@@ -46,9 +47,10 @@ class ConnectorWebSocketConfig {
     @Bean
     fun connectorLinkHandler(
         hub: MachineHub,
+        presence: MachinePresence,
         objectMapper: ObjectMapper,
         eventPublisher: org.springframework.context.ApplicationEventPublisher,
-    ): LinkHandler = LinkHandler(hub, objectMapper, eventPublisher)
+    ): LinkHandler = LinkHandler(hub, presence, objectMapper, eventPublisher)
 
     /**
      * The raw `/machine/link` request handler as a Spring bean, so its Lifecycle (start/stop) and

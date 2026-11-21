@@ -1,39 +1,12 @@
 package app.microteams.model
 
-import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.annotation.JsonValue
 import io.swagger.v3.oas.annotations.media.Schema
 
-/**
- * @param userId
- * @param role
- */
+/** @param userId */
 data class AddTeamMemberRequestDTO(
     @Schema(required = true, description = "")
     @param:JsonProperty("userId", required = true)
     @get:JsonProperty("userId", required = true)
     val userId: kotlin.Long,
-    @Schema(required = true, description = "")
-    @param:JsonProperty("role", required = true)
-    @get:JsonProperty("role", required = true)
-    val role: AddTeamMemberRequestDTO.Role,
-) {
-
-    /** Values: OWNER,ADMIN,MEMBER */
-    enum class Role(@get:JsonValue val value: kotlin.String) {
-
-        OWNER("OWNER"),
-        ADMIN("ADMIN"),
-        MEMBER("MEMBER");
-
-        companion object {
-            @JvmStatic
-            @JsonCreator
-            fun forValue(value: kotlin.String): Role {
-                return values().firstOrNull { it.value == value }
-                    ?: throw IllegalArgumentException("Unexpected value '$value' for enum 'Role'")
-            }
-        }
-    }
-}
+) {}

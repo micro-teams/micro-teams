@@ -27,10 +27,12 @@ import app.microteams.agent.AgentLlmService
 import app.microteams.agent.AgentRegistry
 import app.microteams.agent.AgentWakeup
 import app.microteams.agent.driver.AgentDriver
+import app.microteams.chat.thread.ThreadService
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.MachineHub
+import app.microteams.model.CreateThreadRequestDTO
+import app.microteams.team.chat.TeamChatService
 import app.microteams.team.machine.TeamMachineService
-import app.microteams.team.membership.TeamMemberRole
 import app.microteams.team.membership.TeamService
 import app.microteams.user.Avatar
 import app.microteams.user.User
@@ -61,6 +63,8 @@ class AgentService(
     private val machineService: MachineService,
     private val teamMachineService: TeamMachineService,
     private val teamService: TeamService,
+    private val teamChatService: TeamChatService,
+    private val threadService: ThreadService,
     private val agentScreenRepository: AgentScreenRepository,
     private val agentRegistry: AgentRegistry,
     private val agentWakeup: AgentWakeup,
@@ -112,6 +116,7 @@ class AgentService(
      */
     @Transactional
     fun openAgent(
+        openedBy: IdType,
         machineId: String,
         teamId: IdType,
         nickname: String?,
@@ -139,10 +144,18 @@ class AgentService(
         llm?.let { agentLlmService.validate(it) }
         val agentUserId = createAgentUser(nickname)
         llm?.let { agentLlmService.set(agentUserId, it) }
-        // The agent must be a member of the team it works for, or it cannot even read its own
-        // team's document tree: read/write-document and the git remote are all gated by
-        // is-team-member.
-        teamService.addMember(teamId, agentUserId, TeamMemberRole.MEMBER)
+        // The agent is a member of the team it is opened in, and has a chat of its own name there:
+        // the place the team talks to it.
+        teamService.addMember(teamId, agentUserId)
+        val chat =
+            threadService.createThread(
+                openedBy,
+                CreateThreadRequestDTO(
+                    title = nickname ?: "agent-$agentUserId",
+                    memberIds = listOf(agentUserId),
+                ),
+            )
+        teamChatService.place(teamId, chat.id)
         val session = sessionId ?: UUID.randomUUID().toString() // mint one when not supplied
         // Default to a private per-agent checkout of the team document tree, under the user data
         // dir (~/.local/share/microteams/agents/<name>), so each agent gets its own clone rather
@@ -150,7 +163,7 @@ class AgentService(
         // run; a caller that wants the agent elsewhere (e.g. a source-code checkout) passes an
         // explicit cwd.
         val workCwd = cwd ?: defaultWorkCwd(nickname, agentUserId)
-        val opened = launch(agentUserId, machineId, teamId, workCwd, driver, session, resume)
+        val opened = launch(agentUserId, machineId, workCwd, driver, session, resume)
         logger.info(
             "opened agent user {} on machine {} (screen {}, driver {}, session {}, resume {})",
             agentUserId,
@@ -187,8 +200,7 @@ class AgentService(
         agentRegistry.unregister(agentUserId)
         agentScreenRepository.delete(row)
 
-        val reopened =
-            launch(agentUserId, row.machineId, row.teamId, row.cwd, driver, session, resume = true)
+        val reopened = launch(agentUserId, row.machineId, row.cwd, driver, session, resume = true)
         logger.info(
             "rebooted agent user {} on machine {} (screen {} -> {}, driver {}, session {})",
             agentUserId,
@@ -226,7 +238,7 @@ class AgentService(
                 sid = row.sid,
                 command = command,
                 appletSource = driver.appletSource,
-                env = screenEnv(row.machineId, row.teamId, agentUserId),
+                env = screenEnv(row.machineId, agentUserId),
             )
         if (!respawned) {
             rebootAgent(agentUserId) // no live screen to respawn — open a new one for this session
@@ -251,17 +263,11 @@ class AgentService(
      * config token, but injecting is robust to a machine whose default CLI config points
      * elsewhere).
      */
-    private fun screenEnv(
-        machineId: String,
-        teamId: IdType?,
-        agentUserId: IdType,
-    ): Map<String, String> = buildMap {
+    private fun screenEnv(machineId: String, agentUserId: IdType): Map<String, String> = buildMap {
         // The endpoint this machine reached us on (it reported it when it connected), so its
         // screens call back on a URL that works for them; the config value is only a fallback.
         put("MICROTEAMS_API", hub.originOf(machineId) ?: connectorOrigin)
         machineService.tokenOf(machineId)?.let { put("MICROTEAMS_TOKEN", it) }
-        // The team the agent works for, so the applet's `docs` commands know which tree to sync.
-        put("MICROTEAMS_TEAM", teamId.toString())
         // The agent's model API (dsh). Here, in the one function every launch path calls — open,
         // reboot AND the in-place wake — because the wake used to build its own environment
         // without it, and an agent woken by a chat message came back with no key.
@@ -276,13 +282,12 @@ class AgentService(
     private fun launch(
         agentUserId: IdType,
         machineId: String,
-        teamId: IdType?,
         cwd: String?,
         driver: AgentDriver,
         sessionId: String,
         resume: Boolean,
     ): OpenedAgent {
-        val env = screenEnv(machineId, teamId, agentUserId)
+        val env = screenEnv(machineId, agentUserId)
         val screen =
             hub.openScreen(
                 machineId = machineId,
@@ -296,7 +301,6 @@ class AgentService(
                 sid = screen.sid,
                 machineId = machineId,
                 token = screen.token,
-                teamId = teamId,
                 agentUserId = agentUserId,
                 sessionId = sessionId,
                 cwd = cwd,
@@ -330,16 +334,15 @@ class AgentService(
     }
 
     /**
-     * The document-tree git remote for [agentUserId] paired with its team id: the team's repo on
-     * the endpoint this agent's machine dialed us on, so the URL resolves from that machine (the
-     * config value is only a fallback). Null if the user is not an active agent. The caller mints
-     * the matching credential; together they are what the applet hands a `git` subprocess.
+     * The git remote of team [teamId]'s document tree, on the endpoint [agentUserId]'s machine
+     * dialed us on, so the URL resolves from that machine (the config value is only a fallback).
+     * Null if the user is not an active agent. The caller mints the matching credential; together
+     * they are what the applet hands a `git` subprocess.
      */
-    fun gitWorkspaceUrl(agentUserId: IdType): Pair<String, IdType>? {
+    fun gitWorkspaceUrl(agentUserId: IdType, teamId: IdType): String? {
         val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull() ?: return null
-        val teamId = row.teamId ?: return null
         val base = hub.originOf(row.machineId) ?: connectorOrigin
-        return "$base/git/$teamId" to teamId
+        return "$base/git/$teamId"
     }
 
     private fun createAgentUser(nickname: String?): IdType {

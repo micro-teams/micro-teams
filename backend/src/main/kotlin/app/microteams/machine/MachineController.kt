@@ -21,8 +21,11 @@ import app.microteams.api.MachineApi
 import app.microteams.machine.enrollment.MachineInfo
 import app.microteams.machine.enrollment.MachineService
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.MachinePresence
+import app.microteams.machine.terminal.TerminalService
 import app.microteams.model.*
 import app.microteams.team.machine.TeamMachineService
+import app.microteams.team.membership.TeamAccess
 import jakarta.annotation.PostConstruct
 import jakarta.servlet.http.HttpServletRequest
 import org.rucca.cheese.auth.AuthenticationService
@@ -44,6 +47,9 @@ class MachineController(
     private val teamMachineService: TeamMachineService,
     private val teamService: app.microteams.team.membership.TeamService,
     private val hub: MachineHub,
+    private val presence: MachinePresence,
+    private val teamAccess: TeamAccess,
+    private val terminalService: TerminalService,
     private val authorizationService: AuthorizationService,
     private val authenticationService: AuthenticationService,
 ) : MachineApi {
@@ -75,20 +81,20 @@ class MachineController(
             screen != null && teamMachineService.mayAccess(userId, screen.machineId)
         }
 
-        /** The caller belongs to the team this enumeration is scoped to. */
-        register("is-member-of-queried-team") { userId, authInfo ->
-            (authInfo["teamId"] as? Long)?.let { teamService.isTeamMember(it, userId) } ?: false
+        /** The caller can access the team this enumeration is scoped to. */
+        register("can-access-queried-team") { userId, authInfo ->
+            (authInfo["teamId"] as? Long)?.let { teamAccess.mayAccess(userId, it) } ?: false
         }
 
         /** The enumeration is unscoped, which by definition means the caller's own machines. */
         register("is-enumerating-own-machines") { _, authInfo -> authInfo["teamId"] == null }
 
-        /** The caller belongs to every team this machine is being enrolled into. */
-        register("is-member-of-every-enrolled-team") { userId, authInfo ->
+        /** The caller can access every team this machine is being enrolled into. */
+        register("can-access-every-enrolled-team") { userId, authInfo ->
             val req = authInfo["approve"] as? ApproveEnrollmentRequestDTO
             req != null &&
                 req.teamIds.isNotEmpty() &&
-                req.teamIds.all { teamService.isTeamMember(it, userId) }
+                req.teamIds.all { teamAccess.mayAccess(userId, it) }
         }
     }
 
@@ -153,7 +159,7 @@ class MachineController(
         pageStart: String?,
         pageSize: Int,
     ): ResponseEntity<ListMachinesResponseDTO> {
-        val all = machineService.list(currentUserId(), teamId, online) { hub.isOnline(it) }
+        val all = machineService.list(currentUserId(), teamId, online) { presence.isOnline(it) }
         val page = all.take(pageSize)
         return ResponseEntity.ok(
             ListMachinesResponseDTO(
@@ -189,12 +195,50 @@ class MachineController(
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 
+    // -- terminals and commands ---------------------------------------------
+
+    @Guard("enumerate-terminals", "machine")
+    override fun listTerminals(
+        @PathVariable("id") @AuthInfo("machineId") id: String,
+    ): ResponseEntity<ListTerminalsResponseDTO> =
+        ResponseEntity.ok(ListTerminalsResponseDTO(terminals = terminalService.list(id)))
+
+    @Guard("open-terminal", "machine")
+    override fun openTerminal(
+        @PathVariable("id") @AuthInfo("machineId") id: String,
+        openTerminalRequestDTO: OpenTerminalRequestDTO?,
+    ): ResponseEntity<TerminalDTO> =
+        ResponseEntity.status(HttpStatus.CREATED)
+            .body(
+                terminalService.open(
+                    id,
+                    currentUserId(),
+                    openTerminalRequestDTO?.command,
+                    openTerminalRequestDTO?.cwd,
+                ),
+            )
+
+    @Guard("query-terminal", "machine")
+    override fun getTerminal(
+        @PathVariable("id") @AuthInfo("machineId") id: String,
+        @PathVariable("sid") sid: String,
+    ): ResponseEntity<TerminalDetailDTO> = ResponseEntity.ok(terminalService.detail(id, sid))
+
+    @Guard("close-terminal", "machine")
+    override fun closeTerminal(
+        @PathVariable("id") @AuthInfo("machineId") id: String,
+        @PathVariable("sid") sid: String,
+    ): ResponseEntity<Unit> {
+        terminalService.close(id, sid)
+        return ResponseEntity(HttpStatus.NO_CONTENT)
+    }
+
     private fun MachineInfo.toDTO() =
         MachineDTO(
             id = machineId,
             name = name,
-            online = hub.isOnline(machineId),
-            teamIds = teams,
+            online = presence.isOnline(machineId),
+            teams = teamService.teamsByIds(teams),
             createdAt = null,
         )
 

@@ -27,4 +27,11 @@ class AgentUsersFromScreens(private val agentScreenRepository: AgentScreenReposi
             .map { it.agentUserId }
             .toSet()
     }
+
+    override fun machinesOf(userIds: Collection<IdType>): Map<IdType, String> {
+        if (userIds.isEmpty()) return emptyMap()
+        return agentScreenRepository.findByAgentUserIdIn(userIds.distinct()).associate {
+            it.agentUserId to it.machineId
+        }
+    }
 }

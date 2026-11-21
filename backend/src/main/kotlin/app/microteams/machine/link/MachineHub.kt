@@ -26,13 +26,15 @@
  *               HubScreen, ScreenState, ScreenLifecycleListener, ScreenVarListener — a screen,
  *                                 what is known about its program, and who is told about it.
  *               LinkClosedException  how a call ends whose machine connection went away.
+ *               HUB_SOURCE        the source name screen reads are recorded under.
  *               HubMachine        one machine's state: its current transport, what it
  *                                 reported (origin, build, connectedAt), its screens and its calls
  *                                 awaiting rpc.result; send(msg) writes to the current transport.
  *               MachineHub:
  *                 addScreenLifecycleListener / addScreenVarListener — be told about screens.
- *                 attachMachine(id, transport, origin?) / detachMachine(id, transport)
- *                   — after the machine's hello; detach only if that transport is still current.
+ *                 attachMachine(id, transport, origin?) / detachMachine(id, transport) -> Boolean
+ *                   — after the machine's hello; detach only if that transport is still current,
+ *                   answering whether it was.
  *                 isOnline / originOf / buildOf / connectedAtOf / screensOf /
  *                 onlineMachineIds — what is known about a machine.
  *                 openScreen / closeScreen / readoptScreen / respawnScreen / adoptScreen —
@@ -59,6 +61,7 @@
 
 package app.microteams.machine.link
 
+import app.microteams.common.live.ReadSources
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
@@ -71,6 +74,13 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+
+/**
+ * The source name (common/live/Sources.kt) of the hub's screen state: a read of a screen through
+ * [MachineHub.screen] is a read of it, and the live module announces it whenever a screen's state
+ * or variables change.
+ */
+const val HUB_SOURCE = "hub"
 
 /** A live machine control channel. Satisfied by a WebSocket adapter and trivially fakeable. */
 fun interface MachineTransport {
@@ -377,12 +387,12 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         machine.send(LinkMsg(t = "machine.info"))
     }
 
-    fun detachMachine(machineId: String, transport: MachineTransport) {
+    fun detachMachine(machineId: String, transport: MachineTransport): Boolean {
         val machine = machines[machineId]
-        if (machine != null && machine.transport === transport) {
-            machine.transport = null
-            machine.failPending("the machine disconnected")
-        }
+        if (machine == null || machine.transport !== transport) return false
+        machine.transport = null
+        machine.failPending("the machine disconnected")
+        return true
     }
 
     fun isOnline(machineId: String): Boolean = machines[machineId]?.transport != null
@@ -591,7 +601,10 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     fun screenByToken(token: String): HubScreen? = byScreenToken[token]
 
     /** The screen [sid], or null if this server does not know it. */
-    fun screen(sid: String): HubScreen? = screens[sid]
+    fun screen(sid: String): HubScreen? {
+        ReadSources.touch(HUB_SOURCE)
+        return screens[sid]
+    }
 
     /**
      * Register a screen the machine may already be running (after a server restart) — no

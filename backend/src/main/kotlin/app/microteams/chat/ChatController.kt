@@ -4,7 +4,7 @@
  *               /chat surface: the chat list, the thread and its membership (delegated to
  *               thread/ThreadService) and the messages (delegated to
  *               message/MessageService), and registers the chat authorization logics
- *               (owner resolver, member/admin/author predicates).
+ *               (member and author predicates).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -42,15 +42,6 @@ class ChatController(
 ) : ChatApi {
     @PostConstruct
     fun initialize() {
-        // Register the thread-ownership resolver so the built-in "owned" custom logic
-        // (AuthorizationService.kt:45) can answer "does user X own resource thread Y?"
-        // without an is-thread-owner handler. Must match the resourceType used by @Guard /
-        // RolePermissionService ("chat_thread"); otherwise "owned" can't resolve an owner.
-        authorizationService.ownerIds.register("chat_thread") { threadId ->
-            threadMemberRepository.findByThreadIdAndRole(threadId, ThreadMemberRole.OWNER)?.userId
-                ?: 0
-        }
-
         // is-thread-member: user is any member (member/admin/owner) of a thread. Every
         // @Guard that uses this passes the THREAD id as the resource id (postMessage /
         // listMessages / getThread all bind @ResourceId to the thread path param), so the
@@ -68,23 +59,6 @@ class ChatController(
             _: Any? ->
             resourceId != null &&
                 threadMemberRepository.findByThreadIdAndUserId(resourceId, userId) != null
-        }
-
-        // is-thread-admin: user is admin or owner of a thread (role >= 1). Resource id is the
-        // thread id directly (see is-thread-member above for why we don't remap it).
-        authorizationService.customAuthLogics.register("is-thread-admin") {
-            userId: IdType,
-            _: AuthorizedAction,
-            _: String,
-            resourceId: IdType?,
-            _: Map<String, Any>,
-            _: IdGetter?,
-            _: Any? ->
-            if (resourceId == null) false
-            else {
-                val m = threadMemberRepository.findByThreadIdAndUserId(resourceId, userId)
-                m != null && (m.role == ThreadMemberRole.ADMIN || m.role == ThreadMemberRole.OWNER)
-            }
         }
 
         // is_message_author: user wrote the message (resourceId = message id).
@@ -124,7 +98,8 @@ class ChatController(
     @Guard("query-chat", "chat_thread")
     override fun getThread(
         @PathVariable("id") @ResourceId id: Long,
-    ): ResponseEntity<ThreadDetailDTO> = ResponseEntity.ok(threadService.getThread(id))
+    ): ResponseEntity<ThreadDetailDTO> =
+        ResponseEntity.ok(threadService.getThread(id, authenticationService.getCurrentUserId()))
 
     @Guard("rename-chat", "chat_thread")
     override fun renameThread(
@@ -168,26 +143,22 @@ class ChatController(
         @AuthInfo("addMember") dto: AddMemberRequestDTO?,
     ): ResponseEntity<Unit> {
         val body = dto ?: return ResponseEntity.badRequest().build()
-        threadService.addMember(id, body.userId, body.role?.toDomain() ?: ThreadMemberRole.MEMBER)
+        threadService.addMember(id, body.userId)
+        return ResponseEntity(HttpStatus.NO_CONTENT)
+    }
+
+    @Guard("join-chat", "chat_thread")
+    override fun joinThread(@PathVariable("id") @ResourceId id: Long): ResponseEntity<Unit> {
+        threadService.addMember(id, authenticationService.getCurrentUserId())
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 
     @Guard("remove-chat-member", "chat_thread")
     override fun removeThreadMember(
         @PathVariable("id") @ResourceId id: Long,
-        @PathVariable("userId") userId: Long,
+        @PathVariable("userId") @AuthInfo("userId") userId: Long,
     ): ResponseEntity<Unit> {
         threadService.removeMember(id, userId)
-        return ResponseEntity(HttpStatus.NO_CONTENT)
-    }
-
-    @Guard("change-chat-member-role", "chat_thread")
-    override fun changeThreadMemberRole(
-        @PathVariable("id") @ResourceId id: Long,
-        @PathVariable("userId") userId: Long,
-        dto: ChangeRoleRequestDTO?,
-    ): ResponseEntity<Unit> {
-        threadService.changeMemberRole(id, userId, dto!!.role.toDomain())
         return ResponseEntity(HttpStatus.NO_CONTENT)
     }
 }

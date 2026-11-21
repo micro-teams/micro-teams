@@ -4,17 +4,20 @@
  */
 package app.microteams.api
 
+import app.microteams.model.AddSubteamRequestDTO
 import app.microteams.model.AddTeamMemberRequestDTO
 import app.microteams.model.BindMachineRequestDTO
-import app.microteams.model.ChangeRoleRequestDTO
 import app.microteams.model.CreateTeamRequestDTO
 import app.microteams.model.DocNodeDTO
+import app.microteams.model.ListChatsResponseDTO
 import app.microteams.model.ListTeamsResponseDTO
 import app.microteams.model.MoveDocumentRequestDTO
 import app.microteams.model.RenameTeamRequestDTO
+import app.microteams.model.TeamChatRequestDTO
 import app.microteams.model.TeamDTO
 import app.microteams.model.TeamDetailDTO
 import app.microteams.model.TeamMemberDTO
+import app.microteams.model.ThreadDTO
 import io.swagger.v3.oas.annotations.*
 import io.swagger.v3.oas.annotations.enums.*
 import io.swagger.v3.oas.annotations.media.*
@@ -34,7 +37,69 @@ interface TeamApi {
 
     @Operation(
         tags = ["team"],
-        summary = "Add a member to a team (admin+)",
+        summary =
+            "Put a team inside this one (the caller must access both); refused if this team is already inside it. ",
+        operationId = "addSubteam",
+        description = """""",
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Nested"),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.POST],
+        // "/team/{id}/subteams"
+        value = [PATH_ADD_SUBTEAM],
+        consumes = ["application/json"],
+    )
+    fun addSubteam(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+        @Parameter(description = "")
+        @Valid
+        @RequestBody(required = false)
+        addSubteamRequestDTO: AddSubteamRequestDTO?,
+    ): ResponseEntity<Unit> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["team"],
+        summary =
+            "Put an existing thread into the team (the caller must access both), or create one in it. ",
+        operationId = "addTeamChat",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "The thread now in the team",
+                    content = [Content(schema = Schema(implementation = ThreadDTO::class))],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.POST],
+        // "/team/{id}/chats"
+        value = [PATH_ADD_TEAM_CHAT],
+        produces = ["application/json"],
+        consumes = ["application/json"],
+    )
+    fun addTeamChat(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+        @Parameter(description = "")
+        @Valid
+        @RequestBody(required = false)
+        teamChatRequestDTO: TeamChatRequestDTO?,
+    ): ResponseEntity<ThreadDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["team"],
+        summary =
+            "Add a person or an agent to a team. Adding an agent needs access to it as well, and puts its machine into the team too. ",
         operationId = "addTeamMember",
         description = """""",
         responses =
@@ -88,35 +153,8 @@ interface TeamApi {
 
     @Operation(
         tags = ["team"],
-        summary = "Change a member's role (admin+)",
-        operationId = "changeMemberRole",
-        description = """""",
-        responses =
-            [
-                ApiResponse(responseCode = "204", description = "Role changed"),
-            ],
-        security = [SecurityRequirement(name = "bearerAuth")],
-    )
-    @RequestMapping(
-        method = [RequestMethod.PATCH],
-        // "/team/{id}/members/{userId}"
-        value = [PATH_CHANGE_MEMBER_ROLE],
-        consumes = ["application/json"],
-    )
-    fun changeMemberRole(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
-        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
-        @Parameter(description = "")
-        @Valid
-        @RequestBody(required = false)
-        changeRoleRequestDTO: ChangeRoleRequestDTO?,
-    ): ResponseEntity<Unit> {
-        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
-    }
-
-    @Operation(
-        tags = ["team"],
-        summary = "Create a team (caller becomes owner)",
+        summary =
+            "Create a team; the caller is its first member. With parentId it is created inside that team (which the caller must be able to access). ",
         operationId = "createTeam",
         description = """""",
         responses =
@@ -274,6 +312,39 @@ interface TeamApi {
 
     @Operation(
         tags = ["team"],
+        summary =
+            "The team's chats, most recent activity first, whether or not the caller is a member",
+        operationId = "listTeamChats",
+        description = """""",
+        responses =
+            [
+                ApiResponse(
+                    responseCode = "200",
+                    description = "OK",
+                    content =
+                        [Content(schema = Schema(implementation = ListChatsResponseDTO::class))],
+                ),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.GET],
+        // "/team/{id}/chats"
+        value = [PATH_LIST_TEAM_CHATS],
+        produces = ["application/json"],
+    )
+    fun listTeamChats(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+        @Parameter(description = "", schema = Schema(defaultValue = "false"))
+        @Valid
+        @RequestParam(value = "queryIsMemberAgent", required = false, defaultValue = "false")
+        queryIsMemberAgent: kotlin.Boolean,
+    ): ResponseEntity<ListChatsResponseDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["team"],
         summary = "List a team's members",
         operationId = "listTeamMembers",
         description = """""",
@@ -330,10 +401,6 @@ interface TeamApi {
         produces = ["application/json"],
     )
     fun listTeams(
-        @Parameter(description = "Only teams where the caller has this role (OWNER/ADMIN/MEMBER)")
-        @Valid
-        @RequestParam(value = "role", required = false)
-        role: kotlin.String?,
         @Parameter(description = "id of the first team on the page (cursor)")
         @Valid
         @RequestParam(value = "page_start", required = false)
@@ -385,7 +452,55 @@ interface TeamApi {
 
     @Operation(
         tags = ["team"],
-        summary = "Remove a member from a team (admin+)",
+        summary = "Take a team out of this one (anyone who can access this one)",
+        operationId = "removeSubteam",
+        description = """""",
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Removed"),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.DELETE],
+        // "/team/{id}/subteams/{childId}"
+        value = [PATH_REMOVE_SUBTEAM],
+    )
+    fun removeSubteam(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+        @Parameter(description = "", required = true) @PathVariable("childId") childId: kotlin.Long,
+    ): ResponseEntity<Unit> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["team"],
+        summary = "Take a thread out of the team (anyone who can access the team)",
+        operationId = "removeTeamChat",
+        description = """""",
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Removed"),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.DELETE],
+        // "/team/{id}/chats/{threadId}"
+        value = [PATH_REMOVE_TEAM_CHAT],
+    )
+    fun removeTeamChat(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+        @Parameter(description = "", required = true)
+        @PathVariable("threadId")
+        threadId: kotlin.Long,
+    ): ResponseEntity<Unit> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["team"],
+        summary = "Remove a member from a team (anyone who can access it; anyone may leave)",
         operationId = "removeTeamMember",
         description = """""",
         responses =
@@ -499,17 +614,21 @@ interface TeamApi {
 
     companion object {
         // for your own safety never directly reuse these path definitions in tests
+        const val PATH_ADD_SUBTEAM: String = "/team/{id}/subteams"
+        const val PATH_ADD_TEAM_CHAT: String = "/team/{id}/chats"
         const val PATH_ADD_TEAM_MEMBER: String = "/team/{id}/members"
         const val PATH_BIND_TEAM_MACHINE: String = "/team/{id}/machine"
-        const val PATH_CHANGE_MEMBER_ROLE: String = "/team/{id}/members/{userId}"
         const val PATH_CREATE_TEAM: String = "/team"
         const val PATH_DELETE_DOCUMENT: String = "/team/{id}/document"
         const val PATH_DELETE_TEAM: String = "/team/{id}"
         const val PATH_GET_DOCUMENT: String = "/team/{id}/document"
         const val PATH_GET_TEAM: String = "/team/{id}"
+        const val PATH_LIST_TEAM_CHATS: String = "/team/{id}/chats"
         const val PATH_LIST_TEAM_MEMBERS: String = "/team/{id}/members"
         const val PATH_LIST_TEAMS: String = "/team"
         const val PATH_MOVE_DOCUMENT: String = "/team/{id}/document"
+        const val PATH_REMOVE_SUBTEAM: String = "/team/{id}/subteams/{childId}"
+        const val PATH_REMOVE_TEAM_CHAT: String = "/team/{id}/chats/{threadId}"
         const val PATH_REMOVE_TEAM_MEMBER: String = "/team/{id}/members/{userId}"
         const val PATH_RENAME_TEAM: String = "/team/{id}"
         const val PATH_UNBIND_TEAM_MACHINE: String = "/team/{id}/machine/{machineId}"

@@ -1,8 +1,20 @@
 /*
  *  Description: This file implements the ThreadService class — the thread half of the
  *               chat module: the chat list, the thread itself and its membership.
- *               Messages belong to MessageService (chat/message); this service only reads
- *               a thread's last message to build the chat list.
+ *               Messages belong to MessageService (chat/message); this service reads a
+ *               thread's last message to build the chat list, and writes the JOINED and LEFT
+ *               lines that record membership changes in the thread itself.
+ *
+ *               Members have no roles: every member may speak, rename, add, remove and delete.
+ *               Who may read a thread without being a member is the team module's business
+ *               (a thread in a team is readable by whoever can access the team); it answers
+ *               which teams a thread is in through ThreadTeams.
+ *
+ *               listChats(userId, …) — the caller's chats; summaries(threadIds, userId, …) — any.
+ *               createThread(userId, body) / getThread(threadId, callerId) / renameThread /
+ *               dissolveThread
+ *               listMembers(threadId) / isMember(threadId, userId)
+ *               addMember(threadId, userId) / removeMember(threadId, userId) — each writes a line.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -11,6 +23,8 @@
 
 package app.microteams.chat.thread
 
+import app.microteams.chat.message.MessageEntity
+import app.microteams.chat.message.MessageKind
 import app.microteams.chat.message.MessageRepository
 import app.microteams.common.helper.PageHelper
 import app.microteams.model.*
@@ -24,7 +38,6 @@ import java.time.ZoneOffset
 import org.rucca.cheese.common.error.BadRequestError
 import org.rucca.cheese.common.error.NotFoundError
 import org.springframework.beans.factory.ObjectProvider
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -40,7 +53,7 @@ class ThreadService(
     // (the agent module implements AgentUsers). Chat only ever asks, and only when a caller asked
     // it to — a deployment with no such module simply answers nobody.
     private val agentUsers: ObjectProvider<AgentUsers>,
-    private val eventPublisher: ApplicationEventPublisher,
+    private val threadTeams: ObjectProvider<ThreadTeams>,
 ) {
     /**
      * Reject any id that does not refer to an existing user before it can be added as a thread
@@ -68,7 +81,7 @@ class ThreadService(
         val summaries =
             threadRepository
                 .threadsForUser(userId)
-                .map { it.toChatSummaryDTO() }
+                .map { it.toChatSummaryDTO(userId) }
                 .sortedWith(
                     compareByDescending<ChatSummaryDTO> { it.updatedAt }.thenByDescending { it.id },
                 )
@@ -99,7 +112,23 @@ class ThreadService(
         }
     }
 
-    private fun ThreadEntity.toChatSummaryDTO(): ChatSummaryDTO {
+    /** Chat summaries of the given threads (those that exist), most-recent activity first. */
+    fun summaries(
+        threadIds: Collection<Long>,
+        userId: Long,
+        queryIsMemberAgent: Boolean,
+    ): List<ChatSummaryDTO> =
+        withAgentFlags(
+            threadRepository
+                .findAllById(threadIds.toSet())
+                .map { it.toChatSummaryDTO(userId) }
+                .sortedWith(
+                    compareByDescending<ChatSummaryDTO> { it.updatedAt }.thenByDescending { it.id },
+                ),
+            queryIsMemberAgent,
+        )
+
+    private fun ThreadEntity.toChatSummaryDTO(caller: Long): ChatSummaryDTO {
         val threadId = id!!
         val members =
             threadMemberRepository
@@ -113,7 +142,11 @@ class ThreadService(
                         avatarId = profile?.avatar?.id,
                     )
                 }
-        val last = messageRepository.findTopByThreadIdAndDeletedAtIsNullOrderByIdDesc(threadId)
+        val last =
+            messageRepository.findTopByThreadIdAndKindAndDeletedAtIsNullOrderByIdDesc(
+                threadId,
+                MessageKind.TEXT,
+            )
         val activity = last?.createdAt ?: createdAt ?: LocalDateTime.MIN
         return ChatSummaryDTO(
             id = threadId,
@@ -128,6 +161,7 @@ class ThreadService(
                     )
                 },
             updatedAt = activity.atOffset(ZoneOffset.UTC),
+            isMember = members.any { it.userId == caller },
         )
     }
 
@@ -135,34 +169,30 @@ class ThreadService(
         body.memberIds?.let { requireUsersExist(it.filter { mid -> mid != userId }) }
         val t = ThreadEntity().apply { title = body.title }
         threadRepository.save(t)
-        threadMemberRepository.save(
-            ThreadMemberEntity().apply {
-                threadId = t.id
-                this.userId = userId
-                role = ThreadMemberRole.OWNER
-            },
-        )
-        body.memberIds?.forEach { mid ->
-            if (mid != userId)
-                threadMemberRepository.save(
-                    ThreadMemberEntity().apply {
-                        threadId = t.id
-                        this.userId = mid
-                        role = ThreadMemberRole.MEMBER
-                    },
-                )
+        (listOf(userId) + body.memberIds.orEmpty()).distinct().forEach { mid ->
+            threadMemberRepository.save(
+                ThreadMemberEntity().apply {
+                    threadId = t.id
+                    this.userId = mid
+                },
+            )
         }
-        // A new thread has no messages, so nothing has "moved" and the message event that normally
-        // refreshes a chat list never fires. Everybody who is now in it has a list that changed.
-        announceMembership(t.id!!)
         return t.toDTO()
     }
 
-    fun getThread(threadId: Long): ThreadDetailDTO {
+    fun getThread(threadId: Long, callerId: Long): ThreadDetailDTO {
         val t =
             threadRepository.findById(threadId).orElseThrow { NotFoundError("thread", threadId) }
-        return ThreadDetailDTO(thread = t.toDTO(), members = listMembers(threadId))
+        return ThreadDetailDTO(
+            thread = t.toDTO(),
+            members = listMembers(threadId),
+            teams = threadTeams.ifAvailable?.teamsOf(threadId) ?: emptyList(),
+            isMember = isMember(threadId, callerId),
+        )
     }
+
+    fun isMember(threadId: Long, userId: Long): Boolean =
+        threadMemberRepository.findByThreadIdAndUserId(threadId, userId) != null
 
     fun renameThread(threadId: Long, body: RenameThreadRequestDTO): ThreadDTO {
         val t =
@@ -177,7 +207,6 @@ class ThreadService(
             threadRepository.findById(threadId).orElseThrow { NotFoundError("thread", threadId) }
         t.deletedAt = LocalDateTime.now()
         threadRepository.save(t)
-        announceMembership(threadId)
     }
 
     fun listMembers(threadId: Long): List<ThreadMemberDTO> =
@@ -186,49 +215,35 @@ class ThreadService(
     private fun profileOf(userId: Long): UserProfile? =
         userProfileRepository.findByUserId(userId.toInt()).orElse(null)
 
-    fun addMember(threadId: Long, userId: Long, role: ThreadMemberRole) {
+    /** Make [userId] a member, recorded in the thread as a JOINED line; nothing if already one. */
+    fun addMember(threadId: Long, userId: Long) {
         requireUsersExist(listOf(userId))
-        val existing = threadMemberRepository.findByThreadIdAndUserId(threadId, userId)
-        if (existing != null) {
-            existing.role = role
-            threadMemberRepository.save(existing)
-        } else {
-            threadMemberRepository.save(
-                ThreadMemberEntity().apply {
-                    this.threadId = threadId
-                    this.userId = userId
-                    this.role = role
-                },
-            )
-        }
-        announceMembership(threadId)
+        if (isMember(threadId, userId)) return
+        threadMemberRepository.save(
+            ThreadMemberEntity().apply {
+                this.threadId = threadId
+                this.userId = userId
+            },
+        )
+        line(threadId, userId, MessageKind.JOINED)
     }
 
+    /** End [userId]'s membership, recorded in the thread as a LEFT line; nothing if not one. */
     fun removeMember(threadId: Long, userId: Long) {
+        if (!isMember(threadId, userId)) return
         threadMemberRepository.deleteByThreadIdAndUserId(threadId, userId)
-        // Including the person who left: their list lost a group, which is a change to it.
-        announceMembership(threadId, alsoTell = setOf(userId))
+        line(threadId, userId, MessageKind.LEFT)
     }
 
-    /**
-     * Say that a thread's membership changed, to whoever cares.
-     *
-     * Published rather than pushed: this service does not know that a socket exists, and the day it
-     * does is the day "remember to notify the socket" becomes something every new feature has to
-     * get right. See ThreadMembershipChangedEvent.
-     */
-    private fun announceMembership(threadId: Long, alsoTell: Set<Long> = emptySet()) {
-        val members =
-            threadMemberRepository.findByThreadId(threadId).mapNotNull { it.userId }.toSet()
-        eventPublisher.publishEvent(ThreadMembershipChangedEvent(threadId, members + alsoTell))
-    }
-
-    fun changeMemberRole(threadId: Long, userId: Long, role: ThreadMemberRole) {
-        val m =
-            threadMemberRepository.findByThreadIdAndUserId(threadId, userId)
-                ?: throw NotFoundError("member", userId)
-        m.role = role
-        threadMemberRepository.save(m)
+    private fun line(threadId: Long, userId: Long, kind: MessageKind) {
+        messageRepository.save(
+            MessageEntity().apply {
+                this.threadId = threadId
+                this.senderId = userId
+                this.kind = kind
+                this.content = ""
+            },
+        )
     }
 }
 
@@ -249,7 +264,6 @@ fun ThreadMemberEntity.toDTO(profile: UserProfile?) =
         id = id!!,
         threadId = threadId!!,
         userId = userId!!,
-        role = role.toDTO(),
         joinedAt = createdAt?.atOffset(ZoneOffset.UTC) ?: OffsetDateTime.now(),
         nickname = profile?.nickname ?: "user${userId!!}",
         avatarId = profile?.avatar?.id?.toLong(),

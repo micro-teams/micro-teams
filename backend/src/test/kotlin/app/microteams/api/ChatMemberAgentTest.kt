@@ -22,6 +22,8 @@ package app.microteams.api
 
 import app.microteams.agent.screen.AgentScreen
 import app.microteams.agent.screen.AgentScreenRepository
+import app.microteams.team.membership.TeamMember
+import app.microteams.team.membership.TeamMemberRepository
 import java.time.LocalDateTime
 import java.util.UUID
 import org.json.JSONObject
@@ -52,6 +54,7 @@ constructor(
     private val mockMvc: MockMvc,
     private val userCreatorService: UserCreatorService,
     private val agentScreenRepository: AgentScreenRepository,
+    private val teamMemberRepository: TeamMemberRepository,
 ) {
     private lateinit var humanToken: String
     private var humanId: IdType = -1
@@ -95,7 +98,6 @@ constructor(
                 sid = "s" + UUID.randomUUID().toString().replace("-", "").take(8),
                 machineId = "dev" + UUID.randomUUID().toString().replace("-", "").take(12),
                 token = UUID.randomUUID().toString().replace("-", ""),
-                teamId = teamId,
                 agentUserId = userId,
                 sessionId = UUID.randomUUID().toString(),
                 cwd = null,
@@ -103,6 +105,7 @@ constructor(
                 createdAt = LocalDateTime.now(),
             ),
         )
+        teamMemberRepository.save(TeamMember(teamId = teamId, userId = userId))
     }
 
     private fun createTeam(name: String): IdType {

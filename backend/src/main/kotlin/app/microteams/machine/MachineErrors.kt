@@ -22,4 +22,7 @@ class MachineNotFoundError(machineId: String) :
         mapOf("machineId" to machineId),
     )
 
+class TerminalNotFoundError(sid: String) :
+    BaseError(HttpStatus.NOT_FOUND, "terminal not found: $sid", mapOf("sid" to sid))
+
 class MachineCodeNotFoundError : BaseError(HttpStatus.NOT_FOUND, "unknown or expired machine code")

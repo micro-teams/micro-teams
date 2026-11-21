@@ -5,7 +5,6 @@
 package app.microteams.api
 
 import app.microteams.model.AddMemberRequestDTO
-import app.microteams.model.ChangeRoleRequestDTO
 import app.microteams.model.CreateThreadRequestDTO
 import app.microteams.model.ListChatsResponseDTO
 import app.microteams.model.ListMessagesResponseDTO
@@ -33,7 +32,8 @@ interface ChatApi {
 
     @Operation(
         tags = ["chat"],
-        summary = "Add a member to a thread (admin+)",
+        summary =
+            "Add a member to a thread (any member may). The addition is written into the thread as a JOINED line. ",
         operationId = "addThreadMember",
         description = """""",
         responses =
@@ -60,35 +60,8 @@ interface ChatApi {
 
     @Operation(
         tags = ["chat"],
-        summary = "Change a thread member's role (owner only)",
-        operationId = "changeThreadMemberRole",
-        description = """""",
-        responses =
-            [
-                ApiResponse(responseCode = "204", description = "Role changed"),
-            ],
-        security = [SecurityRequirement(name = "bearerAuth")],
-    )
-    @RequestMapping(
-        method = [RequestMethod.PATCH],
-        // "/chat/{id}/members/{userId}"
-        value = [PATH_CHANGE_THREAD_MEMBER_ROLE],
-        consumes = ["application/json"],
-    )
-    fun changeThreadMemberRole(
-        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
-        @Parameter(description = "", required = true) @PathVariable("userId") userId: kotlin.Long,
-        @Parameter(description = "")
-        @Valid
-        @RequestBody(required = false)
-        changeRoleRequestDTO: ChangeRoleRequestDTO?,
-    ): ResponseEntity<Unit> {
-        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
-    }
-
-    @Operation(
-        tags = ["chat"],
-        summary = "Create a thread (caller becomes owner)",
+        summary =
+            "Create a thread in no team (its members are who may read it); the caller is a member",
         operationId = "createThread",
         description = """""",
         responses =
@@ -119,7 +92,7 @@ interface ChatApi {
 
     @Operation(
         tags = ["chat"],
-        summary = "Dissolve a thread (owner only)",
+        summary = "Delete a thread (any member)",
         operationId = "dissolveThread",
         description = """""",
         responses =
@@ -163,6 +136,29 @@ interface ChatApi {
     fun getThread(
         @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
     ): ResponseEntity<ThreadDetailDTO> {
+        return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
+    }
+
+    @Operation(
+        tags = ["chat"],
+        summary =
+            "Join a thread you can read through one of its teams, written into it as a JOINED line. Speaking needs membership; reading does not. ",
+        operationId = "joinThread",
+        description = """""",
+        responses =
+            [
+                ApiResponse(responseCode = "204", description = "Joined"),
+            ],
+        security = [SecurityRequirement(name = "bearerAuth")],
+    )
+    @RequestMapping(
+        method = [RequestMethod.POST],
+        // "/chat/{id}/join"
+        value = [PATH_JOIN_THREAD],
+    )
+    fun joinThread(
+        @Parameter(description = "", required = true) @PathVariable("id") id: kotlin.Long,
+    ): ResponseEntity<Unit> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 
@@ -315,7 +311,8 @@ interface ChatApi {
 
     @Operation(
         tags = ["chat"],
-        summary = "Remove a member from a thread (admin+)",
+        summary =
+            "Remove a member from a thread (any member may; anyone may remove themselves, which is leaving). The removal is written into the thread as a LEFT line. ",
         operationId = "removeThreadMember",
         description = """""",
         responses =
@@ -338,7 +335,7 @@ interface ChatApi {
 
     @Operation(
         tags = ["chat"],
-        summary = "Rename a thread (admin+)",
+        summary = "Rename a thread (any member)",
         operationId = "renameThread",
         description = """""",
         responses =
@@ -371,10 +368,10 @@ interface ChatApi {
     companion object {
         // for your own safety never directly reuse these path definitions in tests
         const val PATH_ADD_THREAD_MEMBER: String = "/chat/{id}/members"
-        const val PATH_CHANGE_THREAD_MEMBER_ROLE: String = "/chat/{id}/members/{userId}"
         const val PATH_CREATE_THREAD: String = "/chat"
         const val PATH_DISSOLVE_THREAD: String = "/chat/{id}"
         const val PATH_GET_THREAD: String = "/chat/{id}"
+        const val PATH_JOIN_THREAD: String = "/chat/{id}/join"
         const val PATH_LIST_CHATS: String = "/chat"
         const val PATH_LIST_MESSAGES: String = "/chat/{id}/messages"
         const val PATH_LIST_THREAD_MEMBERS: String = "/chat/{id}/members"
