@@ -1,26 +1,26 @@
 /*
- * The one updates socket, and the loop that keeps it up.
+ * The one live socket, and the loop that keeps it up.
  *
- * new UpdatesSocket({ store, path, open }) — path() is read on every dial, so a reconnect after a
- *   token refresh carries the new token. open(path) is how a socket is made (over the substrate, or
- *   directly); it is injected so the reconnect rules can be driven without a server.
+ * new LiveSocket({ path, open, onOpen, onFrame }) — path() is read on every dial, so a reconnect
+ *   after a token refresh carries the new token. open(path) is how a socket is made (over the
+ *   substrate, or directly); it is injected so the reconnect rules can be driven without a server.
+ *   onOpen(send) runs on every connection, with the way to send frames on it; onFrame(text) gets
+ *   every text frame the server sends.
  * socket.start() — dial, and keep dialling with a widening gap (1 s doubling to 20 s, forgiven
  *   once a connection has lasted 5 s).
- * socket.resumed() — the app came back to the foreground: every topic refetches once and the
- *   socket is dialled again at once, because a suspended process cannot know whether its socket
- *   survived.
+ * socket.resumed() — the app came back to the foreground: dial again at once, because a suspended
+ *   process cannot know whether its socket survived.
  * socket.close() — for good.
  * Wire — the WebSocket shape open() returns: send, close, and the four on* callbacks.
  *
  * Example:
- *   const s = new UpdatesSocket({ store, path: () => `/mt/updates?token=${t}`, open: (p) => new WebSocket(url + p) });
+ *   const s = new LiveSocket({ path: () => `/mt/live?token=${t}`, open: (p) => new WebSocket(url + p),
+ *     onOpen: (send) => send('{"t":"get","id":"a","path":"/chat"}'), onFrame: (f) => handle(f) });
  *   s.start();
  *
  * The heartbeat is for one failure only: a half-open socket that never reports closing. A ping
  * every 20 s, and a socket silent for 45 s is closed and dialled again.
  */
-import { encodeFrame, parseFrame } from "./protocol";
-import { UpdatesStore } from "./store";
 
 export interface Wire {
   send(data: string | Uint8Array): void;
@@ -37,7 +37,14 @@ const MIN_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 20_000;
 const STABLE_MS = 5_000;
 
-export class UpdatesSocket {
+export type LiveSocketOptions = {
+  path: () => string;
+  open: (path: string) => Wire;
+  onOpen: (send: (text: string) => void) => void;
+  onFrame: (text: string) => void;
+};
+
+export class LiveSocket {
   private wire: Wire | null = null;
   private closed = true;
   private backoff = MIN_RETRY_MS;
@@ -46,9 +53,7 @@ export class UpdatesSocket {
   private retry: ReturnType<typeof setTimeout> | null = null;
   private stable: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(
-    private readonly opts: { store: UpdatesStore; path: () => string; open: (path: string) => Wire },
-  ) {}
+  constructor(private readonly opts: LiveSocketOptions) {}
 
   start() {
     this.closed = false;
@@ -58,7 +63,6 @@ export class UpdatesSocket {
 
   resumed() {
     if (this.closed) return;
-    this.opts.store.refocused();
     this.drop();
     this.dial();
   }
@@ -74,7 +78,6 @@ export class UpdatesSocket {
     if (this.stable) clearTimeout(this.stable);
     const old = this.wire;
     this.wire = null;
-    this.opts.store.disconnected();
     if (old) {
       old.onclose = old.onmessage = old.onerror = old.onopen = null;
       old.close();
@@ -87,7 +90,7 @@ export class UpdatesSocket {
     try {
       wire = this.opts.open(this.opts.path());
     } catch (e) {
-      console.warn(`updates: could not open the socket: ${String(e)}`);
+      console.warn(`live: could not open the socket: ${String(e)}`);
       this.lost();
       return;
     }
@@ -95,16 +98,16 @@ export class UpdatesSocket {
     this.lastHeard = Date.now();
     wire.onopen = () => {
       if (this.wire !== wire) return;
-      this.opts.store.connected((frame) => wire.send(encodeFrame(frame)));
+      this.opts.onOpen((text) => {
+        if (this.wire === wire) wire.send(text);
+      });
       this.stable = setTimeout(() => {
         if (this.wire === wire) this.backoff = MIN_RETRY_MS;
       }, STABLE_MS);
     };
     wire.onmessage = (ev) => {
       this.lastHeard = Date.now();
-      if (typeof ev.data !== "string") return;
-      const frame = parseFrame(ev.data);
-      if (frame) this.opts.store.handle(frame);
+      if (typeof ev.data === "string") this.opts.onFrame(ev.data);
     };
     wire.onclose = () => {
       if (this.wire === wire) this.lost();
@@ -129,7 +132,7 @@ export class UpdatesSocket {
       return;
     }
     try {
-      wire.send(encodeFrame({ t: "ping" }));
+      wire.send(JSON.stringify({ t: "ping" }));
     } catch {
       this.lost();
     }

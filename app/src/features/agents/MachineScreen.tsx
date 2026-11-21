@@ -1,11 +1,13 @@
 /*
- * One machine: what it is called, whether it is connected, which teams it serves, who is running
- * on it, and what can be done to it.
+ * One machine: what it is called, whether it is connected, which teams it is in, its terminals and
+ * commands, who is running on it, and what can be done to it.
  *
  * <MachineScreen /> — drawn for a "machine" frame with { team, machineId }. The name is a label,
  *   not an identifier — everything refers to the id — so renaming is free. It can be added to
  *   another team of this person's, or removed from one (other teams keep it). The agents on it in
- *   this team open their pages. De-registering forgets it for every team, and the host has to
+ *   this team open their pages. Its terminals belong to the machine, not to any team: anyone who can
+ *   use it opens a login shell or runs a command there, watches either in the live screen, and
+ *   closes it. De-registering forgets it for every team, and the host has to
  *   enrol again, so it asks first and says so. When the machine leaves this team the frame says
  *   so rather than showing stale facts.
  *
@@ -14,7 +16,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { useAllMachines, useFleet, useMachineActions } from "../../data/agents";
+import { useAllMachines, useFleet, useMachineActions, useTerminalActions, useTerminals } from "../../data/agents";
 import { useTeams } from "../../data/teams";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
@@ -51,6 +53,8 @@ export function MachineScreen() {
   const toast = useToast();
   const machine = all.find((m) => m.id === machineId) ?? fleet.machines.find((m) => m.id === machineId);
   const here = fleet.agents.filter((a) => a.machineId === machineId);
+  const { terminals } = useTerminals(machineId);
+  const terminalActions = useTerminalActions(machineId);
 
   const guard = async (action: () => Promise<unknown>) => {
     try {
@@ -62,7 +66,8 @@ export function MachineScreen() {
     }
   };
 
-  if (!machine || (fleet.loaded && !machine.teamIds.includes(team))) {
+  const teamIds = machine?.teams.map((t) => t.id) ?? [];
+  if (!machine || (fleet.loaded && !teamIds.includes(team))) {
     return (
       <View style={styles.root}>
         <Header title="machine" onBack={backFor(self)} />
@@ -88,7 +93,12 @@ export function MachineScreen() {
     if (ok && (await guard(() => actions.forget(machine)))) popTo(self.key);
   };
 
-  const elsewhere = teams.filter((t) => !machine.teamIds.includes(t.id));
+  const openTerminal = () => guard(async () => push("screen", "overlay", { sessionId: await terminalActions.open() }));
+  const runCommand = async () => {
+    const command = await ask<string>("run a command", (done) => <TextPrompt testID="command-text" placeholder="command" action="run" done={done} />);
+    if (command?.trim()) await guard(async () => push("screen", "overlay", { sessionId: await terminalActions.run(command.trim()) }));
+  };
+  const elsewhere = teams.filter((t) => !teamIds.includes(t.id));
   return (
     <View style={styles.root}>
       <Header title={machine.name} onBack={backFor(self)} />
@@ -109,7 +119,7 @@ export function MachineScreen() {
             ]}
           />
           <Section
-            title={`serves ${machine.teamIds.length} ${machine.teamIds.length === 1 ? "team" : "teams"}`}
+            title={`in ${machine.teams.length} ${machine.teams.length === 1 ? "team" : "teams"}`}
             action={
               elsewhere.length ? (
                 <MenuButton testID="machine-add-team" items={elsewhere.map((t) => ({ value: t.id, label: t.name }))} onSelected={(id) => guard(() => actions.bind(machine.id, id))}>
@@ -121,24 +131,66 @@ export function MachineScreen() {
             }
           />
           <View style={styles.bordered}>
-            {machine.teamIds.map((id, i) => (
+            {machine.teams.map(({ id, name }, i) => (
               <View key={id} style={[styles.line, i > 0 && styles.divided]}>
                 <View style={styles.grow}>
-                  {/* A team you are not in has no name to show; its id is better than an invented one. */}
-                  <Txt>{teams.find((t) => t.id === id)?.name ?? `team #${id}`}</Txt>
+                  <Txt>{name}</Txt>
                   {id === team ? (
                     <Txt variant="small" muted>
                       this team
                     </Txt>
                   ) : null}
                 </View>
-                {id === team && machine.teamIds.length > 1 ? (
+                {id === team && machine.teams.length > 1 ? (
                   <Pressable testID={`machine-unbind-${id}`} accessibilityLabel="remove from this team" hitSlop={8} onPress={() => removeFrom(id)}>
                     <MaterialIcons name="close" size={18} color={colors.inkMuted} />
                   </Pressable>
                 ) : null}
               </View>
             ))}
+          </View>
+          <Section
+            title="terminals"
+            action={
+              <View style={styles.links}>
+                <Pressy testID="terminal-open" onPress={openTerminal}>
+                  <Txt variant="small" style={{ color: colors.brand }}>
+                    open terminal
+                  </Txt>
+                </Pressy>
+                <Pressy testID="command-run" onPress={runCommand}>
+                  <Txt variant="small" style={{ color: colors.brand }}>
+                    run command
+                  </Txt>
+                </Pressy>
+              </View>
+            }
+          />
+          <View style={styles.bordered}>
+            {terminals.length ? (
+              terminals.map((t, i) => (
+                <View key={t.sid} style={[styles.line, i > 0 && styles.divided]}>
+                  <Pressy testID={`terminal-${t.sid}`} onPress={() => push("screen", "overlay", { sessionId: t.sid })} style={[styles.grow, styles.term]}>
+                    <MaterialIcons name={t.kind === "COMMAND" ? "play-arrow" : "terminal"} size={18} color={colors.inkMuted} />
+                    <Txt style={styles.grow} numberOfLines={1}>
+                      {t.kind === "COMMAND" ? (t.command ?? "command") : "terminal"}
+                    </Txt>
+                    {t.exitCode !== undefined ? (
+                      <Txt variant="small" muted>
+                        {`exit ${t.exitCode}`}
+                      </Txt>
+                    ) : null}
+                  </Pressy>
+                  <Pressable testID={`terminal-close-${t.sid}`} accessibilityLabel="close" hitSlop={8} onPress={() => guard(() => terminalActions.close(t.sid))}>
+                    <MaterialIcons name="close" size={18} color={colors.inkMuted} />
+                  </Pressable>
+                </View>
+              ))
+            ) : (
+              <View style={styles.line}>
+                <Txt muted>none open</Txt>
+              </View>
+            )}
           </View>
           <Section title="agents on this machine" />
           <View style={styles.bordered}>
@@ -188,6 +240,8 @@ const styles = StyleSheet.create({
   center: { alignSelf: "center" },
   section: { flexDirection: "row", alignItems: "center", marginTop: 12 },
   grow: { flex: 1 },
+  links: { flexDirection: "row", gap: 16 },
+  term: { flexDirection: "row", alignItems: "center", gap: 8 },
   bordered: { borderWidth: 1, borderColor: colors.line, borderRadius: 8, overflow: "hidden" },
   line: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
   divided: { borderTopWidth: 1, borderTopColor: colors.line },

@@ -1,49 +1,43 @@
 /*
- * The chat list and one conversation, as queries: what a screen reads, never how it is fetched.
+ * The chat list and one conversation: what a screen reads, never how it is fetched.
  *
- * useChats() → { chats, loadMore(), hasMore, loading, error, refresh() } — every page of the
- *   caller's conversations, most recent activity first. loadMore() fetches the next page; it is a
- *   no-op while one is in flight or when there is none.
+ * useChats() → { chats, loadMore(), hasMore, loading, error } — the caller's conversations, most
+ *   recent activity first; loadMore() asks the same live request for more of them.
  * useThread(id) → { messages, loaded, pending, loadOlder(), hasOlder, loadingOlder, error, send(text),
- *   retry(token), discard(token) } — one conversation, oldest first; loaded turns true once the
- *   newest page has arrived. Sending goes through the conversation's Outbox (data/outbox.ts):
- *   pending is what it still owes, retry sends one again now, discard gives its text back.
- * useThreadInfo(id) → { title(me), storedTitle, members, roleOf(userId), rename(title), add(userId),
- *   remove(userId), dissolve() } — a conversation's title and members, owners first, and what an
- *   owner or admin can do to it; title(me) is the stored title, or the other people's names when
- *   there is none. Each action refetches the conversation and the chat list.
+ *   retry(token), discard(token) } — one conversation, oldest first, including the JOINED and LEFT
+ *   lines; loadOlder() asks the same live request for a longer stretch of history. Sending goes
+ *   through the conversation's Outbox (data/outbox.ts): pending is what it still owes, retry sends
+ *   one again now, discard gives its text back.
+ * useThreadInfo(id) → { members, teams, isMember, storedTitle, title(me), rename(title), add(userId),
+ *   remove(userId), join(), leave(me), dissolve() } — a conversation's title, members and teams,
+ *   and what anyone in it can do; a reader who is not a member can join. title(me) is the stored
+ *   title, or the other people's names when there is none.
  * useCreateChat() → create(title, memberIds?) → the new thread's id. parseMemberIds(raw) — "12, 34 56" as ids.
  * chatTitle(chat, me) — a group by its title, a one-to-one by the other person.
  *
  * ChatSummary, ThreadMember — the API's own shapes, named for the screens.
- * useFirstScreen(signedIn) → boolean — true once the first screen can be shown complete: signed
- *   out, or the chat list's first page has arrived or failed, or eight seconds have passed.
+ * useFirstScreen(signedIn) → boolean — true once the first screen can be shown: signed out, or the
+ *   chat list's first answer has arrived (kept from the last run counts), or eight seconds passed.
  *
  * Example:
  *   const { chats, loadMore } = useChats();
  *   chats.map((c) => <Row key={c.id} chat={c} />), and loadMore() when a scroll ends near the end
  *
- * Pages are fetched by cursor. The list and a conversation are fetched again when the updates
- * socket says their topic moved (and once on every reconnect and return to the foreground), and
- * they answer the server's periodic digest with what they hold. A conversation's newest page is
- * folded in by id: what it covers comes from the server, what it no longer covers (older history
- * the reader scrolled up to) is kept.
+ * Everything here is a live request (data/live.ts): the server answers again whenever what it
+ * returns changes, so nothing here refetches or patches after a write.
  */
-import type { Message } from "./merge";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Schema } from "../api/client";
-import { mergeNewest, mergeOlder } from "./merge";
+import { livePath, useLive } from "./live";
 import { Outbox, type Pending } from "./outbox";
-import { chatsTopic, threadDigest, threadTopic, useTopic } from "./topics";
 import { useSession } from "./session";
 
 export type ChatSummary = Schema["ChatSummary"];
-export type { Message } from "./merge";
+export type Message = Schema["Message"];
 export type { Pending } from "./outbox";
 
-const CHATS_PAGE = 50;
-const MESSAGES_PAGE = 100;
+const CHATS_STEP = 50;
+const MESSAGES_STEP = 100;
 
 export function chatTitle(chat: ChatSummary, me: number | undefined): string {
   if (chat.title) return chat.title;
@@ -51,66 +45,47 @@ export function chatTitle(chat: ChatSummary, me: number | undefined): string {
   return others.length === 1 ? others[0].nickname : chat.members.map((m) => m.nickname).join(", ");
 }
 
+const chatsPath = (n: number) => livePath("/chat", { page_size: n, queryIsMemberAgent: true });
+
 /**
- * Whether the first screen has what it shows: signed out, at once; signed in, once the chat list's
- * first page has arrived or failed — or after eight seconds, so a slow server never holds the app
+ * Whether the first screen has what it shows: signed out, at once; signed in, once the chat list
+ * has an answer (a kept one counts) — or after eight seconds, so a slow server never holds the app
  * behind its splash.
  */
 export function useFirstScreen(signedIn: boolean): boolean {
-  const queries = useQueryClient();
   const [late, setLate] = useState(false);
-  const settled = useSyncExternalStore(
-    (changed) => queries.getQueryCache().subscribe(changed),
-    () => {
-      const st = queries.getQueryState(["chats"]);
-      return !!st && (st.status === "success" || st.status === "error");
-    },
-  );
+  const { loaded } = useLive<ListChats>(signedIn ? chatsPath(CHATS_STEP) : null);
   useEffect(() => {
     if (!signedIn) return;
     const t = setTimeout(() => setLate(true), 8000);
     return () => clearTimeout(t);
   }, [signedIn]);
-  return !signedIn || settled || late;
+  return !signedIn || loaded || late;
 }
 
+type ListChats = Schema["ListChatsResponse"];
+type ListMessages = Schema["ListMessagesResponse"];
+
 export function useChats() {
-  const { mt, user } = useSession();
-  const q = useInfiniteQuery({
-    queryKey: ["chats"],
-    initialPageParam: undefined as number | undefined,
-    queryFn: async ({ pageParam }) => {
-      const { data } = await mt!.GET("/chat", {
-        params: { query: { page_size: CHATS_PAGE, page_start: pageParam, queryIsMemberAgent: true } },
-      });
-      return data!;
-    },
-    getNextPageParam: (last) => (last.page.has_more ? last.page.next_start : undefined),
-  });
-  // The server digests the number of conversations, which only the whole list can answer.
-  useTopic(user ? chatsTopic(user.id) : null, () => q.refetch(), () =>
-    q.data && !q.hasNextPage ? String(q.data.pages.reduce((n, p) => n + p.chats.length, 0)) : null,
-  );
+  const [n, setN] = useState(CHATS_STEP);
+  const { data, loaded, status } = useLive<ListChats>(chatsPath(n));
+  const hasMore = !!data?.page.has_more;
   return {
-    chats: q.data?.pages.flatMap((p) => p.chats) ?? [],
+    chats: data?.chats ?? [],
     loadMore: () => {
-      if (q.hasNextPage && !q.isFetchingNextPage) q.fetchNextPage();
+      if (hasMore) setN((x) => x + CHATS_STEP);
     },
-    hasMore: q.hasNextPage,
-    loading: q.isPending,
-    error: q.error,
-    refresh: () => q.refetch(),
+    hasMore,
+    loading: !loaded,
+    error: status !== undefined && status !== 200 ? new Error(`chat list: ${status}`) : null,
   };
 }
 
-
 export function useThread(id: number) {
   const { mt } = useSession();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [older, setOlder] = useState<number | null | undefined>(undefined);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [n, setN] = useState(MESSAGES_STEP);
+  const { data, loaded, status } = useLive<ListMessages>(livePath(`/chat/${id}/messages`, { page_size: n }));
+  const messages: Message[] = useMemo(() => data?.messages ?? [], [data]);
 
   const outbox = useMemo(
     () =>
@@ -118,63 +93,27 @@ export function useThread(id: number) {
         id,
         async (content, clientToken) =>
           (await mt!.POST("/chat/{id}/messages", { params: { path: { id } }, body: { content, clientToken } })).data!,
-        (sent) => {
-          if (sent) setMessages((held) => mergeNewest(held, [sent]));
-          setPending(outbox.pending);
-        },
+        () => setPending(outbox.pending),
       ),
     [mt, id],
   );
   const [pending, setPending] = useState<readonly Pending[]>(() => outbox.pending);
   useEffect(() => () => outbox.dispose(), [outbox]);
-
-  const [tick, setTick] = useState(0);
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await mt!.GET("/chat/{id}/messages", { params: { path: { id }, query: { page_size: MESSAGES_PAGE } } });
-        if (!alive || !data) return;
-        setMessages((held) => mergeNewest(held, data.messages));
-        outbox.reconcile(data.messages);
-        setOlder((o) => (o === undefined ? (data.page.has_more ? (data.page.next_start ?? null) : null) : o));
-        setLoaded(true);
-        setError(null);
-      } catch (e) {
-        if (alive) setError(e);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [mt, id, outbox, tick]);
-  useTopic(threadTopic(id), () => setTick((n) => n + 1), () => (loaded ? threadDigest(messages, MESSAGES_PAGE) : null));
+    if (data) outbox.reconcile(data.messages);
+  }, [outbox, data]);
 
-  const loadOlder = async () => {
-    if (older == null || loadingOlder) return;
-    setLoadingOlder(true);
-    try {
-      const { data } = await mt!.GET("/chat/{id}/messages", {
-        params: { path: { id }, query: { page_size: MESSAGES_PAGE, page_start: older } },
-      });
-      if (data) {
-        setMessages((held) => mergeOlder(held, data.messages));
-        setOlder(data.page.has_more ? (data.page.next_start ?? null) : null);
-      }
-    } catch (e) {
-      setError(e);
-    }
-    setLoadingOlder(false);
-  };
-
+  const hasOlder = !!data?.page.has_more;
   return {
     messages,
     loaded,
     pending,
-    loadOlder,
-    hasOlder: older !== null,
-    loadingOlder,
-    error,
+    loadOlder: () => {
+      if (hasOlder) setN((x) => x + MESSAGES_STEP);
+    },
+    hasOlder,
+    loadingOlder: hasOlder && messages.length < n && !!data && data.messages.length < n,
+    error: status !== undefined && status !== 200 ? new Error(`conversation: ${status}`) : null,
     send: (text: string) => outbox.enqueue(text),
     retry: (clientToken: string) => outbox.retry(clientToken),
     discard: (clientToken: string) => outbox.discard(clientToken),
@@ -182,32 +121,25 @@ export function useThread(id: number) {
 }
 
 export type ThreadMember = Schema["ThreadMember"];
-
-const RANK = { OWNER: 0, ADMIN: 1, MEMBER: 2 } as const;
+type ThreadDetail = Schema["ThreadDetail"];
 
 export function useThreadInfo(id: number) {
   const { mt } = useSession();
-  const q = useQuery({
-    queryKey: ["thread", id],
-    queryFn: async () => (await mt!.GET("/chat/{id}", { params: { path: { id } } })).data!,
-  });
-  // The same array until the conversation changes, so the rows that take it are not redrawn.
-  const members: ThreadMember[] = useMemo(() => [...(q.data?.members ?? [])].sort((a, b) => RANK[a.role] - RANK[b.role]), [q.data]);
-  const queries = useQueryClient();
-  const after = async (call: Promise<unknown>) => {
-    await call;
-    await Promise.all([queries.invalidateQueries({ queryKey: ["thread", id] }), queries.invalidateQueries({ queryKey: ["chats"] })]);
-  };
+  const { data } = useLive<ThreadDetail>(`/chat/${id}`);
+  const members: ThreadMember[] = useMemo(() => data?.members ?? [], [data]);
   return {
     members,
-    storedTitle: q.data?.thread.title ?? "",
-    roleOf: (userId: number | undefined) => members.find((m) => m.userId === userId)?.role,
-    rename: (title: string) => after(mt!.PATCH("/chat/{id}", { params: { path: { id } }, body: { title } })),
-    add: (userId: number) => after(mt!.POST("/chat/{id}/members", { params: { path: { id } }, body: { userId } })),
-    remove: (userId: number) => after(mt!.DELETE("/chat/{id}/members/{userId}", { params: { path: { id, userId } } })),
-    dissolve: () => after(mt!.DELETE("/chat/{id}", { params: { path: { id } } })),
+    teams: data?.teams ?? [],
+    isMember: data?.isMember ?? true,
+    storedTitle: data?.thread.title ?? "",
+    rename: (title: string) => mt!.PATCH("/chat/{id}", { params: { path: { id } }, body: { title } }),
+    add: (userId: number) => mt!.POST("/chat/{id}/members", { params: { path: { id } }, body: { userId } }),
+    remove: (userId: number) => mt!.DELETE("/chat/{id}/members/{userId}", { params: { path: { id, userId } } }),
+    join: () => mt!.POST("/chat/{id}/join", { params: { path: { id } } }),
+    leave: (me: number) => mt!.DELETE("/chat/{id}/members/{userId}", { params: { path: { id, userId: me } } }),
+    dissolve: () => mt!.DELETE("/chat/{id}", { params: { path: { id } } }),
     title: (me: number | undefined) => {
-      if (q.data?.thread.title) return q.data.thread.title;
+      if (data?.thread.title) return data.thread.title;
       const others = members.filter((m) => m.userId !== me);
       return others.map((m) => m.nickname ?? `#${m.userId}`).join(", ");
     },
@@ -216,15 +148,10 @@ export function useThreadInfo(id: number) {
 
 export function useCreateChat() {
   const { mt } = useSession();
-  const queries = useQueryClient();
-  const m = useMutation({
-    mutationFn: async ({ title, memberIds }: { title: string; memberIds: number[] }) => {
-      const { data } = await mt!.POST("/chat", { body: { title, memberIds } });
-      return data!.id;
-    },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["chats"] }),
-  });
-  return (title: string, memberIds: number[] = []) => m.mutateAsync({ title, memberIds });
+  return async (title: string, memberIds: number[] = []) => {
+    const { data } = await mt!.POST("/chat", { body: { title, memberIds } });
+    return data!.id;
+  };
 }
 
 /** "12, 34 56" as ids. Anything that is not a number is dropped: a stray comma is not worth refusing. */

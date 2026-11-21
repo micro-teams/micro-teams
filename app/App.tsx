@@ -21,12 +21,12 @@ import { AgentScreen } from "./src/features/agents/AgentScreen";
 import { DocDiffScreen, DocHistoryScreen } from "./src/features/docs/DocHistoryScreen";
 import { DocScreen } from "./src/features/docs/DocScreen";
 import { DocsScreen } from "./src/features/docs/DocsScreen";
-import { AgentsScreen } from "./src/features/agents/AgentsScreen";
+import { TeamsSection } from "./src/features/teams/TeamsSection";
 import { ConnectScreen } from "./src/features/agents/ConnectScreen";
 import { MachineScreen } from "./src/features/agents/MachineScreen";
 import { ThreadInfoScreen } from "./src/features/chats/ThreadInfoScreen";
 import { ThreadScreen } from "./src/features/chats/ThreadScreen";
-import { TeamScreen, TeamsScreen } from "./src/features/teams/TeamsScreen";
+import { TeamListScreen, TeamScreen } from "./src/features/teams/TeamsScreen";
 import { ScreenFrame } from "./src/features/terminal/ScreenFrame";
 import { LinesScreen, MeScreen } from "./src/features/me/MeScreen";
 import { SessionProvider, useSession } from "./src/data/session";
@@ -50,7 +50,7 @@ export const routes = {
   doc: DocScreen,
   docHistory: DocHistoryScreen,
   docDiff: DocDiffScreen,
-  agents: AgentsScreen,
+  teams: TeamsSection,
   agent: AgentScreen,
   machine: MachineScreen,
   connect: ConnectScreen,
@@ -59,7 +59,7 @@ export const routes = {
   dialog: DialogFrame,
   menu: MenuFrame,
   screen: ScreenFrame,
-  teams: TeamsScreen,
+  teamList: TeamListScreen,
   team: TeamScreen,
 };
 

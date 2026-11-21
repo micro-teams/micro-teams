@@ -29,6 +29,9 @@
  * A message that definitely did not reach a recipient (an agent whose program could not take it)
  * says so under it, one muted line per recipient: "Not delivered to <name>: <reason>".
  *
+ * Joining and leaving are drawn as a grey line where they happened. A reader who is not a member
+ * (the chat is in one of their teams) sees "join to speak" where the composer would be.
+ *
  * A message on its way is drawn at once, faded, with "sending…" under it; one that has failed several
  * times says why and offers retry and remove, and removing puts its text back in the composer.
  *
@@ -71,6 +74,14 @@ function Bubble({ text, mine, faded }: { text: string; mine: boolean; faded?: bo
 const Row = memo(function Row({ item, prev, me, members, group }: { item: Message; prev?: Message; me?: number; members: Member[]; group: boolean }) {
   const mine = item.senderId === me;
   const who = members.find((m) => m.userId === item.senderId);
+  if (item.kind !== "TEXT") {
+    const name = mine ? "you" : (who?.nickname ?? `#${item.senderId}`);
+    return (
+      <Txt testID={`message-${item.id}`} variant="label" muted style={styles.separator}>
+        {`${name} ${item.kind === "JOINED" ? "joined" : "left"}`}
+      </Txt>
+    );
+  }
   return (
     <View testID={`message-${item.id}`}>
       {needsSeparator(prev?.createdAt, item.createdAt) && (
@@ -240,6 +251,13 @@ export function ThreadScreen() {
         </View>
       )}
       {!thread.loaded && <View style={styles.fill} />}
+      {!info.isMember ? (
+        <View style={styles.composer}>
+          <View style={styles.composerColumn}>
+            <Button kind="filled" testID="join-chat" label="join to speak" onPress={() => void info.join()} />
+          </View>
+        </View>
+      ) : (
       <KeyboardStickyView offset={{ closed: 0, opened: bottom }}>
         <View ref={composerArea} style={styles.composer}>
           <View style={styles.composerColumn}>
@@ -262,6 +280,7 @@ export function ThreadScreen() {
           </View>
         </View>
       </KeyboardStickyView>
+      )}
     </View>
   );
 }

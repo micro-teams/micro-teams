@@ -25,7 +25,7 @@
  * than retried forever. The clientToken is what makes a blind retry safe: the server stores a
  * token once per conversation and answers a repeat with the message it already has.
  */
-import type { Message } from "./merge";
+import type { Message } from "./chats";
 import { storage } from "../platform/storage";
 
 export type Pending = { clientToken: string; content: string; attempts: number; lastError: string | null };

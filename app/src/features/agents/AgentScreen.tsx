@@ -134,7 +134,8 @@ export function AgentScreen() {
                 { label: "user id", value: String(agent.userId) },
                 { label: "driver", value: agent.driver },
                 { label: "machine", value: fleet.machineName(agent.machineId) },
-                { label: "team", value: agent.teamId === undefined ? undefined : String(agent.teamId) },
+                { label: "teams", value: agent.teams?.length ? agent.teams.map((t) => t.name).join(", ") : undefined },
+                { label: "chats", value: agent.chats?.length ? agent.chats.map((c) => c.title || `#${c.id}`).join(", ") : undefined },
                 { label: "status", value: !agent.online ? undefined : isWorking(agent) ? String(agent.vars?.status) : "idle" },
               ]}
             />

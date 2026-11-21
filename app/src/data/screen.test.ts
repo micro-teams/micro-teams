@@ -3,7 +3,7 @@
  *
  * Run with `npm test`. The socket is a fake that records what was sent.
  */
-import type { Wire } from "../transport/updates/socket";
+import type { Wire } from "../transport/live/socket";
 import { LiveScreen, type ScreenState } from "./screen";
 
 function fakeWire(path: string) {
