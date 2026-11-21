@@ -27,12 +27,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useEffect, useRef, useState, type ElementRef } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLiveScreen, type ScreenState } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
+import { isWeb } from "../../platform/platform";
 import { Txt } from "../../ui/kit";
 import { withMods } from "./keys";
 import { colors, fonts } from "../../ui/theme";
@@ -84,7 +85,7 @@ export function ScreenFrame() {
   // refuse the tap's default so the terminal keeps it.
   const keyRows = useRef<ElementRef<typeof View>>(null);
   useEffect(() => {
-    if (Platform.OS !== "web" || !keyRows.current) return;
+    if (!isWeb || !keyRows.current) return;
     const el = keyRows.current as unknown as HTMLElement;
     const keep = (e: Event) => e.preventDefault();
     el.addEventListener("mousedown", keep);
