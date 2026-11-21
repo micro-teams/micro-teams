@@ -1,35 +1,12 @@
 "use strict";
 (() => {
-  var __defProp = Object.defineProperty;
-  var __defProps = Object.defineProperties;
-  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
-  var __getOwnPropSymbols = Object.getOwnPropertySymbols;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __propIsEnum = Object.prototype.propertyIsEnumerable;
-  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __spreadValues = (a, b) => {
-    for (var prop in b || (b = {}))
-      if (__hasOwnProp.call(b, prop))
-        __defNormalProp(a, prop, b[prop]);
-    if (__getOwnPropSymbols)
-      for (var prop of __getOwnPropSymbols(b)) {
-        if (__propIsEnum.call(b, prop))
-          __defNormalProp(a, prop, b[prop]);
-      }
-    return a;
-  };
-  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
-
   // src/engine/host.ts
-  var raw = globalThis.connector;
-  var host = __spreadProps(__spreadValues({}, raw), {
-    term: {
-      read: () => raw.term.read(),
-      onChange: (fn) => raw.term.onChange(fn),
-      write: (data) => raw.term.write(data) !== false,
-      hold: (on) => raw.term.hold ? raw.term.hold(on) : true
-    }
-  });
+  var host = (() => {
+    const g = globalThis;
+    const found = g.connector || g.microteams;
+    if (!found) throw new Error("micro-connector: no host global found (connector / microteams)");
+    return found;
+  })();
 
   // src/engine/keys.ts
   var ESC = "\x1B";
@@ -106,11 +83,6 @@
     return lines.slice(Math.max(0, end - n), end).join("\n");
   }
   var tailOf = tail;
-  var inputQueue = [];
-  function send(text, mode = "type") {
-    inputQueue.push({ text, mode });
-    return "queued";
-  }
   function defineDriver(spec) {
     var _a, _b, _c;
     const tailLines = (_a = spec.tailLines) != null ? _a : 16;
@@ -122,45 +94,58 @@
     const choices = host.own("choices", []);
     const extra = {};
     for (const key of Object.keys((_b = spec.vars) != null ? _b : {})) extra[key] = host.own(key, spec.vars[key]);
-    let inFlight = null;
-    function report(p, ok, error) {
-      if (p.id !== void 0) host.call("sayResult", { id: p.id, ok, error: error != null ? error : "" });
+    const label = host.watch("label");
+    label.onChange((v) => host.log("screen labelled: " + v));
+    const viewerLevel = host.watch("viewerLevel");
+    const viewerActive = () => {
+      const l = viewerLevel.get();
+      return l === "scroll" || l === "full";
+    };
+    const viewerTyping = () => viewerLevel.get() === "full";
+    let submitIn = 0;
+    let queue = [];
+    let cmdSince = false;
+    function gated(fn) {
+      return function(...args) {
+        const run = () => {
+          cmdSince = true;
+          return fn.apply(null, args);
+        };
+        if (viewerTyping()) {
+          queue.push(run);
+          return "buffered";
+        }
+        return run();
+      };
     }
-    function pump(status) {
-      if (inFlight) {
-        if (!term.hold(true)) return;
-        if (--inFlight.enterIn > 0) return;
-        const done = inFlight;
-        inFlight = null;
-        const ok = term.write(ENTER);
-        term.hold(false);
-        report(done, ok, ok ? void 0 : "the Enter could not be written");
-        return;
+    viewerLevel.onChange(() => {
+      if (!viewerTyping() && queue.length) {
+        const q = queue;
+        queue = [];
+        q.forEach((f) => f());
       }
-      if (!inputQueue.length || status !== "idle" && status !== "busy") return;
-      if (!term.hold(true)) return;
-      const next = inputQueue[0];
-      const body = next.mode === "paste" ? PASTE_START + next.text + PASTE_END : next.text;
-      if (!term.write(body)) {
-        term.hold(false);
-        return;
-      }
-      inputQueue.shift();
-      inFlight = __spreadProps(__spreadValues({}, next), { enterIn: 2 });
-    }
+    });
+    let stableBusy = false;
+    let wasActive = false;
     let frame = 0;
     term.onChange(() => {
       var _a2, _b2, _c2;
       frame++;
       const screen = term.read();
       const tail2 = tailOf(screen, tailLines);
-      const ctx = { screen, tail: tail2, frame, status: statusVar.get(), write: (d) => term.write(d) };
-      const last = (_a2 = tail2.split("\n").pop()) != null ? _a2 : "";
-      if (/^Pane is dead \(status \d+/.test(last.trim())) {
-        statusVar.set("dead");
-        return;
+      const ctx = {
+        screen,
+        tail: tail2,
+        frame,
+        status: statusVar.get(),
+        write: (d) => term.write(d),
+        viewerActive,
+        viewerTyping
+      };
+      if (submitIn > 0 && !viewerTyping()) {
+        if (--submitIn === 0) term.write(ENTER);
       }
-      for (const gate of (_b2 = spec.gates) != null ? _b2 : []) {
+      for (const gate of (_a2 = spec.gates) != null ? _a2 : []) {
         const gctx = {
           screen,
           tail: tail2,
@@ -173,17 +158,30 @@
           }
         };
         const up = typeof gate.when === "function" ? gate.when(gctx) : gate.when.test(screen);
-        if (!up) continue;
-        if (frame % ((_c2 = gate.every) != null ? _c2 : 2) === 0) gate.act(gctx);
-        statusVar.set("starting");
+        if (!up || viewerTyping()) continue;
+        if (frame % ((_b2 = gate.every) != null ? _b2 : 2) === 0) gate.act(gctx);
         return;
       }
+      const active = viewerActive();
+      if (((_c2 = spec.keepAtBottom) != null ? _c2 : true) && wasActive && !active) {
+        for (let i = 0; i < 12; i++) term.write(PGDN);
+      }
+      wasActive = active;
       const o = spec.observe(screen);
       let st = o.kind;
-      if (o.kind === "open") st = o.working ? "busy" : o.hasUI ? "idle" : "starting";
+      if (o.kind === "open") {
+        let busy;
+        if (!active) {
+          busy = !!o.working;
+          stableBusy = busy;
+          cmdSince = false;
+        } else {
+          busy = stableBusy || cmdSince;
+        }
+        st = busy ? "busy" : o.hasUI ? "idle" : "starting";
+      }
       ctx.status = st;
-      pump(st);
-      if (st === "idle" && !inFlight && !inputQueue.length && spec.onIdle) spec.onIdle(ctx);
+      if (st === "idle" && !active && spec.onIdle) spec.onIdle(ctx);
       statusVar.set(st);
       question.set(o.kind === "waiting" ? o.question || "" : "");
       choices.set(o.kind === "waiting" ? o.choices || [] : []);
@@ -198,17 +196,18 @@
       if (spec.report) spec.report(ctx, extra, o);
     });
     host.expose("snapshot", () => term.read());
-    const seen = /* @__PURE__ */ new Set();
-    host.expose("say", (text, id) => {
-      if (id !== void 0) {
-        if (seen.has(String(id))) return "queued";
-        seen.add(String(id));
-      }
-      const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
-      inputQueue.push({ text: body, mode: "paste", id: id === void 0 ? void 0 : String(id) });
-      return "queued";
-    });
-    for (const name of Object.keys((_c = spec.commands) != null ? _c : {})) host.expose(name, spec.commands[name]);
+    host.expose(
+      "say",
+      gated((text) => {
+        const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
+        term.write(PASTE_START + body + PASTE_END);
+        submitIn = 2;
+        return true;
+      })
+    );
+    for (const name of Object.keys((_c = spec.commands) != null ? _c : {})) {
+      host.expose(name, gated(spec.commands[name]));
+    }
     host.call("screenReady", { driver: spec.name, version: spec.version }).then((ack) => {
       host.log("server acked screenReady: " + JSON.stringify(ack));
     });
@@ -233,6 +232,7 @@
   function observe(screen) {
     const tail2 = tail(screen, 16).split("\n");
     const tailStr = tail2.join("\n");
+    if (/Pane is dead \(status/.test(tailStr)) return { kind: "dead" };
     const trust = /Do you trust/i.test(tailStr);
     const hasFooter = /Esc to cancel|to amend|ctrl\+e to explain|Enter to (confirm|continue)|Esc to exit/i.test(tailStr);
     const selIdx = tail2.findIndex((l) => /❯\s+\d+\.\s/.test(clean(l)));
@@ -262,7 +262,7 @@
       return spins(c) && !/esc to interrupt/.test(c);
     }).length;
     const busyFooter = /…\s*\([^)]*\b(?:\d+[hms]|tokens?)\b[^)]*\)/i.test(tailStr);
-    const hasUI = /\? for shortcuts|for agents|permissions on|mode on|shift\+tab to cycle/i.test(tailStr);
+    const hasUI = /\? for shortcuts|for agents/.test(tailStr) || tail2.filter((l) => l.trim()).length > 3;
     return { kind: "open", working: orange || anySpinner || busyFooter, hasUI, bandRows };
   }
   defineDriver({
@@ -270,9 +270,15 @@
     version: 16,
     gates: [
       {
-        // The folder-trust gate on a fresh directory. Its wording and shape vary by version, and the
-        // cursor can start on "No, exit", so it is answered by label; only a dialog with no cursor
-        // at all is answered with Enter.
+        // The folder-trust gate on a fresh cwd. Wording varies by version, and so does the SHAPE.
+        //
+        // It used to be answered with a bare Enter, on the belief that the default was the safe
+        // option. Newer Claude Code paints it as an unnumbered list with the cursor on "No, exit" —
+        // so that Enter quit Claude Code, and the pane died three seconds after launch. Every agent
+        // on a folder it had not been trusted with before was dead on arrival.
+        //
+        // So: pick by LABEL, never by position, in whichever shape this version uses. A bare Enter
+        // is left only for the shape that has no cursor to move at all.
         name: "folder trust",
         when: /I trust this folder|created or one you trust|Do you trust/i,
         every: 1,
@@ -366,15 +372,17 @@
       if (tk) out.tokens = tk[1];
       return out;
     },
-    // Keep Claude Code in bypass-permissions mode, the mode --dangerously-skip-permissions starts in,
-    // which it can drift out of. Bypass is in the Shift+Tab cycle, so cycle until it shows; when a
-    // full cycle passes without it (it can be disabled), settle for auto. Act only while a mode line
-    // is on screen, so a transient frame cannot cycle away from a good mode.
+    // Keep Claude in bypass-permissions mode — the peer of what --dangerously-skip-permissions starts
+    // in, and the most permissive. It drifts out of it over time, and an older driver actively cycled
+    // it AWAY into auto mode. Bypass is in the Shift+Tab cycle, so hunt for it; only if a full cycle
+    // passes without it appearing (it can be disabled) settle for auto. Only act while a mode line is
+    // actually on screen, so a transient frame cannot cycle away from a good mode.
     onIdle: (ctx) => {
       if (inLoginMode()) {
         const urlNow = capturedUrl || findOAuthUrl(ctx.screen);
         if (!loginIssued && !urlNow) {
-          send("/login");
+          ctx.write("/login");
+          ctx.write(ENTER);
           loginIssued = true;
         }
         return;
@@ -393,8 +401,10 @@
       }
     },
     commands: {
-      // Answer the dialog on screen by option number, for a control plane relaying a person's click:
-      // the number names the option, whose label is then moved to relatively.
+      // Answer the dialog currently on screen by option NUMBER, for a control plane relaying a
+      // person's click. Resolved to that option's label and then moved to relatively — the number
+      // says which option, never how many keys to press. (The old driver counted keystrokes from an
+      // imagined top of the list, which is the bug that made it press "No, exit".)
       choose: (n) => {
         const want = parseInt(String(n), 10) || 1;
         const screen = host.term.read();
@@ -410,16 +420,21 @@
         }
         return true;
       },
-      compact: () => send("/compact"),
-      // The account's usage limits, painted by Claude Code itself.
-      usage: () => send("/usage"),
+      // Two writes, not one: the command text and its submit, the same way a person sends it.
+      compact: () => {
+        host.term.write("/compact");
+        host.term.write(ENTER);
+        return true;
+      },
       // Start the interactive login explicitly, for a control plane that would rather drive it than
       // wait for the idle kick (e.g. after re-pointing settings at the official endpoint). Same shape
       // as compact. Submit the captured OAuth code with the ordinary `say` — a bracketed paste with a
       // deferred Enter is exactly what a pasted code needs, and it is already the engine's blessed path.
       login: () => {
+        host.term.write("/login");
+        host.term.write(ENTER);
         loginIssued = true;
-        return send("/login");
+        return true;
       }
     }
   });

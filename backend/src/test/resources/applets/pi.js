@@ -1,35 +1,12 @@
 "use strict";
 (() => {
-  var __defProp = Object.defineProperty;
-  var __defProps = Object.defineProperties;
-  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
-  var __getOwnPropSymbols = Object.getOwnPropertySymbols;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __propIsEnum = Object.prototype.propertyIsEnumerable;
-  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __spreadValues = (a, b) => {
-    for (var prop in b || (b = {}))
-      if (__hasOwnProp.call(b, prop))
-        __defNormalProp(a, prop, b[prop]);
-    if (__getOwnPropSymbols)
-      for (var prop of __getOwnPropSymbols(b)) {
-        if (__propIsEnum.call(b, prop))
-          __defNormalProp(a, prop, b[prop]);
-      }
-    return a;
-  };
-  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
-
   // src/engine/host.ts
-  var raw = globalThis.connector;
-  var host = __spreadProps(__spreadValues({}, raw), {
-    term: {
-      read: () => raw.term.read(),
-      onChange: (fn) => raw.term.onChange(fn),
-      write: (data) => raw.term.write(data) !== false,
-      hold: (on) => raw.term.hold ? raw.term.hold(on) : true
-    }
-  });
+  var host = (() => {
+    const g = globalThis;
+    const found = g.connector || g.microteams;
+    if (!found) throw new Error("micro-connector: no host global found (connector / microteams)");
+    return found;
+  })();
 
   // src/engine/keys.ts
   var ESC = "\x1B";
@@ -106,7 +83,6 @@
     return lines.slice(Math.max(0, end - n), end).join("\n");
   }
   var tailOf = tail;
-  var inputQueue = [];
   function defineDriver(spec) {
     var _a, _b, _c;
     const tailLines = (_a = spec.tailLines) != null ? _a : 16;
@@ -118,45 +94,58 @@
     const choices = host.own("choices", []);
     const extra = {};
     for (const key of Object.keys((_b = spec.vars) != null ? _b : {})) extra[key] = host.own(key, spec.vars[key]);
-    let inFlight = null;
-    function report(p, ok, error) {
-      if (p.id !== void 0) host.call("sayResult", { id: p.id, ok, error: error != null ? error : "" });
+    const label = host.watch("label");
+    label.onChange((v) => host.log("screen labelled: " + v));
+    const viewerLevel = host.watch("viewerLevel");
+    const viewerActive = () => {
+      const l = viewerLevel.get();
+      return l === "scroll" || l === "full";
+    };
+    const viewerTyping = () => viewerLevel.get() === "full";
+    let submitIn = 0;
+    let queue = [];
+    let cmdSince = false;
+    function gated(fn) {
+      return function(...args) {
+        const run = () => {
+          cmdSince = true;
+          return fn.apply(null, args);
+        };
+        if (viewerTyping()) {
+          queue.push(run);
+          return "buffered";
+        }
+        return run();
+      };
     }
-    function pump(status) {
-      if (inFlight) {
-        if (!term.hold(true)) return;
-        if (--inFlight.enterIn > 0) return;
-        const done = inFlight;
-        inFlight = null;
-        const ok = term.write(ENTER);
-        term.hold(false);
-        report(done, ok, ok ? void 0 : "the Enter could not be written");
-        return;
+    viewerLevel.onChange(() => {
+      if (!viewerTyping() && queue.length) {
+        const q = queue;
+        queue = [];
+        q.forEach((f) => f());
       }
-      if (!inputQueue.length || status !== "idle" && status !== "busy") return;
-      if (!term.hold(true)) return;
-      const next = inputQueue[0];
-      const body = next.mode === "paste" ? PASTE_START + next.text + PASTE_END : next.text;
-      if (!term.write(body)) {
-        term.hold(false);
-        return;
-      }
-      inputQueue.shift();
-      inFlight = __spreadProps(__spreadValues({}, next), { enterIn: 2 });
-    }
+    });
+    let stableBusy = false;
+    let wasActive = false;
     let frame = 0;
     term.onChange(() => {
       var _a2, _b2, _c2;
       frame++;
       const screen = term.read();
       const tail2 = tailOf(screen, tailLines);
-      const ctx = { screen, tail: tail2, frame, status: statusVar.get(), write: (d) => term.write(d) };
-      const last = (_a2 = tail2.split("\n").pop()) != null ? _a2 : "";
-      if (/^Pane is dead \(status \d+/.test(last.trim())) {
-        statusVar.set("dead");
-        return;
+      const ctx = {
+        screen,
+        tail: tail2,
+        frame,
+        status: statusVar.get(),
+        write: (d) => term.write(d),
+        viewerActive,
+        viewerTyping
+      };
+      if (submitIn > 0 && !viewerTyping()) {
+        if (--submitIn === 0) term.write(ENTER);
       }
-      for (const gate of (_b2 = spec.gates) != null ? _b2 : []) {
+      for (const gate of (_a2 = spec.gates) != null ? _a2 : []) {
         const gctx = {
           screen,
           tail: tail2,
@@ -169,17 +158,30 @@
           }
         };
         const up = typeof gate.when === "function" ? gate.when(gctx) : gate.when.test(screen);
-        if (!up) continue;
-        if (frame % ((_c2 = gate.every) != null ? _c2 : 2) === 0) gate.act(gctx);
-        statusVar.set("starting");
+        if (!up || viewerTyping()) continue;
+        if (frame % ((_b2 = gate.every) != null ? _b2 : 2) === 0) gate.act(gctx);
         return;
       }
+      const active = viewerActive();
+      if (((_c2 = spec.keepAtBottom) != null ? _c2 : true) && wasActive && !active) {
+        for (let i = 0; i < 12; i++) term.write(PGDN);
+      }
+      wasActive = active;
       const o = spec.observe(screen);
       let st = o.kind;
-      if (o.kind === "open") st = o.working ? "busy" : o.hasUI ? "idle" : "starting";
+      if (o.kind === "open") {
+        let busy;
+        if (!active) {
+          busy = !!o.working;
+          stableBusy = busy;
+          cmdSince = false;
+        } else {
+          busy = stableBusy || cmdSince;
+        }
+        st = busy ? "busy" : o.hasUI ? "idle" : "starting";
+      }
       ctx.status = st;
-      pump(st);
-      if (st === "idle" && !inFlight && !inputQueue.length && spec.onIdle) spec.onIdle(ctx);
+      if (st === "idle" && !active && spec.onIdle) spec.onIdle(ctx);
       statusVar.set(st);
       question.set(o.kind === "waiting" ? o.question || "" : "");
       choices.set(o.kind === "waiting" ? o.choices || [] : []);
@@ -194,17 +196,18 @@
       if (spec.report) spec.report(ctx, extra, o);
     });
     host.expose("snapshot", () => term.read());
-    const seen = /* @__PURE__ */ new Set();
-    host.expose("say", (text, id) => {
-      if (id !== void 0) {
-        if (seen.has(String(id))) return "queued";
-        seen.add(String(id));
-      }
-      const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
-      inputQueue.push({ text: body, mode: "paste", id: id === void 0 ? void 0 : String(id) });
-      return "queued";
-    });
-    for (const name of Object.keys((_c = spec.commands) != null ? _c : {})) host.expose(name, spec.commands[name]);
+    host.expose(
+      "say",
+      gated((text) => {
+        const body = spec.beforeSay ? spec.beforeSay(String(text)) : String(text);
+        term.write(PASTE_START + body + PASTE_END);
+        submitIn = 2;
+        return true;
+      })
+    );
+    for (const name of Object.keys((_c = spec.commands) != null ? _c : {})) {
+      host.expose(name, gated(spec.commands[name]));
+    }
     host.call("screenReady", { driver: spec.name, version: spec.version }).then((ack) => {
       host.log("server acked screenReady: " + JSON.stringify(ack));
     });
@@ -217,8 +220,9 @@
     observe: (screen) => {
       const tail2 = tail(screen, 16).split("\n");
       const tailStr = tail2.join("\n");
+      if (/Pane is dead \(status/.test(tailStr)) return { kind: "dead" };
       const working = /[⠁-⣿]/.test(tailStr) && /\bWorking\b/.test(tailStr);
-      const hasUI = /\d+(\.\d+)?%\/\d+[kKmM]?\s*\(/.test(tailStr) && !/Startup is still in progress/i.test(tailStr);
+      const hasUI = /\d+(\.\d+)?%\/\d+[kKmM]?\s*\(/.test(tailStr) || tail2.filter((l) => l.trim()).length > 3;
       return { kind: "open", working, hasUI };
     },
     // pi paints no per-turn elapsed or token count — the context line above is cumulative, and
