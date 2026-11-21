@@ -17,7 +17,8 @@
  *                              machine -> server adds screen.size, screen.lease.state,
  *                              screen.capture.result and screen.error; server -> machine adds
  *                              screen.ack, screen.lease and screen.capture; screen.scroll is gone
- *                              (the wheel is mouse input).
+ *                              (the wheel is mouse input). The input lease decides who may type;
+ *                              the server mirrors it into `viewerLevel` for the applet.
  *
  *               LinkMsg     the union of every field either version uses.
  *               PROTOCOL_V1, PROTOCOL_V2  the version numbers, as `hello` / `welcome` carry them.
@@ -36,7 +37,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
-/** One shared viewer per screen, viewerLevel, screen.scroll. */
+/** One shared viewer per screen, viewerLevel set by typing, screen.scroll. */
 const val PROTOCOL_V1: Int = 1
 
 /** Per-viewer screens, the input lease, acks and capture. */

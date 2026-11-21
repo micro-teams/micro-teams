@@ -226,7 +226,6 @@ class AgentService(
                 command = command,
                 appletSource = driver.appletSource,
                 env = screenEnv(row.machineId, row.teamId, agentUserId),
-                vars = driver.vars,
             )
         if (!respawned) {
             rebootAgent(agentUserId) // no live screen to respawn — open a new one for this session
@@ -290,7 +289,6 @@ class AgentService(
                 kind = AGENT_SCREEN_KIND,
                 appletSource = driver.appletSource,
                 env = env,
-                vars = driver.vars,
             )
         val row =
             AgentScreen(

@@ -1,15 +1,9 @@
 /*
- *  Description: Integration test for the two outcomes AgentWakeup reaches on its own clock, with
- *               the back-off and the confirmation grace shortened to a second
- *               (microteams.wakeup.*):
- *
- *               1. A message to a program that dies on every start: each wake the back-off holds
- *                  back is retried when it ends, with nobody asking again, and once the attempts
- *                  are spent the message shows as undelivered ("keeps exiting").
- *               2. A protocol 2 message the applet accepted, then the machine's connection
- *                  breaks and comes back with the applet surviving (no screenReady): its sayResult
- *                  may have been lost with the old connection, so after the grace it is failed
- *                  with "the connection to the machine broke before the agent confirmed it".
+ *  Description: Integration test for the outcome AgentWakeup reaches on its own clock, with the
+ *               back-off shortened to a second (microteams.wakeup.backoff-seconds): a message to a
+ *               program that dies on every start. Each wake the back-off holds back is retried
+ *               when it ends, with nobody asking again, and once the attempts are spent the
+ *               message shows as undelivered ("keeps exiting").
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -54,8 +48,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties =
-        ["microteams.wakeup.backoff-seconds=0,1,1", "microteams.wakeup.confirm-grace-seconds=1"],
+    properties = ["microteams.wakeup.backoff-seconds=0,1,1"],
 )
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -208,27 +201,6 @@ constructor(
 
     @Test
     @Order(1)
-    fun anAcceptedMessageWhoseConfirmationMayBeLostFailsAfterTheGrace() {
-        val (sid, threadId) = openAgent("Grace")
-        send(
-            """{"t":"rpc.call","sid":"$sid","id":"r1","name":"screenReady","args":[{}]}""",
-        )
-        val deadline = System.currentTimeMillis() + 5000
-        while (machineHub.screen(sid)?.state != ScreenState.LIVE) {
-            check(System.currentTimeMillis() < deadline) { "never live" }
-            Thread.sleep(50)
-        }
-        val messageId = postMessage(threadId, "confirm me")
-        val say = await("rpc.call", sid)
-        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":"queued"}""")
-        Thread.sleep(300)
-        connect() // the applet survives: no screenReady follows
-        val reason = undeliveredReason(threadId, messageId, 6000)
-        assertTrue(reason.contains("connection to the machine broke"), reason)
-    }
-
-    @Test
-    @Order(2)
     fun aProgramThatKeepsDyingIsRetriedOnItsOwnAndThenGivenUpOn() {
         val (sid, threadId) = openAgent("Dies")
         val dead = """{"t":"var.push","sid":"$sid","name":"status","value":"dead"}"""

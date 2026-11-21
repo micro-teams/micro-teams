@@ -33,7 +33,9 @@ class ScreenAgent(
     private val wakeup: AgentWakeup,
 ) : Agent {
 
-    /** Said as `say(prompt, "m<messageId>")`; see AgentWakeup for how it is delivered. */
+    /**
+     * Said as `say(prompt)` under the id "m<messageId>"; see AgentWakeup for how it is delivered.
+     */
     override fun tell(threadId: IdType, messageId: IdType, speaker: String, text: String) {
         wakeup.tell(this, prompt(threadId, speaker, text), "m$messageId", messageId)
     }

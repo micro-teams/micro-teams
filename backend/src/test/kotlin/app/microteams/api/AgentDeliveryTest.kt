@@ -3,18 +3,15 @@
  *               sender seeing when that definitely failed.
  *
  *               A fake machine (a real WebSocket client) says hello, a human opens an agent on it
- *               and messages it in a group. Each message arrives as `say(text, "m<messageId>")`,
- *               and the fake answers as an applet would:
- *                 - accepted (rpc.result) and then `sayResult {ok:false}` -> the message carries
- *                   `undelivered` for the agent, over the API;
- *                 - `sayResult {ok:true}` -> it does not;
+ *               and messages it in a group. Each message arrives as `say(text)`, and the fake
+ *               answers as an applet would:
+ *                 - `false` -> the message carries `undelivered` for the agent, over the API;
+ *                 - true, or 'buffered' (a person holds the input) -> it does not, and neither a
+ *                   reconnect nor an applet announcing itself after the re-adopt says it again;
  *                 - an rpc error -> undelivered;
  *                 - never answered, and the machine connects again -> said again on the new
  *                   connection;
- *                 - accepted, and the machine connects again -> not said again (the applet still
- *                   holds it), until an applet announces itself after the re-adopt;
- *                 - a protocol 1 machine, which never calls sayResult: the accepted rpc.result is
- *                   delivery, so a reconnect does not say it again — but `false` is a failure;
+ *                 - a protocol 1 machine likewise: true is delivery, `false` a failure;
  *                 - what a server still owed when it stopped is marked undelivered when the next
  *                   one starts (reportLostOnRestart, which startup runs).
  *
@@ -207,30 +204,14 @@ constructor(
                 .andReturn()
         val messageId = JSONObject(res.response.contentAsString).getLong("id")
         val say = await("rpc.call", "say")
+        assertEquals(1, say.getJSONArray("args").length(), "say takes the text alone")
         assertTrue(say.getJSONArray("args").getString(0).contains(text))
-        assertEquals(
-            "m$messageId",
-            say.getJSONArray("args").getString(1),
-            "a chat message says under its id",
-        )
         return messageId to say
     }
 
-    private fun accept(say: JSONObject) =
-        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":"queued"}""")
-
-    /** Report [id]'s outcome as an applet does, and wait until the server has taken it. */
-    private fun sayResult(id: String, ok: Boolean, error: String = "") {
-        val call = "c${UUID.randomUUID()}"
-        send(
-            """{"t":"rpc.call","sid":"$sid","id":"$call","name":"sayResult",""" +
-                """"args":[{"id":"$id","ok":$ok,"error":"$error"}]}""",
-        )
-        val deadline = System.currentTimeMillis() + 5000
-        while (poll("rpc.result", null, 200)?.optString("id") != call) {
-            check(System.currentTimeMillis() < deadline) { "sayResult $call was never answered" }
-        }
-    }
+    /** Answer [say] as the applet's `say` does: true, `'buffered'` or false. */
+    private fun answer(say: JSONObject, value: String) =
+        send("""{"t":"rpc.result","sid":"$sid","id":"${say.getString("id")}","value":$value}""")
 
     /** The message as the API shows it to its sender. */
     private fun message(messageId: Long): JSONObject {
@@ -270,25 +251,23 @@ constructor(
 
     @Test
     @Order(1)
-    fun aSayResultThatFailedShowsTheMessageAsUndelivered() {
+    fun anAppletAnsweringFalseShowsTheMessageAsUndelivered() {
         val (messageId, say) = postAndAwaitSay("first")
-        accept(say)
-        sayResult("m$messageId", ok = false, error = "the Enter could not be written")
+        answer(say, "false")
         val entry = awaitUndelivered(messageId)
         assertEquals(agentUserId, entry.getLong("userId"))
-        assertTrue(
-            entry.getString("reason").contains("the Enter could not be written"),
-            entry.toString(),
-        )
+        assertTrue(entry.getString("reason").contains("could not take it"), entry.toString())
     }
 
     @Test
     @Order(2)
-    fun aSayResultThatSucceededDoesNot() {
-        val (messageId, say) = postAndAwaitSay("second")
-        accept(say)
-        sayResult("m$messageId", ok = true)
-        stillDelivered(messageId)
+    fun anAcceptedOrBufferedSayIsDelivered() {
+        val (first, say) = postAndAwaitSay("second")
+        answer(say, "true")
+        val (buffered, again) = postAndAwaitSay("second, while a person types")
+        answer(again, "\"buffered\"")
+        stillDelivered(first)
+        stillDelivered(buffered)
     }
 
     @Test
@@ -303,30 +282,26 @@ constructor(
 
     @Test
     @Order(4)
-    fun aSayNeverAcceptedIsSaidAgainOnTheNextConnection() {
+    fun aSayNeverAnsweredIsSaidAgainOnTheNextConnection() {
         val (messageId, _) = postAndAwaitSay("fourth")
         connect(2)
         val again = await("rpc.call", "say")
-        assertEquals("m$messageId", again.getJSONArray("args").getString(1))
-        accept(again)
-        sayResult("m$messageId", ok = true)
+        assertTrue(again.getJSONArray("args").getString(0).contains("fourth"))
+        answer(again, "true")
         stillDelivered(messageId)
     }
 
     @Test
     @Order(5)
-    fun anAcceptedSayWaitsForTheAppletUnlessTheAppletRestarted() {
+    fun anAcceptedSayIsNotSaidAgainAfterAReconnectOrARestartedApplet() {
         val (messageId, say) = postAndAwaitSay("fifth")
-        accept(say)
+        answer(say, "true")
         Thread.sleep(300)
         connect(2) // the re-adopt sends a new session.create
         await("session.create")
-        assertEquals(null, poll("rpc.call", "say", 1500), "a surviving applet still holds it")
-        ready() // ...but this one loaded afresh, so it holds nothing sent before
-        val again = await("rpc.call", "say")
-        assertEquals("m$messageId", again.getJSONArray("args").getString(1))
-        accept(again)
-        sayResult("m$messageId", ok = true)
+        ready()
+        assertEquals(null, poll("rpc.call", "say", 1500), "delivered, so never said again")
+        stillDelivered(messageId)
     }
 
     @Test
@@ -377,11 +352,11 @@ constructor(
         assertEquals("commands", commands.getString("type"))
         val names = commands.getJSONArray("names")
         assertEquals(
-            listOf("usage", "compact"),
+            listOf("compact"),
             (0 until names.length()).map { names.getString(it) },
         )
-        viewer.sendMessage(TextMessage("""{"type":"command","id":"u1","name":"usage"}"""))
-        await("rpc.call", "usage")
+        viewer.sendMessage(TextMessage("""{"type":"command","id":"u1","name":"compact"}"""))
+        await("rpc.call", "compact")
         viewer.close()
     }
 

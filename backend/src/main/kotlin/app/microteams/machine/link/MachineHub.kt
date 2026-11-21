@@ -10,6 +10,12 @@
  *               capture; protocol 1 shares one stream among all viewers and is mapped onto the same
  *               viewer interface here, so callers never branch on the version.
  *
+ *               The applet watches `viewerLevel`: "full" while a person has the input, when it
+ *               holds back what it is told to type, and "passive" otherwise; leaving "full" is when
+ *               it returns the pane to its live bottom. Protocol 1 sets it full while a viewer
+ *               types; protocol 2 derives it from the input lease, full exactly while a viewer
+ *               holds it, and sets it again after every session.create and every screenReady.
+ *
  *               I/O-free by design: it depends only on small transport interfaces, so it is
  *               exercised with in-process fakes (no WebSocket, no machine, no DB).
  *
@@ -32,9 +38,7 @@
  *                 isOnline / originOf / buildOf / connectedAtOf / protocolOf / screensOf /
  *                 onlineMachineIds — what is known about a machine.
  *                 openScreen / closeScreen / readoptScreen / respawnScreen / adoptScreen —
- *                   a screen's life; open, readopt and respawn set the given applet variables
- *                   (`vars`) right after their session.create, and readopt and respawn resubscribe
- *                   every attached viewer.
+ *                   a screen's life; readopt and respawn resubscribe every attached viewer.
  *                 sendUpdate(machineId) — ask the connector to update its own binary.
  *                 callScreen(machineId, sid, name, args) -> CompletableFuture of the applet's value.
  *                 screen(sid) / screenByToken(token) / allOnlineScreens() — look screens up.
@@ -157,8 +161,13 @@ class HubScreen(
     /** Why it was last declared dead (for logs / diagnostics); null unless [state] is DEAD. */
     @Volatile var deadReason: String? = null
 
-    /** Protocol 1 only: the `viewerLevel` last set, and the window size last asked for. */
-    @Volatile internal var v1Level: String = "passive"
+    /** The `viewerLevel` last set. */
+    @Volatile internal var level: String = "passive"
+
+    /** Protocol 2 only: who holds the input lease, as the machine last said ("" free). */
+    @Volatile internal var leaseHolder: String = ""
+
+    /** Protocol 1 only: the window size last asked for. */
     @Volatile internal var v1Cols: Int = 120
     @Volatile internal var v1Rows: Int = 32
 }
@@ -306,6 +315,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         fns["screenReady"] = ScreenFn { _, screen, _ ->
             lifecycleListeners.forEach { l -> safely { l.onAppletReady(screen) } }
             markScreen(screen.sid, ScreenState.LIVE)
+            machines[screen.machineId]?.let { if (it.proto >= PROTOCOL_V2) sendLevel(it, screen) }
             mapOf("ok" to true)
         }
         fns.putAll(screenFns)
@@ -426,20 +436,17 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     // -- screens (server -> machine) ----------------------------------------
 
     /**
-     * Send a session.create, then [vars] as var.set: the connector handles one screen's messages in
-     * order, so the applet the create loads observes them from its start.
+     * Send a session.create. On protocol 2 the new session knows no viewer and so no lease, and
+     * `viewerLevel` follows at once: the connector handles one screen's messages in order, so the
+     * applet the create loads observes it from its start.
      */
-    private fun create(
-        machine: HubMachine,
-        screen: HubScreen,
-        msg: LinkMsg,
-        vars: Map<String, Any?>,
-    ) {
+    private fun create(machine: HubMachine, screen: HubScreen, msg: LinkMsg) {
         screen.generation.incrementAndGet()
         machine.send(msg)
-        vars.forEach { (name, value) ->
-            machine.send(LinkMsg(t = "var.set", sid = screen.sid, name = name, value = value))
-        }
+        if (machine.proto < PROTOCOL_V2) return
+        screen.leaseHolder = ""
+        screen.level = "passive"
+        sendLevel(machine, screen)
     }
 
     /**
@@ -453,7 +460,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         kind: String,
         appletSource: String? = null,
         env: Map<String, String>? = null,
-        vars: Map<String, Any?> = emptyMap(),
         cols: Int = 120,
         rows: Int = 32,
     ): HubScreen {
@@ -484,7 +490,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 source = appletSource,
                 env = env?.ifEmpty { null },
             ),
-            vars,
         )
         return screen
     }
@@ -510,7 +515,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         command: List<String>,
         appletSource: String,
         env: Map<String, String>? = null,
-        vars: Map<String, Any?> = emptyMap(),
         cols: Int = 120,
         rows: Int = 32,
     ) {
@@ -530,7 +534,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 adopt = true,
                 env = env?.ifEmpty { null },
             ),
-            vars,
         )
         resubscribe(machine, screen)
     }
@@ -550,7 +553,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         command: List<String>,
         appletSource: String? = null,
         env: Map<String, String>? = null,
-        vars: Map<String, Any?> = emptyMap(),
         cols: Int = 120,
         rows: Int = 32,
     ): Boolean {
@@ -570,7 +572,6 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 source = appletSource,
                 env = env?.ifEmpty { null },
             ),
-            vars,
         )
         screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
         markScreen(sid, ScreenState.STARTING)
@@ -689,15 +690,17 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     }
 
     /**
-     * Detach viewer [viewerId]. Protocol 2 unsubscribes it, which also frees a lease it held.
-     * Protocol 1 drops `viewerLevel` when nobody typing is left and unsubscribes the shared client
-     * with the last viewer.
+     * Detach viewer [viewerId]. Protocol 2 unsubscribes it, which also frees a lease it held (and
+     * the machine tells that only to the viewers left, possibly none). Protocol 1 drops
+     * `viewerLevel` when nobody typing is left and unsubscribes the shared client with the last
+     * viewer.
      */
     fun detachViewer(sid: String, viewerId: String) {
         val (screen, machine) = viewerTarget(sid) ?: return
         val viewer = screen.viewers.remove(viewerId) ?: return
         if (machine.proto >= PROTOCOL_V2) {
             machine.send(LinkMsg(t = "screen.unsubscribe", sid = sid, viewer = viewerId))
+            if (screen.leaseHolder == viewerId) v2Lease(screen, machine, "")
             return
         }
         viewer.typing = false
@@ -810,17 +813,34 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     fun viewerControl(sid: String, level: String) {
         val (screen, machine) = viewerTarget(sid) ?: return
         if (machine.proto >= PROTOCOL_V2) return
-        val lvl = if (level in setOf("passive", "scroll", "full")) level else "passive"
-        screen.v1Level = lvl
-        machine.send(LinkMsg(t = "var.set", sid = sid, name = "viewerLevel", value = lvl))
+        screen.level = if (level in setOf("passive", "scroll", "full")) level else "passive"
+        sendLevel(machine, screen)
     }
 
     /** Protocol 1: `viewerLevel` is full while any viewer is typing; set only when it changes. */
     private fun v1Level(screen: HubScreen, machine: HubMachine) {
         val level = if (screen.viewers.values.any { it.typing }) "full" else "passive"
-        if (level == screen.v1Level) return
-        screen.v1Level = level
-        machine.send(LinkMsg(t = "var.set", sid = screen.sid, name = "viewerLevel", value = level))
+        if (level == screen.level) return
+        screen.level = level
+        sendLevel(machine, screen)
+    }
+
+    /**
+     * Protocol 2: the lease is now [holder]'s ("" free, "driver" the applet, otherwise a viewer),
+     * and `viewerLevel` is full exactly while a viewer holds it; set only when it changes.
+     */
+    private fun v2Lease(screen: HubScreen, machine: HubMachine, holder: String) {
+        screen.leaseHolder = holder
+        val level = if (holder != "" && holder != "driver") "full" else "passive"
+        if (level == screen.level) return
+        screen.level = level
+        sendLevel(machine, screen)
+    }
+
+    private fun sendLevel(machine: HubMachine, screen: HubScreen) {
+        machine.send(
+            LinkMsg(t = "var.set", sid = screen.sid, name = "viewerLevel", value = screen.level),
+        )
     }
 
     // -- machine -> server (inbound) ----------------------------------------
@@ -870,8 +890,11 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
             "screen.size" ->
                 if (screen != null && m.cols != null && m.rows != null)
                     toViewer(machine, screen, m) { it.size(m.cols, m.rows) }
-            "screen.lease.state" ->
-                if (screen != null) toViewer(machine, screen, m) { it.lease(m.holder ?: "") }
+            "screen.lease.state" -> {
+                if (screen == null) return
+                v2Lease(screen, machine, m.holder ?: "")
+                toViewer(machine, screen, m) { it.lease(m.holder ?: "") }
+            }
             "screen.capture.result" -> {
                 if (screen == null) return
                 val text = m.data?.let { decode(it)?.toString(Charsets.UTF_8) }
@@ -944,6 +967,7 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 machine.send(
                     LinkMsg(t = "screen.unsubscribe", sid = screen.sid, viewer = viewer.id),
                 )
+                if (screen.leaseHolder == viewer.id) v2Lease(screen, machine, "")
             }
         }
     }

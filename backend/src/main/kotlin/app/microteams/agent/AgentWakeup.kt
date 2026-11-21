@@ -24,23 +24,17 @@
  *               an AgentPendingMessage row, and a server that starts finds the rows its
  *               predecessor left and marks those messages undelivered ("the server restarted
  *               before it was delivered"), since nothing will deliver them now.
- *                 - it is sent as `say(text, id)` while the agent is awake, and held while it is
+ *                 - it is sent as `say(text)` while the agent is awake, and held while it is
  *                   asleep, dead or starting;
- *                 - the applet's rpc.result accepting it means it is queued there; a protocol 1
- *                   applet never reports more, so that is delivery — unless the value is `false`,
- *                   which is how a protocol 1 applet says it could not take it; a protocol 2
- *                   applet later calls `sayResult({id, ok, error})`;
- *                 - a send not yet accepted when the machine's connection closes or is replaced is
- *                   sent again on the next connection; an accepted one is sent again only when the
- *                   applet restarted (screenReady after a newer session.create than the send — see
- *                   HubScreen.generation). Otherwise the applet survived, and its sayResult may
- *                   have been lost with the old connection: unless one arrives within
- *                   [confirmGrace] of the reconnect, the message is failed with "the connection to
- *                   the machine broke before the agent confirmed it" (a sayResult arriving later
- *                   finds nothing to settle);
- *                 - definite failures are an rpc error, a refusal, sayResult ok=false, the
- *                   connection breaking before confirmation, the agent being closed and the wake
- *                   giving up. A chat message that fails is recorded with
+ *                 - the applet's rpc.result accepting it (true, or 'buffered' while a person
+ *                   holds the input) is delivery: the applet pastes it, or pastes it once the
+ *                   person lets go, and reports nothing more. The value `false` is the applet
+ *                   saying it could not take it;
+ *                 - a send not yet answered when the machine's connection closes or is replaced,
+ *                   or when the applet restarts (screenReady after a newer session.create than the
+ *                   send — see HubScreen.generation), is sent again;
+ *                 - definite failures are an rpc error, a refusal, the agent being closed and the
+ *                   wake giving up. A chat message that fails is recorded with
  *                   MessageService.markUndelivered so its sender sees it. An offline machine is not
  *                   a failure: the message waits for it.
  *
@@ -68,8 +62,6 @@ import app.microteams.chat.message.MessageService
 import app.microteams.machine.link.HubScreen
 import app.microteams.machine.link.LinkClosedException
 import app.microteams.machine.link.MachineHub
-import app.microteams.machine.link.PROTOCOL_V2
-import app.microteams.machine.link.ScreenFn
 import app.microteams.machine.link.ScreenLifecycleListener
 import app.microteams.machine.link.ScreenState
 import app.microteams.machine.link.ScreenVarListener
@@ -120,8 +112,6 @@ class AgentWakeup(
      * busy loop that would hammer the machine and burn the agent's credits.
      */
     @Value("\${microteams.wakeup.backoff-seconds:0,15,60,300}") backoffSeconds: List<Long>,
-    /** How long after a reconnect a surviving applet has to confirm a message it had accepted. */
-    @Value("\${microteams.wakeup.confirm-grace-seconds:30}") confirmGraceSeconds: Long,
 ) {
     private val logger = LoggerFactory.getLogger(AgentWakeup::class.java)
 
@@ -136,10 +126,6 @@ class AgentWakeup(
     private class Say(val id: String, val text: String, val messageId: IdType?) {
         var generation: Long? = null
         var call: Int = 0
-        var accepted: Boolean = false
-
-        /** The machine connection (its connectedAt) the applet accepted it on. */
-        var acceptedOn: Instant? = null
     }
 
     /** What each agent still owes, oldest first. */
@@ -170,8 +156,6 @@ class AgentWakeup(
      */
     private val stableWindow = Duration.ofMinutes(30)
 
-    private val confirmGrace = Duration.ofSeconds(confirmGraceSeconds)
-
     /**
      * A transaction of its own for the pending row: chat tells an agent after its commit, inside a
      * transaction that is finished, where a write would join it and never be committed.
@@ -181,7 +165,7 @@ class AgentWakeup(
             it.propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
         }
 
-    /** Runs the back-off's retries and the confirmation deadlines. */
+    /** Runs the back-off's retries. */
     private val timer = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "agent-wakeup").also { it.isDaemon = true }
     }
@@ -260,7 +244,6 @@ class AgentWakeup(
                 else hub.markScreen(screen.sid, ScreenState.LIVE)
             },
         )
-        hub.expose("sayResult", ScreenFn { _, screen, args -> sayResult(screen, args) })
     }
 
     // -- delivering -------------------------------------------------------------
@@ -281,42 +264,11 @@ class AgentWakeup(
         deliver(agent)
     }
 
-    /**
-     * The machine said hello again: whatever waits for its agents can go out now, and what a
-     * surviving applet accepted on an earlier connection must be confirmed within [confirmGrace].
-     */
+    /** The machine said hello again: whatever waits for its agents can go out now. */
     fun deliverOn(machineId: String) {
-        val now = hub.connectedAtOf(machineId)
-        val v2 = hub.protocolOf(machineId) == PROTOCOL_V2
         for (agent in agentRegistry.screenAgents().filter { it.machineId == machineId }) {
-            val q = outstanding[agent.userId]
-            if (v2 && q != null) {
-                synchronized(q) {
-                    q.filter { it.accepted && it.acceptedOn != now }
-                        .forEach { awaitConfirmation(agent, q, it) }
-                }
-            }
             deliver(agent)
         }
-    }
-
-    /** Called holding [q]: fail [say] unless it is settled or sent again within [confirmGrace]. */
-    private fun awaitConfirmation(agent: ScreenAgent, q: MutableList<Say>, say: Say) {
-        val call = say.call
-        timer.schedule(
-            {
-                synchronized(q) {
-                    if (say.call != call || !say.accepted || !q.remove(say)) return@schedule
-                    failed(
-                        agent.userId,
-                        say,
-                        "the connection to the machine broke before the agent confirmed it",
-                    )
-                }
-            },
-            confirmGrace.toMillis(),
-            TimeUnit.MILLISECONDS,
-        )
     }
 
     private fun queueOf(agentUserId: IdType): MutableList<Say> =
@@ -339,10 +291,12 @@ class AgentWakeup(
     /** Called holding [q]. */
     private fun send(agent: ScreenAgent, q: MutableList<Say>, say: Say, generation: Long) {
         say.generation = generation
-        say.accepted = false
         val call = ++say.call
-        hub.callScreen(agent.machineId, agent.sid, "say", listOf(say.text, say.id))
-            .whenCompleteAsync { value, e -> answered(agent, q, say, call, value, e) }
+        hub.callScreen(agent.machineId, agent.sid, "say", listOf(say.text)).whenCompleteAsync {
+            value,
+            e ->
+            answered(agent, q, say, call, value, e)
+        }
     }
 
     /** The applet's rpc.result to one send of [say], or the end of the connection it went on. */
@@ -365,13 +319,8 @@ class AgentWakeup(
                         false
                     }
                     cause == null -> {
-                        say.accepted = true
-                        say.acceptedOn = hub.connectedAtOf(agent.machineId)
-                        // A protocol 1 applet never reports more than having taken it.
-                        if (hub.protocolOf(agent.machineId) != PROTOCOL_V2) {
-                            q.remove(say)
-                            delivered(agent.userId, say)
-                        }
+                        q.remove(say)
+                        delivered(agent.userId, say)
                         false
                     }
                     cause is LinkClosedException -> {
@@ -392,24 +341,6 @@ class AgentWakeup(
         if (resend) deliver(agent)
     }
 
-    /** `sayResult({id, ok, error})`: a protocol 2 applet's final word on one message. */
-    private fun sayResult(screen: HubScreen, args: List<Any?>): Any? {
-        val result = args.firstOrNull() as? Map<*, *> ?: throw IllegalArgumentException("no result")
-        val id = result["id"]?.toString() ?: throw IllegalArgumentException("no id")
-        val agent = agentRegistry.bySid(screen.sid) ?: return null
-        val q = outstanding[agent.userId] ?: return null
-        synchronized(q) {
-            val say = q.firstOrNull { it.id == id } ?: return null
-            q.remove(say)
-            if (result["ok"] == true) delivered(agent.userId, say)
-            else {
-                val error = result["error"]?.toString()?.ifBlank { null } ?: "no reason given"
-                failed(agent.userId, say, "the agent's program could not take it: $error")
-            }
-        }
-        return null
-    }
-
     /**
      * A freshly loaded applet holds nothing sent before the session.create that loaded it, so those
      * sends go again; ones sent since reached this applet already.
@@ -421,7 +352,6 @@ class AgentWakeup(
                 val sent = say.generation ?: continue
                 if (sent < generation) {
                     say.generation = null
-                    say.accepted = false
                     say.call++
                 }
             }
@@ -549,7 +479,6 @@ class AgentWakeup(
                 sid = row.sid,
                 command = emptyList(),
                 appletSource = driver.appletSource,
-                vars = driver.vars,
             )
         }
         if (!isAwake(row.agentUserId) && !ensureAwake(row.agentUserId)) {

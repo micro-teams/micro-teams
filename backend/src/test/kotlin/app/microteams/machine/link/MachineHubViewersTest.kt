@@ -5,7 +5,8 @@
  *               Protocol 2: each viewer is subscribed under its own id at its own size; what the
  *               machine says for a viewer (data, size, lease, capture, error) reaches that viewer
  *               only; readopt and respawn resubscribe every viewer with its id and last size; detach
- *               unsubscribes that viewer alone.
+ *               unsubscribes that viewer alone; `viewerLevel` is full exactly while a viewer holds
+ *               the lease, and set passive after every session.create and again on screenReady.
  *               Protocol 1: the old shared messages (no viewer field), the viewer's size echoed
  *               before the subscribe, screen.data fanned out, `viewerLevel` following input and the
  *               lease, and capture answered at once with an error.
@@ -89,7 +90,7 @@ class MachineHubViewersTest {
         val subs = sent.filter { it.t == "screen.subscribe" }
         assertEquals(listOf("va" to 100, "vb" to 60), subs.map { it.viewer to it.cols })
         assertEquals(listOf(30, 20), subs.map { it.rows })
-        assertTrue(sent.none { it.t == "var.set" }, "protocol 2 has no viewerLevel")
+        assertTrue(sent.none { it.t == "var.set" }, "attaching leaves viewerLevel alone")
     }
 
     @Test
@@ -174,12 +175,12 @@ class MachineHubViewersTest {
         hub.viewerResize("s1", "vb", 100, 30)
         sent.clear()
 
-        hub.readoptScreen("m1", "s1", emptyList(), "// src", vars = mapOf("operatorPrompt" to "p"))
+        hub.readoptScreen("m1", "s1", emptyList(), "// src")
         assertEquals(
             listOf("session.create", "var.set", "screen.subscribe", "screen.subscribe"),
             sent.map { it.t },
         )
-        assertEquals("operatorPrompt", sent[1].name)
+        assertEquals("viewerLevel" to "passive", sent[1].name to sent[1].value)
         val subs =
             sent.filter { it.t == "screen.subscribe" }.map { "${it.viewer}:${it.cols}x${it.rows}" }
         assertEquals(setOf("va:80x24", "vb:100x30"), subs.toSet())
@@ -187,10 +188,59 @@ class MachineHubViewersTest {
 
         hub.respawnScreen("m1", screen.sid, listOf("bash", "--resume"))
         assertEquals(
-            listOf("session.close", "session.create", "screen.subscribe", "screen.subscribe"),
+            listOf(
+                "session.close",
+                "session.create",
+                "var.set",
+                "screen.subscribe",
+                "screen.subscribe",
+            ),
             sent.map { it.t },
         )
         assertEquals(2L, screen.generation.get(), "each create is a new generation")
+    }
+
+    @Test
+    fun `v2 sets viewerLevel full exactly while a viewer holds the lease`() {
+        val (hub, sent) = hub(2)
+        val screen = hub.openScreen("m1", listOf("bash"), kind = "test")
+        val sid = screen.sid
+        assertEquals("passive", sent.last { it.t == "var.set" }.value, "a new session's applet")
+        hub.attachViewer(sid, HubViewer("va", Seen(), 80, 24))
+        hub.attachViewer(sid, HubViewer("vb", Seen(), 80, 24))
+        sent.clear()
+        fun levels() = sent.filter { it.t == "var.set" }.map { it.name to it.value }
+        fun lease(holder: String?) {
+            for (v in listOf("va", "vb")) {
+                hub.onMachineMessage(
+                    "m1",
+                    LinkMsg(t = "screen.lease.state", sid = sid, viewer = v, holder = holder),
+                )
+            }
+        }
+
+        lease("va")
+        assertEquals(listOf("viewerLevel" to "full"), levels(), "once, though each viewer is told")
+        lease(null)
+        lease("driver")
+        assertEquals(
+            listOf("full", "passive"),
+            levels().map { it.second },
+            "the agent is no viewer",
+        )
+        lease("vb")
+        sent.clear()
+        hub.onMachineMessage(
+            "m1",
+            LinkMsg(t = "rpc.call", sid = sid, id = "c1", name = "screenReady"),
+        )
+        assertEquals(listOf("full"), levels().map { it.second }, "a loaded applet is told again")
+        sent.clear()
+        // The holder leaves: the machine frees the lease and tells only who is left, maybe nobody.
+        hub.detachViewer(sid, "va")
+        assertEquals(emptyList<Any>(), levels(), "va did not hold it")
+        hub.detachViewer(sid, "vb")
+        assertEquals(listOf("passive"), levels().map { it.second })
     }
 
     @Test

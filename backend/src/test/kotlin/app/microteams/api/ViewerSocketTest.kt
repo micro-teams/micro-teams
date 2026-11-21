@@ -254,7 +254,7 @@ constructor(
         assertEquals("line", capture.getString("text"))
 
         // Nothing is listed for this screen, so nothing may be called on it.
-        socket.sendMessage(TextMessage("""{"type":"command","id":"x2","name":"usage"}"""))
+        socket.sendMessage(TextMessage("""{"type":"command","id":"x2","name":"compact"}"""))
         val refusedCommand = browser.nextJson()
         assertEquals("x2", refusedCommand.getString("id"))
         assertTrue(refusedCommand.getString("error").contains("offers no command"))

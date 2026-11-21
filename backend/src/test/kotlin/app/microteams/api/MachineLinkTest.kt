@@ -4,8 +4,9 @@
  *               port: an enrolled machine dials in with its `X-Microteams-Session` token, says
  *               hello, and must receive `welcome` with the version it will be spoken to in —
  *               and nothing at all before its hello; the server opens a screen and the client must
- *               receive the exact `session.create`; an inbound `rpc.call` (screenReady)
- *               must be answered with `rpc.result`, and a `var.push` must be mirrored into
+ *               receive the exact `session.create`, then `viewerLevel` passive; an inbound
+ *               `rpc.call` (screenReady) must be answered with `viewerLevel` again and its
+ *               `rpc.result`, and a `var.push` must be mirrored into
  *               the screen's variables. A bad token must fail the handshake.
  *
  *  Author(s):
@@ -125,6 +126,9 @@ constructor(
         assertEquals("bash", create["command"][0].asText())
         assertEquals(120, create["cols"].asInt())
         assertEquals("http://127.0.0.1:8080", create["env"]["MICROTEAMS_API"].asText())
+        val level = nextFrame(collector)
+        assertEquals("var.set" to "viewerLevel", level["t"].asText() to level["name"].asText())
+        assertEquals("passive", level["value"].asText())
 
         // 3) inbound rpc.call (screenReady) -> rpc.result with the fn's value
         session.sendMessage(
@@ -140,6 +144,7 @@ constructor(
                 ),
             ),
         )
+        assertEquals("var.set", nextFrame(collector)["t"].asText(), "the loaded applet's level")
         val result = nextFrame(collector)
         assertEquals("rpc.result", result["t"].asText())
         assertEquals("c1", result["id"].asText())

@@ -71,14 +71,13 @@ class AgentReadopt(
                 sid = row.sid,
                 command = emptyList(),
                 appletSource = driver.appletSource,
-                vars = driver.vars,
             )
             readopted++
         }
         if (readopted > 0) {
             logger.info("re-drove {} agent screen(s) on machine {}", readopted, event.machineId)
         }
-        // Messages whose send the old connection never confirmed go out on this one.
+        // Messages whose send the old connection never answered go out on this one.
         wakeup.deliverOn(event.machineId)
     }
 }
