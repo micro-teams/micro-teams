@@ -1,6 +1,6 @@
 // `agent`: the Agents tab and an agent's detail screen — who the agents are, opening one on a
 // machine, closing and rebooting it, and its name, avatar and keepalive. Who may do which is the
-// server's call (lifecycle actions need membership of the agent's team).
+// server's call (operating an agent needs access to it: a team it is in, or its machine).
 
 import type { AgentLlm, AgentLlmSettings } from '../api'
 import { call } from '../runtime'
@@ -63,7 +63,7 @@ const list: CommandSpec = {
   name: 'list',
   short: 'List agents, optionally only those of a team, a machine or a group chat',
   flags: [
-    { name: 'team', type: 'string', help: 'only agents working for this team (id or name)' },
+    { name: 'team', type: 'string', help: 'only agents in this team (id or name)' },
     { name: 'machine', type: 'string', help: 'only agents running on this machine (id or name)' },
     { name: 'thread-id', type: 'int', help: 'only agents in this group chat' },
     { name: 'online', type: 'bool', help: 'only agents running right now' },
@@ -87,7 +87,7 @@ const list: CommandSpec = {
     if (agents.length === 0) return microteams.print('(no agents)')
     for (const a of agents) {
       const where = a.machineId ? ` · on ${a.machineId}` : ''
-      const team = a.teamId != null ? ` · team #${a.teamId}` : ''
+      const team = a.teams?.length ? ` · teams ${a.teams.map((t) => '#' + t.id).join(', ')}` : ''
       microteams.print(`#${a.userId} ${a.nickname} · ${a.online ? 'online' : 'offline'}${team}${where}${a.driver ? ' · ' + a.driver : ''}`)
     }
     moreHint(resp.page, (n) => `microteams api agent list --page-start ${n}`, 'agents')
@@ -96,7 +96,7 @@ const list: CommandSpec = {
 
 const show: CommandSpec = {
   name: 'show',
-  short: 'One agent: where it runs, for which team, with which driver, and its keepalive',
+  short: 'One agent: where it runs, its teams and chats, its driver, and its keepalive',
   flags: [AGENT, JSON_FLAG],
   run: (ctx) => {
     const userId = Number(need(ctx, 'user-id'))
@@ -104,7 +104,8 @@ const show: CommandSpec = {
     if (!a) throw new Error(`no agent #${userId}`)
     if (wantsJson(ctx)) return microteams.print(JSON.stringify(a))
     microteams.print(`#${a.userId} ${a.nickname} · ${a.online ? 'online' : 'offline'}`)
-    if (a.teamId != null) microteams.print(`team #${a.teamId}`)
+    microteams.print(`teams: ${(a.teams ?? []).map((t) => `#${t.id} ${t.name}`).join(', ') || '(none)'}`)
+    microteams.print(`chats: ${(a.chats ?? []).map((c) => `#${c.id} ${c.title ?? ''}`).join(', ') || '(none)'}`)
     if (a.machineId) microteams.print(`machine ${a.machineId}${a.sid ? ' · screen ' + a.sid : ''}`)
     if (a.driver) microteams.print(`driver ${a.driver}`)
     if (a.keepalive) microteams.print(`keepalive ${JSON.stringify(a.keepalive)}`)

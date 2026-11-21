@@ -45,15 +45,6 @@ export function done(what: string) {
   microteams.print(what)
 }
 
-export const ROLES = ['OWNER', 'ADMIN', 'MEMBER'] as const
-export type Role = (typeof ROLES)[number]
-
-export function role(value: string): Role {
-  const r = value.toUpperCase()
-  if ((ROLES as readonly string[]).indexOf(r) < 0) throw new Error(`role must be one of ${ROLES.join(', ')}`)
-  return r as Role
-}
-
 /**
  * A team as the person typed it: its id, or its name as shown in the app. Names are matched
  * case-insensitively among the caller's own teams; two teams with the same name is an error that
