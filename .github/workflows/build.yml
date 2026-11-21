@@ -552,6 +552,13 @@ jobs:
             browser: firefox
             viewport: desktop
             experimental: false
+          # A phone's Firefox: its own touch handling around a held finger, which selects.
+          - client: web
+            leg: npm:2.1.220
+            driver: ""
+            browser: firefox
+            viewport: phone
+            experimental: false
           - client: android
             leg: pi:0.87.0
             driver: pi

@@ -10,6 +10,8 @@
  *   how long the live screen took to open is printed. The keyboard of the live
  *   screen is the page made shorter by 40%, as a phone's keyboard makes a page that asks for
  *   resizes-content; a scroll is a finger dragged down on a touch screen and a wheel turn on a desktop.
+ *   The page may read and write the clipboard (Firefox through its testing prefs), so clipboard()
+ *   reads what a copy put there; a phone's Firefox has a coarse pointer, as a phone's does.
  *
  * Example: await journey(new PlaywrightDriver("http://localhost/app/", { browser: "firefox", viewport: "desktop" }), params);
  */
@@ -37,11 +39,21 @@ export class PlaywrightDriver implements Driver {
 
   async open() {
     const phone = this.opts.viewport === "phone";
-    this.browser = await (this.opts.browser === "firefox" ? firefox : chromium).launch();
+    this.browser =
+      this.opts.browser === "firefox"
+        ? await firefox.launch({
+            firefoxUserPrefs: {
+              "dom.events.asyncClipboard.readText": true,
+              "dom.events.testing.asyncClipboard": true,
+              ...(phone ? { "ui.primaryPointerCapabilities": 1, "ui.allPointerCapabilities": 1 } : {}),
+            },
+          })
+        : await chromium.launch();
     this.page = await this.browser.newPage({
       viewport: this.size,
       hasTouch: phone,
       isMobile: phone && this.opts.browser === "chromium",
+      permissions: this.opts.browser === "chromium" ? ["clipboard-read", "clipboard-write"] : [],
     });
     this.p.on("console", (m) => {
       if (m.type() === "error") this.log.push(`console: ${m.text()}`);
@@ -189,7 +201,7 @@ export class PlaywrightDriver implements Driver {
     const x0 = box.x + box.width * 0.05;
     const y0 = box.y + box.height * 0.04;
     const x1 = box.x + box.width * 0.6;
-    const y1 = box.y + box.height * 0.5;
+    const y1 = box.y + box.height * 0.7;
     // Touches as a finger makes them, dispatched where the terminal listens for them.
     const touch = (type: string, x: number, y: number) =>
       this.p.evaluate(
@@ -209,6 +221,10 @@ export class PlaywrightDriver implements Driver {
       await this.p.waitForTimeout(40);
     }
     await touch("touchend", x1, y1);
+  }
+
+  async clipboard() {
+    return (await this.p.evaluate("navigator.clipboard.readText()")) as string;
   }
 
   async watchOverflow(on: boolean) {

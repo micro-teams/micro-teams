@@ -24,7 +24,10 @@
  *   - scrolling: a wheel turn (a swipe on a phone) puts tmux into its history, and the terminal on
  *     the client never scrolls by itself (the web);
  *   - copy: the copy button shows the screen's text with its history, the agent's message in it;
- *     on a phone a held finger dragged selects, and the selection comes back as a copy;
+ *     on a phone a held finger dragged selects, and the selection comes back as a copy: the
+ *     clipboard (where the client lets it be read) holds the agent's message, and with Claude
+ *     Code, which selects in its full-screen renderer, a paragraph it wrapped over several rows
+ *     comes as one line;
  *   - commands: Claude Code's driver offers compact, and the others no command;
  *   and closes the screen.
  * ScreenCtx — the outside viewer factory, the machine's pane, telling the agent something from
@@ -163,12 +166,12 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   await d.typeInTerminal(" ");
   await d.waitFor("screen-refused", 10_000);
   if (!/ is operating: what you typed was not sent$/.test(await d.text("screen-refused"))) throw new Error(`refused input: "${await d.text("screen-refused")}"`);
-  await d.waitGone("screen-refused", 10_000);
   other.type(" \x7f");
   await flip();
   await until("a refused take says who operates", async () => / is operating$/.test(await d.text("screen-refused").catch(() => "")), 10_000);
   other.close();
-  await until("the lease free once the other viewer left", async () => (await d.text("screen-holder")) === "" && (await knob()) === "watch", 15_000);
+  await d.waitGone("screen-holder", 15_000);
+  if ((await knob()) !== "watch") throw new Error("the switch shows operate once the other viewer left");
   ctx.lap("live screen: lease taken, kept, given back, refused; the switch; held back while operating");
 
   // -- two viewers ---------------------------------------------------------------------------
@@ -220,6 +223,18 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
       await until("a copy from a touch selection after c", noted, 10_000);
     }
     console.log(`  live screen: a touch selection copied (${await d.text("screen-note")})`);
+    if (d.clipboard) {
+      const copied = await d.clipboard();
+      if (!copied.includes(ctx.marker)) throw new Error(`the clipboard lacks the agent's message ${ctx.marker}: ${copied.slice(0, 400)}`);
+      if (ctx.driver === "" || ctx.driver === "claude") {
+        // The reminder the server adds to every message: one paragraph, wrapped by Claude Code.
+        const rows = (await ctx.pane()).text.split("\n").filter((l) => /\(Reminder:|verbatim\.\)/.test(l));
+        const line = copied.split("\n").find((l) => l.includes("(Reminder:")) ?? "";
+        if (rows.length < 2) throw new Error(`the reminder is not wrapped on the screen: ${JSON.stringify(rows)}`);
+        if (!line.includes("verbatim.)")) throw new Error(`a paragraph wrapped over several rows did not copy as one line: ${JSON.stringify(line)}`);
+      }
+      console.log(`  live screen: the clipboard holds the selection (${copied.length} characters${ctx.driver === "" || ctx.driver === "claude" ? ", a wrapped paragraph as one line" : ""})`);
+    }
     ctx.lap("live screen: select by touch, copy");
   }
 

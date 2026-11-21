@@ -91,8 +91,10 @@ export interface Driver {
    * whether the terminal still has the focus (on a phone, losing it closes the keyboard). */
   keepsFocusOnTap?(id: string): Promise<boolean>;
   /** Hold a finger still on the terminal long enough to start a selection, then drag it from
-   * near the top left to the middle and lift it. */
+   * near the top left to below the middle and lift it. */
   selectByHold?(): Promise<void>;
+  /** The web only: the text the system clipboard holds. */
+  clipboard?(): Promise<string>;
   /** The web only: the room around the terminal inside its view, in px, and a cell's height. */
   terminalOffsets?(): Promise<{ left: number; right: number; top: number; bottom: number; cell: number }>;
   /** The web only: what is wrong if the terminal has scrolled by itself or keeps lines above it. */

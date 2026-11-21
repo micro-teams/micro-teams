@@ -215,14 +215,19 @@ export function ScreenFrame() {
     );
 
   const size = state.size;
+  const holder = holderText(state.lease);
   return (
     <View style={[styles.root, { paddingTop: insets.top }]} testID="screen">
       <View ref={chrome} style={styles.chrome}>
         <Small testID="screen-close" icon="close" label="close" onPress={pop} />
         <LeaseSwitch on={state.lease.holder === "self"} onChange={(on) => (on ? screen.take() : screen.release())} />
-        <Txt testID="screen-holder" variant="small" muted style={styles.lease} numberOfLines={1}>
-          {holderText(state.lease) ?? ""}
-        </Txt>
+        <View style={styles.lease}>
+          {holder !== null && (
+            <Txt testID="screen-holder" variant="small" muted numberOfLines={1}>
+              {holder}
+            </Txt>
+          )}
+        </View>
         {size && (
           <View testID="screen-size-info" accessible accessibilityLabel={`terminal ${size.cols}x${size.rows}, resized ${state.resizes} times`} style={styles.size}>
             <Txt testID="screen-size" variant="label" muted>

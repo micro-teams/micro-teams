@@ -27,7 +27,11 @@
  * selects with it, or passes it to a program that takes the mouse (Claude Code selects with it,
  * and copies on its own key), and the copy comes back as OSC 52. Held at the top or bottom row, the
  * selection scrolls the content, so it can run past one screen. A selection never takes or gives
- * up the keyboard, and a long press never opens the browser's own menu. While the element is
+ * up the keyboard. Every touch on the terminal is the terminal's alone: the browser neither pans,
+ * zooms nor refreshes with it (touch-action), and recognises no gesture in it (its start is
+ * cancelled), so a long press opens no menu, selects no page text and synthesizes no click (a
+ * phone's Firefox does all three otherwise); a touch the browser cancels all the same ends the
+ * selection where it was. While the element is
  * smaller than the terminal (it has just shrunk, and the machine has not answered with the new
  * size), nothing new is drawn and the terminal keeps its bottom edge, where a program's prompt is,
  * in view; after a growth it keeps its place until the new size arrives. Otherwise it is centred
@@ -265,6 +269,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   const onTouchStart = (e: TouchEvent) => {
     const t = e.touches[0];
     if (!t || e.touches.length > 1) return;
+    e.preventDefault();
     start = { x: t.clientX, y: t.clientY };
     lastY = t.clientY;
     travel = 0;
@@ -312,8 +317,8 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     clearTimeout(hold);
     clearInterval(edge);
     const t = e.changedTouches[0];
-    if (selecting) mouse("mouseup", t?.clientX ?? start.x, t?.clientY ?? start.y);
-    else if (!moved) term.focus();
+    if (selecting) mouse("mouseup", t?.clientX ?? at.x, t?.clientY ?? at.y);
+    else if (!moved && e.type === "touchend") term.focus();
     selecting = false;
     start = null;
   };
@@ -322,9 +327,11 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   box.addEventListener("contextmenu", noMenu);
   box.style.setProperty("-webkit-touch-callout", "none");
   box.style.userSelect = "none";
-  box.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
+  box.style.touchAction = "none";
+  box.addEventListener("touchstart", onTouchStart, { passive: false, capture: true });
   box.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
   box.addEventListener("touchend", onTouchEnd, { passive: false, capture: true });
+  box.addEventListener("touchcancel", onTouchEnd, { passive: false, capture: true });
 
   return {
     write: (bytes) => {
@@ -353,6 +360,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
       box.removeEventListener("touchstart", onTouchStart, { capture: true });
       box.removeEventListener("touchmove", onTouchMove, { capture: true });
       box.removeEventListener("touchend", onTouchEnd, { capture: true });
+      box.removeEventListener("touchcancel", onTouchEnd, { capture: true });
       for (const e of PERSON_EVENTS) box.removeEventListener(e, person, { capture: true });
       term.textarea!.removeEventListener("focus", onFocus);
       term.textarea!.removeEventListener("blur", onBlur);
