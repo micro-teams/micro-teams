@@ -11,8 +11,19 @@ import { JSON_FLAG, int, need, str, teamId, wantsJson } from './util'
 // The git remote + a fresh credential come from the backend (the call is already authenticated as
 // this agent), so no token is ever written into .git and the connector needs no git knowledge.
 
-function gitWorkspace(): AgentGitWorkspace {
-  return call('getGitWorkspace', {})
+// Which team's tree: the one named, else the one this checkout was cloned from (its remote ends in
+// /git/<team id>), else the server's choice, which is the agent's only team when it is in one.
+function gitWorkspace(team: string | undefined): AgentGitWorkspace {
+  if (team != null) return call('getGitWorkspace', { teamId: teamId(team) })
+  const remote = microteams.exec('git', ['remote', 'get-url', 'origin'])
+  const cloned = remote.code === 0 ? /\/git\/(\d+)(\.git)?\/?$/.exec(remote.stdout.trim()) : null
+  return call('getGitWorkspace', { teamId: cloned ? Number(cloned[1]) : undefined })
+}
+
+const TEAM_FLAG: CommandFlag = {
+  name: 'team',
+  type: 'string',
+  help: "which team's tree (id or name); needed for a first clone when you are in several teams",
 }
 
 // The commit identity every git action here writes under. Needed wherever git may CREATE a commit:
@@ -33,13 +44,14 @@ function insideRepo(): boolean {
 
 const gitCommands: CommandSpec = {
   name: 'docs',
-  short: "Work with your team's shared document tree",
+  short: "Work with a team's shared document tree (one checkout per team)",
   commands: [
     {
       name: 'sync',
       short: 'Fetch the latest document tree and publish your recorded changes (pull + push)',
-      run: () => {
-        const ws = gitWorkspace()
+      flags: [TEAM_FLAG],
+      run: (ctx) => {
+        const ws = gitWorkspace(str(ctx, 'team'))
         if (!insideRepo()) {
           const cloned = authedGit(ws.token, ['clone', ws.gitUrl, '.'])
           if (cloned.code !== 0) throw new Error('docs sync (clone) failed: ' + cloned.stderr)
@@ -195,7 +207,7 @@ const gitCommands: CommandSpec = {
 // whose tree this agent works in.
 function readTeam(ctx: CommandContext): number {
   const t = str(ctx, 'team')
-  return t != null ? teamId(t) : gitWorkspace().teamId
+  return t != null ? teamId(t) : gitWorkspace(undefined).teamId
 }
 
 const TEAM: CommandFlag = { name: 'team', type: 'string', help: 'a team id or name (default: your own team)' }
