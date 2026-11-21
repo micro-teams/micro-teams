@@ -27,7 +27,6 @@
  * Example: push("screen", "overlay", { sessionId: agent.sid })
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import * as Clipboard from "expo-clipboard";
 import { useEffect, useRef, useState, type ElementRef } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -35,6 +34,7 @@ import { useLiveScreen, type ScreenState } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
+import { writeClipboard } from "../../platform/clipboard";
 import { tick } from "../../platform/haptics";
 import { isWeb } from "../../platform/platform";
 import { Txt } from "../../ui/kit";
@@ -127,8 +127,8 @@ export function ScreenFrame() {
     [],
   );
   const toClipboard = (text: string) =>
-    Clipboard.setStringAsync(text).then(
-      (ok) => notify(ok ? "copied" : "copy: the clipboard refused the text"),
+    writeClipboard(text).then(
+      () => notify("copied"),
       (e: Error) => notify(`copy: ${e.message}`),
     );
   // The copy sheet opens at its end, where the latest lines are, once per text it is given.
