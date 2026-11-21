@@ -12,7 +12,7 @@
  *   in a browser — waits for it to come online, opens an agent on it, says something to the agent
  *   and waits until the model on the machine has been given it (params.machine.heard), finds the
  *   same conversation a second time, uses the agent's live screen from the chat's roster
- *   (terminal.ts: opening, the keyboard, the lease, two viewers, scrolling, copy, usage), takes the agent out of the
+ *   (terminal.ts: opening, the keyboard, the lease and the watch/operate switch, a message held back while the person operates, two viewers, scrolling, copy, commands), takes the agent out of the
  *   chat, renames it, sets its keepalive, and closes it.
  *   With the stack's lines (params.lines), it then opens the lines panel and finds the three lines
  *   up; kills one line silently and slows another, sees the dead one shown down within seconds and
@@ -35,8 +35,8 @@
  * Lines — fault(line, mode) gives line "b" or "c" a fault ("dead", "slow") or none ("pass");
  *   restartServer() restarts the multipath server and resolves once it is back; machineSession()
  *   is the id of the machine's live MultiPath session, or null.
- * outside(api, username, password) → { post(title, text), createTeam(name) → id, chatTitled(title)
- *   → id, approve(code, teamIds), agentNamed(teamId, name) → userId, sidOf(teamId, userId) → the
+ * outside(api, username, password) → { post(title, text), postTo(chatId, text), createTeam(name) →
+ *   id, chatTitled(title) → id, chatWith(userId) → the id of the conversation of two with them, approve(code, teamIds), agentNamed(teamId, name) → userId, sidOf(teamId, userId) → the
  *   agent's screen, viewer(sid, cols, rows) → a second viewer of it (terminal.ts's Viewer),
  *   untilIdle(teamId, userId) } — signs in over HTTP and acts as another client of the same person
  *   would; the ids are what the app's testIDs carry, and untilIdle waits for the agent's program to
@@ -163,6 +163,13 @@ export async function outside(api: string, username: string, password: string) {
   };
   return {
     post: async (title: string, text: string) => void (await send(`/chat/${await chatTitled(title)}/messages`, { content: text })),
+    postTo: async (chatId: number, text: string) => void (await send(`/chat/${chatId}/messages`, { content: text })),
+    chatWith: async (userId: number) => {
+      const { chats } = await get<{ chats: { id: number; members: { userId: number }[] }[] }>("/chat?page_size=50");
+      const chat = chats.find((c) => c.members.length === 2 && c.members.some((m) => m.userId === userId));
+      if (!chat) throw new Error(`no conversation of two with user ${userId}`);
+      return chat.id;
+    },
     createTeam: async (name: string) => (await send("/team", { name })).id,
     chatTitled,
     approve: async (code: string, teamIds: number[]) => void (await send("/machine/enroll/approve", { code, teamIds })),
@@ -418,7 +425,17 @@ async function withAMachine(
 
   await d.tap("chat-info");
   const sid = await elsewhere.sidOf(teamId, agentId);
-  await liveScreen(d, { agentId, marker, driver: machine.driver, viewer: (cols, rows) => elsewhere.viewer(sid, cols, rows), pane: machine.pane, lap });
+  const chatWithAgent = await elsewhere.chatWith(agentId);
+  await liveScreen(d, {
+    agentId,
+    marker,
+    driver: machine.driver,
+    viewer: (cols, rows) => elsewhere.viewer(sid, cols, rows),
+    pane: machine.pane,
+    tell: (text) => elsewhere.postTo(chatWithAgent, text),
+    heard: machine.heard,
+    lap,
+  });
 
   await d.tap(`remove-${agentId}`);
   await d.tap("confirm");

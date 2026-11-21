@@ -12,19 +12,23 @@
  *     and (on the web) the terminal's bottom, where the prompt is, never leaves its view meanwhile
  *     (until the smaller size arrives, the terminal keeps its bottom edge in view and its top is
  *     cut off; how long is printed);
- *   - the lease: typing takes the input ("you are typing"), it is kept while the person types and
- *     is given back after a minute without input ("free"); a second viewer typing then holds it,
- *     and what the person types meanwhile is refused and said so;
+ *   - the lease: typing takes the input (the switch slides to "operate"), it is kept while the
+ *     person types and is given back after a minute without input ("watch"); tapping the switch
+ *     takes it and tapping it again gives it back, and neither takes the terminal's focus; a
+ *     second viewer typing then holds it, which the caption names, and what the person types
+ *     meanwhile is refused and said so, as is a tap on the switch;
+ *   - holding back: while the person operates, a message to the agent is not typed into its
+ *     program; once they switch back to watching it is, and the model is given it;
  *   - two viewers: the terminal is the smaller one's size, centred (measured on the web), and back to
  *     its own room when that viewer leaves;
  *   - scrolling: a wheel turn (a swipe on a phone) puts tmux into its history, and the terminal on
  *     the client never scrolls by itself (the web);
  *   - copy: the copy button shows the screen's text with its history, the agent's message in it;
  *     on a phone a held finger dragged selects, and the selection comes back as a copy;
- *   - usage: the usage button reaches the driver (Claude Code shows /usage in the pane; a driver
- *     without the command offers no button);
+ *   - commands: Claude Code's driver offers compact, and the others no command;
  *   and closes the screen.
- * ScreenCtx — the outside viewer factory and the machine's pane, from the journey.
+ * ScreenCtx — the outside viewer factory, the machine's pane, telling the agent something from
+ *   outside and waiting until its model was given it, from the journey.
  * Viewer — a second viewer over a plain WebSocket: its sizes, the lease states it was told, type(),
  *   close().
  *
@@ -47,6 +51,8 @@ export interface ScreenCtx {
   driver: string;
   viewer(cols: number, rows: number): Promise<Viewer>;
   pane(): Promise<{ inMode: boolean; mouse: boolean; alternate: boolean; text: string }>;
+  tell(text: string): Promise<void>;
+  heard(text: string): Promise<void>;
   lap(step: string): void;
 }
 
@@ -124,20 +130,46 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   }
 
   // -- the lease -----------------------------------------------------------------------------
+  const knob = () => d.label("screen-lease");
   await d.typeInTerminal(" \x7f");
-  await until("typing takes the input", async () => (await d.text("screen-lease")) === "you are typing", 10_000);
+  await until("typing takes the input: the switch on operate", async () => (await knob()) === "operate", 10_000);
   await sleep(5_000); // longer than the machine's lease: it stays only because it is renewed
-  if ((await d.text("screen-lease")) !== "you are typing") throw new Error("the lease was not kept while typing");
-  const freed = await until("the lease given back after a minute idle", async () => (await d.text("screen-lease")) === "free", 90_000);
+  if ((await knob()) !== "operate") throw new Error("the lease was not kept while typing");
+  const freed = await until("the lease given back after a minute idle", async () => (await knob()) === "watch", 90_000);
   console.log(`  live screen: lease kept while typing, given back ${5 + Math.round(freed / 1000)} s after the last key`);
+  // The switch takes and gives back the input, and leaves the focus (a phone's keyboard) alone.
+  const flip = async () => {
+    if (d.keepsFocusOnTap) {
+      if (!(await d.keepsFocusOnTap("screen-lease"))) throw new Error("the watch/operate switch took the focus from the terminal");
+    } else await d.tap("screen-lease");
+  };
+  await flip();
+  await until("the switch tapped to operate takes the input", async () => (await knob()) === "operate", 10_000);
+  await sleep(4_000);
+  if ((await knob()) !== "operate") throw new Error("the lease the switch took was not kept");
+  // -- holding back: what the agent is told waits while the person operates --------------------
+  const held = `${ctx.marker}-held`;
+  await ctx.tell(held);
+  await sleep(6_000);
+  if ((await ctx.pane()).text.includes(held)) throw new Error("a message was typed into the program while a person operated it");
+  await flip();
+  await until("the switch tapped to watch gives the input back", async () => (await knob()) === "watch", 10_000);
+  await ctx.heard(held);
+  console.log("  live screen: the switch takes and gives back the input; a message waited for the person to stop operating");
   const other = await ctx.viewer(first.cols, first.rows);
   other.type(" \x7f");
-  await until("another viewer's input shows as theirs", async () => / is typing$/.test(await d.text("screen-lease")) && (await d.text("screen-lease")) !== "you are typing", 10_000);
+  await until("another viewer's input named beside the switch", async () => / is operating$/.test(await d.text("screen-holder")), 10_000);
+  if ((await knob()) !== "watch") throw new Error("the switch shows operate while someone else holds the input");
   await d.typeInTerminal(" ");
   await d.waitFor("screen-refused", 10_000);
+  if (!/ is operating: what you typed was not sent$/.test(await d.text("screen-refused"))) throw new Error(`refused input: "${await d.text("screen-refused")}"`);
+  await d.waitGone("screen-refused", 10_000);
+  other.type(" \x7f");
+  await flip();
+  await until("a refused take says who operates", async () => / is operating$/.test(await d.text("screen-refused").catch(() => "")), 10_000);
   other.close();
-  await until("the lease free once the other viewer left", async () => (await d.text("screen-lease")) === "free", 15_000);
-  ctx.lap("live screen: lease taken, kept, given back, refused");
+  await until("the lease free once the other viewer left", async () => (await d.text("screen-holder")) === "" && (await knob()) === "watch", 15_000);
+  ctx.lap("live screen: lease taken, kept, given back, refused; the switch; held back while operating");
 
   // -- two viewers ---------------------------------------------------------------------------
   const small = await ctx.viewer(Math.min(50, first.cols - 10), Math.min(15, first.rows - 4));
@@ -191,16 +223,12 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
     ctx.lap("live screen: select by touch, copy");
   }
 
-  // -- usage ---------------------------------------------------------------------------------
-  if (ctx.driver === "" || ctx.driver === "claude") {
-    await d.tap("screen-usage");
-    await until("Claude Code shows its usage", async () => /usage/i.test((await ctx.pane()).text.split("\n").slice(-30).join("\n")), 30_000);
-  } else {
-    // A driver without the command offers no button for it.
-    await d.waitGone("screen-usage", 5_000);
-    console.log(`  live screen: ${ctx.driver} has no usage button`);
-  }
-  ctx.lap("live screen: usage");
+  // -- commands ------------------------------------------------------------------------------
+  if (ctx.driver === "" || ctx.driver === "claude") await d.waitFor("screen-compact", 5_000);
+  else await d.waitGone("screen-compact", 5_000);
+  await d.waitGone("screen-usage", 1_000);
+  console.log(`  live screen: ${ctx.driver || "claude"} offers ${ctx.driver === "" || ctx.driver === "claude" ? "compact" : "no command"}`);
+  ctx.lap("live screen: commands");
 
   await d.tap("screen-close");
   await d.waitGone("screen");

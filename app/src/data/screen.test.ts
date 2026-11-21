@@ -104,9 +104,26 @@ test("refused input says who has the lease, for a few seconds", () => {
   screen.start();
   wires[0].onopen!();
   say(wires[0], { type: "lease", holder: "other", name: "Ada", refused: true });
-  expect(states.at(-1)).toMatchObject({ lease: { holder: "other", name: "Ada" }, refused: "Ada" });
+  expect(states.at(-1)).toMatchObject({ lease: { holder: "other", name: "Ada" }, refused: { holder: "Ada is operating", typed: true } });
   tick(3000);
   expect(states.at(-1)!.refused).toBeNull();
+});
+
+test("a take asks for the lease, holds it as typing does, and a refusal says who holds it", () => {
+  const { screen, wires, json, say, states, tick } = rig();
+  screen.room(80, 24);
+  screen.start();
+  wires[0].onopen!();
+  screen.take();
+  expect(json(wires[0]).at(-1)).toEqual({ type: "lease", op: "take" });
+  say(wires[0], { type: "lease", holder: "driver", name: null, refused: true });
+  expect(states.at(-1)!.refused).toEqual({ holder: "the agent is typing", typed: false });
+  screen.take();
+  say(wires[0], { type: "lease", holder: "self", name: null, refused: false });
+  tick(59_000);
+  expect(json(wires[0]).at(-1)).toEqual({ type: "lease", op: "renew" });
+  screen.release();
+  expect(json(wires[0]).at(-1)).toEqual({ type: "lease", op: "release" });
 });
 
 test("capture and commands are answered by id; an error rejects", async () => {
@@ -115,7 +132,7 @@ test("capture and commands are answered by id; an error rejects", async () => {
   screen.start();
   wires[0].onopen!();
   const text = screen.capture();
-  const usage = screen.command("usage");
+  const usage = screen.command("compact");
   const [c, u] = json(wires[0]);
   say(wires[0], { type: "capture", id: c.id, text: "hello", error: null });
   say(wires[0], { type: "command", id: u.id, error: "no such command" });
@@ -227,6 +244,6 @@ test("the driver's commands are what the backend says it offers", () => {
   screen.room(80, 24);
   screen.start();
   wires[0].onopen!();
-  say(wires[0], { type: "commands", names: ["usage"] });
-  expect(states.at(-1)!.commands).toEqual(["usage"]);
+  say(wires[0], { type: "commands", names: ["compact"] });
+  expect(states.at(-1)!.commands).toEqual(["compact"]);
 });

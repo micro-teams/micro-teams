@@ -4,11 +4,16 @@
  *
  * <ScreenFrame /> — drawn for a "screen" overlay frame with { sessionId }. One row of chrome above
  *   the terminal (a terminal is the content; the chrome is a tax on how many lines you see): close;
- *   who has the input (free, you, the agent, or another person by name — whoever types first takes
- *   it, and input while someone else has it is refused and said so); the terminal's size; the
- *   agent's usage, which the agent's program shows in the terminal; copy, which opens the screen's
- *   text with its history as plain selectable text; and compact. What a button did, or why it could
- *   not, is a note over the terminal for a few seconds. On a device with a screen keyboard the
+ *   the watch/operate switch, with who else has the input beside it (the agent, or another person
+ *   by name); the terminal's size; copy, which opens the screen's text with its history as plain
+ *   selectable text; and compact, where the agent's driver offers it. What a button did, or why it
+ *   could not, is a note over the terminal for a few seconds.
+ *
+ *   The switch shows whether this person has the input: its knob is on "operate" exactly while
+ *   they hold the lease, whether the switch or their typing took it. Sliding or tapping it to
+ *   "operate" asks for the lease, and a refusal says who holds it; sliding it to "watch" gives it
+ *   back. While a person operates, the agent's program holds back what it is told to type. Whoever
+ *   types first takes the input, and input while someone else has it is refused and said so. On a device with a screen keyboard the
  *   chrome also has the keyboard's own key, and two rows of the keys a screen keyboard lacks sit
  *   under the terminal, laid out as Termux lays them out:
  *
@@ -30,7 +35,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useEffect, useRef, useState, type ElementRef } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLiveScreen, type ScreenState } from "../../data/screen";
+import { holderText, useLiveScreen } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
@@ -43,6 +48,8 @@ import { colors, fonts } from "../../ui/theme";
 
 /** How long a note (copied, or what went wrong with a button) stays over the terminal. */
 const NOTE_MS = 4_000;
+/** A finger travelling this far over the switch slides it; less is a tap, which flips it. */
+const SLIDE_PX = 8;
 
 type Icon = keyof typeof MaterialIcons.glyphMap;
 
@@ -66,19 +73,37 @@ function Small({ icon, label, onPress, testID }: { icon: Icon; label: string; on
   );
 }
 
-function leaseText(s: ScreenState): string {
-  switch (s.lease.holder) {
-    case "self":
-      return "you are typing";
-    case "driver":
-      return "the agent is typing";
-    case "other":
-      return `${s.lease.name ?? "someone"} is typing`;
-    default:
-      return "free";
-  }
+/** Watch (knob left) or operate (knob right), slid or tapped; never takes the focus. */
+function LeaseSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const from = useRef(0);
+  return (
+    <View
+      testID="screen-lease"
+      accessible
+      accessibilityRole="switch"
+      accessibilityLabel={on ? "operate" : "watch"}
+      accessibilityState={{ checked: on }}
+      onStartShouldSetResponder={() => true}
+      onResponderGrant={(e) => {
+        from.current = e.nativeEvent.pageX;
+      }}
+      onResponderRelease={(e) => {
+        const dx = e.nativeEvent.pageX - from.current;
+        onChange(Math.abs(dx) > SLIDE_PX ? dx > 0 : !on);
+      }}
+      hitSlop={6}
+      style={styles.switch}
+    >
+      <View style={[styles.knob, on && styles.knobOn]} pointerEvents="none" />
+      <Txt variant="label" muted={on} style={styles.switchLabel}>
+        watch
+      </Txt>
+      <Txt variant="label" muted={!on} style={styles.switchLabel}>
+        operate
+      </Txt>
+    </View>
+  );
 }
-
 
 export function ScreenFrame() {
   const { sessionId } = useFrame().params as { sessionId: string };
@@ -175,7 +200,7 @@ export function ScreenFrame() {
   // the terminal has the focus.
   const keyboardOpen = keyboardInsetKnown ? keyboard > 0 : focused;
 
-  const ask = (name: "usage" | "compact") =>
+  const ask = (name: "compact") =>
     screen.command(name).then(
       () => notify(`${name}: asked; the agent's program shows it`),
       (e: Error) => notify(`${name}: ${e.message}`),
@@ -194,8 +219,9 @@ export function ScreenFrame() {
     <View style={[styles.root, { paddingTop: insets.top }]} testID="screen">
       <View ref={chrome} style={styles.chrome}>
         <Small testID="screen-close" icon="close" label="close" onPress={pop} />
-        <Txt testID="screen-lease" variant="label" muted={state.lease.holder === "free"} style={styles.lease} numberOfLines={1}>
-          {leaseText(state)}
+        <LeaseSwitch on={state.lease.holder === "self"} onChange={(on) => (on ? screen.take() : screen.release())} />
+        <Txt testID="screen-holder" variant="small" muted style={styles.lease} numberOfLines={1}>
+          {holderText(state.lease) ?? ""}
         </Txt>
         {size && (
           <View testID="screen-size-info" accessible accessibilityLabel={`terminal ${size.cols}x${size.rows}, resized ${state.resizes} times`} style={styles.size}>
@@ -204,7 +230,6 @@ export function ScreenFrame() {
             </Txt>
           </View>
         )}
-        {state.commands.includes("usage") && <Small testID="screen-usage" icon="data-usage" label="usage" onPress={() => void ask("usage")} />}
         <Small testID="screen-copy" icon="content-copy" label="copy" onPress={copy} />
         {state.commands.includes("compact") && <Small testID="screen-compact" icon="compress" label="compact" onPress={() => void ask("compact")} />}
         {hasTouchKeyboard && (
@@ -256,9 +281,9 @@ export function ScreenFrame() {
             </View>
           )}
           {state.refused && (
-            <View testID="screen-refused" style={[styles.banner, styles.refused]} pointerEvents="none">
-              <Txt variant="small" style={styles.bannerText}>
-                {`${state.refused} has the input: what you typed was not sent`}
+            <View style={[styles.banner, styles.refused]} pointerEvents="none">
+              <Txt testID="screen-refused" variant="small" style={styles.bannerText}>
+                {state.refused.typed ? `${state.refused.holder}: what you typed was not sent` : state.refused.holder}
               </Txt>
             </View>
           )}
@@ -339,6 +364,10 @@ const styles = StyleSheet.create({
   chrome: { flexDirection: "row", alignItems: "center", backgroundColor: colors.raised, paddingHorizontal: 4, paddingVertical: 2, gap: 2 },
   small: { width: 28, height: 28, borderRadius: 6, alignItems: "center", justifyContent: "center" },
   lease: { flex: 1, marginHorizontal: 6 },
+  switch: { flexDirection: "row", alignItems: "center", height: 24, borderRadius: 12, backgroundColor: colors.page, marginLeft: 4 },
+  switchLabel: { width: 60, textAlign: "center" },
+  knob: { position: "absolute", top: 2, bottom: 2, left: 2, width: 58, borderRadius: 10, backgroundColor: colors.keyDown },
+  knobOn: { left: 60 },
   size: { marginRight: 4 },
   spacer: { flex: 1 },
   body: { flex: 1 },

@@ -6,17 +6,18 @@
  * frames are screen bytes in and input out (keys, pastes, mouse sequences: the wheel scrolls tmux).
  * Text frames out: {type:"resize",cols,rows}, {type:"ack",n} (bytes drawn; the machine sends more
  * only as these arrive), {type:"reply",data} (base64: the terminal's answers to tmux, outside the
- * lease), {type:"lease",op:"renew"|"release"}, {type:"capture",id}, {type:"command",id,name}.
+ * lease), {type:"lease",op:"take"|"renew"|"release"}, {type:"capture",id}, {type:"command",id,name}.
  * Text frames in: {type:"size",cols,rows} (the terminal's size from now on, before any byte at that
  * size), {type:"lease",holder,name,refused}, {type:"capture",id,text,error},
  * {type:"command",id,error}, {type:"commands",names} (what the screen's driver offers),
  * {type:"error",error}.
  *
- * Input is under a lease, held by one party at a time. The first input on a free screen takes it;
- * it is renewed every second while the person types (a key in the last minute) or scrolls (a wheel
- * turn in the last few seconds), then given back; leaving gives it back too. Input while someone
- * else holds it is refused by the machine, and the state says so for a few seconds. Each connection
- * starts with the lease free and nothing drawn.
+ * Input is under a lease, held by one party at a time. The first input on a free screen takes it,
+ * and so does asking for it (take()); it is renewed every second while the person types (a key, or
+ * the take, in the last minute) or scrolls (a wheel turn in the last few seconds), then given back;
+ * leaving gives it back too. Input or a take while someone else holds it is refused by the machine,
+ * and the state says who holds it for a few seconds. While a person holds it the agent's program
+ * holds back what it is told to type. Each connection starts with the lease free and nothing drawn.
  *
  * LiveScreen({ open, path(cols, rows), onState, now? }) — path gives the address to dial, or null
  *   when there is nobody signed in (then nothing is dialled and the state says so).
@@ -24,16 +25,19 @@
  *   not there and is ignored), close() ends it for good, retry() redials now. drawOn(sink) says
  *   where the stream goes. input(data, typed?) sends input (typed false: a reply);
  *   rendered(n) reports drawn bytes; capture() resolves to the screen's text with its history;
- *   command(name) gives the lease back and asks the driver for "usage" or "compact"; release()
- *   gives the lease back. Reconnects forever, waiting LiveScreen.waitFor(attempt) — 0.5 s, doubling
+ *   command(name) gives the lease back and asks the driver for "compact"; take() asks for the
+ *   lease; release() gives it back. Reconnects forever, waiting LiveScreen.waitFor(attempt) — 0.5 s, doubling
  *   to 30 s — and forgiving the count only once a connection has lasted 5 s.
  *   onState(ScreenState) on every change.
  * ScreenState — connected, reconnecting, doubtful (three attempts failed without one opening: the
  *   screen may be gone, or not this person's to watch), drawn (this connection's first bytes are on
  *   the terminal), size (the terminal's) and resizes (how many times it changed after the first
- *   paint of this view), lease (who holds the input), refused (who refused this person's input,
- *   for a few seconds), error (what went wrong for this viewer), commands (the driver's).
+ *   paint of this view), lease (who holds the input), refused (for a few seconds after the machine
+ *   refused this person's input or take: who holds the input, as holderText says it, and whether
+ *   what was refused was typed), error (what went wrong for this viewer), commands (the driver's).
  * Lease — { holder: "free" | "self" | "driver" | "other", name }.
+ * holderText(lease) — who holds it, said for a person: "the agent is typing", "Ada is operating";
+ *   null when it is free or this person's.
  * ScreenSink — what drawOn takes: write(bytes), size(cols, rows), reset() (each new connection
  *   starts on a clean terminal).
  * useLiveScreen(sessionId) → { state, screen } — a LiveScreen over the session's substrate for the
@@ -56,7 +60,7 @@ export type ScreenState = {
   size: { cols: number; rows: number } | null;
   resizes: number;
   lease: Lease;
-  refused: string | null;
+  refused: { holder: string; typed: boolean } | null;
   error: string | null;
   commands: string[];
 };
@@ -107,6 +111,8 @@ export class LiveScreen {
   private firstPaint = true;
   private lastTyped = -Infinity;
   private lastScroll = -Infinity;
+  /** What the last request for the lease was: typed input, or a take. */
+  private lastAsk: "typed" | "take" = "typed";
   private dialedRoom = { cols: 0, rows: 0 };
   private written = 0;
   private acked = 0;
@@ -177,6 +183,7 @@ export class LiveScreen {
     if (!typed) return this.json({ type: "reply", data: base64(bytes) });
     if (MOUSE.test(new TextDecoder().decode(bytes.subarray(0, 3)))) this.lastScroll = this.now();
     else this.lastTyped = this.now();
+    this.lastAsk = "typed";
     this.send(bytes);
   }
 
@@ -190,7 +197,14 @@ export class LiveScreen {
     if (!this.state.drawn) this.set({ drawn: true });
   }
 
-  /** Give the lease back now: the person has left (the app went to the background). */
+  /** Ask for the lease without typing: it is then held as if the person had just typed. */
+  take() {
+    this.lastTyped = this.now();
+    this.lastAsk = "take";
+    this.json({ type: "lease", op: "take" });
+  }
+
+  /** Give the lease back now: the person has let go, or left (the app went to the background). */
   release() {
     if (this.state.lease.holder === "self") this.json({ type: "lease", op: "release" });
     this.lastTyped = this.lastScroll = -Infinity;
@@ -201,7 +215,7 @@ export class LiveScreen {
   }
 
   /** Asking the driver to act hands it the input: the lease is given back first. */
-  command(name: "usage" | "compact"): Promise<string> {
+  command(name: "compact"): Promise<string> {
     this.release();
     return this.request({ type: "command", name });
   }
@@ -307,10 +321,10 @@ export class LiveScreen {
     } else if (m.type === "lease") {
       const lease: Lease = { holder: m.holder as Lease["holder"], name: (m.name as string | null) ?? null };
       if (m.refused) {
-        const who = lease.holder === "driver" ? "the agent" : lease.name ?? "someone else";
+        const holder = holderText(lease) ?? "someone else is operating";
         if (this.refusedTimer) clearTimeout(this.refusedTimer);
         this.refusedTimer = setTimeout(() => this.set({ refused: null }), REFUSED_MS);
-        this.set({ lease, refused: who });
+        this.set({ lease, refused: { holder, typed: this.lastAsk === "typed" } });
       } else this.set({ lease });
     } else if (m.type === "capture" || m.type === "command") {
       const p = this.pending.get(String(m.id));
@@ -362,6 +376,12 @@ export class LiveScreen {
     this.state = { ...this.state, ...change };
     this.opts.onState?.(this.state);
   }
+}
+
+export function holderText(lease: Lease): string | null {
+  if (lease.holder === "driver") return "the agent is typing";
+  if (lease.holder === "other") return `${lease.name ?? "someone"} is operating`;
+  return null;
 }
 
 function base64(bytes: Uint8Array): string {
