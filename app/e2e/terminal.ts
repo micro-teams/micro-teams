@@ -156,6 +156,10 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
   await d.scrollTerminal();
   const pane = await ctx.pane();
   if (!pane.inMode && !pane.mouse && !pane.alternate) throw new Error("a scroll reached neither tmux's history nor the program");
+  // Claude Code must be in its full-screen renderer: otherwise a scroll shows tmux's history, which
+  // holds a copy of the transcript for every width it was ever drawn at.
+  if ((ctx.driver === "" || ctx.driver === "claude") && !pane.alternate)
+    throw new Error("Claude Code is not full-screen (CLAUDE_CODE_NO_FLICKER missing from its launch)");
   const local = await d.terminalScrolled?.();
   if (local) throw new Error(`the terminal scrolled on the client: ${local}`);
   console.log(`  live screen: scrolling ${pane.inMode ? "went into tmux's history" : "went to the program, which asked for the mouse"}`);
