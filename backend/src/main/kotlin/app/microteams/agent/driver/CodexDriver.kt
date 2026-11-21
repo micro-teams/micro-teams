@@ -54,6 +54,6 @@ class CodexDriver(private val appletStore: AppletStore) : AgentDriver {
         val autonomy = "--dangerously-bypass-approvals-and-sandbox"
         var inner = if (resume) "exec codex $autonomy resume --last" else "exec codex $autonomy"
         if (cwd != null) inner = enterCwd(cwd) + inner
-        return listOf("bash", "-lc", inner)
+        return listOf("bash", "-lc", onTmuxPath + inner)
     }
 }

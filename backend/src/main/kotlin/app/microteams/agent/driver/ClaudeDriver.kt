@@ -52,6 +52,6 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
         // The cwd is the agent's document-tree workspace; enterCwd creates it (it may not exist yet
         // on a fresh machine — the applet's `docs sync` clones into it) and supports a leading `~`.
         if (cwd != null) inner = enterCwd(cwd) + inner
-        return listOf("bash", "-lc", inner)
+        return listOf("bash", "-lc", onTmuxPath + inner)
     }
 }

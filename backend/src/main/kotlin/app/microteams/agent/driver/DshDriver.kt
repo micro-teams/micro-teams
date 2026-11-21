@@ -47,6 +47,6 @@ class DshDriver(private val appletStore: AppletStore) : AgentDriver {
         var inner =
             "export MICROTEAMS_OPERATOR_PROMPT=${shellQuote(OperatorPrompt.TEXT)}\n" + launchScript
         if (cwd != null) inner = enterCwd(cwd) + "\n" + inner
-        return listOf("bash", "-lc", inner, "dsh-launch", sessionId)
+        return listOf("bash", "-lc", onTmuxPath + inner, "dsh-launch", sessionId)
     }
 }

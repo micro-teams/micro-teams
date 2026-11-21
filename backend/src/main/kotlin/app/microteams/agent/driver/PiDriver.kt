@@ -52,6 +52,6 @@ class PiDriver(private val appletStore: AppletStore) : AgentDriver {
             "exec pi --session-id $sessionId " +
                 "--append-system-prompt ${shellQuote(OperatorPrompt.TEXT)}"
         if (cwd != null) inner = enterCwd(cwd) + inner
-        return listOf("bash", "-lc", inner)
+        return listOf("bash", "-lc", onTmuxPath + inner)
     }
 }
