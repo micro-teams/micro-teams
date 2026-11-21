@@ -25,7 +25,9 @@
  * turned into wheel turns for the same reason, and a tap takes the keyboard. A finger held still
  * for SELECT_HOLD_MS and then dragged is the mouse's left button dragged, as in Termux: tmux
  * selects with it, or passes it to a program that takes the mouse (Claude Code selects with it,
- * and copies on its own key), and the copy comes back as OSC 52. While the element is
+ * and copies on its own key), and the copy comes back as OSC 52. Held at the top or bottom row, the
+ * selection scrolls the content, so it can run past one screen. A selection never takes or gives
+ * up the keyboard, and a long press never opens the browser's own menu. While the element is
  * smaller than the terminal (it has just shrunk, and the machine has not answered with the new
  * size), nothing new is drawn and the terminal keeps its bottom edge, where a program's prompt is,
  * in view; after a growth it keeps its place until the new size arrives. Otherwise it is centred
@@ -67,6 +69,8 @@ const CELLS_PER_TURN = 2;
 const TAP_SLOP_PX = 8;
 /** A finger held this long without moving starts a selection instead of a scroll. */
 const SELECT_HOLD_MS = 400;
+/** How often a selection held at the top or bottom row scrolls one wheel turn. */
+const EDGE_SCROLL_MS = 120;
 /** Input this soon after a key, a paste or a pointer event is the person's; later, the terminal's. */
 const TYPED_MS = 1_000;
 const PERSON_EVENTS = ["keydown", "beforeinput", "paste", "compositionend", "mousedown", "mouseup", "wheel", "touchmove", "touchend"];
@@ -237,10 +241,27 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
   const screenEl = () => xterm.querySelector(".xterm-screen") ?? xterm;
   // xterm turns these into the mouse reports tmux asked for; during a drag it listens on the
   // document, so the moves and the release go there.
-  const mouse = (type: "mousedown" | "mousemove" | "mouseup", x: number, y: number) =>
+  // xterm takes the focus on a mouse press, which would raise a phone's keyboard; a selection
+  // leaves the keyboard as it was, so the focus is given back if it was not the terminal's.
+  const mouse = (type: "mousedown" | "mousemove" | "mouseup", x: number, y: number) => {
+    const had = document.activeElement === term.textarea;
     (type === "mousedown" ? screenEl() : document).dispatchEvent(
       new MouseEvent(type, { clientX: x, clientY: y, button: 0, buttons: type === "mouseup" ? 0 : 1, bubbles: true, cancelable: true }),
     );
+    if (!had && document.activeElement === term.textarea) term.textarea!.blur();
+  };
+  // While a selection is dragged to the terminal's top or bottom row the content scrolls, a wheel
+  // turn every EDGE_SCROLL_MS, so a selection can run past what one screen shows.
+  let edge: ReturnType<typeof setInterval> | undefined;
+  let at = { x: 0, y: 0 };
+  const edgeScroll = () => {
+    const box = screenEl().getBoundingClientRect();
+    const up = at.y < box.top + cellHeight();
+    const down = at.y > box.bottom - cellHeight();
+    if (!up && !down) return;
+    screenEl().dispatchEvent(new WheelEvent("wheel", { deltaY: up ? -cellHeight() : cellHeight(), deltaMode: 0, clientX: at.x, clientY: at.y, bubbles: true, cancelable: true }));
+    mouse("mousemove", at.x, at.y);
+  };
   const onTouchStart = (e: TouchEvent) => {
     const t = e.touches[0];
     if (!t || e.touches.length > 1) return;
@@ -250,12 +271,14 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     moved = false;
     selecting = false;
     clearTimeout(hold);
-    const at = start;
+    const from = start;
     hold = setTimeout(() => {
-      if (moved || start !== at) return;
+      if (moved || start !== from) return;
       selecting = true;
+      at = from;
       if (typeof navigator.vibrate === "function") navigator.vibrate(10);
-      mouse("mousedown", at.x, at.y);
+      mouse("mousedown", from.x, from.y);
+      edge = setInterval(edgeScroll, EDGE_SCROLL_MS);
     }, SELECT_HOLD_MS);
   };
   const onTouchMove = (e: TouchEvent) => {
@@ -263,6 +286,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     if (!t || !start) return;
     e.preventDefault();
     if (selecting) {
+      at = { x: t.clientX, y: t.clientY };
       mouse("mousemove", t.clientX, t.clientY);
       return;
     }
@@ -286,12 +310,18 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     // events are cancelled.
     e.preventDefault();
     clearTimeout(hold);
+    clearInterval(edge);
     const t = e.changedTouches[0];
     if (selecting) mouse("mouseup", t?.clientX ?? start.x, t?.clientY ?? start.y);
     else if (!moved) term.focus();
     selecting = false;
     start = null;
   };
+  // A long press belongs to the selection, not to the browser's own menu or text selection.
+  const noMenu = (e: Event) => e.preventDefault();
+  box.addEventListener("contextmenu", noMenu);
+  box.style.setProperty("-webkit-touch-callout", "none");
+  box.style.userSelect = "none";
   box.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
   box.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
   box.addEventListener("touchend", onTouchEnd, { passive: false, capture: true });
@@ -319,6 +349,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
     dispose: () => {
       observer.disconnect();
       for (const t of [settle, holdTimer, ackTimer]) if (t) clearTimeout(t);
+      box.removeEventListener("contextmenu", noMenu);
       box.removeEventListener("touchstart", onTouchStart, { capture: true });
       box.removeEventListener("touchmove", onTouchMove, { capture: true });
       box.removeEventListener("touchend", onTouchEnd, { capture: true });
@@ -326,6 +357,7 @@ export function mountTerminal(el: HTMLElement, post: (m: FromTerminal) => void, 
       term.textarea!.removeEventListener("focus", onFocus);
       term.textarea!.removeEventListener("blur", onBlur);
       clearTimeout(hold);
+      clearInterval(edge);
       term.dispose();
       box.remove();
     },

@@ -46,8 +46,11 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
             "mkdir -p \"\$HOME/.claude\"; [ -f \"\$HOME/.claude.json\" ] || " +
                 "printf '{\"hasCompletedOnboarding\":true}' > \"\$HOME/.claude.json\""
         val skipIfNonRoot = "\$([ \"\$(id -u)\" != 0 ] && printf %s --dangerously-skip-permissions)"
+        // Claude Code's full-screen renderer (forced, since it turns itself off in some terminals)
+        // selects and copies by the text it laid out, so a wrapped line copies as one line; it also
+        // owns scrolling, which a selection extends.
         var inner =
-            "$onboard; exec claude $flag $sessionId $skipIfNonRoot " +
+            "$onboard; export CLAUDE_CODE_NO_FLICKER=1; exec claude $flag $sessionId $skipIfNonRoot " +
                 "--append-system-prompt ${shellQuote(OperatorPrompt.TEXT)}"
         // The cwd is the agent's document-tree workspace; enterCwd creates it (it may not exist yet
         // on a fresh machine — the applet's `docs sync` clones into it) and supports a leading `~`.

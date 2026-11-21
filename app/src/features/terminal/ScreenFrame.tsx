@@ -97,15 +97,19 @@ export function ScreenFrame() {
   };
   useEffect(() => stopRepeat, []);
   // On the web the mouse press a tap ends with moves the focus away from the terminal, which closes
-  // the keyboard; the key rows refuse that press's default so the terminal keeps it. (Refusing the
+  // the keyboard; the key rows and the chrome (copy, usage, …) refuse that press's default, so a
+  // button leaves the keyboard as it was. (Refusing the
   // touch's own end instead would also stop the press reaching the keys.)
   const keyRows = useRef<ElementRef<typeof View>>(null);
+  const chrome = useRef<ElementRef<typeof View>>(null);
   useEffect(() => {
-    if (!isWeb || !keyRows.current) return;
-    const el = keyRows.current as unknown as HTMLElement;
+    if (!isWeb) return;
+    const els = [keyRows.current, chrome.current].filter(Boolean) as unknown as HTMLElement[];
     const keep = (e: Event) => e.preventDefault();
-    el.addEventListener("mousedown", keep);
-    return () => el.removeEventListener("mousedown", keep);
+    for (const el of els) el.addEventListener("mousedown", keep);
+    return () => {
+      for (const el of els) el.removeEventListener("mousedown", keep);
+    };
   }, []);
   const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -188,7 +192,7 @@ export function ScreenFrame() {
   const size = state.size;
   return (
     <View style={[styles.root, { paddingTop: insets.top }]} testID="screen">
-      <View style={styles.chrome}>
+      <View ref={chrome} style={styles.chrome}>
         <Small testID="screen-close" icon="close" label="close" onPress={pop} />
         <Txt testID="screen-lease" variant="label" muted={state.lease.holder === "free"} style={styles.lease} numberOfLines={1}>
           {leaseText(state)}
