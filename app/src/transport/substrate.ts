@@ -36,7 +36,7 @@
 import { Client, createLineRouter, type ClientEvent, type ClientStats, type LineRouter, type StoredLines } from "@micro-teams/multipath";
 import { isWeb } from "../platform/platform";
 import { storage } from "../platform/storage";
-import type { Wire } from "./updates/socket";
+import type { Wire } from "./live/socket";
 
 /** How long after the start requests wait for the first live session before going to the network. */
 const FALLBACK_AFTER = 3000;

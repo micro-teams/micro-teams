@@ -1,26 +1,22 @@
 /*
- * The teams you are in, and the way to make another; one team's name, members and roles.
+ * The teams this person belongs to, and one team's own settings.
  *
- * <TeamsScreen /> — drawn for a "teams" frame, opened from the team picker's "manage teams". The
- *   team the docs and agents sections look at is ticked. A row opens that team ("team" frame) on
- *   top. "new" makes a team and looks at it: making one says where you intend to work.
- * <TeamScreen /> — drawn for a "team" frame with { teamId }: rename and add a member (by user id —
- *   the contract has no user search) in the header, every member with their role, and on anybody
- *   but yourself a menu to change their role or remove them (your own row offers nothing: demoting
- *   or removing yourself is the one change with no way back from inside the app). Deleting the team
- *   asks for its name typed out — a confirmation you can dismiss by reflex is not a confirmation —
- *   then forgets its stacks and closes this frame.
+ * <TeamListScreen /> — drawn for a "teamList" frame, opened from the team picker's "manage teams".
+ *   A row opens that team ("team" frame); "new" makes a team and switches to it.
+ * <TeamScreen /> — drawn for a "team" frame with { teamId }: rename it, add a member (by user id —
+ *   a person, or an agent this person can reach), remove one (or leave, for oneself), and delete
+ *   the team. Nobody has a role: everyone who can reach a team may do all of this.
  *
- * Example: push("teams", "detail")
+ * Example: push("teamList", "detail")
  */
 import { MaterialIcons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSession } from "../../data/session";
-import { ROLES, useTeam, useTeamAdmin, useTeams, type Role, type TeamMember } from "../../data/teams";
+import { useTeam, useTeamAdmin, useTeams, type TeamMember } from "../../data/teams";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { Avatar } from "../../ui/Avatar";
 import { useAsk } from "../../ui/Dialog";
-import { Button, Header, Pressy, Txt } from "../../ui/kit";
+import { Button, Header, Txt } from "../../ui/kit";
 import { ListRow } from "../../ui/ListRow";
 import { Confirm, TextPrompt } from "../../ui/prompts";
 import { colors, metrics } from "../../ui/theme";
@@ -39,7 +35,7 @@ function useGuard() {
   };
 }
 
-export function TeamsScreen() {
+export function TeamListScreen() {
   const self = useFrame();
   const { backFor, push, nav, switchTeam } = useNav();
   const { teams, loaded, error } = useTeams();
@@ -82,21 +78,6 @@ export function TeamsScreen() {
   );
 }
 
-function MemberMenu({ member, done }: { member: TeamMember; done: (choice: Role | "remove") => void }) {
-  return (
-    <View>
-      {ROLES.filter((r) => r !== member.role).map((r) => (
-        <Pressy key={r} testID={`role-${r}`} onPress={() => done(r)} style={styles.option}>
-          <Txt>{`make ${r.toLowerCase()}`}</Txt>
-        </Pressy>
-      ))}
-      <Pressy testID="member-remove" onPress={() => done("remove")} style={styles.option}>
-        <Txt style={{ color: colors.danger }}>remove</Txt>
-      </Pressy>
-    </View>
-  );
-}
-
 export function TeamScreen() {
   const self = useFrame();
   const { teamId } = self.params as { teamId: number };
@@ -118,11 +99,11 @@ export function TeamScreen() {
     if (raw && Number.isInteger(userId) && userId > 0) await guard(() => admin.addMember(teamId, userId));
   };
   const act = async (m: TeamMember) => {
+    const self = m.userId === user?.id;
     const who = m.nickname || `user #${m.userId}`;
-    const choice = await ask<Role | "remove">(who, (done) => <MemberMenu member={m} done={done} />);
-    if (!choice) return;
-    if (choice !== "remove") return void (await guard(() => admin.setRole(teamId, m.userId, choice)));
-    const ok = await ask<boolean>(`remove ${who}?`, (done) => <Confirm text="They can be added back afterwards." action="remove" done={done} />);
+    const ok = await ask<boolean>(self ? `leave ${name}?` : `remove ${who}?`, (done) => (
+      <Confirm text={self ? "Anyone still in it can add you back." : "They can be added back afterwards."} action={self ? "leave" : "remove"} done={done} />
+    ));
     if (ok) await guard(() => admin.removeMember(teamId, m.userId));
   };
   const remove = async () => {
@@ -163,17 +144,15 @@ export function TeamScreen() {
                 title={m.nickname || `user #${m.userId}`}
                 subtitle={
                   <Txt variant="small" muted>
-                    {m.role.toLowerCase()}
+                    {m.isAgent ? "agent" : m.userId === user?.id ? "you" : `user #${m.userId}`}
                   </Txt>
                 }
-                onPress={() => m.userId !== user?.id && act(m)}
+                onPress={() => act(m)}
               />
             </View>
-            {m.userId !== user?.id && (
-              <Pressable testID={`team-member-${m.userId}-menu`} accessibilityLabel="actions" hitSlop={8} onPress={() => act(m)} style={styles.menu}>
-                <MaterialIcons name="more-horiz" size={18} color={colors.inkMuted} />
-              </Pressable>
-            )}
+            <Pressable testID={`team-member-${m.userId}-menu`} accessibilityLabel="actions" hitSlop={8} onPress={() => act(m)} style={styles.menu}>
+              <MaterialIcons name="more-horiz" size={18} color={colors.inkMuted} />
+            </Pressable>
           </View>
         ))}
         <Pressable testID="team-delete" onPress={remove} style={styles.delete}>
@@ -191,7 +170,6 @@ const styles = StyleSheet.create({
   member: { flexDirection: "row", alignItems: "center", paddingRight: 12 },
   memberRow: { flex: 1 },
   menu: { padding: 8 },
-  option: { paddingVertical: 12 },
   delete: { marginTop: 24, marginHorizontal: 16, height: 44, borderRadius: 6, backgroundColor: colors.danger, alignItems: "center", justifyContent: "center" },
   deleteText: { color: "#fff" },
   notice: { textAlign: "center", padding: 24 },

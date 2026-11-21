@@ -28,10 +28,10 @@
  * pops exactly one frame; so leaving a page can never land anywhere but where it was opened from.
  */
 
-export type Section = "chats" | "docs" | "agents" | "me";
+export type Section = "chats" | "docs" | "teams" | "me";
 
 /** Sections whose content belongs to one team: each team gets its own stack in them. */
-export const TEAM_SCOPED: ReadonlySet<Section> = new Set<Section>(["docs", "agents"]);
+export const TEAM_SCOPED: ReadonlySet<Section> = new Set<Section>(["docs", "teams"]);
 export const ONE_PANE: ReadonlySet<Section> = new Set<Section>(["me"]);
 
 export type FrameKind = "list" | "detail" | "side" | "overlay";

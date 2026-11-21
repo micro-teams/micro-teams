@@ -7,7 +7,7 @@
 #
 # Usage: carried.sh [at least]   — fails unless nginx served at least that many /mt/ and /api/
 #                                  requests from the multipath server (default 20); unless the
-#                                  app's two WebSockets — the updates socket and a live screen —
+#                                  app's two WebSockets — the live socket and a live screen —
 #                                  were each opened over the lines and never directly (a viewer
 #                                  the journey opens from outside the app, named by its User-Agent,
 #                                  is not the app's); and, with a
@@ -25,7 +25,7 @@ LOG="$(docker logs e2e-nginx-1 2>/dev/null)"
 CARRIED="$(grep -c "^$MP_IP .*\"[A-Z]* /\(mt\|api\)/" <<<"$LOG" || true)"
 echo "$CARRIED requests reached nginx over the lines (from the multipath server, $MP_IP)"
 [ "$CARRIED" -ge "$WANT" ] || { echo "FAIL: fewer than $WANT: the client is not using the lines" >&2; exit 1; }
-for socket in /mt/updates /mt/machine/screen/; do
+for socket in /mt/live /mt/machine/screen/; do
   over="$(grep -c "^$MP_IP .*\"GET $socket" <<<"$LOG" || true)"
   # The journey's second viewer of a live screen is another client, outside the app, and says so.
   direct="$(grep "\"GET $socket" <<<"$LOG" | grep -v 'ua="e2e-outside-viewer"' | grep -vc "^$MP_IP " || true)"
