@@ -2,7 +2,8 @@
  *  Description: The standing instructions every agent runs under as a MicroTeams group member,
  *               shared by all drivers. The TEXT is driver-agnostic — how to speak in a group and the
  *               document-tree workflow — while each driver INJECTS it its own way (Claude via
- *               --append-system-prompt, Codex as the initial session prompt), because the delivery
+ *               --append-system-prompt, Codex in place of its applet's placeholder,
+ *               prepended to the first message), because the delivery
  *               mechanism is program-specific but the guidance is not.
  *
  *  Author(s):

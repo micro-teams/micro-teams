@@ -5,7 +5,9 @@
  * new WebdriverioDriver({ appPackage, appActivity }) — expects an Appium server on 127.0.0.1:4723
  *   and an emulator with the app installed. tap() puts the keyboard away first, as a person does
  *   before reaching for a button it covers. There is no go(): an installed app has no address bar,
- *   and a link the CLI prints opens in a browser.
+ *   and a link the CLI prints opens in a browser. The live screen's keyboard is the phone's own,
+ *   raised by the screen's keyboard key; typing into the terminal raises it, types, and puts it
+ *   away; a scroll is a finger dragged down the terminal.
  *
  * Example: await journey(new WebdriverioDriver({ appPackage: "app.microteams.microteams", appActivity: ".MainActivity" }), params);
  */
@@ -128,6 +130,38 @@ export class WebdriverioDriver implements Driver {
 
   async waitGone(id: string, timeoutMs = 15_000) {
     await (await this.byId(id)).waitForDisplayed({ timeout: timeoutMs, reverse: true });
+  }
+
+  async label(id: string) {
+    return (await (await this.byId(id)).getAttribute("content-desc")) ?? "";
+  }
+
+  async keyboard(open: boolean) {
+    if (open === (await this.browser.isKeyboardShown())) return;
+    if (open) await (await this.shown("screen-keyboard")).click();
+    else await this.browser.hideKeyboard();
+    await this.browser.waitUntil(async () => (await this.browser.isKeyboardShown()) === open, { timeout: 10_000 });
+  }
+
+  async typeInTerminal(text: string) {
+    await this.keyboard(true);
+    await this.browser.keys([...text].map((ch) => (ch === "\x7f" ? "\uE003" : ch)));
+    await this.keyboard(false);
+  }
+
+  async scrollTerminal() {
+    const el = await this.byId("terminal");
+    const { x, y } = await el.getLocation();
+    const { width, height } = await el.getSize();
+    const cx = Math.round(x + width / 2);
+    await this.browser
+      .action("pointer", { parameters: { pointerType: "touch" } })
+      .move({ x: cx, y: Math.round(y + height * 0.2) })
+      .down()
+      .pause(100)
+      .move({ x: cx, y: Math.round(y + height * 0.8), duration: 600 })
+      .up()
+      .perform();
   }
 
   async dump() {

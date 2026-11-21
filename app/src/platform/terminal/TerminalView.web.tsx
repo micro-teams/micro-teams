@@ -1,6 +1,12 @@
 /*
  * The web half of TerminalView: xterm.js straight into this document — the page is a browser
- * already, so there is nothing to embed, and nothing for TerminalWarmup to start.
+ * already, so there is nothing to embed.
+ *
+ * <TerminalView ref onMessage style /> — the same props and handle as TerminalView.tsx: a terminal
+ *   in style's box, mounted once the monospace face has loaded (xterm measures its cell once).
+ * <TerminalWarmup /> — renders nothing: there is no browser engine to start ahead of time.
+ *
+ * Example: <TerminalView ref={term} onMessage={handle} style={{ flex: 1 }} />
  */
 import "@xterm/xterm/css/xterm.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
@@ -9,7 +15,7 @@ import { fonts } from "../../ui/theme";
 import { mountTerminal, type TerminalHandle } from "./page";
 import type { TerminalViewHandle, TerminalViewProps } from "./TerminalView";
 
-export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({ typing, onMessage, style }, ref) {
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({ onMessage, style }, ref) {
   const host = useRef<HTMLElement | null>(null);
   const term = useRef<TerminalHandle | null>(null);
   const post = useRef(onMessage);
@@ -19,16 +25,28 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
   useEffect(() => {
     // The face is loaded before the terminal measures its cell, or the cell is a fallback's.
     let gone = false;
-    void document.fonts.load("13px LiberationMono").catch(() => undefined).then(() => {
-      if (!gone) term.current = mountTerminal(host.current!, (m) => post.current(m), { fontFamily: fonts.mono });
-    });
+    void Promise.all([document.fonts.load("13px LiberationMono"), document.fonts.load("bold 13px LiberationMono")])
+      // A face that does not load is said in the console, and the terminal is drawn in the
+      // fallback face, which is visibly wrong rather than missing.
+      .catch((e: unknown) => console.error(`terminal: the face did not load: ${String(e)}`))
+      .then(() => {
+        if (!gone) term.current = mountTerminal(host.current!, (m) => post.current(m), { fontFamily: fonts.mono });
+      });
     return () => {
       gone = true;
       term.current?.dispose();
     };
   }, []);
-  useEffect(() => term.current?.setTyping(typing), [typing]);
-  useImperativeHandle(ref, () => ({ write: (bytes) => term.current?.write(bytes) }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      write: (bytes) => term.current?.write(bytes),
+      size: (cols, rows) => term.current?.size(cols, rows),
+      reset: () => term.current?.reset(),
+      focus: (on) => term.current?.focus(on),
+    }),
+    [],
+  );
   // On the web a View is a div, which is what xterm mounts on.
   return <View ref={(v) => void (host.current = v as unknown as HTMLElement | null)} style={style} testID="terminal" />;
 });

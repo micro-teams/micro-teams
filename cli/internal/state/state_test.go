@@ -168,3 +168,19 @@ func TestAServiceWithoutAClientRecordsNone(t *testing.T) {
 		t.Errorf("expected no client, got %+v", got)
 	}
 }
+
+// A writer of this build says it keeps the sessions; a file written by a connector that does not
+// say so (any build that ends them on a stop) reads as not keeping them.
+func TestKeepsSessions(t *testing.T) {
+	cfg := tempCfg(t)
+	Write(cfg, 1, Client{}, Link{})
+	if !KeepsSessions(cfg) {
+		t.Fatal("this build's state should say it keeps the sessions")
+	}
+	if err := os.WriteFile(Path(cfg), []byte(`{"screens":1,"pid":`+itoa(os.Getpid())+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if KeepsSessions(cfg) {
+		t.Fatal("a state file that does not say so must read as ending the sessions")
+	}
+}

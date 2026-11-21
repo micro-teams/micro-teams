@@ -26,6 +26,9 @@
  * The page before is asked for once the reader is within a screen of the top; when it arrives above
  * what is being read, that stays where it was (platform/keepPlace.ts).
  *
+ * A message that definitely did not reach a recipient (an agent whose program could not take it)
+ * says so under it, one muted line per recipient: "Not delivered to <name>: <reason>".
+ *
  * A message on its way is drawn at once, faded, with "sending…" under it; one that has failed several
  * times says why and offers retry and remove, and removing puts its text back in the composer.
  *
@@ -84,6 +87,11 @@ const Row = memo(function Row({ item, prev, me, members, group }: { item: Messag
             </Txt>
           )}
           <Bubble text={item.content} mine={mine} />
+          {item.undelivered?.map((u) => (
+            <Txt key={u.userId} testID="undelivered" variant="label" muted style={styles.undelivered}>
+              Not delivered to {members.find((x) => x.userId === u.userId)?.nickname ?? `#${u.userId}`}: {u.reason}
+            </Txt>
+          ))}
         </View>
       </View>
     </View>
@@ -283,6 +291,7 @@ const styles = StyleSheet.create({
   },
   tail: { position: "absolute", top: 12, width: 8, height: 8, transform: [{ rotate: "45deg" }] },
   error: { color: colors.danger, textAlign: "center", padding: 8 },
+  undelivered: { marginTop: 2 },
   stuck: { flexDirection: "row", gap: 8, marginTop: 2 },
   action: { color: colors.danger, textDecorationLine: "underline" },
   composer: {

@@ -1,8 +1,8 @@
 /*
  *  Description: Unit-ish test for the Codex driver (a real object, nothing mocked — like
- *               GitServiceTest). Pins the two Codex-specific choices: full-auto argv + operator
- *               prompt as the initial session prompt on a fresh launch, `resume --last` without
- *               re-injecting on reboot; and that its applet resolves to the bundled codex.js.
+ *               GitServiceTest). Pins the Codex-specific choices: full-auto argv with no
+ *               initial prompt on a fresh launch, `resume --last` on reboot; and that its applet
+ *               is the bundled codex.js with the operator prompt in place of its placeholder.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>

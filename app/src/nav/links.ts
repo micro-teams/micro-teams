@@ -6,7 +6,7 @@
  *   ("connect", "screen/abc", "chats/5"); null for anything not a link, which opens the app as
  *   usual. A link is a stack pushed on a section's root, so back from it lands on that root rather
  *   than outside the app:
- *     connect?code=…   → agents › approve device (the end of `microteams link auto-connect`)
+ *     connect?code=…   → agents › approve device (the end of `microteams enable`)
  *     screen/<sid>     → chats › the live screen over it (the CLI's "watch" link)
  *     chats/<id>       → chats › that conversation
  *     __lines          → me › the lines panel, otherwise reached from the client block under

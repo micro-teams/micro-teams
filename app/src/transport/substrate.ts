@@ -17,7 +17,8 @@
  *   once, over the lines: once it may have reached the server, its failure is the caller's.
  * substrate.openSocket(path) → Wire — a WebSocket to the origin over a fresh stream, the updates
  *   socket's and the live screen's open(); directly, logged and counted, when no session is live
- *   within FALLBACK_AFTER or the stream has not opened within REQUEST_WAIT.
+ *   (waiting for one as fetch does: at most FALLBACK_AFTER after the start, or while a session is
+ *   being replaced) or the stream has not opened within REQUEST_WAIT.
  * substrate.diagnostics() → Diagnostics — everything the lines panel shows and copies: the client's
  *   stats (session, every line, every stream), the fallbacks with their reasons, and the latest
  *   events (lines up and down, sessions started and ended).
@@ -78,6 +79,7 @@ export class Substrate {
   private readonly fallbacks: Diagnostics["fallbacks"] = { count: 0, recent: [] };
   private readonly events: Diagnostics["events"] = [];
   private endedAt = 0;
+  private startedAt = 0;
 
   constructor(
     private readonly origin: string,
@@ -88,6 +90,7 @@ export class Substrate {
 
   start(): Started {
     if (this.started) return this.started;
+    this.startedAt = Date.now();
     const key = `multipath-lines:${this.origin}`;
     const onEvent = (event: ClientEvent) => {
       if (event.type === "fallback") return this.fellBack(event.url, event.reason);
@@ -166,7 +169,12 @@ export class Substrate {
       attach(ws as unknown as Inner, false);
     };
     void (async () => {
-      if (!(await client.live(FALLBACK_AFTER))) return direct(`no live session within ${FALLBACK_AFTER} ms`);
+      // Waiting is worth it only while a session may still come: in the start's first
+      // FALLBACK_AFTER, or while one that just ended is replaced. With none otherwise (a line list
+      // this page cannot use, say), every open would wait FALLBACK_AFTER for nothing.
+      const now = Date.now();
+      const wait = now - this.endedAt < REPLACING ? FALLBACK_AFTER : Math.max(0, FALLBACK_AFTER - (now - this.startedAt));
+      if (!(await client.live(wait))) return direct(wait > 0 ? `no live session within ${wait} ms` : "no live session");
       const opening = client.openWebSocket(path);
       try {
         const ws = await within(opening, REQUEST_WAIT);

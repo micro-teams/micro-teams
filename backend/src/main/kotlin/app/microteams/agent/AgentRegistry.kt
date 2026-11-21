@@ -42,11 +42,12 @@ class AgentRegistry(private val chatSubscriptions: ChatSubscriptions) {
 
                 override fun onMessage(
                     threadId: IdType,
+                    messageId: IdType,
                     senderId: IdType,
                     speaker: String,
                     content: String,
                 ) {
-                    agent.tell(threadId, speaker, content)
+                    agent.tell(threadId, messageId, speaker, content)
                 }
             },
         )

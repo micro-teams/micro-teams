@@ -10,9 +10,10 @@
  *               lives in the row and not in a timer, nothing about the cadence is lost across a
  *               restart.
  *
- *               A touch is a plain do-nothing message typed straight into the agent's program
- *               (ScreenAgent.say), NOT a group message and NOT routed through the wake-up: it is
- *               sent only while the agent is actually alive. Waking a dead agent to keep it warm
+ *               A touch is a plain do-nothing message said to the agent's program (through
+ *               AgentWakeup.tell under its own "k…" id, so it is delivered like any message), NOT
+ *               a group message, and it never wakes anything: it is sent only while the agent is
+ *               actually alive, and dropped if the agent dies before taking it. Waking a dead agent to keep it warm
  *               would rebuild the very context this exists to preserve — the opposite of the point —
  *               so a dead agent is left dead and simply not touched. The next-fire time still
  *               advances so a long-dead agent is not probed on every single tick.
@@ -26,6 +27,7 @@ package app.microteams.agent
 
 import app.microteams.agent.screen.ScreenAgent
 import java.time.Instant
+import java.util.UUID
 import org.rucca.cheese.common.error.BadRequestError
 import org.rucca.cheese.common.persistent.IdType
 import org.slf4j.LoggerFactory
@@ -117,7 +119,7 @@ class AgentKeepaliveService(
             return
         }
         val agent = agentRegistry.get(agentUserId) as? ScreenAgent ?: return
-        agent.say(KEEPALIVE_MESSAGE)
+        wakeup.tell(agent, KEEPALIVE_MESSAGE, "k" + UUID.randomUUID().toString().take(8), null)
         logger.debug("keepalive: touched agent {}", agentUserId)
     }
 }

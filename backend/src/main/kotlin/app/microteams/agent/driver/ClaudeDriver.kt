@@ -1,7 +1,8 @@
 /*
  *  Description: The Claude Code driver — the only place in the backend that knows Claude exists.
  *               Its applet (claude.js) comes from the AppletStore (mounted applets-dir, or the
- *               classpath fallback).
+ *               classpath fallback); a viewer may call its `compact`
+ *               (viewerCommands).
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -18,6 +19,9 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
     override val name = "claude"
 
     override val appletSource: String by lazy { appletStore.require("claude.js") }
+
+    /** The claude applet's `compact` (Claude Code's /compact). */
+    override val viewerCommands = listOf("compact")
 
     /**
      * We always control Claude's session id (`--session-id` fresh / `--resume` to continue), and
@@ -42,12 +46,15 @@ class ClaudeDriver(private val appletStore: AppletStore) : AgentDriver {
             "mkdir -p \"\$HOME/.claude\"; [ -f \"\$HOME/.claude.json\" ] || " +
                 "printf '{\"hasCompletedOnboarding\":true}' > \"\$HOME/.claude.json\""
         val skipIfNonRoot = "\$([ \"\$(id -u)\" != 0 ] && printf %s --dangerously-skip-permissions)"
+        // Claude Code's full-screen renderer (forced, since it turns itself off in some terminals)
+        // selects and copies by the text it laid out, so a wrapped line copies as one line; it also
+        // owns scrolling, which a selection extends.
         var inner =
-            "$onboard; exec claude $flag $sessionId $skipIfNonRoot " +
+            "$onboard; export CLAUDE_CODE_NO_FLICKER=1; exec claude $flag $sessionId $skipIfNonRoot " +
                 "--append-system-prompt ${shellQuote(OperatorPrompt.TEXT)}"
         // The cwd is the agent's document-tree workspace; enterCwd creates it (it may not exist yet
         // on a fresh machine — the applet's `docs sync` clones into it) and supports a leading `~`.
         if (cwd != null) inner = enterCwd(cwd) + inner
-        return listOf("bash", "-lc", inner)
+        return listOf("bash", "-lc", onTmuxPath + inner)
     }
 }

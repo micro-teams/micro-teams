@@ -1,50 +1,113 @@
-// Package daemoncmd wires the human-facing lifecycle of `microteams`. The mental
-// model has two halves, mirrored by two command groups:
+// Package daemoncmd is the human-facing lifecycle of `microteams`: one flat set of verbs, each
+// saying what to do next when it succeeds.
 //
-//	microteams auth …   who this machine is (login / logout)
-//	microteams link …   whether it is connected (connect / disconnect / status /
-//	                auto-connect / no-auto-connect)
+//	microteams login [server-url]     who this machine is (device flow); logout forgets it
+//	microteams start | stop | restart the connector, now; sessions keep running through all three
+//	microteams enable | disable       whether it starts at boot (or login)
+//	microteams status [--json]        login, connection, service, sessions and lines on one screen
+//	microteams logs [-f]              the connector's own log
+//	microteams config                 this machine's settings (proxy)
+//	microteams update | uninstall     the binary itself; only uninstall ends the sessions
 //
-// plus `microteams api` (the server's generated API) and `microteams uninstall`. Every
-// command tries to meet the user where they are: connect logs you in first if
-// needed, disconnect warns when screens are still running, and each success
-// message says what to do next.
+// The sessions on a machine belong to its tmux server, which outlives the connector process, so no
+// command here ends them except `uninstall`. A stop could still end them through a running
+// connector that ends its sessions when it exits, or a systemd unit without KillMode=process; every
+// command that stops the service deals with both first (see lifecycle.go).
+//
+// The forms these commands replace (`auth …`, `link …`, `proxy …`) are hidden aliases that print the
+// new form and then run it.
+//
+// Under sudo, a command acts for the person who ran sudo: the service runs as them, and their
+// config, state file, log and tmux are the ones that matter. tmux is reached only as that person,
+// so a root process never claims to know how many sessions they have.
+//
+//   - AsInvokingUser() error, called before anything resolves a path: under sudo, makes this
+//     process's home that of SUDO_USER, so every path derived from it is theirs. Nothing to do
+//     otherwise; an error when SUDO_USER names nobody.
+//
+//   - Commands() []*cobra.Command is every lifecycle command, visible and hidden, to add to the
+//     `microteams` root:
+//
+//     if err := daemoncmd.AsInvokingUser(); err != nil { ... }
+//     for _, c := range daemoncmd.Commands() { root.AddCommand(c) }
 package daemoncmd
 
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"net/url"
 	"os"
-	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/micro-teams/micro-connector/cli/auth"
 	"github.com/micro-teams/micro-connector/cli/config"
 	"github.com/micro-teams/micro-connector/cli/service"
 	"github.com/micro-teams/micro-connector/cli/terminal"
-	"github.com/micro-teams/micro-connector/cli/update"
 	"github.com/micro-teams/microteams/cli/internal/host"
-	"github.com/micro-teams/microteams/cli/internal/hostlog"
-	"github.com/micro-teams/microteams/cli/internal/mpclient"
 	"github.com/micro-teams/microteams/cli/internal/netcfg"
-	"github.com/micro-teams/microteams/cli/internal/state"
-	"github.com/micro-teams/microteams/cli/internal/ui"
-	"github.com/micro-teams/multipath/go/client"
 )
 
-// hostRunner is what this product's service actually does: dial the backend and let it open screens
-// here. The library installs and supervises a service without knowing that — which is why the same
-// package serves a provisioning tool that has no daemon at all.
+// Commands returns every lifecycle command to add to the `microteams` root.
+func Commands() []*cobra.Command {
+	var cfgPath string
+	withConfig := func(c *cobra.Command) *cobra.Command {
+		c.Flags().StringVar(&cfgPath, "config", config.DefaultPath(), "path to this machine's microteams config")
+		return c
+	}
+	return []*cobra.Command{
+		loginCmd(&cfgPath, withConfig),
+		logoutCmd(&cfgPath, withConfig),
+		startCmd(&cfgPath, withConfig),
+		stopCmd(&cfgPath, withConfig),
+		restartCmd(&cfgPath, withConfig),
+		enableCmd(&cfgPath, withConfig),
+		disableCmd(&cfgPath, withConfig),
+		statusCmd(&cfgPath, withConfig),
+		logsCmd(&cfgPath, withConfig),
+		configCmd(&cfgPath, withConfig),
+		updateCmd(&cfgPath, withConfig),
+		uninstallCmd(&cfgPath, withConfig),
+		runCmd(&cfgPath, withConfig),
+		authAlias(&cfgPath, withConfig),
+		linkAlias(&cfgPath, withConfig),
+		alias(proxyCmd(&cfgPath, withConfig), "proxy", "config proxy"),
+	}
+}
+
+// sudoUser is the person who ran this process through sudo, or "" when it was not (or root did).
+func sudoUser() string {
+	if name := os.Getenv("SUDO_USER"); os.Geteuid() == 0 && name != "root" {
+		return name
+	}
+	return ""
+}
+
+// AsInvokingUser gives this process SUDO_USER's home. XDG_CONFIG_HOME is kept when sudo kept it: it
+// is then that person's own.
+func AsInvokingUser() error {
+	name := sudoUser()
+	if name == "" {
+		return nil
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return fmt.Errorf("run through sudo by %s, who has no account here: %w", name, err)
+	}
+	if err := os.Setenv("HOME", u.HomeDir); err != nil {
+		return err
+	}
+	runtimeDir := filepath.Join("/run/user", u.Uid)
+	if _, err := os.Stat(runtimeDir); err != nil {
+		return os.Unsetenv("XDG_RUNTIME_DIR")
+	}
+	return os.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+}
+
+// hostRunner is what this product's service does: dial the backend and let it open screens here.
 func hostRunner(cfgPath string) service.Runner {
 	return func(ctx context.Context) error {
 		cfg, err := host.LoadConfig(cfgPath)
@@ -58,716 +121,6 @@ func hostRunner(cfgPath string) service.Runner {
 		return h.Run(ctx)
 	}
 }
-
-// Commands returns every lifecycle command to add to the `microteams` root.
-func Commands() []*cobra.Command {
-	var cfgPath string
-	withConfig := func(c *cobra.Command) *cobra.Command {
-		c.Flags().StringVar(&cfgPath, "config", config.DefaultPath(),
-			"path to this machine's microteams config")
-		return c
-	}
-	return []*cobra.Command{
-		authCmd(&cfgPath, withConfig),
-		linkCmd(&cfgPath, withConfig),
-		statusCmd(&cfgPath, withConfig),
-		logsCmd(&cfgPath, withConfig),
-		proxyCmd(&cfgPath, withConfig),
-		runCmd(&cfgPath, withConfig),
-		updateCmd(&cfgPath, withConfig),
-		uninstallCmd(&cfgPath, withConfig),
-	}
-}
-
-// ---------------------------------------------------------------------------
-// auth
-// ---------------------------------------------------------------------------
-
-func authCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	login := withConfig(&cobra.Command{
-		Use:   "login [server-url]",
-		Short: "Log this machine in and store its credential",
-		Long: "Registers this machine with the server, prints a link for you to open and\n" +
-			"approve in a browser, and on approval stores a durable credential.\n" +
-			"The server URL is remembered (installers may pre-set it), so it only has to\n" +
-			"be given once.",
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			serverArg := ""
-			if len(args) == 1 {
-				serverArg = args[0]
-			}
-			if _, err := doLogin(*cfgPath, serverArg); err != nil {
-				return err
-			}
-			ui.OK("Logged in.")
-			ui.Hint("`microteams link connect` to connect · `microteams link auto-connect` to also reconnect on boot")
-			return nil
-		},
-	})
-
-	logout := withConfig(&cobra.Command{
-		Use:   "logout",
-		Short: "Forget this machine's credential (disconnects first)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load(*cfgPath)
-			if err != nil || cfg.Token == "" {
-				fmt.Println("Already logged out.")
-				return nil
-			}
-			warnScreens(*cfgPath)
-			// Stop BEFORE forgetting the credential, and do not swallow the failure. Erasing the
-			// token while the connector still runs leaves the worst of both: the machine stays
-			// connected (the running process holds the old token in memory) while nothing on disk
-			// says so — and the old code printed "Logged out and disconnected" regardless.
-			if err := stopInstalled(*cfgPath, "stop", "uninstall"); err != nil {
-				return fmt.Errorf("could not stop the connector, so the credential was kept: %w", err)
-			}
-			cfg.Token = ""
-			cfg.MachineID = ""
-			if err := config.Save(*cfgPath, cfg); err != nil {
-				return err
-			}
-			fmt.Println("Logged out and disconnected. `microteams auth login` to log in again.")
-			return nil
-		},
-	})
-
-	group := &cobra.Command{Use: "auth", Short: "Log this machine in or out"}
-	group.AddCommand(login, logout)
-	return group
-}
-
-// doLogin runs the device flow and persists the result. serverArg overrides the
-// stored base; an empty serverArg requires a stored base (e.g. from install.sh).
-func doLogin(cfgPath, serverArg string) (*config.Config, error) {
-	cfg, _ := config.Load(cfgPath)
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	if serverArg != "" {
-		cfg.Base = serverArg
-	}
-	if cfg.Base == "" {
-		return nil, fmt.Errorf("no server known yet — run `microteams auth login <server-url>` once (installers can pre-set it)")
-	}
-	res, err := auth.Login(context.Background(), cfg.Base, func(approveURL string) {
-		fmt.Println("Open this link and approve this machine:")
-		fmt.Println("\n    " + approveURL + "\n")
-		fmt.Println("Waiting for approval…")
-	})
-	if err != nil {
-		return nil, err
-	}
-	cfg.Token = res.Token
-	cfg.MachineID = res.MachineID
-	if err := config.Save(cfgPath, cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-// elevateToRoot re-executes this exact command under sudo when it is about to install
-// the boot service and we are not already root. A *system* service is the right default
-// — on a server it starts with no user logged in — whereas a user-level service (which a
-// non-root install would produce) stops on logout and only makes sense on a personal
-// client machine; that rarer case stays available via the hidden --user flag. If sudo is
-// missing we fall back to a user service rather than fail. On success the elevated child
-// does all the work and this process exits.
-func elevateToRoot(userService bool, cfgPath string) error {
-	return elevateToRootFor(userService, cfgPath,
-		"Installing a system-wide service (needs root) — elevating with sudo…",
-		"(pass --user for a user-level service instead, e.g. on a personal laptop)")
-}
-
-// elevateToRootFor is elevateToRoot with the wording the situation calls for: installing a service
-// and stopping one both need root, but "Installing a system-wide service" is a lie when the user
-// asked to disconnect.
-func elevateToRootFor(userService bool, cfgPath, why, aside string) error {
-	if userService || os.Geteuid() == 0 {
-		return nil
-	}
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		ui.Hint("no sudo found — installing a user-level service (it stops on logout; pass --user to silence)")
-		return nil
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	fmt.Println(why)
-	if aside != "" {
-		fmt.Println(aside)
-	}
-	// Re-run the same invocation verbatim as root; the absolute self path means sudo's
-	// secure_path can't hide it. Inherit stdio so the login link, polling and any sudo
-	// password prompt all work interactively.
-	args := append([]string{self}, os.Args[1:]...)
-	// Forward this user's config path so the elevated root reads/writes the SAME config
-	// (where the installer recorded the server, and where the token lands — os.WriteFile
-	// keeps it user-owned). The system unit then runs `microteams run --config <that>` as the
-	// user (see service.New), so config + private tmux stay in the user's home.
-	if !hasFlag(os.Args[1:], "--config") {
-		args = append(args, "--config", cfgPath)
-	}
-	cmd := exec.Command(sudo, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	os.Exit(0)
-	return nil
-}
-
-// stopInstalled acts on the connector service that is actually installed on this machine,
-// elevating first when that service is a system one.
-//
-// Both halves of that sentence were the bug (T-039). `link connect` elevates and installs a SYSTEM
-// service; `link disconnect` did neither — as an ordinary user it built the per-user variant from
-// its own euid and told the service manager to stop a unit that had never been installed, so the
-// running connector was untouched and the machine stayed connected. Worse, `microteams status`
-// still said "connected", because status probes BOTH variants: looking and acting disagreed.
-//
-// Now the variant is read off the machine (service.Installed) and, if it is the system one, we
-// re-exec under sudo exactly as connect does — stopping a system unit needs root just as much as
-// installing it did.
-func stopInstalled(cfgPath string, actions ...string) error {
-	userService, found := service.Installed(cfgPath)
-	if !found {
-		fmt.Println("No connector service is installed on this machine — nothing to stop.")
-		return nil
-	}
-	if !userService {
-		if err := elevateToRootFor(false, cfgPath,
-			"Stopping the system-wide service (needs root) — elevating with sudo…", ""); err != nil {
-			return err
-		}
-	}
-	for _, action := range actions {
-		if err := service.ControlInstalled(cfgPath, action); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// hasFlag reports whether argv already carries the given flag (as `--flag` or
-// `--flag=value`), so elevation doesn't append a duplicate.
-func hasFlag(argv []string, flag string) bool {
-	for _, a := range argv {
-		if a == flag || strings.HasPrefix(a, flag+"=") {
-			return true
-		}
-	}
-	return false
-}
-
-// ---------------------------------------------------------------------------
-// link
-// ---------------------------------------------------------------------------
-
-func linkCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	var force bool
-	var userService bool
-
-	connect := withConfig(&cobra.Command{
-		Use:   "connect [server-url]",
-		Short: "Connect this machine to the server",
-		Long: "Connects now (and, as a side effect of installing the background service,\n" +
-			"also reconnects after a reboot — `microteams link no-auto-connect` turns that off).\n" +
-			"If this machine is not logged in yet, the login flow runs first.\n\n" +
-			"Installs a system-wide service by default (starts even with no user logged in),\n" +
-			"elevating with sudo when needed. Use --user for a user-level service instead.",
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			if err := elevateToRoot(userService, *cfgPath); err != nil {
-				return err
-			}
-			serverArg := ""
-			if len(args) == 1 {
-				serverArg = args[0]
-			}
-			cfg, _ := config.Load(*cfgPath)
-			if cfg == nil || cfg.Token == "" || serverArg != "" && cfg != nil && cfg.Base != serverArg {
-				fmt.Println("Not logged in yet — starting login first.")
-				var err error
-				if cfg, err = doLogin(*cfgPath, serverArg); err != nil {
-					return err
-				}
-				ui.OK("Logged in.")
-			}
-			_ = service.Control(*cfgPath, "install")
-			if err := service.Control(*cfgPath, "start"); err != nil {
-				return err
-			}
-			// Starting the service is not connecting. Wait for the host to say it reached the
-			// control plane, and if it does not, say what happened instead of claiming success —
-			// this line used to print unconditionally, and a machine that never connected was told
-			// it had.
-			switch link := awaitLink(*cfgPath, connectWait); {
-			case link.Up:
-				ui.OK("Connected. The server can now open screens on this machine.")
-			case link.Error != "":
-				ui.Warn("Started, but not connected: %s", link.Error)
-				ui.Hint("`microteams status` to check again · `microteams logs` for the full story")
-				return nil
-			default:
-				ui.Warn("Started, but not connected yet.")
-				ui.Hint("`microteams status` to check again · `microteams logs` for the full story")
-				return nil
-			}
-			ui.Hint("`microteams status` to check · `microteams link disconnect` to disconnect")
-			return nil
-		},
-	})
-
-	disconnect := withConfig(&cobra.Command{
-		Use:   "disconnect",
-		Short: "Disconnect from the server",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if n := state.Screens(*cfgPath); n > 0 && !force {
-				fmt.Printf("This machine is running %d session(s); disconnecting will stop them.\n", n)
-				if !confirm("Disconnect anyway?") {
-					fmt.Println("Aborted. (Use --force to skip this prompt.)")
-					return nil
-				}
-			}
-			if err := stopInstalled(*cfgPath, "stop"); err != nil {
-				return err
-			}
-			fmt.Println("Disconnected. `microteams link connect` to reconnect.")
-			fmt.Println("(Note: it will still reconnect after a reboot; `microteams link no-auto-connect` prevents that.)")
-			return nil
-		},
-	})
-	disconnect.Flags().BoolVar(&force, "force", false, "disconnect even if screens are running")
-
-	autoConnect := withConfig(&cobra.Command{
-		Use:   "auto-connect [server-url]",
-		Short: "Connect now and reconnect automatically on every boot",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return connect.RunE(cmd, args)
-		},
-	})
-
-	noAutoConnect := withConfig(&cobra.Command{
-		Use:   "no-auto-connect",
-		Short: "Disconnect and stop reconnecting on boot",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if n := state.Screens(*cfgPath); n > 0 && !force {
-				fmt.Printf("This machine is running %d session(s); this will stop them.\n", n)
-				if !confirm("Continue?") {
-					fmt.Println("Aborted. (Use --force to skip this prompt.)")
-					return nil
-				}
-			}
-			if err := stopInstalled(*cfgPath, "stop", "uninstall"); err != nil {
-				return err
-			}
-			fmt.Println("Disconnected and removed from boot. `microteams link connect` to connect again.")
-			return nil
-		},
-	})
-	noAutoConnect.Flags().BoolVar(&force, "force", false, "proceed even if screens are running")
-
-	// Hidden opt-out from the system-service default (rare: a personal client machine).
-	// Bound to the same var on both service-installing commands; only the invoked one parses.
-	for _, c := range []*cobra.Command{connect, autoConnect} {
-		c.Flags().BoolVar(&userService, "user", false, "install a user-level service instead of system-wide")
-		_ = c.Flags().MarkHidden("user")
-	}
-
-	group := &cobra.Command{Use: "link", Short: "Manage this machine's connection to the server"}
-	group.AddCommand(connect, disconnect, autoConnect, noAutoConnect, retestCmd(cfgPath, withConfig))
-	return group
-}
-
-// retestCmd asks the running service to start its MultiPath client over, so the client fetches
-// the line list now rather than at its next refresh, and prints what the new client sees. Nothing is
-// stopped: the screens keep running, and the control link is back within seconds.
-func retestCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	return withConfig(&cobra.Command{
-		Use:   "retest",
-		Short: "Fetch the network path list again and re-dial the lines (sessions keep running)",
-		Long: "Asks the running service to start its multipath client over: the client fetches the\n" +
-			"list of network paths to the server again and dials every one of them.\n\n" +
-			"Sessions are not touched: nothing is stopped, so the terminals on this machine keep\n" +
-			"running throughout. The client also fetches the list every ten minutes on its own.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			pid := state.PID(*cfgPath)
-			if pid == 0 {
-				ui.Hint("no service is running, so there is no link to re-dial")
-				return nil
-			}
-			// The binary on disk updates without the service restarting, and SIGHUP terminates a
-			// process that does not handle it.
-			if !state.CanRelink(*cfgPath) {
-				ui.Hint("the running service predates this command; restart it to pick up the new")
-				ui.Hint("build (`microteams link connect`), then this will work — note that stopping")
-				ui.Hint("the service also stops the sessions on this machine")
-				return nil
-			}
-			before := state.CurrentClient(*cfgPath)
-			if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
-				return fmt.Errorf("signal running service (pid %d): %w", pid, err)
-			}
-			deadline := time.Now().Add(15 * time.Second)
-			for time.Now().Before(deadline) {
-				if c := state.CurrentClient(*cfgPath); c.PID != 0 && c.PID != before.PID {
-					if _, err := mpclient.Lookup(c); err == nil {
-						printClient(c)
-						return nil
-					}
-				}
-				time.Sleep(250 * time.Millisecond)
-			}
-			ui.Hint("the new multipath client has no live session yet — `microteams status` to check")
-			return nil
-		},
-	})
-}
-
-// printClient renders what the service's MultiPath client sees: its session and every line.
-func printClient(c state.Client) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	st, err := mpclient.Status(ctx, c.Status)
-	if err != nil {
-		ui.Field("multipath", ui.Red("not answering")+" "+ui.Dim(err.Error()))
-		return
-	}
-	switch {
-	case st.Session == nil:
-		ui.Field("multipath", ui.Yellow("no session yet"))
-	case st.Session.State == "live":
-		ui.Field("multipath", ui.Green("live")+" "+ui.Dim(fmt.Sprintf("session %s for %s, %d started",
-			st.Session.ID, (time.Duration(st.Session.AgeMs)*time.Millisecond).Round(time.Second), st.SessionsStarted)))
-	default:
-		ui.Field("multipath", ui.Yellow(st.Session.State)+" "+ui.Dim(st.LastSessionEnd))
-	}
-	for _, l := range st.Lines {
-		ui.Field("line "+l.ID, describe(l))
-	}
-}
-
-// describe renders one line the way somebody asking "is this path working?" reads it. The
-// reconnect count is part of the answer: a line can fail and come back many times without anything
-// above it noticing.
-func describe(l client.LineStatus) string {
-	where := ui.Dim(l.URL)
-	flapped := ""
-	if l.Reconnects > 0 {
-		flapped = ui.Dim(fmt.Sprintf("  (recovered %d×)", l.Reconnects))
-	}
-	switch l.State {
-	case "up":
-		return ui.Bold("up") + " " + where + ui.Dim(fmt.Sprintf("  last byte %d ms ago", l.LastByteAgoMs)) + flapped
-	case "connecting":
-		return ui.Yellow("connecting") + " " + where + flapped
-	default:
-		reason := l.LastReason
-		if reason == "" {
-			reason = "no reason given"
-		}
-		return ui.Red("down: "+reason) + " " + where + flapped
-	}
-}
-
-// How long `link connect` waits for the host to establish the control link before reporting what
-// it sees. Long enough for a healthy dial (including a slow relay), short enough that a person is
-// not left staring at a prompt; the answer at the end is honest either way, so being wrong here
-// costs a re-run of `status` rather than a wrong claim.
-const connectWait = 8 * time.Second
-
-// awaitLink polls the host's own record until it says connected, it says why not, or we give up.
-func awaitLink(cfgPath string, within time.Duration) state.Link {
-	deadline := time.Now().Add(within)
-	var last state.Link
-	for time.Now().Before(deadline) {
-		last = state.CurrentLink(cfgPath)
-		if last.Up || last.Error != "" {
-			return last
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return last
-}
-
-// proxyCmd is `microteams proxy`: tell this machine how to reach the network.
-//
-// The setting lives in a file this product owns and is applied by the connector to itself at
-// startup, so it survives being started by an init system that scrubs the environment — which is
-// the situation that made a correctly-configured global proxy simply not reach the service. See
-// internal/netcfg.
-func proxyCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	cmd := withConfig(&cobra.Command{
-		Use:   "proxy",
-		Short: "Show or set the proxy this machine's connector uses",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s := netcfg.Load(*cfgPath)
-			if s.Proxy == "" {
-				ui.Field("proxy", ui.Dim("not set"))
-				// The environment may still be providing one when run by hand, and saying so
-				// prevents the obvious wrong conclusion when the service behaves differently.
-				if env := netcfg.Effective("https://example.invalid"); env != "" {
-					ui.Field("environment", env)
-					ui.Hint("that comes from this shell — a service started by the system will NOT have it")
-				}
-				ui.Hint("`microteams proxy set http://user:pass@host:port` to configure one")
-				return nil
-			}
-			ui.Field("proxy", redactProxy(s.Proxy))
-			if s.NoProxy != "" {
-				ui.Field("no proxy", s.NoProxy)
-			}
-			ui.Hint("applies to the control link, the API and line probing · `microteams proxy clear` to remove")
-			return nil
-		},
-	})
-	// Every subcommand gets --config too. Without this the flag exists only on the parent, and
-	// `microteams proxy set … --config X` fails with "unknown flag" — which is exactly how it was
-	// first written, and exactly the kind of thing that compiles and passes CI.
-	set := withConfig(&cobra.Command{
-		Use:   "set <url>",
-		Short: "Use this proxy (http:// or socks5://), for the service too",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			raw := args[0]
-			parsed, err := url.Parse(raw)
-			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-				return fmt.Errorf("not a usable proxy URL: %s (want e.g. http://host:3128)", raw)
-			}
-			s := netcfg.Load(*cfgPath)
-			s.Proxy = raw
-			if err := netcfg.Save(*cfgPath, s); err != nil {
-				return err
-			}
-			ui.OK("Proxy set to %s", redactProxy(raw))
-			ui.Hint("restart the connector to pick it up — `microteams link connect`")
-			return nil
-		},
-	})
-	noProxy := withConfig(&cobra.Command{
-		Use:   "no-proxy <list>",
-		Short: "Hosts to reach directly (comma-separated), as in NO_PROXY",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			s := netcfg.Load(*cfgPath)
-			s.NoProxy = args[0]
-			if err := netcfg.Save(*cfgPath, s); err != nil {
-				return err
-			}
-			ui.OK("Direct for: %s", args[0])
-			return nil
-		},
-	})
-	clear := withConfig(&cobra.Command{
-		Use:   "clear",
-		Short: "Stop using a configured proxy",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if err := netcfg.Save(*cfgPath, netcfg.Settings{}); err != nil {
-				return err
-			}
-			ui.OK("Proxy cleared.")
-			ui.Hint("restart the connector to pick it up")
-			return nil
-		},
-	})
-	cmd.AddCommand(set, noProxy, clear)
-	return cmd
-}
-
-// redactProxy hides the password in a proxy URL. These routinely carry credentials, and this string
-// is printed by `status`, which people paste into chats when asking for help.
-func redactProxy(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	return parsed.Redacted()
-}
-
-// logsCmd is `microteams logs`: the connector's own log, wherever this machine keeps it.
-//
-// It exists because "where are the logs" had no single answer — journald under systemd, a file
-// under the sysv fallback, elsewhere under launchd — and the machine that most needs its logs read
-// is a container with no journalctl to run. The connector now always writes its own file
-// (internal/hostlog); this command is how a human reaches it without knowing any of that.
-func logsCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	var follow bool
-	var lines int
-	cmd := withConfig(&cobra.Command{
-		Use:   "logs",
-		Short: "Show this machine's connector log",
-		Long: "Prints the connector's own log file — the same place the reason a control link\n" +
-			"cannot connect is written. Works the same on every init system, and inside a\n" +
-			"container with no journald.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			path := hostlog.Path(*cfgPath)
-			if _, err := os.Stat(path); err != nil {
-				// Say where we looked. "No logs" with no path is the kind of answer that sends
-				// someone hunting through /var/log for an hour.
-				ui.Warn("No log yet at %s", path)
-				ui.Hint("the log appears once the connector runs — `microteams link connect`")
-				return nil
-			}
-			if err := tailFile(path, lines); err != nil {
-				return err
-			}
-			if !follow {
-				ui.Hint("%s · `microteams logs -f` to follow", path)
-				return nil
-			}
-			return followFile(path)
-		},
-	})
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing as new lines arrive")
-	cmd.Flags().IntVarP(&lines, "lines", "n", 200, "how many trailing lines to show first")
-	return cmd
-}
-
-// tailFile prints the last n lines. Reads the whole file, which is bounded by hostlog's rotation —
-// a log that cannot exceed a few megabytes does not need a smarter tail.
-func tailFile(path string, n int) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if n > 0 && len(all) > n {
-		all = all[len(all)-n:]
-	}
-	for _, line := range all {
-		fmt.Println(line)
-	}
-	return nil
-}
-
-// followFile keeps printing what is appended, and survives the rotation that hostlog performs:
-// when the file it holds is replaced, it reopens rather than going quiet forever on a file nobody
-// writes to any more.
-func followFile(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return err
-	}
-	buf := make([]byte, 8192)
-	for {
-		n, err := f.Read(buf)
-		if n > 0 {
-			os.Stdout.Write(buf[:n])
-			continue
-		}
-		if err != nil && err != io.EOF {
-			return err
-		}
-		time.Sleep(300 * time.Millisecond)
-		// Rotated out from under us: the path now names a different file than the one we hold.
-		if info, statErr := os.Stat(path); statErr == nil {
-			if here, herr := f.Stat(); herr == nil && !os.SameFile(info, here) {
-				reopened, oerr := os.Open(path)
-				if oerr != nil {
-					continue
-				}
-				f.Close()
-				f = reopened
-			}
-		}
-	}
-}
-
-// statusCmd is the top-level `microteams status`: a compact, colored overview of
-// login, connection, and the screens this machine is hosting.
-func statusCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	return withConfig(&cobra.Command{
-		Use:   "status",
-		Short: "Show login, connection, and running sessions",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			ui.Heading("microteams")
-			cfg, err := config.Load(*cfgPath)
-			if err != nil || cfg.Token == "" {
-				ui.Field("login", ui.Red("not logged in"))
-				ui.Hint("run `microteams auth login <server-url>` to get started")
-				return nil
-			}
-			ui.Field("login", ui.Green("logged in"))
-			ui.Field("machine", ui.Dim(cfg.MachineID))
-			ui.Field("server", cfg.Base)
-
-			// Two different questions, and conflating them is what made this lie for so long: the
-			// service manager knows whether the PROCESS is running, and only the process knows
-			// whether it reached the control plane. Ask both, and say which is which.
-			st, serr := service.Status(*cfgPath)
-			link := state.CurrentLink(*cfgPath)
-			switch {
-			case serr != nil:
-				ui.Field("link", ui.Yellow("not connected")+" "+ui.Dim("(service not installed)"))
-			case st != "running":
-				ui.Field("link", ui.Yellow(st))
-			case link.Up:
-				since := ""
-				if !link.Since.IsZero() {
-					since = " " + ui.Dim("since "+link.Since.Format("15:04:05"))
-				}
-				ui.Field("link", ui.Green("connected")+since)
-			case link.Error != "":
-				// Running, not connected, and we know why. This is the case that used to say
-				// "connected" while the live screen would not open.
-				ui.Field("link", ui.Red("not connected")+" "+ui.Dim(link.Error))
-			default:
-				// Running but nothing established yet — a process seconds old looks like this, and
-				// so does an older host that does not record the link at all. Neither is a failure
-				// to report as one.
-				ui.Field("link", ui.Yellow("service running, not connected yet"))
-			}
-
-			// Ask tmux, not the state file. The file records what the host published when screens
-			// were last created or closed, so a tmux server that died since — taking every screen
-			// with it — leaves it claiming screens nobody can open. That is precisely the state a
-			// human runs `status` to find out about, so the count is taken live here and the file
-			// is only the fallback for when this process cannot reach tmux at all.
-			n := state.Screens(*cfgPath)
-			if tm, err := terminal.NewManager(); err == nil {
-				n = tm.LiveSessions()
-			}
-			screens := ui.Dim("none")
-			if n > 0 {
-				screens = ui.Bold(fmt.Sprintf("%d", n)) + " running"
-			}
-			ui.Field("screens", screens)
-
-			// The client hides a dead line from everything above it, which is its purpose; this is
-			// where a machine down to its last working path shows it.
-			if c := state.CurrentClient(*cfgPath); c.Status != "" {
-				printClient(c)
-			} else if st == "running" {
-				ui.Field("multipath", ui.Yellow("no client running")+" "+ui.Dim("(the control link goes directly)"))
-			}
-
-			// Whether this machine goes through a proxy is invisible from outside the process, and it
-			// is the first thing worth knowing when no line comes up. Shown is what the service uses
-			// (the configured one), not what this shell happens to have.
-			if px := netcfg.Load(*cfgPath); px.Proxy != "" {
-				ui.Field("proxy", redactProxy(px.Proxy))
-			}
-
-			if serr != nil {
-				ui.Hint("run `microteams link connect` to connect")
-			}
-			return nil
-		},
-	})
-}
-
-// ---------------------------------------------------------------------------
-// the rest
-// ---------------------------------------------------------------------------
 
 func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
 	return withConfig(&cobra.Command{
@@ -785,137 +138,21 @@ func runCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *co
 	})
 }
 
-// updateCmd updates the `microteams` binary to the latest published build. If the
-// background service is running it merely SIGNALS it (SIGUSR2): the update must
-// happen inside that process so its private tmux — and the tasks running in it —
-// survive the binary swap and the in-place hand-off (syscall.Exec). Only when no
-// service is running (nothing to preserve) does it download + replace directly.
-func updateCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	return withConfig(&cobra.Command{
-		Use:   "update",
-		Short: "Update the microteams binary to the latest published build",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if pid := state.PID(*cfgPath); pid > 0 {
-				// A live service owns the tmux + tasks: let it update itself in-process
-				// and hand off, so nothing running is killed.
-				if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
-					return fmt.Errorf("signal running service (pid %d): %w", pid, err)
-				}
-				ui.OK("Update signalled to the running service (pid %d).", pid)
-				ui.Hint("it downloads, verifies and hands off in place — running screens are preserved")
-				return nil
-			}
-			// No running service: nothing to preserve — download + replace directly.
-			cfg, err := config.Load(*cfgPath)
-			if err != nil || cfg.Base == "" {
-				return fmt.Errorf("no server configured — run `microteams auth login` first")
-			}
-			fmt.Println("Downloading the latest microteams and multipath client…")
-			tmp, err := update.Fetch(context.Background(), cfg.Base)
-			if err != nil {
-				return err
-			}
-			self, err := update.SelfPath()
-			if err != nil {
-				return err
-			}
-			if err := update.Replace(tmp, self); err != nil {
-				return err
-			}
-			if err := mpclient.Install(context.Background(), cfg.Base, mpclient.BinaryPath(filepath.Dir(*cfgPath))); err != nil {
-				return err
-			}
-			ui.OK("microteams updated.")
-			ui.Hint("no service was running; the new binary is in place and used from now on")
-			return nil
-		},
-	})
+// liveSessions asks tmux how many sessions this machine hosts. The state file is not asked: a tmux
+// server that died since it was written would leave it claiming sessions nobody can open. Under sudo
+// it does not answer: the sessions are the invoking user's, in a tmux root may not find.
+func liveSessions() (int, error) {
+	if name := sudoUser(); name != "" {
+		return 0, fmt.Errorf("the sessions belong to %s and are counted only as %s, not through sudo", name, name)
+	}
+	tm, err := terminal.NewManager()
+	if err != nil {
+		return 0, err
+	}
+	return tm.LiveSessions()
 }
 
-func uninstallCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) *cobra.Command {
-	return withConfig(&cobra.Command{
-		Use:   "uninstall",
-		Short: "Remove the microteams CLI from this machine (service, config, and binary)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			warnScreens(*cfgPath)
-			// Capture the live connector's pid (recorded by `microteams run`) BEFORE anything,
-			// so we can guarantee it is actually stopped.
-			pid := state.RawPID(*cfgPath)
-			_ = service.Control(*cfgPath, "stop")
-			_ = service.Control(*cfgPath, "uninstall")
-			// A running connector whose config+binary were deleted is the worst possible
-			// state: it keeps using stale in-memory credentials, can't be managed, and
-			// looks "connected" while the server sees it offline. So guarantee the process
-			// is gone before deleting anything. `systemctl stop` of a *system* unit needs
-			// root and silently no-ops otherwise — but the process itself runs as this
-			// user, so we can stop it directly. If we truly cannot (a root-owned process),
-			// fail loudly and leave every file intact so nothing is orphaned.
-			if err := stopProcess(pid); err != nil {
-				return fmt.Errorf(
-					"the microteams connector is still running (pid %d) and could not be stopped; "+
-						"nothing was removed — re-run as: sudo microteams uninstall", pid)
-			}
-			if err := os.RemoveAll(config.Dir()); err != nil {
-				return fmt.Errorf("remove config %s: %w", config.Dir(), err)
-			}
-			exe, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			if err := os.Remove(exe); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove binary %s: %w (delete it manually)", exe, err)
-			}
-			fmt.Println("microteams uninstalled — service, config, and binary removed.")
-			return nil
-		},
-	})
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-func warnScreens(cfgPath string) {
-	if n := state.Screens(cfgPath); n > 0 {
-		fmt.Printf("Note: %d running session(s) will be stopped.\n", n)
-	}
-}
-
-// procAlive reports whether pid names a live process. EPERM means it exists but we may
-// not signal it (a differently-owned process) — still alive; ESRCH means it is gone.
-func procAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-// stopProcess ensures pid is no longer running: SIGTERM (so the host tears its tmux
-// down cleanly), then SIGKILL as a backstop, polling briefly between. Returns nil once
-// the process is gone (or was never there), or an error if it is still alive after both
-// — e.g. we lack the privilege to signal a differently-owned process.
-func stopProcess(pid int) error {
-	if !procAlive(pid) {
-		return nil
-	}
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	for range 30 {
-		if !procAlive(pid) {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-	for range 20 {
-		if !procAlive(pid) {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("process %d still alive", pid)
-}
-
+// confirm asks a yes/no question on the terminal; without one the answer is no.
 func confirm(q string) bool {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return false

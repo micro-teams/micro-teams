@@ -195,8 +195,8 @@ does when its lines are down.
 
 ```sh
 cd cli && go build -o microteams .
-./microteams auth login http://your-host:8199    # prints a link; a team member approves it
-./microteams link connect                        # installs the background service (`./microteams run` to stay in the foreground)
+./microteams login http://your-host:8199         # prints a link; a team member approves it
+./microteams start                               # installs the background service (`./microteams run` to stay in the foreground)
 ```
 
 Then open an agent on that machine (`POST /agent` with `machineId`, `teamId`, `nickname`), add it
@@ -223,8 +223,8 @@ to a group, and talk to it. Click its avatar anywhere to watch its live terminal
 ## Working in this repo
 
 Nothing here can be built or tested from the root. `backend/` is `./mvnw test`. `cli/` is `go test ./...`.
-`applets/` is `npm ci` (it needs `NODE_AUTH_TOKEN` with `read:packages`, see `applets/.npmrc`) then
-`npm run build`. `backend/` and `cli/` have their own conventions in `backend/README.md` and
+`applets/` is `npm ci` then `npm run build`, which also builds the screen drivers from the
+micro-connector commit `cli/go.mod` pins (it needs `go`, `git` and network access). `backend/` and `cli/` have their own conventions in `backend/README.md` and
 `cli/README.md`. The rules every agent working here follows are in `AGENTS.md`.
 
 ### Which test to write

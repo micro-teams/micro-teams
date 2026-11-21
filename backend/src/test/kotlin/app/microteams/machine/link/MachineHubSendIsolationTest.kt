@@ -1,12 +1,8 @@
 /*
- *  Description: Regression test for T-092: a viewer's connection closing must not crash on a
- *               machine control-link session that is already gone. HubMachine.send() had no
- *               try/catch around the transport write, so an IllegalStateException from a
- *               closed WebSocket session (the exact shape Tomcat throws for a write against a
- *               closed session — this is what production hit right after a backend restart, when
- *               a burst of reconnects and the detaches/resubscribes they trigger land in the same
- *               narrow window) propagated straight out of detachViewer and out of whatever caller
- *               triggered it.
+ *  Description: A send to a machine whose control-link session is already closed must not fail
+ *               the caller. Tomcat throws IllegalStateException for a write against a closed
+ *               session, and a viewer detaching (or attaching) right after its machine dropped
+ *               would otherwise fail on it. HubMachine.send logs and drops such a write instead.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -18,6 +14,19 @@ package app.microteams.machine.link
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Test
 
+/** A viewer that ignores everything it is told. */
+private object NoSink : ViewerSink {
+    override fun bytes(data: ByteArray) {}
+
+    override fun size(cols: Int, rows: Int) {}
+
+    override fun lease(holder: String) {}
+
+    override fun capture(id: String, text: String?, error: String?) {}
+
+    override fun error(text: String) {}
+}
+
 class MachineHubSendIsolationTest {
 
     @Test
@@ -26,12 +35,12 @@ class MachineHubSendIsolationTest {
         hub.attachMachine(
             "m1",
             MachineTransport { throw IllegalStateException("session has been closed") },
+            PROTOCOL_V2,
         )
         val screen = hub.openScreen("m1", listOf("bash"), kind = "test", appletSource = "// src")
-        val viewer = ViewerTransport {}
-        hub.attachViewer("m1", screen.sid, viewer)
+        hub.attachViewer(screen.sid, HubViewer("va", NoSink, 80, 24))
 
-        assertDoesNotThrow { hub.detachViewer("m1", screen.sid, viewer) }
+        assertDoesNotThrow { hub.detachViewer(screen.sid, "va") }
     }
 
     @Test
@@ -40,11 +49,12 @@ class MachineHubSendIsolationTest {
         hub.attachMachine(
             "m1",
             MachineTransport { throw IllegalStateException("session has been closed") },
+            PROTOCOL_V2,
         )
         val screen = hub.openScreen("m1", listOf("bash"), kind = "test", appletSource = "// src")
 
         assertDoesNotThrow {
-            hub.attachViewer("m1", screen.sid, ViewerTransport {})
+            hub.attachViewer(screen.sid, HubViewer("va", NoSink, 80, 24))
         }
     }
 }

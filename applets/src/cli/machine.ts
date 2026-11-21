@@ -72,7 +72,7 @@ const forget: CommandSpec = {
 
 const approve: CommandSpec = {
   name: 'approve',
-  short: 'Approve a machine that is enrolling (`microteams link connect` printed its code) into teams',
+  short: 'Approve a machine that is enrolling (`microteams start` printed its code) into teams',
   flags: [
     { name: 'code', type: 'string', required: true, help: 'the one-time code from the enrolling machine' },
     { name: 'teams', type: 'string', required: true, help: 'comma-separated team ids or names it should serve' },

@@ -1,37 +1,32 @@
 /*
  *  Description: One browser viewer's outbound queue, and the reason it exists.
  *
- *               Screen bytes reach a viewer on the machine's control-channel receive thread:
- *               LinkHandler.handleTextMessage -> MachineHub.onMachineMessage -> fanOutScreenData ->
- *               viewer.sendBytes. Writing to the browser's WebSocket *there* means a viewer that
- *               cannot keep up does not stall itself — it stalls that thread, and with it every
- *               other thing the machine is saying: other screens' data, rpc results, var updates,
- *               screenReady, exec results. A watcher on a slow relay could therefore freeze a whole
- *               machine, and the freeze looked exactly like "the agent stopped": nothing moved until
- *               something forced the pipe to drain, and any keystroke did (it travels the other
- *               direction, so it is never behind the jam, and the program repaints on input).
+ *               What a viewer is told reaches it on the machine's control-channel receive thread
+ *               (LinkHandler -> MachineHub.onMachineMessage -> the viewer's ViewerSink). Writing to
+ *               the browser's WebSocket there would let a viewer that cannot keep up stall that
+ *               thread, and with it everything else the machine says: other screens' data, rpc
+ *               results, variables, screenReady. So the machine thread only hands frames to this
+ *               queue and returns; one thread per viewer does the blocking write.
  *
- *               So the machine thread must never block on a browser. It hands bytes to this queue
- *               and returns immediately; one thread per viewer does the blocking write.
+ *               Flow control is the connector's: a protocol 2 viewer acknowledges what it has
+ *               rendered, and the connector stops reading a viewer's client while 256 KiB are
+ *               unacknowledged, so this queue stays short. It is bounded anyway, for a protocol 1
+ *               machine (no flow control) and for a browser that stops reading. Dropping bytes
+ *               would be wrong — the stream is escape sequences mutating a parser, and a hole can
+ *               leave the picture wrong for good — so past `capacityBytes` the viewer is hung up
+ *               on. Its client dials again, and a fresh subscription is a full repaint.
  *
- *               What to do when a viewer falls hopelessly behind is the interesting half. Dropping
- *               bytes out of a terminal stream is NOT a safe way to shed load: the stream is a
- *               sequence of escape sequences that mutate a state machine, so a hole in the middle
- *               does not cost you a frame, it can leave the parser (and the picture) wrong forever.
- *               Until the protocol can say "repaint everything" (the resync primitive this repo does
- *               not have yet), the only truthful options are block — which is what we are removing —
- *               or hang up. This hangs up: past `capacityBytes` of unwritten screen, the viewer is
- *               closed. The browser's reconnect loop dials again, and a reattach is a full repaint
- *               (a fresh tmux client paints the whole pane), so the picture comes back correct
- *               rather than subtly broken.
+ *               Text frames (the viewer's size, lease state, capture and command answers) go
+ *               through the same queue as the bytes, so a size is never overtaken by the data drawn
+ *               at that size, nor the other way round.
  *
- *               Former caveat, now fixed (T-091): that reattach used to only repaint when the
- *               reconnecting viewer was the only one on the screen, because the hub subscribed on
- *               the first viewer alone — a second watcher just waited for the screen to change on
- *               its own, sometimes indefinitely. MachineHub.attachViewer now sends screen.subscribe
- *               for every viewer, and the machine (once running the matching micro-connector fix)
- *               answers a subscribe on an already-attached screen with a synthesized snapshot
- *               instead of silence.
+ *               ViewerFrame.Bytes(data) / ViewerFrame.Text(json)  one outbound frame.
+ *               VIEWER_QUEUE_BYTES  the default capacityBytes.
+ *               ViewerPump(label, capacityBytes?, write, giveUp, startThread?)
+ *                 offer(frame) -> false once given up; close(); backlogBytes(); isClosed().
+ *
+ *               Example: val pump = ViewerPump("v1", write = { send(it) }, giveUp = { close() })
+ *                        pump.offer(ViewerFrame.Text("""{"type":"size","cols":80,"rows":24}"""))
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -45,14 +40,32 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.slf4j.LoggerFactory
 
-/** How much unwritten screen a single viewer may owe before we give up on it. */
+/** One frame to a viewer: screen bytes (a binary frame) or a JSON text frame. */
+sealed interface ViewerFrame {
+    val size: Int
+
+    class Bytes(val data: ByteArray) : ViewerFrame {
+        override val size: Int
+            get() = data.size
+    }
+
+    class Text(val json: String) : ViewerFrame {
+        override val size: Int
+            get() = json.length
+    }
+}
+
+/**
+ * How many bytes of frames a viewer may owe — accepted by [ViewerPump.offer], not yet written —
+ * before it is hung up on. Far above what acknowledged flow control lets build up.
+ */
 const val VIEWER_QUEUE_BYTES: Int = 4 * 1024 * 1024
 
 class ViewerPump(
     private val label: String,
     private val capacityBytes: Int = VIEWER_QUEUE_BYTES,
     /** The blocking write. Called only from this pump's own thread, never from a caller's. */
-    private val write: (ByteArray) -> Unit,
+    private val write: (ViewerFrame) -> Unit,
     /**
      * Tear the viewer down — in production, close its WebSocket. Called at most once, never on the
      * caller's thread and never on the pump's own: a blocked write must not delay the hang-up, and
@@ -66,11 +79,11 @@ class ViewerPump(
 ) {
     private val logger = LoggerFactory.getLogger(ViewerPump::class.java)
 
-    private val queue = LinkedBlockingQueue<ByteArray>()
+    private val queue = LinkedBlockingQueue<ViewerFrame>()
     private val queued = AtomicInteger(0)
     private val closed = AtomicBoolean(false)
-    /** Ends the loop; a zero-length array is the only value that means "stop", never data. */
-    private val poison = ByteArray(0)
+    /** Ends the loop; compared by identity, so no real frame can mean "stop". */
+    private val poison: ViewerFrame = ViewerFrame.Bytes(ByteArray(0))
 
     init {
         startThread("viewer-pump-$label", Runnable { run() })
@@ -83,10 +96,10 @@ class ViewerPump(
      * Returns false once the viewer has been given up on, so a caller that keeps a viewer list can
      * drop it — but nothing depends on the caller noticing, since the pump closes the session too.
      */
-    fun offer(bytes: ByteArray): Boolean {
+    fun offer(frame: ViewerFrame): Boolean {
         if (closed.get()) return false
-        if (bytes.isEmpty()) return true
-        val total = queued.addAndGet(bytes.size)
+        if (frame.size == 0) return true
+        val total = queued.addAndGet(frame.size)
         if (total > capacityBytes) {
             // Hopelessly behind. Do not try to catch up by discarding part of the stream — see the
             // file header for why a hole is worse than a hang-up.
@@ -99,7 +112,7 @@ class ViewerPump(
             stop(hangUp = true)
             return false
         }
-        queue.put(bytes) // unbounded queue: put() cannot block
+        queue.put(frame) // unbounded queue: put() cannot block
         return true
     }
 

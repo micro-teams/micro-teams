@@ -33,11 +33,11 @@ A machine with nothing installed joins in two commands:
 
 ```bash
 curl -fsSL https://<your-domain>/install.sh | sh   # drops the microteams binary + a private tmux
-microteams link auto-connect                       # enroll (approve in the browser) + boot service
+microteams enable                                  # enroll (approve in the browser) + boot service
 ```
 
 > **Run as a normal user, not root.** `| sh` installs to your `~/.local/bin`, and
-> `microteams link auto-connect` registers a boot service that runs *as you* (`User=<you>`),
+> `microteams enable` registers a boot service that runs *as you* (`User=<you>`),
 > so the connector — and every agent it launches — runs under your account. This matters:
 > Claude Code refuses `--dangerously-skip-permissions` as root, so an agent started by a
 > **root** connector hangs. `| sudo sh` works for the install too (binary → `/usr/local/bin`,
@@ -333,7 +333,7 @@ To add a line:
 3. Add it to `multipath/lines.json` (edit in place or replace the file: the directory is mounted, so
    both are seen). Check: `curl -fsS https://<origin>/multipath/v3/lines`.
 4. Running clients pick it up within ten minutes (their refresh) or with their next session; a
-   machine at once with `microteams link retest`. Removing a line works the same way: clients
+   machine at once with `microteams restart` (its sessions keep running). Removing a line works the same way: clients
    close its links once another line is up.
 
 Each client shows its lines: the web and Android apps under *me → version → lines* (with a button

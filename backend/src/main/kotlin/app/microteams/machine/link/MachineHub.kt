@@ -1,16 +1,60 @@
 /*
- *  Description: MachineHub — the server end of the frozen `link.Msg` protocol. One
- *               long-lived control channel per connected machine, over which the
- *               server opens *screens* (each a hosted CLI + applet), relays a
- *               screen's raw terminal to browser viewers, mirrors the applet's
- *               variables, answers the applet's calls, and runs one-shot `exec`
- *               on the machine. Ported field-for-field from the reference hub.py; the
- *               wire shape matches the frozen CLI's link.Msg contract exactly.
+ *  Description: MachineHub — the server end of the connector protocol (see LinkProtocol.kt). One
+ *               long-lived control channel per connected machine, over which the server opens
+ *               *screens* (each a hosted program + an optional applet), relays a screen's terminal
+ *               to the people watching it, mirrors the applet's variables and answers its calls.
  *
- *               I/O-free by design: it depends only on two tiny transport interfaces,
- *               so it is exercised with in-process fakes (no WebSocket, no machine, no
- *               DB). The connector WS routes adapt real WebSockets to these interfaces
- *               and resolve the machine→agent actor via MachineService/attribution.
+ *               A machine speaks protocol 1 or 2, fixed by its `hello`; nothing screen-related is
+ *               sent to it before that, which is why a machine counts as attached only from its
+ *               hello on. Protocol 2 gives every viewer its own stream, size, lease state and
+ *               capture; protocol 1 shares one stream among all viewers and is mapped onto the same
+ *               viewer interface here, so callers never branch on the version.
+ *
+ *               The applet watches `viewerLevel`: "full" while a person has the input, when it
+ *               holds back what it is told to type, and "passive" otherwise; leaving "full" is when
+ *               it returns the pane to its live bottom. Protocol 1 sets it full while a viewer
+ *               types; protocol 2 derives it from the input lease, full exactly while a viewer
+ *               holds it, and sets it again after every session.create and every screenReady.
+ *
+ *               I/O-free by design: it depends only on small transport interfaces, so it is
+ *               exercised with in-process fakes (no WebSocket, no machine, no DB).
+ *
+ *               Public surface:
+ *               MachineTransport  sendJson(msg) — one machine's control channel.
+ *               ViewerSink        what a viewer is told: bytes / size / lease / capture / error,
+ *                                 and resubscribed() when its subscription is made again.
+ *               HubViewer(id, sink, cols, rows)  one person watching a screen, by viewer id.
+ *               ScreenFn          an applet -> server function; exceptions become rpc errors.
+ *               HubScreen, ScreenState, ScreenLifecycleListener, ScreenVarListener — a screen,
+ *                                 what is known about its program, and who is told about it.
+ *               LinkClosedException  how a call ends whose machine connection went away.
+ *               HubMachine        one machine's state: its current transport and protocol, what it
+ *                                 reported (origin, build, connectedAt), its screens and its calls
+ *                                 awaiting rpc.result; send(msg) writes to the current transport.
+ *               MachineHub:
+ *                 addScreenLifecycleListener / addScreenVarListener — be told about screens.
+ *                 attachMachine(id, transport, protocol, origin?) / detachMachine(id, transport)
+ *                   — after the machine's hello; detach only if that transport is still current.
+ *                 isOnline / originOf / buildOf / connectedAtOf / protocolOf / screensOf /
+ *                 onlineMachineIds — what is known about a machine.
+ *                 openScreen / closeScreen / readoptScreen / respawnScreen / adoptScreen —
+ *                   a screen's life; readopt and respawn resubscribe every attached viewer.
+ *                 sendUpdate(machineId) — ask the connector to update its own binary.
+ *                 callScreen(machineId, sid, name, args) -> CompletableFuture of the applet's value.
+ *                 screen(sid) / screenByToken(token) / allOnlineScreens() — look screens up.
+ *                 expose(name, fn) — answer an applet's call `name`.
+ *                 attachViewer(sid, viewer) / detachViewer / viewerInput / viewerReply /
+ *                 viewerResize / viewerAck / viewerLease / viewerCapture — a viewer, in either
+ *                 protocol;
+ *                 viewerScroll / viewerControl — protocol 1 only.
+ *                 markScreen(sid, state, reason?) — record what is known about a program.
+ *                 onMachineMessage(machineId, msg, from?) — every inbound message; an applet's call
+ *                   is answered on the transport [from] it came in on.
+ *
+ *               Example:
+ *                 hub.attachMachine("m1", transport, PROTOCOL_V2)
+ *                 val screen = hub.openScreen("m1", listOf("bash"), kind = "shell")
+ *                 hub.attachViewer(screen.sid, HubViewer("v1a2b3c4d", sink, 120, 32))
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -19,13 +63,14 @@
 
 package app.microteams.machine.link
 
+import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import org.slf4j.LoggerFactory
@@ -36,15 +81,53 @@ fun interface MachineTransport {
     fun sendJson(msg: LinkMsg)
 }
 
-/** A browser terminal viewer. It only ever *receives* raw screen bytes. */
-fun interface ViewerTransport {
-    fun sendBytes(data: ByteArray)
+/**
+ * Everything a viewer is told, in the order the machine said it. Implementations must not block:
+ * they are called on the machine's receive thread (the viewer WebSocket queues them).
+ */
+interface ViewerSink {
+    /** Terminal bytes for this viewer. */
+    fun bytes(data: ByteArray)
+
+    /** The terminal's size from now on; always before any bytes at that size. */
+    fun size(cols: Int, rows: Int)
+
+    /** Who holds the input lease: "" free, "driver" the applet, otherwise a viewer id. */
+    fun lease(holder: String)
+
+    /** The answer to capture [id]: the screen's text, or why there is none. */
+    fun capture(id: String, text: String?, error: String?)
+
+    /** Something failed for this viewer; the screen itself is fine. */
+    fun error(text: String)
+
+    /**
+     * The viewer was subscribed again (a readopt or respawn): what the machine says next repeats
+     * its state rather than answering anything the viewer did.
+     */
+    fun resubscribed() {}
+}
+
+/**
+ * One person watching a screen. [id] is the viewer id the machine routes by (protocol 2); [cols] x
+ * [rows] is the room the viewer last said it has.
+ */
+class HubViewer(val id: String, val sink: ViewerSink, cols: Int, rows: Int) {
+    @Volatile var cols: Int = cols
+
+    @Volatile var rows: Int = rows
+
+    /** Protocol 1 only: this viewer typed or took the lease, so it wants `viewerLevel` full. */
+    @Volatile var typing: Boolean = false
 }
 
 /** A applet→server function: (hub, screen, args) -> value. Exceptions become rpc errors. */
 fun interface ScreenFn {
     fun call(hub: MachineHub, screen: HubScreen, args: List<Any?>): Any?
 }
+
+/** A call to a machine that can no longer be answered: its connection closed or was replaced. */
+class LinkClosedException(message: String) : RuntimeException(message)
 
 /**
  * One hosted process on a machine: a command, the terminal the server relays to viewers, and
@@ -55,6 +138,11 @@ fun interface ScreenFn {
  * mapping), and a screen may equally be a shared shell that belongs to nobody. [kind] is opaque
  * here: the machine layer never interprets it, it only lets the owning application recognise its
  * own screens.
+ *
+ * [generation] counts the session.create messages sent for this screen. A connector handles one
+ * screen's messages in order and loads the applet while handling a create, so anything sent after
+ * the latest create reaches the applet that create loaded; the agent module uses it to tell which
+ * of its calls an applet restart lost.
  */
 class HubScreen(
     val sid: String,
@@ -64,13 +152,24 @@ class HubScreen(
     val kind: String,
 ) {
     val vars: MutableMap<String, Any?> = ConcurrentHashMap()
-    val viewers: MutableSet<ViewerTransport> = ConcurrentHashMap.newKeySet()
+    val viewers: MutableMap<String, HubViewer> = ConcurrentHashMap()
+    val generation = AtomicLong(0)
 
     /** What we last observed about the program on this screen. See [ScreenState]. */
     @Volatile var state: ScreenState = ScreenState.UNKNOWN
 
     /** Why it was last declared dead (for logs / diagnostics); null unless [state] is DEAD. */
     @Volatile var deadReason: String? = null
+
+    /** The `viewerLevel` last set. */
+    @Volatile internal var level: String = "passive"
+
+    /** Protocol 2 only: who holds the input lease, as the machine last said ("" free). */
+    @Volatile internal var leaseHolder: String = ""
+
+    /** Protocol 1 only: the window size last asked for. */
+    @Volatile internal var v1Cols: Int = 120
+    @Volatile internal var v1Rows: Int = 32
 }
 
 /**
@@ -103,13 +202,16 @@ enum class ScreenState {
  * what runs on a screen, so it never acts on the change — it publishes it, and the module that
  * opened the screen decides whether a death is worth reviving (see the agent module's wake-up).
  *
- * Changes may come either from the wire (a machine refusing to drive a session, an applet
- * announcing itself) or from the owning module's own verdict via [MachineHub.markScreen] — reading
- * a screen's mirrored variables is how a module recognises its own program's death, and that
- * reading is knowledge the machine layer must not carry.
+ * Changes may come either from the wire (a machine reporting a session gone, an applet announcing
+ * itself) or from the owning module's own verdict via [MachineHub.markScreen].
+ *
+ * [onAppletReady] is told every time an applet announces itself (`screenReady`), whether or not the
+ * state changes: an applet that loads again has lost whatever the one before it held.
  */
 fun interface ScreenLifecycleListener {
     fun onScreenState(screen: HubScreen, previous: ScreenState)
+
+    fun onAppletReady(screen: HubScreen) {}
 }
 
 /** Told whenever a screen's applet pushes a new value for a variable it owns. */
@@ -117,61 +219,49 @@ fun interface ScreenVarListener {
     fun onScreenVar(screen: HubScreen, name: String, value: Any?)
 }
 
-/** The per-machine server-side state: its transport, its screens, and pending exec calls. */
+/**
+ * The per-machine server-side state: the transport of its current connection and the protocol
+ * spoken on it, what it reported about itself, its screens, and the calls awaiting rpc.result.
+ */
 class HubMachine(val machineId: String) {
     @Volatile var transport: MachineTransport? = null
-    @Volatile var proto: Int? = null
+
+    /** The protocol this server speaks to the machine, from its hello. */
+    @Volatile var proto: Int = PROTOCOL_V1
 
     /**
      * The base URL this machine used to reach us on its *current* connection — reported by the CLI
      * on the control-channel handshake. The server stays URL-agnostic: it never assumes its own
      * address but echoes each machine's own endpoint back as MICROTEAMS_API, so two machines on the
-     * same deployment reached via different endpoints (a public reverse proxy, an IPv4 relay, IPv6
-     * direct, a campus network …) each drive their screens against the endpoint that works for
-     * them.
+     * same deployment reached via different endpoints each drive their screens against the endpoint
+     * that works for them.
      */
     @Volatile var origin: String? = null
 
     /**
-     * Which build of the connector this machine is running, as it reported when asked.
-     *
-     * Null means it has not answered — an older connector that does not know the question, or one
-     * that has not answered yet. Null is therefore "unknown", never "old": an operator deciding
-     * whether an update landed must be able to tell those apart.
+     * Which build of the connector this machine is running, as it reported when asked. Null means
+     * it has not answered — unknown, never "old".
      */
     @Volatile var build: String? = null
 
     /** When this machine last attached. Null if it has not connected since this server started. */
-    @Volatile var connectedAt: java.time.Instant? = null
+    @Volatile var connectedAt: Instant? = null
 
     val screens: MutableMap<String, HubScreen> = ConcurrentHashMap()
-    val execSeq = AtomicInteger(0)
     val callSeq = AtomicInteger(0)
-    val execPending: MutableMap<String, CompletableFuture<ExecResult>> = ConcurrentHashMap()
 
-    /**
-     * Server→applet calls awaiting their `rpc.result`. Most calls are fire-and-forget (say / choose
-     * / compact — the answer is what the program then does on screen), but a caller that needs the
-     * value back — probing whether the applet is still there at all — parks its future here.
-     */
+    /** Server→applet calls awaiting their `rpc.result`, on the current connection. */
     val callPending: MutableMap<String, CompletableFuture<Any?>> = ConcurrentHashMap()
     private val sendLock = ReentrantLock()
 
     /**
      * Serialize sends to one machine: a WebSocket is not safe for concurrent writes, and the
-     * orchestrator, exec, and every viewer's fan-out all send here. Without this, interleaved
-     * frames corrupt the channel.
+     * orchestrator and every viewer send here.
      *
-     * T-092: a machine's control-link session can already be closed by the time some other,
-     * unrelated event (a viewer detaching, a screen readopting after reconnect) gets around to
-     * sending to it — most sharply right after a backend restart, when a burst of reconnects and
-     * the resubscribes/detaches they trigger all land in the same narrow window. Tomcat's WebSocket
-     * session throws IllegalStateException for a write against an already-closed session, and that
-     * used to propagate straight out of here, up through whatever caller happened to be sending
-     * (e.g. MachineHub.detachViewer, itself called from a viewer's own connection-closed handler)
-     * and fail that unrelated request. A missed send here just means this one machine misses one
-     * message it will get again next time something resyncs it — never worth taking the caller down
-     * for.
+     * A machine's session can already be closed when an unrelated event (a viewer detaching, a
+     * readopt after a burst of reconnects) sends to it, and the container then throws
+     * IllegalStateException. One missed message is resynced by the next attach, so it is logged
+     * rather than allowed to fail the caller.
      */
     fun send(msg: LinkMsg) {
         try {
@@ -181,6 +271,27 @@ class HubMachine(val machineId: String) {
                 "dropped a send to a machine whose control-link session was already closed: ${e.message}",
             )
         }
+    }
+
+    /**
+     * Write to [via], a connection of this machine that may no longer be its current one: an
+     * applet's call is answered on the connection it came in on. A connection that has closed
+     * meanwhile drops the answer, logged.
+     */
+    fun sendOn(via: MachineTransport, msg: LinkMsg) {
+        if (via === transport) return send(msg)
+        try {
+            synchronized(via) { via.sendJson(msg) }
+        } catch (e: IllegalStateException) {
+            logger.warn("dropped {} for machine {}: its old connection is closed", msg.t, machineId)
+        }
+    }
+
+    /** End every call still waiting on this machine; their connection is gone. */
+    fun failPending(reason: String) {
+        val calls = callPending.values.toList()
+        callPending.clear()
+        calls.forEach { it.completeExceptionally(LinkClosedException(reason)) }
     }
 
     companion object {
@@ -195,35 +306,43 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     private val screens: MutableMap<String, HubScreen> = ConcurrentHashMap() // sid -> screen
     private val byScreenToken: MutableMap<String, HubScreen> = ConcurrentHashMap()
     private val fns: MutableMap<String, ScreenFn> = ConcurrentHashMap()
-    private val lifecycleListeners =
-        java.util.concurrent.CopyOnWriteArrayList<ScreenLifecycleListener>()
-    private val varListeners = java.util.concurrent.CopyOnWriteArrayList<ScreenVarListener>()
+    private val lifecycleListeners = CopyOnWriteArrayList<ScreenLifecycleListener>()
+    private val varListeners = CopyOnWriteArrayList<ScreenVarListener>()
 
     init {
         // An applet announcing itself is the one unambiguous "the program is up and being driven"
         // signal on the wire, so it also clears a death recorded before this (re)start.
         fns["screenReady"] = ScreenFn { _, screen, _ ->
+            lifecycleListeners.forEach { l -> safely { l.onAppletReady(screen) } }
             markScreen(screen.sid, ScreenState.LIVE)
+            machines[screen.machineId]?.let { if (it.proto >= PROTOCOL_V2) sendLevel(it, screen) }
             mapOf("ok" to true)
         }
         fns.putAll(screenFns)
     }
 
-    /** Be told when screens die / come back. Listeners must not throw; one that does is logged. */
+    /**
+     * Be told when what is known about a screen's program changes, and when an applet announces
+     * itself. Listeners must not throw; one that does is logged.
+     */
     fun addScreenLifecycleListener(listener: ScreenLifecycleListener) {
         lifecycleListeners.add(listener)
     }
 
-    /** Be told when an applet pushes a variable it owns. */
+    /** Be told when an applet pushes a variable it owns; called on the machine's receive thread. */
     fun addScreenVarListener(listener: ScreenVarListener) {
         varListeners.add(listener)
     }
 
+    /** Answer an applet's `rpc.call` named [name] with [fn]. */
+    fun expose(name: String, fn: ScreenFn) {
+        fns[name] = fn
+    }
+
     /**
      * Record what is now known about the program on [sid], and tell the listeners what changed.
-     * Idempotent: a state that does not change publishes nothing, so a repeated signal (a variable
-     * re-pushed, a second session.error) can never re-trigger whatever the owning module does about
-     * it.
+     * Idempotent: a state that does not change publishes nothing, so a repeated signal can never
+     * re-trigger whatever the owning module does about it.
      */
     fun markScreen(sid: String, state: ScreenState, reason: String? = null) {
         val screen = screens[sid] ?: return
@@ -255,18 +374,34 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
 
     // -- machine connection -------------------------------------------------
 
-    fun attachMachine(machineId: String, transport: MachineTransport, origin: String? = null) {
+    /**
+     * A machine said hello on [transport], announcing [protocol]: from now on it is online and is
+     * spoken to in that version. Calls still waiting on an earlier connection can no longer be
+     * answered, so they end here.
+     */
+    fun attachMachine(
+        machineId: String,
+        transport: MachineTransport,
+        protocol: Int,
+        origin: String? = null,
+    ) {
         val machine = machine(machineId)
+        machine.failPending("the machine connected again")
         machine.transport = transport
-        // Record the endpoint the CLI dialed on this connection (null when an older client did not
-        // report one); it becomes MICROTEAMS_API for screens opened while this connection lives.
+        machine.proto = if (protocol >= PROTOCOL_V2) PROTOCOL_V2 else PROTOCOL_V1
+        // The endpoint the CLI dialed on this connection (null when it did not report one); it
+        // becomes MICROTEAMS_API for screens opened while this connection lives.
         if (origin != null) machine.origin = origin
-        machine.connectedAt = java.time.Instant.now()
-        machine.send(LinkMsg(t = "welcome", v = PROTOCOL_VERSION))
-        // Ask which build it runs. Asking on attach rather than having it announce means the answer
-        // is refreshed at the one moment it matters most — right after an update has replaced the
-        // process — and an older connector that does not know the question simply never answers,
-        // which reads as "unknown" rather than as a lie.
+        machine.connectedAt = Instant.now()
+        logger.info(
+            "machine {} speaks protocol {} (announced {})",
+            machineId,
+            machine.proto,
+            protocol,
+        )
+        machine.send(LinkMsg(t = "welcome", v = machine.proto))
+        // Ask which build it runs, right after an update has had the chance to replace it. A
+        // connector that does not know the question never answers, which reads as "unknown".
         machine.send(LinkMsg(t = "machine.info"))
     }
 
@@ -274,20 +409,23 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         val machine = machines[machineId]
         if (machine != null && machine.transport === transport) {
             machine.transport = null
+            machine.failPending("the machine disconnected")
         }
     }
 
     fun isOnline(machineId: String): Boolean = machines[machineId]?.transport != null
 
-    /**
-     * The base URL the machine reported on its live connection, or null (offline / not reported).
-     */
+    /** The base URL the machine reported on its live connection, or null. */
     fun originOf(machineId: String): String? = machines[machineId]?.origin
 
     /** The connector build this machine reported, or null if it has not said. */
     fun buildOf(machineId: String): String? = machines[machineId]?.build
 
-    fun connectedAtOf(machineId: String): java.time.Instant? = machines[machineId]?.connectedAt
+    fun connectedAtOf(machineId: String): Instant? = machines[machineId]?.connectedAt
+
+    /** The protocol spoken to this machine, or null if it never said hello to this server. */
+    fun protocolOf(machineId: String): Int? =
+        machines[machineId]?.takeIf { it.connectedAt != null }?.proto
 
     /** How many screens this machine currently holds. */
     fun screensOf(machineId: String): Int = machines[machineId]?.screens?.size ?: 0
@@ -298,12 +436,23 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     // -- screens (server -> machine) ----------------------------------------
 
     /**
-     * Open a screen of [kind] on a machine: mint its per-screen token and ship the optional applet,
-     * mirroring web-claude's session.create. The token becomes MICROTEAMS_SCREEN inside the screen;
-     * [env] is injected into its process environment.
-     *
-     * [appletSource] is null for a screen nobody drives -- a plain shell is just a command with a
-     * terminal, and `source` is omitted from the frame exactly as the Go CLI's omitempty does.
+     * Send a session.create. On protocol 2 the new session knows no viewer and so no lease, and
+     * `viewerLevel` follows at once: the connector handles one screen's messages in order, so the
+     * applet the create loads observes it from its start.
+     */
+    private fun create(machine: HubMachine, screen: HubScreen, msg: LinkMsg) {
+        screen.generation.incrementAndGet()
+        machine.send(msg)
+        if (machine.proto < PROTOCOL_V2) return
+        screen.leaseHolder = ""
+        screen.level = "passive"
+        sendLevel(machine, screen)
+    }
+
+    /**
+     * Open a screen of [kind] on a machine: mint its per-screen token and ship the optional applet.
+     * The token becomes MICROTEAMS_SCREEN inside the screen; [env] is injected into its process
+     * environment. [appletSource] is null for a screen nobody drives.
      */
     fun openScreen(
         machineId: String,
@@ -328,7 +477,9 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         screens[sid] = screen
         byScreenToken[screen.token] = screen
         screen.state = ScreenState.STARTING // we asked for it; its applet will confirm
-        machine.send(
+        create(
+            machine,
+            screen,
             LinkMsg(
                 t = "session.create",
                 sid = sid,
@@ -353,15 +504,10 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         return true
     }
 
-    /** Hot-reload the applet into a running screen — no restart, no lost CLI context. */
-    fun reloadDriver(machineId: String, sid: String, source: String) {
-        machine(machineId).send(LinkMsg(t = "script.load", sid = sid, source = source))
-    }
-
     /**
-     * Re-provision an already-adopted screen after the CLI reconnects: send an `adopt`
-     * session.create so the client re-drives the *surviving* tmux session. The screen must already
-     * be registered (via [adoptScreen]) so its token is known.
+     * Re-provision an already-registered screen after the machine (re)connects: an `adopt`
+     * session.create makes the connector re-drive the surviving tmux session, or report it gone.
+     * The connector remembers no viewer from before, so every attached viewer is subscribed again.
      */
     fun readoptScreen(
         machineId: String,
@@ -374,7 +520,9 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
     ) {
         val screen = screens[sid] ?: return
         val machine = machine(machineId)
-        machine.send(
+        create(
+            machine,
+            screen,
             LinkMsg(
                 t = "session.create",
                 sid = sid,
@@ -387,37 +535,17 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 env = env?.ifEmpty { null },
             ),
         )
-        // The reconnecting CLI is a fresh process (its old one either exited or, on a machine
-        // reboot, tmux and everything above it are gone) — it remembers no `screen.subscribe`
-        // from before, whatever this HubScreen's viewers set says. That set survives a machine
-        // outage untouched (nothing here closes a viewer just because its machine went away, and
-        // a browser tab sitting on a stalled ViewerPump never notices to reconnect — see
-        // ViewerPump's header), so attachViewer's "first viewer" fan-out gate — the ONLY other
-        // place screen.subscribe is sent — will never fire again for it: every viewer already in
-        // the set reads as "not first". Without this, a viewer that survived the outage keeps its
-        // handshake but the newly (re)spawned session never starts streaming to it: a silent,
-        // permanent black screen. Re-asking here, unconditionally on any pre-existing viewer,
-        // costs the machine nothing (screen.subscribe is idempotent there) and is the only point
-        // that knows the session underneath just changed.
-        if (screen.viewers.isNotEmpty()) {
-            machine.send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
-        }
+        resubscribe(machine, screen)
     }
 
     /**
      * Restart the program on an existing screen *in place*: end the machine's session and create it
-     * again under the SAME sid and the same screen token. Everything that names the screen — the
-     * owning module's rows, a browser live-screen URL, the MICROTEAMS_SCREEN a callback
-     * authenticates with — therefore keeps working across the restart, which is the whole reason
-     * this exists rather than a close + [openScreen] pair.
-     *
-     * Ordering is safe on the frozen CLI: it dispatches control messages one at a time off a single
-     * read loop, and its session.close kills the tmux synchronously, so the session.create that
-     * follows always finds the sid free and spawns fresh (rather than adopting the corpse).
+     * again under the SAME sid and the same screen token, so everything that names the screen keeps
+     * working across the restart. The connector handles one screen's messages in order, so the
+     * create always finds the sid free and spawns fresh.
      *
      * The screen goes to STARTING rather than LIVE: a `--resume` takes seconds to paint a usable
-     * prompt, so a screen that is merely *asked* to restart is not yet one that can be typed at.
-     * Whoever waits for it is told by the lifecycle listeners the moment it really is back.
+     * prompt. The new session knows no viewer, so every attached viewer is subscribed again.
      */
     fun respawnScreen(
         machineId: String,
@@ -428,10 +556,12 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         cols: Int = 120,
         rows: Int = 32,
     ): Boolean {
-        val screen = machine(machineId).screens[sid] ?: return false
         val machine = machine(machineId)
+        val screen = machine.screens[sid] ?: return false
         machine.send(LinkMsg(t = "session.close", sid = sid))
-        machine.send(
+        create(
+            machine,
+            screen,
             LinkMsg(
                 t = "session.create",
                 sid = sid,
@@ -445,66 +575,69 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         )
         screen.vars.clear() // the old program's status/tokens/… say nothing about the new one
         markScreen(sid, ScreenState.STARTING)
-        // Same reasoning as readoptScreen's resubscribe just below: session.close + session.create
-        // hands the machine a brand-new tmux session under the old sid, so any subscription it
-        // remembered for the old one is gone, while this HubScreen's viewers set (and therefore
-        // attachViewer's "first viewer" gate) is untouched. Left alone, a viewer already attached
-        // when wakeAgent respawns a dead screen keeps its socket open but never receives another
-        // byte — exactly the black-screen this respawn is meant to cure.
-        if (screen.viewers.isNotEmpty()) {
-            machine.send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
-        }
+        resubscribe(machine, screen)
         return true
     }
+
+    /**
+     * Subscribe every viewer of [screen] again, each with its own id and size (v1: one, shared).
+     */
+    private fun resubscribe(machine: HubMachine, screen: HubScreen) {
+        val viewers = screen.viewers.values.toList()
+        if (viewers.isEmpty()) return
+        viewers.forEach { it.sink.resubscribed() }
+        if (machine.proto >= PROTOCOL_V2) {
+            for (v in viewers) {
+                machine.send(subscribeMsg(screen.sid, v.id, v.cols, v.rows))
+            }
+        } else {
+            viewers.forEach { it.sink.size(screen.v1Cols, screen.v1Rows) }
+            machine.send(subscribeMsg(screen.sid, null, screen.v1Cols, screen.v1Rows))
+        }
+    }
+
+    private fun subscribeMsg(sid: String, viewer: String?, cols: Int, rows: Int) =
+        LinkMsg(t = "screen.subscribe", sid = sid, viewer = viewer, cols = cols, rows = rows)
 
     /** Push a forced self-update to a machine (it downloads + swaps its binary in place). */
     fun sendUpdate(machineId: String) {
         machine(machineId).send(LinkMsg(t = "update"))
     }
 
-    /** Server→applet function call (say / choose / compact …). Fire-and-forget. */
-    fun callScreen(machineId: String, sid: String, name: String, args: List<Any?>) {
-        val machine = machine(machineId)
-        val id = "srv" + machine.callSeq.incrementAndGet()
-        machine.send(LinkMsg(t = "rpc.call", sid = sid, id = id, name = name, args = args))
-    }
-
     /**
-     * Server→applet call whose value we wait for, up to [timeoutSeconds]. Returns null on timeout,
-     * on an applet-side error, or when the machine is offline — every one of which means "nothing
-     * is driving that screen right now", which is exactly what a caller probing an applet wants to
-     * learn. Use [callScreen] for the ordinary fire-and-forget case.
+     * Call the applet function [name] on screen [sid]. The future completes with the applet's
+     * value, exceptionally with the applet's error, or with [LinkClosedException] when the
+     * machine's connection closes or is replaced first (at once if it is offline). It never times
+     * out by itself; a caller that needs a bound adds one.
      */
-    fun callScreenAwait(
+    fun callScreen(
         machineId: String,
         sid: String,
         name: String,
-        args: List<Any?> = emptyList(),
-        timeoutSeconds: Long = 3,
-    ): Any? {
-        val machine = machines[machineId] ?: return null
-        if (machine.transport == null) return null
-        val id = "srv" + machine.callSeq.incrementAndGet()
+        args: List<Any?>,
+    ): CompletableFuture<Any?> {
         val fut = CompletableFuture<Any?>()
-        machine.callPending[id] = fut
-        try {
-            machine.send(LinkMsg(t = "rpc.call", sid = sid, id = id, name = name, args = args))
-            return fut.get(timeoutSeconds, TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            return null
-        } finally {
-            machine.callPending.remove(id)
+        val machine = machines[machineId]
+        if (machine?.transport == null) {
+            fut.completeExceptionally(LinkClosedException("the machine is offline"))
+            return fut
         }
+        val id = "srv" + machine.callSeq.incrementAndGet()
+        machine.callPending[id] = fut
+        fut.whenComplete { _, _ -> machine.callPending.remove(id) }
+        machine.send(LinkMsg(t = "rpc.call", sid = sid, id = id, name = name, args = args))
+        return fut
     }
 
+    /** The screen whose MICROTEAMS_SCREEN token is [token] — how a program on it is recognised. */
     fun screenByToken(token: String): HubScreen? = byScreenToken[token]
 
-    /** Look up a screen by id (viewer route authz + machine routing). Read-only. */
+    /** The screen [sid], or null if this server does not know it. */
     fun screen(sid: String): HubScreen? = screens[sid]
 
     /**
-     * Re-register a screen the CLI is already running (after a server restart) — no session.create
-     * is sent; the tmux session already exists on the machine.
+     * Register a screen the machine may already be running (after a server restart) — no
+     * session.create is sent here; the caller re-adopts it.
      */
     fun adoptScreen(sid: String, machineId: String, token: String, kind: String): HubScreen {
         val machine = machine(machineId)
@@ -522,179 +655,215 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
         return screen
     }
 
-    /** Every live screen, of every kind. Filtering by application concepts is the caller's job. */
-    fun allOnlineScreens(): List<HubScreen> = screens.values.filter { isOnline(it.machineId) }
-
-    // -- exec (server -> machine, awaited) ----------------------------------
-
     /**
-     * One-shot command on the machine → {stdout, stderr, exit, truncated}. [timeoutSeconds] bounds
-     * it machine-side; if even that plus a margin elapses we tell the machine to cancel and throw
-     * [TimeoutException].
+     * Every screen whose machine is online, of every kind. Filtering by application concepts is the
+     * caller's job.
      */
-    fun exec(
-        machineId: String,
-        argv: List<String>,
-        cwd: String? = null,
-        env: Map<String, String>? = null,
-        timeoutSeconds: Long = 60,
-        stdin: String? = null,
-    ): ExecResult {
-        val machine = machine(machineId)
-        val eid = "e" + machine.execSeq.incrementAndGet()
-        val fut = CompletableFuture<ExecResult>()
-        machine.execPending[eid] = fut
-        machine.send(
-            LinkMsg(
-                t = "exec",
-                id = eid,
-                command = argv,
-                timeout = timeoutSeconds.toInt(),
-                cwd = cwd,
-                env = env?.ifEmpty { null },
-                stdin = stdin,
-            ),
-        )
-        try {
-            return fut.get(timeoutSeconds + 5, TimeUnit.SECONDS)
-        } catch (e: TimeoutException) {
-            machine.send(LinkMsg(t = "exec.cancel", id = eid))
-            throw e
-        } finally {
-            machine.execPending.remove(eid)
-        }
-    }
+    fun allOnlineScreens(): List<HubScreen> = screens.values.filter { isOnline(it.machineId) }
 
     // -- viewers (browser <-> machine screen) -------------------------------
 
-    /**
-     * Attach a browser viewer to a screen. Every viewer — not just the first — triggers a
-     * screen.subscribe.
-     *
-     * The first viewer's subscribe makes the CLI do a real `tmux attach-session`, which tmux itself
-     * repaints in full on attach — nothing more was ever needed for it. A later viewer used to add
-     * itself to [HubScreen.viewers] (so it shares the running client's future deltas) and stop
-     * there, on the theory that the screen was "already subscribed". It was not: from that viewer's
-     * own point of view nothing had ever painted the screen it opened onto. Confirmed by packet
-     * capture and a live tmux session (T-091) — a second (or later) viewer joining a screen that
-     * already has a watcher saw a blank/stale screen until an unrelated future delta or resize
-     * happened to repaint over it, sometimes indefinitely.
-     *
-     * screen.subscribe is idempotent on a machine that already has a client attached to this sid —
-     * see this session's earlier fixes in [readoptScreen] and [respawnScreen], which already lean
-     * on sending it unconditionally after a session changes underneath existing viewers. As of the
-     * matching micro-connector fix, a machine that gets a screen.subscribe for a screen it already
-     * has a client on synthesizes a snapshot from the pane's current content instead of doing
-     * nothing, so this new every-viewer send now actually reaches somewhere useful. Before that
-     * connector fix ships, sending it here is still harmless (the old CLI's subscribeScreen bails
-     * out silently on an already-attached client, exactly as before) — this backend change and the
-     * connector one are independent to deploy, in either order.
-     */
-    fun attachViewer(
-        machineId: String,
-        sid: String,
-        viewer: ViewerTransport,
-        cols: Int = 120,
-        rows: Int = 32,
-    ) {
-        val screen = requireScreen(machineId, sid)
-        screen.viewers.add(viewer)
-        machine(machineId)
-            .send(LinkMsg(t = "screen.subscribe", sid = sid, cols = cols, rows = rows))
+    private fun viewerTarget(sid: String): Pair<HubScreen, HubMachine>? {
+        val screen = screens[sid] ?: return null
+        // Route to the screen's own machine, so a stale id can never reach the wrong one.
+        return screen to machine(screen.machineId)
     }
 
-    fun detachViewer(machineId: String, sid: String, viewer: ViewerTransport) {
-        val screen = screens[sid] ?: return
-        screen.viewers.remove(viewer)
-        // Route to the screen's own machine, not the caller-supplied id, so a stale id can
-        // never send an unsubscribe to the wrong machine.
-        val machine = machine(screen.machineId)
-        machine.send(LinkMsg(t = "var.set", sid = sid, name = "viewerLevel", value = "passive"))
-        if (screen.viewers.isEmpty()) {
-            machine.send(LinkMsg(t = "screen.unsubscribe", sid = sid))
+    /**
+     * Attach [viewer] to screen [sid] and subscribe it at its size. Protocol 2 gives it its own
+     * tmux client, which paints it whole. Protocol 1 shares one client; its window follows the last
+     * size asked for, which is echoed to this viewer before the subscribe so the size comes first.
+     */
+    fun attachViewer(sid: String, viewer: HubViewer) {
+        val (screen, machine) =
+            viewerTarget(sid) ?: throw NoSuchElementException("no screen '$sid'")
+        if (machine.proto >= PROTOCOL_V2) {
+            screen.viewers[viewer.id] = viewer
+            machine.send(subscribeMsg(sid, viewer.id, viewer.cols, viewer.rows))
+        } else {
+            screen.v1Cols = viewer.cols
+            screen.v1Rows = viewer.rows
+            viewer.sink.size(viewer.cols, viewer.rows)
+            screen.viewers[viewer.id] = viewer
+            machine.send(subscribeMsg(sid, null, viewer.cols, viewer.rows))
         }
     }
 
-    fun viewerInput(machineId: String, sid: String, data: ByteArray) {
-        machine(machineId)
-            .send(
-                LinkMsg(
-                    t = "screen.input",
-                    sid = sid,
-                    data = Base64.getEncoder().encodeToString(data),
-                ),
-            )
+    /**
+     * Detach viewer [viewerId]. Protocol 2 unsubscribes it, which also frees a lease it held (and
+     * the machine tells that only to the viewers left, possibly none). Protocol 1 drops
+     * `viewerLevel` when nobody typing is left and unsubscribes the shared client with the last
+     * viewer.
+     */
+    fun detachViewer(sid: String, viewerId: String) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        val viewer = screen.viewers.remove(viewerId) ?: return
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(LinkMsg(t = "screen.unsubscribe", sid = sid, viewer = viewerId))
+            if (screen.leaseHolder == viewerId) v2Lease(screen, machine, "")
+            return
+        }
+        viewer.typing = false
+        v1Level(screen, machine)
+        if (screen.viewers.isEmpty()) machine.send(LinkMsg(t = "screen.unsubscribe", sid = sid))
     }
 
-    fun viewerResize(machineId: String, sid: String, cols: Int, rows: Int) {
-        machine(machineId).send(LinkMsg(t = "screen.resize", sid = sid, cols = cols, rows = rows))
+    fun viewerInput(sid: String, viewerId: String, data: ByteArray) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        val b64 = Base64.getEncoder().encodeToString(data)
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(LinkMsg(t = "screen.input", sid = sid, viewer = viewerId, data = b64))
+            return
+        }
+        screen.viewers[viewerId]?.typing = true
+        v1Level(screen, machine)
+        machine.send(LinkMsg(t = "screen.input", sid = sid, data = b64))
     }
 
     /**
-     * The viewer scrolling through the pane's history. The hosted program is a full-screen TUI with
-     * no scrollback of its own -- the history lives in tmux -- so paging back drives tmux copy-mode
-     * on the machine, never PgUp/PgDn into the program (which it ignores). "up"/"down" page the
-     * scrollback; "bottom" returns to the live screen.
+     * The viewer's terminal answering a query from tmux (device attributes, cursor position).
+     * Protocol 2 lets it past the lease (`op: "reply"`); protocol 1 has no lease, and an answer is
+     * not the viewer typing, so `viewerLevel` is left as it is.
      */
-    fun viewerScroll(machineId: String, sid: String, dir: String) {
-        val d = if (dir in setOf("up", "down", "bottom")) dir else "bottom"
-        machine(machineId).send(LinkMsg(t = "screen.scroll", sid = sid, dir = d))
+    fun viewerReply(sid: String, viewerId: String, data: ByteArray) {
+        val (_, machine) = viewerTarget(sid) ?: return
+        val b64 = Base64.getEncoder().encodeToString(data)
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(
+                LinkMsg(t = "screen.input", sid = sid, viewer = viewerId, data = b64, op = "reply"),
+            )
+        } else {
+            machine.send(LinkMsg(t = "screen.input", sid = sid, data = b64))
+        }
     }
 
-    /** The viewer's mode (passive / scroll / full) → the `viewerLevel` variable. */
-    fun viewerControl(machineId: String, sid: String, level: String) {
-        val lvl = if (level in setOf("passive", "scroll", "full")) level else "passive"
-        machine(machineId)
-            .send(LinkMsg(t = "var.set", sid = sid, name = "viewerLevel", value = lvl))
+    /**
+     * The room viewer [viewerId] has changed. Protocol 1 shares one window, which follows the last
+     * resize, so every viewer is told the new size.
+     */
+    fun viewerResize(sid: String, viewerId: String, cols: Int, rows: Int) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        val viewer = screen.viewers[viewerId] ?: return
+        viewer.cols = cols
+        viewer.rows = rows
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(
+                LinkMsg(
+                    t = "screen.resize",
+                    sid = sid,
+                    viewer = viewerId,
+                    cols = cols,
+                    rows = rows,
+                ),
+            )
+            return
+        }
+        screen.v1Cols = cols
+        screen.v1Rows = rows
+        screen.viewers.values.forEach { v -> tell(machine, screen, v) { it.size(cols, rows) } }
+        machine.send(LinkMsg(t = "screen.resize", sid = sid, cols = cols, rows = rows))
+    }
+
+    /** The viewer rendered [n] more bytes. Protocol 1 has no flow control, so it is dropped. */
+    fun viewerAck(sid: String, viewerId: String, n: Int) {
+        val (_, machine) = viewerTarget(sid) ?: return
+        if (machine.proto < PROTOCOL_V2 || n <= 0) return
+        machine.send(LinkMsg(t = "screen.ack", sid = sid, viewer = viewerId, n = n))
+    }
+
+    /**
+     * Take, renew or release the input lease. Protocol 1 has no lease; there a take or renew makes
+     * the screen's `viewerLevel` full and a release lets it fall back to passive.
+     */
+    fun viewerLease(sid: String, viewerId: String, op: String) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        if (op !in setOf("take", "renew", "release")) return
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(LinkMsg(t = "screen.lease", sid = sid, viewer = viewerId, op = op))
+            return
+        }
+        screen.viewers[viewerId]?.typing = op != "release"
+        v1Level(screen, machine)
+    }
+
+    /** Ask for the screen's text. A protocol 1 connector cannot answer, and the viewer is told. */
+    fun viewerCapture(sid: String, viewerId: String, id: String) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        if (machine.proto >= PROTOCOL_V2) {
+            machine.send(LinkMsg(t = "screen.capture", sid = sid, viewer = viewerId, id = id))
+            return
+        }
+        screen.viewers[viewerId]
+            ?.sink
+            ?.capture(id, null, "this machine's connector is too old to copy from; update it")
+    }
+
+    /**
+     * Protocol 1 only: page the pane's tmux history (copy-mode). "up"/"down" page the scrollback;
+     * "bottom" returns to the live screen. On protocol 2 the wheel is mouse input instead.
+     */
+    fun viewerScroll(sid: String, dir: String) {
+        val (_, machine) = viewerTarget(sid) ?: return
+        if (machine.proto >= PROTOCOL_V2) return
+        val d = if (dir in setOf("up", "down", "bottom")) dir else "bottom"
+        machine.send(LinkMsg(t = "screen.scroll", sid = sid, dir = d))
+    }
+
+    /** Protocol 1 only: an older client setting the viewer mode (passive / scroll / full). */
+    fun viewerControl(sid: String, level: String) {
+        val (screen, machine) = viewerTarget(sid) ?: return
+        if (machine.proto >= PROTOCOL_V2) return
+        screen.level = if (level in setOf("passive", "scroll", "full")) level else "passive"
+        sendLevel(machine, screen)
+    }
+
+    /** Protocol 1: `viewerLevel` is full while any viewer is typing; set only when it changes. */
+    private fun v1Level(screen: HubScreen, machine: HubMachine) {
+        val level = if (screen.viewers.values.any { it.typing }) "full" else "passive"
+        if (level == screen.level) return
+        screen.level = level
+        sendLevel(machine, screen)
+    }
+
+    /**
+     * Protocol 2: the lease is now [holder]'s ("" free, "driver" the applet, otherwise a viewer),
+     * and `viewerLevel` is full exactly while a viewer holds it; set only when it changes.
+     */
+    private fun v2Lease(screen: HubScreen, machine: HubMachine, holder: String) {
+        screen.leaseHolder = holder
+        val level = if (holder != "" && holder != "driver") "full" else "passive"
+        if (level == screen.level) return
+        screen.level = level
+        sendLevel(machine, screen)
+    }
+
+    private fun sendLevel(machine: HubMachine, screen: HubScreen) {
+        machine.send(
+            LinkMsg(t = "var.set", sid = screen.sid, name = "viewerLevel", value = screen.level),
+        )
     }
 
     // -- machine -> server (inbound) ----------------------------------------
 
-    /** Dispatch one inbound link.Msg from the machine — the server half of the CLI's loop. */
-    fun onMachineMessage(machineId: String, m: LinkMsg) {
+    /**
+     * Dispatch one inbound message from an attached machine, received on [from] (null: on its
+     * current connection).
+     */
+    fun onMachineMessage(machineId: String, m: LinkMsg, from: MachineTransport? = null) {
         val machine = machine(machineId)
         val sid = m.sid ?: ""
         val screen = machine.screens[sid]
 
         when (m.t) {
-            "hello" -> {
-                machine.proto = m.v
-                if (machine.proto != null && machine.proto != PROTOCOL_VERSION) {
-                    logger.warn(
-                        "machine {} speaks protocol {} (server {})",
-                        machineId,
-                        machine.proto,
-                        PROTOCOL_VERSION,
-                    )
-                }
-            }
-            // The machine answering what we asked on attach. One shape for anything a machine can
-            // tell us about itself, so a second fact later is a new name rather than a new message.
+            // One shape for anything a machine can tell us about itself.
             "machine.info" -> {
                 if (m.name == "version")
                     machine.build = m.value?.toString()?.takeIf { it.isNotBlank() }
             }
-            "heartbeat",
-            "session.ready" -> {}
-            // The machine could not (re)drive this session. On the re-adopt path that is exactly
-            // how a screen whose tmux did NOT survive announces itself — the adopt carries an empty
-            // command precisely so a dead session errors here instead of being respawned blank —
-            // so it is the wire's own death notice, and the module that owns the screen is told.
+            // The machine could not (re)drive this session, or the session ended: the wire's own
+            // death notice, and the module that owns the screen is told.
             "session.error" -> {
-                if (screen != null) markScreen(sid, ScreenState.DEAD, m.error ?: "session error")
-            }
-            "exec.result" -> {
-                val fut = machine.execPending[m.id]
-                if (fut != null && !fut.isDone) {
-                    fut.complete(
-                        ExecResult(
-                            stdout = m.stdout ?: "",
-                            stderr = m.stderr ?: "",
-                            exit = m.exit ?: 0,
-                            truncated = m.truncated ?: false,
-                        ),
-                    )
-                }
+                if (screen != null) markScreen(sid, ScreenState.DEAD, deathReason(machine, m))
             }
             "var.push" -> {
                 if (screen != null && m.name != null) {
@@ -710,29 +879,105 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 }
             }
             "screen.data" -> {
-                if (screen != null) fanOutScreenData(screen, m.data ?: "")
+                if (screen == null) return
+                val raw = decode(m.data) ?: return
+                if (m.viewer == null)
+                    screen.viewers.values.forEach { v ->
+                        tell(machine, screen, v) { it.bytes(raw) }
+                    }
+                else toViewer(machine, screen, m) { it.bytes(raw) }
             }
-            "rpc.call" -> handleScreenCall(machine, screen, m)
+            "screen.size" ->
+                if (screen != null && m.cols != null && m.rows != null)
+                    toViewer(machine, screen, m) { it.size(m.cols, m.rows) }
+            "screen.lease.state" -> {
+                if (screen == null) return
+                v2Lease(screen, machine, m.holder ?: "")
+                toViewer(machine, screen, m) { it.lease(m.holder ?: "") }
+            }
+            "screen.capture.result" -> {
+                if (screen == null) return
+                val text = m.data?.let { decode(it)?.toString(Charsets.UTF_8) }
+                toViewer(machine, screen, m) {
+                    it.capture(
+                        m.id ?: "",
+                        text ?: if (m.error.isNullOrEmpty()) "" else null,
+                        m.error?.ifEmpty { null },
+                    )
+                }
+            }
+            "screen.error" ->
+                if (screen != null) toViewer(machine, screen, m) { it.error(m.error ?: "error") }
+            "rpc.call" -> handleScreenCall(machine, screen, m, from)
         }
     }
 
-    private fun fanOutScreenData(screen: HubScreen, dataB64: String) {
-        val raw =
-            try {
-                Base64.getDecoder().decode(dataB64)
-            } catch (e: IllegalArgumentException) {
-                return
-            }
-        for (viewer in screen.viewers.toList()) {
-            try {
-                viewer.sendBytes(raw)
-            } catch (e: Exception) {
-                screen.viewers.remove(viewer)
+    /**
+     * Why a session.error means the program is gone. A protocol 1 connector answers an adopt of a
+     * session that did not survive by trying to spawn the adopt's empty command, and reports that
+     * failure; the truth is that the program is no longer running.
+     */
+    private fun deathReason(machine: HubMachine, m: LinkMsg): String =
+        if (machine.proto < PROTOCOL_V2 && m.error == "terminal: empty command")
+            "the screen's program is no longer running on this machine"
+        else m.error ?: "session error"
+
+    private fun decode(b64: String?): ByteArray? =
+        try {
+            Base64.getDecoder().decode(b64 ?: "")
+        } catch (e: IllegalArgumentException) {
+            logger.warn("dropping a frame whose data is not base64")
+            null
+        }
+
+    private fun toViewer(
+        machine: HubMachine,
+        screen: HubScreen,
+        m: LinkMsg,
+        block: (ViewerSink) -> Unit,
+    ) {
+        val viewer = screen.viewers[m.viewer ?: ""]
+        if (viewer == null) {
+            logger.debug("{} for viewer {} of {}, which is not attached", m.t, m.viewer, screen.sid)
+            return
+        }
+        tell(machine, screen, viewer) { block(viewer.sink) }
+    }
+
+    /**
+     * Tell one viewer something. A sink that throws is detached, and on protocol 2 the machine is
+     * told so too, or it would keep that viewer's client and its lease share alive.
+     */
+    private inline fun tell(
+        machine: HubMachine,
+        screen: HubScreen,
+        viewer: HubViewer,
+        block: (ViewerSink) -> Unit,
+    ) {
+        try {
+            block(viewer.sink)
+        } catch (e: Exception) {
+            logger.warn(
+                "viewer {} of {} failed, detaching it: {}",
+                viewer.id,
+                screen.sid,
+                e.toString(),
+            )
+            if (screen.viewers.remove(viewer.id) != null && machine.proto >= PROTOCOL_V2) {
+                machine.send(
+                    LinkMsg(t = "screen.unsubscribe", sid = screen.sid, viewer = viewer.id),
+                )
+                if (screen.leaseHolder == viewer.id) v2Lease(screen, machine, "")
             }
         }
     }
 
-    private fun handleScreenCall(machine: HubMachine, screen: HubScreen?, m: LinkMsg) {
+    private fun handleScreenCall(
+        machine: HubMachine,
+        screen: HubScreen?,
+        m: LinkMsg,
+        from: MachineTransport?,
+    ) {
         val name = m.name ?: ""
         val args = m.args ?: emptyList()
         var value: Any? = null
@@ -747,18 +992,14 @@ class MachineHub(screenFns: Map<String, ScreenFn> = emptyMap()) {
                 error = exc.message ?: exc.javaClass.simpleName
             }
         }
-        machine.send(
+        val result =
             LinkMsg(
                 t = "rpc.result",
                 sid = m.sid,
                 id = m.id,
                 value = value,
                 error = error.ifEmpty { null },
-            ),
-        )
+            )
+        if (from == null) machine.send(result) else machine.sendOn(from, result)
     }
-
-    private fun requireScreen(machineId: String, sid: String): HubScreen =
-        machine(machineId).screens[sid]
-            ?: throw NoSuchElementException("no screen '$sid' on machine '$machineId'")
 }

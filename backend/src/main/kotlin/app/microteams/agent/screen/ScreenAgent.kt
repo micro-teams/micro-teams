@@ -1,7 +1,8 @@
 /*
  *  Description: An agent backed by a live screen on a machine — the only kind we have today, and
  *               the reason Agent itself mentions none of this. It is told a group message by having
- *               the driver's applet type it into the program's terminal (`say`), and it answers by
+ *               the driver's applet type it into the program's terminal (`say`, by way of
+ *               AgentWakeup, which holds it until it is delivered or definitely fails), and it answers by
  *               running `microteams api say` back to the group as itself — an ordinary member
  *               posting an ordinary message. How to be heard is a standing instruction the driver
  *               injects once at launch (see ClaudeDriver), so each message we type is just the
@@ -17,7 +18,6 @@ package app.microteams.agent.screen
 import app.microteams.agent.Agent
 import app.microteams.agent.AgentWakeup
 import app.microteams.agent.driver.AgentDriver
-import app.microteams.machine.link.MachineHub
 import org.rucca.cheese.common.persistent.IdType
 
 /** The screen kind agents run under. Opaque to the machine layer; it only lets us find our own. */
@@ -30,22 +30,14 @@ class ScreenAgent(
     val teamId: IdType?,
     val screenToken: String,
     val driver: AgentDriver,
-    private val hub: MachineHub,
-    // How a message reaches an agent whose program is not running: the wake-up revives the screen
-    // and delivers once it is back. Null only where there is nothing to revive with (tests, and
-    // any future agent constructed outside the orchestrator), and then we simply type and hope —
-    // exactly the old behaviour.
-    private val wakeup: AgentWakeup? = null,
+    private val wakeup: AgentWakeup,
 ) : Agent {
 
-    override fun tell(threadId: IdType, speaker: String, text: String) {
-        val message = prompt(threadId, speaker, text)
-        if (wakeup != null) wakeup.tell(this, message) else say(message)
-    }
-
-    /** Type a message into the program's terminal now, without asking whether anything is there. */
-    fun say(message: String) {
-        hub.callScreen(machineId, sid, "say", listOf(message))
+    /**
+     * Said as `say(prompt)` under the id "m<messageId>"; see AgentWakeup for how it is delivered.
+     */
+    override fun tell(threadId: IdType, messageId: IdType, speaker: String, text: String) {
+        wakeup.tell(this, prompt(threadId, speaker, text), "m$messageId", messageId)
     }
 
     /**

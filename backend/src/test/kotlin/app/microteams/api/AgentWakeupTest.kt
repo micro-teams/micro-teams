@@ -16,10 +16,10 @@
  *               2. A second death right after must NOT respawn again — a program that dies on every
  *                  start would otherwise be relaunched in a loop.
  *
- *               It also covers the two ways a machine's comings and goings must not count as the
- *               agent dying: a wake tried while the machine is offline spends none of that back-off
- *               budget, and a live-screen probe that went unanswered on a connection the machine
- *               has since replaced does not kill the program on the new one.
+ *               It also covers what must not count as the agent dying: a wake tried while the
+ *               machine is offline spends none of that back-off budget, and opening the live screen
+ *               of a running agent asks the machine nothing — it subscribes at once, and a machine
+ *               that stays silent never gets the program respawned.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -174,6 +174,8 @@ constructor(
         return StandardWebSocketClient(container)
             .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
             .get(5, TimeUnit.SECONDS)
+            // A connector's first word is its hello; the server answers nothing before it.
+            .also { it.sendMessage(TextMessage("""{"t":"hello","v":2}""")) }
     }
 
     private fun awaitFrame(type: String, timeoutMs: Long = 5000): JSONObject {
@@ -187,11 +189,13 @@ constructor(
     }
 
     /** Whether a frame of [type] arrives at all — for asserting that one must NOT. */
-    private fun noFrame(type: String, withinMs: Long = 1500): Boolean {
+    private fun noFrame(type: String, withinMs: Long = 1500, sid: String? = null): Boolean {
         val deadline = System.currentTimeMillis() + withinMs
         while (System.currentTimeMillis() < deadline) {
             val payload = collector.frames.poll(200, TimeUnit.MILLISECONDS) ?: continue
-            if (JSONObject(payload).optString("t") == type) return false
+            val obj = JSONObject(payload)
+            if (obj.optString("t") == type && (sid == null || obj.optString("sid") == sid))
+                return false
         }
         return true
     }
@@ -365,8 +369,9 @@ constructor(
      * Opening the live screen must ENSURE there is something to look at, not assume it. Here the
      * server has forgotten the screen completely — no hub registration, no registry entry, only the
      * persisted row — which is what a restart that never re-adopted this screen leaves behind. The
-     * attach must rebuild all of it from the row and start the program, rather than closing on
-     * "screen not found" and leaving the human with a blank terminal and no explanation.
+     * attach must rebuild all of it from the row, ask the machine, and start the program when the
+     * machine reports it gone, rather than closing on "screen not found" and leaving the human with
+     * a blank terminal and no explanation.
      */
     @Test
     @Order(5)
@@ -413,7 +418,17 @@ constructor(
                 )
                 .get(5, TimeUnit.SECONDS)
 
-        // Rebuilt: the program is started again on the SAME screen, and the viewer attaches to it.
+        // Rebuilt from the row, and the machine asked — without waiting — whether the session is
+        // still there; the viewer is subscribed meanwhile.
+        val adopt = awaitFrameFor("session.create", lostSid)
+        assertTrue(adopt.optBoolean("adopt", false), "the machine is asked with an adopt")
+        awaitFrameFor("screen.subscribe", lostSid)
+        // It is not (the closeScreen above ended it): the machine says so, and only that wakes it.
+        send(
+            """{"t":"session.error","sid":"$lostSid",""" +
+                """"error":"the screen's program is no longer running on this machine"}""",
+        )
+        // Woken: the program is started again on the SAME screen, and the viewer resubscribed.
         val respawn = awaitFrameFor("session.create", lostSid)
         assertTrue(
             respawn.getJSONArray("command").getString(2).contains("--resume"),
@@ -464,13 +479,12 @@ constructor(
     }
 
     /**
-     * An updating CLI connects again while its old connection is still open here, and a probe sent
-     * on the old one goes unanswered although the screen is fine. That silence must not be read as
-     * death: respawning would kill the very program that survived the update.
+     * Opening the live screen of a running agent must not wait on, or test, the machine: the viewer
+     * is subscribed straight away, and silence from the machine is never read as death.
      */
     @Test
     @Order(7)
-    fun aProbeUnansweredOnAReplacedConnectionDoesNotKillTheScreen() {
+    fun openingTheLiveScreenOfARunningAgentAsksTheMachineNothing() {
         val (liveSid, _) = openAgent("Echo")
         send(
             """{"t":"rpc.call","sid":"$liveSid","id":"c7","name":"screenReady",""" +
@@ -485,28 +499,59 @@ constructor(
                 .execute(
                     Collector(),
                     WebSocketHttpHeaders(),
-                    URI("ws://localhost:$port/machine/screen/$liveSid?token=$humanToken"),
+                    URI(
+                        "ws://localhost:$port/machine/screen/$liveSid?token=$humanToken&cols=90&rows=30",
+                    ),
                 )
-        val probe = awaitFrameFor("rpc.call", liveSid)
-        assertEquals("snapshot", probe.getString("name"))
-
-        // The old connection never answers; the machine comes back on a new one meanwhile.
-        val old = machine
-        collector = Collector()
-        machine = connect(collector)
-        awaitFrame("welcome")
-        // The probe waits two seconds for its answer; watch well past that.
+        // The first thing the machine hears about this viewer is its subscribe — no probe first.
+        val first = awaitFrameFor("screen.subscribe", liveSid)
+        assertEquals(90, first.getInt("cols"))
         assertTrue(
-            noFrame("session.close", 4000),
-            "the program that survived must not be respawned",
+            noFrame("session.close", 4000, liveSid),
+            "a silent machine must not get the program respawned",
         )
-        assertEquals(
-            ScreenState.LIVE,
-            machineHub.screen(liveSid)!!.state,
-            "silence on a replaced connection says nothing about the screen",
-        )
+        assertEquals(ScreenState.LIVE, machineHub.screen(liveSid)!!.state)
         viewer.get(5, TimeUnit.SECONDS).close()
-        old.close()
+    }
+
+    /**
+     * A program that dies while a person stays on its screen is not restarted under them: it is
+     * woken by the next message or the next opening, as on any other screen.
+     */
+    @Test
+    @Order(8)
+    fun aDeathUnderAViewerWhoStaysWakesNothing() {
+        val (watchedSid, _) = openAgent("Kit")
+        send(
+            """{"t":"rpc.call","sid":"$watchedSid","id":"c8","name":"screenReady",""" +
+                """"args":[{"driver":"claude"}]}""",
+        )
+        awaitTrue("the screen must be live") {
+            machineHub.screen(watchedSid)!!.state == ScreenState.LIVE
+        }
+        val viewer =
+            StandardWebSocketClient()
+                .execute(
+                    Collector(),
+                    WebSocketHttpHeaders(),
+                    URI(
+                        "ws://localhost:$port/machine/screen/$watchedSid?token=$humanToken&cols=90&rows=30",
+                    ),
+                )
+                .get(5, TimeUnit.SECONDS)
+        awaitFrameFor("screen.subscribe", watchedSid)
+
+        send(
+            """{"t":"session.error","sid":"$watchedSid","error":"the screen's tmux session ended"}""",
+        )
+        awaitTrue("the screen must be dead") {
+            machineHub.screen(watchedSid)!!.state == ScreenState.DEAD
+        }
+        assertTrue(
+            noFrame("session.close", 2000, watchedSid),
+            "a death under a viewer must not respawn",
+        )
+        viewer.close()
     }
 
     /** Open one more agent on the fake machine and return its screen id and user id. */

@@ -28,6 +28,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -121,6 +122,8 @@ constructor(
         return StandardWebSocketClient(container)
             .execute(collector, headers, URI("ws://localhost:$port/machine/link"))
             .get(5, TimeUnit.SECONDS)
+            // A connector's first word is its hello; the server answers nothing before it.
+            .also { it.sendMessage(TextMessage("""{"t":"hello","v":2}""")) }
     }
 
     private fun awaitFrame(collector: Collector, type: String): JSONObject {
@@ -332,6 +335,37 @@ constructor(
     private fun commandOf(create: JSONObject): String {
         val cmd = create.getJSONArray("command")
         return (0 until cmd.length()).joinToString(" ") { cmd.getString(it) }
+    }
+
+    /**
+     * Codex has no system prompt; its applet carries the standing instructions in place of its
+     * placeholder. And a new screen's applet is told `viewerLevel` right after the create that
+     * loads it: nobody holds the input of a new session.
+     */
+    @Test
+    fun aCodexScreensAppletCarriesItsOperatorPromptAndIsToldTheViewerLevel() {
+        val collector = Collector()
+        val session = connect(collector)
+        awaitFrame(collector, "welcome")
+        val res =
+            mockMvc
+                .perform(
+                    post("/agent")
+                        .header("Authorization", "Bearer $humanToken")
+                        .contentType("application/json")
+                        .content(
+                            """{"machineId":"$machineId","teamId":$teamId,"driver":"codex"}""",
+                        ),
+                )
+                .andExpect(status().isCreated)
+                .andReturn()
+        val sid = sidOf(res.response.contentAsString)
+        val source = awaitFrameFor(collector, "session.create", sid).getString("source")
+        assertTrue(source.contains("microteams api say"), "the operator prompt is in the applet")
+        assertFalse(source.contains("__MT_OPERATOR_PROMPT__"))
+        val set = awaitFrameFor(collector, "var.set", sid)
+        assertEquals("viewerLevel" to "passive", set.getString("name") to set.getString("value"))
+        session.close()
     }
 
     /**

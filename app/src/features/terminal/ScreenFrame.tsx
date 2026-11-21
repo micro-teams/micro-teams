@@ -3,36 +3,105 @@
  * closes it and everything under it is where you left it.
  *
  * <ScreenFrame /> — drawn for a "screen" overlay frame with { sessionId }. One row of chrome above
- *   the terminal (a terminal is the content; the chrome is a tax on how many lines you see): close,
- *   the three modes — watching, history, typing — as icons, "the agent is not driving" while
- *   typing, compact, and Esc (sent when pressed, in any mode: a phone's keyboard has none). Until
- *   the first of the screen arrives one row says it is connecting; while the socket is down, that
- *   it is reconnecting, and once several attempts have never connected, that the screen may be
- *   gone or not yours to watch, with a way to try now.
+ *   the terminal (a terminal is the content; the chrome is a tax on how many lines you see): close;
+ *   the watch/operate switch, with who else has the input beside it (the agent, or another person
+ *   by name); the terminal's size; copy, which opens the screen's text with its history as plain
+ *   selectable text; and compact, where the agent's driver offers it. What a button did, or why it
+ *   could not, is a note over the terminal for a few seconds.
+ *
+ *   The switch shows whether this person has the input: its knob is on "operate" exactly while
+ *   they hold the lease, whether the switch or their typing took it. Sliding or tapping it to
+ *   "operate" asks for the lease, and a refusal says who holds it; sliding it to "watch" gives it
+ *   back. While a person operates, the agent's program holds back what it is told to type. Whoever
+ *   types first takes the input, and input while someone else has it is refused and said so. On a device with a screen keyboard the
+ *   chrome also has the keyboard's own key, and two rows of the keys a screen keyboard lacks sit
+ *   under the terminal, laid out as Termux lays them out:
+ *
+ *     Esc  /    -    Home ↑  End PgUp
+ *     Tab  Ctrl Alt  ←    ↓  →   PgDn
+ *
+ *   As in Termux the keys have no borders, light up while pressed and tick in the hand when let
+ *   go; Ctrl and Alt turn blue while they apply to the next key, typed or tapped; the arrows and
+ *   the paging keys repeat while held. Tapping a key never takes the focus from the terminal, so
+ *   an open keyboard stays open.
+ *
+ *   Nothing that comes and goes changes the terminal's room: the connecting and reconnecting notes
+ *   lie over the terminal, the key row is always there where it is shown at all, and the keyboard
+ *   takes its room once as it starts to open and gives it back once as it starts to close.
  *
  * Example: push("screen", "overlay", { sessionId: agent.sid })
  */
 import { MaterialIcons } from "@expo/vector-icons";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { useEffect, useRef, useState, type ElementRef } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLiveScreen, type ViewMode } from "../../data/screen";
+import { holderText, useLiveScreen } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
+import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
+import { writeClipboard } from "../../platform/clipboard";
+import { tick } from "../../platform/haptics";
+import { isWeb } from "../../platform/platform";
 import { Txt } from "../../ui/kit";
-import { colors } from "../../ui/theme";
+import { withMods } from "./keys";
+import { colors, fonts } from "../../ui/theme";
 
-const MODES: { mode: ViewMode; icon: keyof typeof MaterialIcons.glyphMap; label: string }[] = [
-  { mode: "watching", icon: "visibility", label: "watching" },
-  { mode: "history", icon: "history", label: "history" },
-  { mode: "typing", icon: "keyboard", label: "typing" },
+/** How long a note (copied, or what went wrong with a button) stays over the terminal. */
+const NOTE_MS = 4_000;
+/** A finger travelling this far over the switch slides it; less is a tap, which flips it. */
+const SLIDE_PX = 8;
+
+type Icon = keyof typeof MaterialIcons.glyphMap;
+
+type Key = { label: string; testID: string; seq?: string; mod?: "ctrl" | "alt"; repeats?: boolean };
+const key = (label: string, name: string, seq?: string, more: Partial<Key> = {}): Key => ({ label, testID: `screen-key-${name}`, seq, ...more });
+const R = { repeats: true };
+const KEY_ROWS: Key[][] = [
+  [key("Esc", "esc", "\x1b"), key("/", "slash", "/"), key("-", "dash", "-"), key("Home", "home", "\x1b[H"), key("↑", "up", "\x1b[A", R), key("End", "end", "\x1b[F"), key("PgUp", "pgup", "\x1b[5~", R)],
+  [key("Tab", "tab", "\t"), key("Ctrl", "ctrl", undefined, { mod: "ctrl" }), key("Alt", "alt", undefined, { mod: "alt" }), key("←", "left", "\x1b[D", R), key("↓", "down", "\x1b[B", R), key("→", "right", "\x1b[C", R), key("PgDn", "pgdn", "\x1b[6~", R)],
 ];
+// A held arrow or paging key types again after REPEAT_DELAY_MS, then every REPEAT_MS, as a
+// keyboard's own keys do.
+const REPEAT_DELAY_MS = 400;
+const REPEAT_MS = 60;
 
-function Small({ icon, label, selected, onPress, testID }: { icon: keyof typeof MaterialIcons.glyphMap; label: string; selected?: boolean; onPress: () => void; testID?: string }) {
+function Small({ icon, label, onPress, testID }: { icon: Icon; label: string; onPress: () => void; testID: string }) {
   return (
-    <Pressable testID={testID} accessibilityLabel={label} onPress={onPress} hitSlop={6} style={[styles.small, selected && styles.selected]}>
-      <MaterialIcons name={icon} size={16} color={selected ? colors.brand : colors.inkMuted} />
+    <Pressable testID={testID} accessibilityLabel={label} onPress={onPress} hitSlop={6} style={styles.small}>
+      <MaterialIcons name={icon} size={16} color={colors.inkMuted} />
     </Pressable>
+  );
+}
+
+/** Watch (knob left) or operate (knob right), slid or tapped; never takes the focus. */
+function LeaseSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const from = useRef(0);
+  return (
+    <View
+      testID="screen-lease"
+      accessible
+      accessibilityRole="switch"
+      accessibilityLabel={on ? "operate" : "watch"}
+      accessibilityState={{ checked: on }}
+      onStartShouldSetResponder={() => true}
+      onResponderGrant={(e) => {
+        from.current = e.nativeEvent.pageX;
+      }}
+      onResponderRelease={(e) => {
+        const dx = e.nativeEvent.pageX - from.current;
+        onChange(Math.abs(dx) > SLIDE_PX ? dx > 0 : !on);
+      }}
+      hitSlop={6}
+      style={styles.switch}
+    >
+      <View style={[styles.knob, on && styles.knobOn]} pointerEvents="none" />
+      <Txt variant="label" muted={on} style={styles.switchLabel}>
+        watch
+      </Txt>
+      <Txt variant="label" muted={!on} style={styles.switchLabel}>
+        operate
+      </Txt>
+    </View>
   );
 }
 
@@ -40,82 +109,296 @@ export function ScreenFrame() {
   const { sessionId } = useFrame().params as { sessionId: string };
   const { pop } = useNav();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardInset();
   const term = useRef<TerminalViewHandle>(null);
-  const [drawn, setDrawn] = useState(false);
-  const opened = useRef(0);
+  const { state, screen } = useLiveScreen(sessionId);
+  const [ctrl, setCtrl] = useState(false);
+  const [alt, setAlt] = useState(false);
+  const repeat = useRef<{ delay?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setInterval> }>({});
+  const stopRepeat = () => {
+    if (repeat.current.delay) clearTimeout(repeat.current.delay);
+    if (repeat.current.every) clearInterval(repeat.current.every);
+    repeat.current = {};
+  };
+  useEffect(() => stopRepeat, []);
+  // On the web the mouse press a tap ends with moves the focus away from the terminal, which closes
+  // the keyboard; the key rows and the chrome (copy, usage, …) refuse that press's default, so a
+  // button leaves the keyboard as it was. (Refusing the
+  // touch's own end instead would also stop the press reaching the keys.)
+  const keyRows = useRef<ElementRef<typeof View>>(null);
+  const chrome = useRef<ElementRef<typeof View>>(null);
   useEffect(() => {
-    opened.current = Date.now();
+    if (!isWeb) return;
+    const els = [keyRows.current, chrome.current].filter(Boolean) as unknown as HTMLElement[];
+    const keep = (e: Event) => e.preventDefault();
+    for (const el of els) el.addEventListener("mousedown", keep);
+    return () => {
+      for (const el of els) el.removeEventListener("mousedown", keep);
+    };
   }, []);
-  const { state, screen } = useLiveScreen(sessionId, (bytes) => {
-    term.current?.write(bytes);
-    if (opened.current > 0) console.log(`screen: the first of it after ${Date.now() - opened.current} ms`);
-    opened.current = -1;
-    setDrawn(true);
-  });
+  const [focused, setFocused] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notify = (text: string) => {
+    setNote(text);
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote(null), NOTE_MS);
+  };
+  useEffect(
+    () => () => {
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+    },
+    [],
+  );
+  const toClipboard = (text: string) =>
+    writeClipboard(text).then(
+      () => notify("copied"),
+      (e: Error) => notify(`copy: ${e.message}`),
+    );
+  // The copy sheet opens at its end, where the latest lines are, once per text it is given.
+  const sheetAtEnd = useRef(false);
+  const sheet = useRef<ScrollViewInstance>(null);
+  const opened = useRef({ at: 0, steps: [] as string[], done: false });
 
+  useEffect(() => {
+    opened.current.at = Date.now();
+    screen.drawOn({
+      write: (b) => term.current?.write(b),
+      size: (c, r) => term.current?.size(c, r),
+      reset: () => term.current?.reset(),
+    });
+  }, [screen]);
+
+  // How long opening took, step by step: the console is where a slow open is diagnosed.
+  const step = (name: string) => {
+    const o = opened.current;
+    if (o.done || o.steps.some((s) => s.startsWith(`${name} `))) return;
+    o.steps.push(`${name} ${Date.now() - o.at}`);
+    if (name === "drawn") {
+      o.done = true;
+      console.log(`screen: opened in ${Date.now() - o.at} ms (${o.steps.join(", ")})`);
+    }
+  };
+  useEffect(() => {
+    if (state.connected) step("socket");
+  }, [state.connected]);
+  useEffect(() => {
+    if (state.size) step("size");
+  }, [state.size]);
+  useEffect(() => {
+    if (state.drawn) step("drawn");
+  }, [state.drawn]);
+
+  const send = (data: string, typed = true) => {
+    if (!typed) return screen.input(data, false);
+    screen.input(withMods(data, ctrl, alt));
+    if (ctrl) setCtrl(false);
+    if (alt) setAlt(false);
+  };
+  // Where the platform reports the keyboard itself, that is what the key shows; on the web, whether
+  // the terminal has the focus.
+  const keyboardOpen = keyboardInsetKnown ? keyboard > 0 : focused;
+
+  const ask = (name: "compact") =>
+    screen.command(name).then(
+      () => notify(`${name}: asked; the agent's program shows it`),
+      (e: Error) => notify(`${name}: ${e.message}`),
+    );
+  const copy = () =>
+    screen.capture().then(
+      (text) => {
+        sheetAtEnd.current = false;
+        setCopied(text.replace(/\s+$/, ""));
+      },
+      (e: Error) => notify(`copy: ${e.message}`),
+    );
+
+  const size = state.size;
+  const holder = holderText(state.lease);
   return (
     <View style={[styles.root, { paddingTop: insets.top }]} testID="screen">
-      <View style={styles.chrome}>
+      <View ref={chrome} style={styles.chrome}>
         <Small testID="screen-close" icon="close" label="close" onPress={pop} />
-        <View style={styles.gap} />
-        {MODES.map((m) => (
-          <Small key={m.mode} testID={`screen-${m.mode}`} icon={m.icon} label={m.label} selected={state.mode === m.mode} onPress={() => screen.setMode(m.mode)} />
-        ))}
-        <View style={styles.spacer} />
-        {state.mode === "typing" && (
-          <Txt variant="label" muted style={styles.note}>
-            the agent is not driving
-          </Txt>
-        )}
-        <Small testID="screen-compact" icon="compress" label="compact" onPress={() => screen.compact()} />
-        <Pressable testID="screen-esc" accessibilityLabel="send Esc" onPress={() => screen.escape()} hitSlop={6} style={styles.esc}>
-          <Txt variant="label">Esc</Txt>
-        </Pressable>
-      </View>
-      {!drawn && !state.reconnecting && (
-        <View testID="screen-connecting" style={styles.banner}>
-          <ActivityIndicator size="small" color={colors.ink} />
-          <Txt variant="small" style={styles.bannerText}>
-            connecting…
-          </Txt>
+        <LeaseSwitch on={state.lease.holder === "self"} onChange={(on) => (on ? screen.take() : screen.release())} />
+        <View style={styles.lease}>
+          {holder !== null && (
+            <Txt testID="screen-holder" variant="small" muted numberOfLines={1}>
+              {holder}
+            </Txt>
+          )}
         </View>
-      )}
-      {state.reconnecting && (
-        <Pressable onPress={() => screen.retry()} style={[styles.banner, state.doubtful && styles.doubtful]}>
-          <ActivityIndicator size="small" color={colors.ink} />
-          <Txt variant="small" style={styles.bannerText}>
-            {state.doubtful ? "still trying — this screen may be gone, or not yours to watch" : "reconnecting…"}
-          </Txt>
-          <Txt variant="small" style={{ color: colors.brand }}>
-            try now
-          </Txt>
-        </Pressable>
-      )}
-      <TerminalView
-        ref={term}
-        typing={state.mode === "typing"}
-        style={[styles.terminal, { marginBottom: insets.bottom }]}
-        onMessage={(m) => {
-          if (m.type === "keys") screen.keys(m.data);
-          else if (m.type === "resize") screen.resize(m.cols, m.rows);
-          else screen.scroll(m.dir);
-        }}
-      />
+        {size && (
+          <View testID="screen-size-info" accessible accessibilityLabel={`terminal ${size.cols}x${size.rows}, resized ${state.resizes} times`} style={styles.size}>
+            <Txt testID="screen-size" variant="label" muted>
+              {`${size.cols}×${size.rows}`}
+            </Txt>
+          </View>
+        )}
+        <Small testID="screen-copy" icon="content-copy" label="copy" onPress={copy} />
+        {state.commands.includes("compact") && <Small testID="screen-compact" icon="compress" label="compact" onPress={() => void ask("compact")} />}
+        {hasTouchKeyboard && (
+          <Small testID="screen-keyboard" icon={keyboardOpen ? "keyboard-hide" : "keyboard"} label="keyboard" onPress={() => term.current?.focus(!keyboardOpen)} />
+        )}
+      </View>
+      <View style={[styles.body, { marginBottom: Math.max(insets.bottom, keyboard) }]}>
+        <View style={styles.terminal}>
+          <TerminalView
+            ref={term}
+            style={styles.fill}
+            onMessage={(m) => {
+              if (m.type === "keys") send(m.data, m.typed);
+              else if (m.type === "rendered") screen.rendered(m.n);
+              else if (m.type === "copy") void toClipboard(m.text);
+              else if (m.type === "focus") setFocused(m.on);
+              // A new terminal, empty: a new connection paints it whole.
+              else if (m.type === "lost") screen.retry();
+              else if (m.type === "room") {
+                step("terminal");
+                screen.room(m.cols, m.rows);
+              }
+            }}
+          />
+          {!state.drawn && !state.reconnecting && (
+            <View testID="screen-connecting" style={styles.banner} pointerEvents="none">
+              <ActivityIndicator size="small" color={colors.ink} />
+              <Txt variant="small" style={styles.bannerText}>
+                {state.error ?? "connecting…"}
+              </Txt>
+            </View>
+          )}
+          {state.reconnecting && (
+            <Pressable onPress={() => screen.retry()} style={[styles.banner, state.doubtful && styles.doubtful]}>
+              <ActivityIndicator size="small" color={colors.ink} />
+              <Txt variant="small" style={styles.bannerText}>
+                {state.doubtful ? "still trying — this screen may be gone, or not yours to watch" : "reconnecting…"}
+              </Txt>
+              <Txt variant="small" style={{ color: colors.brand }}>
+                try now
+              </Txt>
+            </Pressable>
+          )}
+          {note !== null && (
+            <View style={styles.banner} pointerEvents="none">
+              <Txt testID="screen-note" variant="small" style={styles.bannerText}>
+                {note}
+              </Txt>
+            </View>
+          )}
+          {state.refused && (
+            <View style={[styles.banner, styles.refused]} pointerEvents="none">
+              <Txt testID="screen-refused" variant="small" style={styles.bannerText}>
+                {state.refused.typed ? `${state.refused.holder}: what you typed was not sent` : state.refused.holder}
+              </Txt>
+            </View>
+          )}
+        </View>
+        {hasTouchKeyboard && (
+          <View ref={keyRows} style={styles.keyRows}>
+            {KEY_ROWS.map((row, i) => (
+              <View key={i} style={styles.keys}>
+                {row.map((k) => {
+                  const armed = (k.mod === "ctrl" && ctrl) || (k.mod === "alt" && alt);
+                  const press = () => (k.mod === "ctrl" ? setCtrl(!ctrl) : k.mod === "alt" ? setAlt(!alt) : !k.repeats && send(k.seq ?? ""));
+                  const down = () => {
+                    if (!k.repeats) return;
+                    stopRepeat();
+                    // Every repeat carries the modifiers the first press had.
+                    const seq = withMods(k.seq ?? "", ctrl, alt);
+                    screen.input(seq);
+                    if (ctrl) setCtrl(false);
+                    if (alt) setAlt(false);
+                    repeat.current.delay = setTimeout(() => {
+                      repeat.current.every = setInterval(() => screen.input(seq), REPEAT_MS);
+                    }, REPEAT_DELAY_MS);
+                  };
+                  const up = () => {
+                    stopRepeat();
+                    tick();
+                  };
+                  return (
+                    <Pressable
+                      key={k.testID}
+                      testID={k.testID}
+                      onPress={press}
+                      onPressIn={down}
+                      onPressOut={up}
+                      style={({ pressed }) => [styles.key, pressed && styles.keyDown]}
+                    >
+                      <Txt variant="label" style={armed ? styles.armed : undefined}>
+                        {k.label}
+                      </Txt>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        )}
+        {copied !== null && (
+          <View testID="screen-copy-sheet" style={styles.sheet}>
+            <View style={styles.chrome}>
+              <Small testID="screen-copy-close" icon="close" label="close" onPress={() => setCopied(null)} />
+              <View style={styles.spacer} />
+              <Pressable testID="screen-copy-all" onPress={() => void toClipboard(copied)} style={styles.key}>
+                <Txt variant="label">copy all</Txt>
+              </Pressable>
+            </View>
+            <ScrollView
+              ref={sheet}
+              onContentSizeChange={() => {
+                if (sheetAtEnd.current) return;
+                sheetAtEnd.current = true;
+                sheet.current?.scrollToEnd({ animated: false });
+              }}
+              contentContainerStyle={styles.sheetBody}
+            >
+              <Text testID="screen-copy-text" selectable style={styles.copyText}>
+                {copied}
+              </Text>
+            </ScrollView>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { ...StyleSheet.absoluteFill, backgroundColor: "#000" },
-  chrome: { flexDirection: "row", alignItems: "center", backgroundColor: colors.raised, paddingHorizontal: 4, paddingVertical: 2 },
+  chrome: { flexDirection: "row", alignItems: "center", backgroundColor: colors.raised, paddingHorizontal: 4, paddingVertical: 2, gap: 2 },
   small: { width: 28, height: 28, borderRadius: 6, alignItems: "center", justifyContent: "center" },
-  esc: { height: 24, paddingHorizontal: 8, marginLeft: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
-  selected: { backgroundColor: colors.page },
-  gap: { width: 4 },
+  lease: { flex: 1, marginHorizontal: 6 },
+  switch: { flexDirection: "row", alignItems: "center", height: 24, borderRadius: 12, backgroundColor: colors.page, marginLeft: 4 },
+  switchLabel: { width: 60, textAlign: "center" },
+  knob: { position: "absolute", top: 2, bottom: 2, left: 2, width: 58, borderRadius: 10, backgroundColor: colors.keyDown },
+  knobOn: { left: 60 },
+  size: { marginRight: 4 },
   spacer: { flex: 1 },
-  note: { marginRight: 6 },
-  banner: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.hover },
-  doubtful: { backgroundColor: "#3A1416" },
-  bannerText: { flex: 1 },
+  body: { flex: 1 },
   terminal: { flex: 1 },
+  fill: { flex: 1 },
+  banner: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.hover,
+  },
+  doubtful: { backgroundColor: "#3A1416" },
+  refused: { backgroundColor: "#3A2A10" },
+  bannerText: { flex: 1 },
+  keyRows: { backgroundColor: colors.raised, paddingHorizontal: 2, paddingVertical: 2, gap: 2 },
+  keys: { flexDirection: "row", gap: 3 },
+  key: { flex: 1, height: 30, minWidth: 0, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  keyDown: { backgroundColor: colors.keyDown },
+  armed: { color: colors.keyArmed },
+  sheet: { ...StyleSheet.absoluteFill, backgroundColor: colors.page },
+  sheetBody: { padding: 8 },
+  copyText: { fontFamily: fonts.mono, fontSize: 12, lineHeight: 16, color: colors.ink },
 });

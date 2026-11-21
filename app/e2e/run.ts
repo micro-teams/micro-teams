@@ -4,7 +4,8 @@
  * http://localhost), RUN (a unique suffix), and, for the journey with a machine, ENROLL (the code
  * machine.sh up printed), LEG (the program on the machine, as machine.sh takes it; default
  * npm:2.1.220) and DRIVER (the agent's driver; empty for the server's default) in the
- * environment. The stack's lines (stack.sh) are faulted through their control port, :8090, and the
+ * environment; on the web, BROWSER (chromium, the default, or firefox) and VIEWPORT (phone, the
+ * default, or desktop). The stack's lines (stack.sh) are faulted through their control port, :8090, and the
  * multipath server is restarted with docker. Prints each step's time and exits non-zero, with what
  * was on screen, when the journey fails.
  *
@@ -30,6 +31,12 @@ const machine = process.env.ENROLL
       code: process.env.ENROLL,
       driver: process.env.DRIVER ?? "",
       heard: async (text: string) => void (await sh("bash", [machineSh, "saw", leg, text])),
+      pane: async () => {
+        const out = (await sh("bash", [machineSh, "pane"])).stdout;
+        const [head, ...rest] = out.split("\n");
+        const [inMode, , mouse, alternate] = head.trim().split(" ");
+        return { inMode: inMode === "1", mouse: mouse === "1", alternate: alternate === "1", text: rest.join("\n") };
+      },
     }
   : null;
 
@@ -44,7 +51,7 @@ const lines = {
 
 const driver =
   client === "web"
-    ? new PlaywrightDriver(where)
+    ? new PlaywrightDriver(where, { browser: process.env.BROWSER === "firefox" ? "firefox" : "chromium", viewport: process.env.VIEWPORT === "desktop" ? "desktop" : "phone" })
     : new WebdriverioDriver({ appPackage: "app.microteams.microteams", appActivity: ".MainActivity" });
 
 const started = Date.now();

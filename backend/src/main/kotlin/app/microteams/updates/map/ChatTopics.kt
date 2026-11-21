@@ -34,7 +34,7 @@ class ChatTopics(
 
     @TransactionalEventListener(fallbackExecution = true)
     fun onMessagePosted(event: MessagePostedEvent) {
-        val id = event.messageId ?: return // nothing to point a cursor at
+        val id = event.messageId
         try {
             val members =
                 threadMemberRepository

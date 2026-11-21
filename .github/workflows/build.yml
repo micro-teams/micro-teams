@@ -206,11 +206,8 @@ jobs:
 
   build-applet:
     runs-on: ubuntu-latest
-    # The screen drivers are installed from @micro-teams/connector-applets on GitHub Packages, which
-    # requires an authenticated request even for a public package.
     permissions:
       contents: read
-      packages: read
     defaults:
       run:
         working-directory: applets
@@ -226,11 +223,13 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: applets/package-lock.json
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@micro-teams"
+      # The screen drivers are built from the micro-connector commit cli/go.mod pins, which go
+      # resolves (scripts/connector-drivers.sh): the connector and its drivers are one version.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
       - name: Upload applets
         uses: actions/upload-artifact@v7
@@ -460,6 +459,10 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
+      # The viewer e2e.sh keeps on the live screen is a Node WebSocket client.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       # The artifact is the bundle directory (not a zip); download-artifact restores its files
       # directly into microteams-deploy/ — no unzip step, and no nested archive. Note: artifact
       # up/download does NOT preserve the executable bit, so gen-env.sh is invoked via `bash` and the
@@ -493,6 +496,16 @@ jobs:
           ( cd cli && go build -trimpath -ldflags "-X main.version=$MARKER" -o "$GITHUB_WORKSPACE/updated-microteams" . )
           echo "UPDATE_MARKER_BIN=$GITHUB_WORKSPACE/updated-microteams" >> "$GITHUB_ENV"
           echo "UPDATE_MARKER_VERSION=$MARKER" >> "$GITHUB_ENV"
+      # The same leg carries the upgrade from a connector that ends its sessions when it exits: the
+      # machine starts on it, and e2e.sh installs this build over it and restarts. 40f66b5 is the
+      # last such build that reaches this deployment (it speaks multipath protocol 3).
+      - name: Build a connector that ends its sessions when it exits (to prove upgrading from it keeps them)
+        if: matrix.leg == 'npm:2.1.220'
+        run: |
+          git fetch -q --depth 1 origin 40f66b59bf6eb789340c6268b1c36631bcf69a33
+          git worktree add -q "$RUNNER_TEMP/release" FETCH_HEAD
+          ( cd "$RUNNER_TEMP/release/cli" && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=release-40f66b5" -o "$GITHUB_WORKSPACE/release-microteams" . )
+          echo "RELEASE_BIN=$GITHUB_WORKSPACE/release-microteams" >> "$GITHUB_ENV"
       - name: "End-to-end: machine + agent + a message that must arrive (${{ matrix.leg }})"
         working-directory: microteams-deploy
         run: bash "$GITHUB_WORKSPACE/.github/scripts/e2e.sh" "${{ matrix.leg }}"
@@ -528,6 +541,23 @@ jobs:
           - client: web
             leg: npm:2.1.220
             driver: ""
+            browser: chromium
+            viewport: phone
+            experimental: false
+          # The live screen differs most between engines and between a touch phone and a desktop
+          # with a wheel and a mouse: the other engine, on a desktop.
+          - client: web
+            leg: npm:2.1.220
+            driver: ""
+            browser: firefox
+            viewport: desktop
+            experimental: false
+          # A phone's Firefox: its own touch handling around a held finger, which selects.
+          - client: web
+            leg: npm:2.1.220
+            driver: ""
+            browser: firefox
+            viewport: phone
             experimental: false
           - client: android
             leg: pi:0.87.0
@@ -536,12 +566,16 @@ jobs:
           - client: web
             leg: installer
             driver: ""
+            browser: chromium
+            viewport: phone
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
     env:
       RUN: j${{ github.run_id }}${{ strategy.job-index }}
       LEG: ${{ matrix.leg }}
       DRIVER: ${{ matrix.driver }}
+      BROWSER: ${{ matrix.browser }}
+      VIEWPORT: ${{ matrix.viewport }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -563,7 +597,7 @@ jobs:
         if: matrix.client == 'web'
         working-directory: app/e2e
         run: |
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium ${{ matrix.browser }}
           # Is everything where it is served (the site at /, the app under /app/, deep links, the
           # worker's scope, /version)? Then the journey through the app.
           npx tsx bundle.ts http://localhost
@@ -595,8 +629,9 @@ jobs:
           # The app reaches the stack's three lines under the names every client uses
           # (http://localhost, :8081, :8082); adbd as root may forward port 80. When the journey is
           # over, the app must have dialled the stack's lines alone (stayed-local.sh), and it is
-          # stopped so the server's counters can settle.
-          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; exit 1)) && bash stayed-local.sh ../../microteams-deploy/multipath/lines.json && adb shell am force-stop app.microteams.microteams
+          # stopped so the server's counters can settle. A failed journey prints the app's log, and
+          # why Android ended its process if it did (a crash, a killed WebView renderer).
+          script: adb shell settings put global hide_error_dialogs 1 && adb root && sleep 3 && adb wait-for-device && adb reverse tcp:80 tcp:80 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8082 tcp:8082 && adb install microteams-deploy/frontend/dist/downloads/*/microteams-*-android.apk && cd app/e2e && (npx tsx run.ts android http://localhost || (adb logcat -d -s ReactNativeJS:V | tail -200; adb logcat -d -s AndroidRuntime:E ActivityManager:I chromium:E DEBUG:F | grep -iE 'app.microteams|died|crash|fatal|renderer' | tail -80; exit 1)) && bash stayed-local.sh ../../microteams-deploy/multipath/lines.json && adb shell am force-stop app.microteams.microteams
       - name: The app's and the machine's requests went over the lines
         run: bash app/e2e/carried.sh
       - name: Every client gone, the multipath server holds nothing

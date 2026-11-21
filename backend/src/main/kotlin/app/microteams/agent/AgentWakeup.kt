@@ -1,27 +1,52 @@
 /*
- *  Description: Waking an agent whose program is no longer running. A screen outlives the program
- *               on it — Claude Code exits on a crash, an OOM kill, a `/quit`, an out-of-credit
- *               error, and the tmux pane stays behind holding its corpse — so "the agent has a
- *               screen" was never the same as "the agent is listening". Before this, a message
- *               said to a dead agent was typed into a dead pane and silently lost, and the live screen opened
- *               onto a frozen screenful of whatever killed it.
+ *  Description: Getting what is said to an agent into its program, and waking the program when it
+ *               is gone. A screen outlives the program on it — Claude Code exits on a crash, an
+ *               OOM kill, a `/quit` — so "the agent has a screen" was never the same as "the agent
+ *               is listening".
  *
- *               Two things live here, and only these two. **Knowing** an agent is dead: the applet
- *               already reports `status = dead` when it sees tmux's dead-pane marker, and the
- *               machine reports a session.error when it cannot drive a session at all (which is
- *               what a tmux that did not survive a reboot looks like on the re-adopt path) — this
- *               is the one place that reads those two signals as "the program is gone", because
- *               what a driver's status values mean is agent knowledge, not the machine layer's.
- *               And **deciding** to revive: lazily, on the two moments a human actually needs the
- *               agent — being messaged and being watched — never as a background resurrection sweep, so an agent
- *               nobody is talking to stays quietly dead instead of being restarted forever.
+ *               **Knowing** an agent is dead: the applet reports `status = dead` when it sees
+ *               tmux's dead-pane marker, and the machine reports session.error when a session is
+ *               gone or cannot be driven. Those reported signals are the only evidence of death;
+ *               silence is never read as death, since a slow line or a busy machine answers late
+ *               and respawning would kill the program that was merely slow.
  *
- *               Waking is AgentService.wakeAgent (respawn in place, same session, resume=true), and
- *               it is rate-limited: a program that dies immediately on every start must not be
- *               relaunched in a loop, so repeated deaths back off and eventually give up until the
- *               screen proves it can stay alive. Only wakes sent to a connected machine count
- *               against that budget, and the live-screen probe trusts silence only on the
- *               connection it asked over.
+ *               **Deciding** to revive: lazily, on the two moments a human needs the agent — being
+ *               messaged and being watched — never as a background sweep. Waking is
+ *               AgentService.wakeAgent (respawn in place, resume=true), rate-limited so a program
+ *               that dies on every start is not relaunched in a loop; only wakes sent to a
+ *               connected machine count against that budget. A wake held back by the back-off is
+ *               retried when the back-off ends, so the last attempt — and the giving up after it —
+ *               happen without anybody asking again.
+ *
+ *               **Delivering**: every message told to an agent has an id ("m<messageId>" for a chat
+ *               message, "k<…>" for a keepalive) and stays in the agent's outstanding queue until
+ *               its outcome is definite. The queue is in memory; each chat message in it also has
+ *               an AgentPendingMessage row, and a server that starts finds the rows its
+ *               predecessor left and marks those messages undelivered ("the server restarted
+ *               before it was delivered"), since nothing will deliver them now.
+ *                 - it is sent as `say(text)` while the agent is awake, and held while it is
+ *                   asleep, dead or starting;
+ *                 - the applet's rpc.result accepting it (true, or 'buffered' while a person
+ *                   holds the input) is delivery: the applet pastes it, or pastes it once the
+ *                   person lets go, and reports nothing more. The value `false` is the applet
+ *                   saying it could not take it;
+ *                 - a send not yet answered when the machine's connection closes or is replaced,
+ *                   or when the applet restarts (screenReady after a newer session.create than the
+ *                   send — see HubScreen.generation), is sent again;
+ *                 - definite failures are an rpc error, a refusal, the agent being closed and the
+ *                   wake giving up. A chat message that fails is recorded with
+ *                   MessageService.markUndelivered so its sender sees it. An offline machine is not
+ *                   a failure: the message waits for it.
+ *
+ *               AgentWakeup:
+ *                 tell(agent, text, id, messageId?) — say [text] to [agent]; see above.
+ *                 deliverOn(machineId) — the machine (re)connected; send what waits for it.
+ *                 ensureAwakeForViewer(sid) -> the sid to attach to; never waits on the machine.
+ *                 isAwake(agentUserId) / ensureAwake(agentUserId) — liveness, and waking.
+ *                 forget(agentUserId) — the agent was closed; what it still owed fails.
+ *                 reportLostOnRestart() — at startup: what the previous process owed is undelivered.
+ *
+ *               Example: wakeup.tell(agent, prompt, "m41", 41L)
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -33,19 +58,32 @@ package app.microteams.agent
 import app.microteams.agent.screen.AgentScreenRepository
 import app.microteams.agent.screen.AgentScreens
 import app.microteams.agent.screen.ScreenAgent
+import app.microteams.chat.message.MessageService
+import app.microteams.machine.link.HubScreen
+import app.microteams.machine.link.LinkClosedException
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.ScreenLifecycleListener
 import app.microteams.machine.link.ScreenState
 import app.microteams.machine.link.ScreenVarListener
 import jakarta.annotation.PostConstruct
+import jakarta.annotation.PreDestroy
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import org.rucca.cheese.common.persistent.IdType
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The mirrored variable every screen applet owns to say what the program is doing, and the one
@@ -61,18 +99,44 @@ class AgentWakeup(
     private val hub: MachineHub,
     private val agentRegistry: AgentRegistry,
     private val agentScreenRepository: AgentScreenRepository,
+    private val messageService: MessageService,
+    private val pendingMessages: AgentPendingMessageRepository,
+    transactions: PlatformTransactionManager,
     // Late-bound: AgentService constructs the ScreenAgents that call back into here, so asking for
     // it eagerly would be a cycle. Nothing is resolved until the first wake.
     private val agentService: ObjectProvider<app.microteams.agent.screen.AgentService>,
     private val agentScreens: ObjectProvider<AgentScreens>,
+    /**
+     * Back-off between successive wakes of the same agent, in seconds; its length is how many wakes
+     * are tried before giving up. A program that starts, dies, and is restarted immediately is a
+     * busy loop that would hammer the machine and burn the agent's credits.
+     */
+    @Value("\${microteams.wakeup.backoff-seconds:0,15,60,300}") backoffSeconds: List<Long>,
 ) {
     private val logger = LoggerFactory.getLogger(AgentWakeup::class.java)
 
     /** One wake at a time per agent, so three messages arriving together start one program. */
     private val locks = ConcurrentHashMap<IdType, ReentrantLock>()
 
-    /** What we tried to say while the program was down, delivered once it is back. */
-    private val pending = ConcurrentHashMap<IdType, ConcurrentLinkedQueue<String>>()
+    /**
+     * One message on its way to an agent's program. Guarded by its agent's queue. [generation] is
+     * the screen generation it was last sent under, null while it waits to be sent; [call] counts
+     * its sends, so an answer to an older send is recognised and ignored.
+     */
+    private class Say(val id: String, val text: String, val messageId: IdType?) {
+        var generation: Long? = null
+        var call: Int = 0
+    }
+
+    /** What each agent still owes, oldest first. */
+    private val outstanding = ConcurrentHashMap<IdType, MutableList<Say>>()
+
+    /**
+     * Agents whose screen a person opening it has just asked the machine about (an adopt of a
+     * screen this server had forgotten): the death that answer may report is a death somebody is
+     * waiting to see mended.
+     */
+    private val askedByViewer: MutableSet<IdType> = ConcurrentHashMap.newKeySet()
 
     private val attempts = ConcurrentHashMap<IdType, WakeAttempts>()
 
@@ -82,102 +146,279 @@ class AgentWakeup(
         @Volatile var last: Instant = Instant.EPOCH
     }
 
-    /**
-     * Back-off between successive wakes of the same agent, and how many we try before giving up. A
-     * program that starts, dies, and is restarted immediately is a busy loop that would hammer the
-     * machine and burn the agent's credits; a program that dies once an hour is just a crash worth
-     * papering over.
-     *
-     * The budget resets once [stableWindow] has passed since the last wake — i.e. the agent stayed
-     * up rather than merely reaching a prompt before dying again. Resetting on "reported alive"
-     * instead would defeat the whole thing: a program that starts, announces itself and dies a
-     * second later would clear its own budget on every cycle and be relaunched forever.
-     *
-     * Only a wake actually sent to the machine counts. While the machine is offline nothing can be
-     * started, and a viewer retrying the live screen through an outage would otherwise use up the
-     * whole budget, leaving the agent unwakeable for [stableWindow] after its machine came back.
-     */
-    private val backoff = listOf(0L, 15L, 60L, 300L).map(Duration::ofSeconds)
+    private val backoff = backoffSeconds.map(Duration::ofSeconds)
 
     private val maxAttempts = backoff.size
 
+    /**
+     * The wake budget resets once this has passed since the last wake — the agent stayed up rather
+     * than merely reaching a prompt before dying again.
+     */
     private val stableWindow = Duration.ofMinutes(30)
+
+    /**
+     * A transaction of its own for the pending row: chat tells an agent after its commit, inside a
+     * transaction that is finished, where a write would join it and never be committed.
+     */
+    private val ownTransaction =
+        TransactionTemplate(transactions).also {
+            it.propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+        }
+
+    /** Runs the back-off's retries. */
+    private val timer = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "agent-wakeup").also { it.isDaemon = true }
+    }
+
+    /** Agents asked about while a wake of theirs was in progress, to be looked at once it ends. */
+    private val lookAgain: MutableSet<IdType> = ConcurrentHashMap.newKeySet()
+
+    /** The wake retry scheduled for an agent the back-off held back, at most one each. */
+    private val retries = ConcurrentHashMap<IdType, ScheduledFuture<*>>()
+
+    @PreDestroy
+    fun stop() {
+        timer.shutdownNow()
+    }
+
+    /**
+     * Mark undelivered every chat message a previous server process still owed (its
+     * AgentPendingMessage rows): its memory, and with it any chance of delivering them, is gone.
+     * Runs at startup, before this server owes anything itself.
+     */
+    fun reportLostOnRestart() {
+        for (row in pendingMessages.findAll()) {
+            messageService.markUndelivered(
+                row.messageId!!,
+                row.agentUserId!!,
+                "the server restarted before it was delivered",
+            )
+            pendingMessages.delete(row)
+        }
+    }
 
     @PostConstruct
     fun subscribe() {
-        hub.addScreenLifecycleListener { screen, _ ->
-            val agent = agentRegistry.bySid(screen.sid)
-            if (agent != null) {
-                when (screen.state) {
-                    // Back up and being driven: say everything that piled up while it was down.
-                    ScreenState.LIVE -> flush(agent)
-                    ScreenState.DEAD -> {
-                        logger.info(
-                            "agent {} died on screen {}: {}",
-                            agent.userId,
-                            screen.sid,
-                            screen.deadReason,
-                        )
-                        // Only wake right away if something is already waiting to be said;
-                        // otherwise let it lie until somebody wants it (a message / a viewer).
-                        if (!pending[agent.userId].isNullOrEmpty()) ensureAwake(agent.userId)
+        reportLostOnRestart()
+        hub.addScreenLifecycleListener(
+            object : ScreenLifecycleListener {
+                override fun onScreenState(screen: HubScreen, previous: ScreenState) {
+                    val agent = agentRegistry.bySid(screen.sid) ?: return
+                    when (screen.state) {
+                        // Back up and being driven: say everything that piled up while it was down.
+                        ScreenState.LIVE -> {
+                            askedByViewer.remove(agent.userId)
+                            deliver(agent)
+                        }
+                        ScreenState.DEAD -> {
+                            logger.info(
+                                "agent {} died on screen {}: {}",
+                                agent.userId,
+                                screen.sid,
+                                screen.deadReason,
+                            )
+                            onDeath(agent)
+                        }
+                        ScreenState.STARTING,
+                        ScreenState.UNKNOWN -> {}
                     }
-                    // Coming up, or never heard from: nothing to do but wait.
-                    ScreenState.STARTING,
-                    ScreenState.UNKNOWN -> {}
                 }
-            }
-        }
+
+                override fun onAppletReady(screen: HubScreen) {
+                    val agent = agentRegistry.bySid(screen.sid) ?: return
+                    appletRestarted(agent, screen.generation.get())
+                }
+            },
+        )
         // The applet's own verdict. `status` is a driver-applet variable, so reading it as liveness
         // belongs to the agent module — the hub just forwards the push.
         hub.addScreenVarListener(
             ScreenVarListener { screen, name, value ->
                 if (name != STATUS_VAR) return@ScreenVarListener
-                // Any value at all means the applet is running and reading the terminal; what it
-                // says about the pane is what tells the two apart.
                 if (value == STATUS_DEAD)
-                    hub.markScreen(screen.sid, ScreenState.DEAD, "pane is dead")
+                    hub.markScreen(
+                        screen.sid,
+                        ScreenState.DEAD,
+                        "the program exited (pane is dead)",
+                    )
                 else hub.markScreen(screen.sid, ScreenState.LIVE)
             },
         )
     }
 
-    // -- the two trigger points ---------------------------------------------
+    // -- delivering -------------------------------------------------------------
 
-    /**
-     * Say something to an agent, waking it first if its program is gone. The message is queued and
-     * typed once the applet reports the new program ready, because a `--resume` takes seconds to
-     * paint a prompt and anything typed before that lands in a terminal that is still starting.
-     */
-    fun tell(agent: ScreenAgent, message: String) {
-        if (isAwake(agent.userId)) {
-            agent.say(message)
-            return
+    /** Say [text] to [agent] under [id]; [messageId] is the chat message it carries, if any. */
+    fun tell(agent: ScreenAgent, text: String, id: String, messageId: IdType?) {
+        if (messageId != null) {
+            ownTransaction.executeWithoutResult {
+                pendingMessages.save(
+                    AgentPendingMessage().also {
+                        it.messageId = messageId
+                        it.agentUserId = agent.userId
+                    },
+                )
+            }
         }
-        pending.computeIfAbsent(agent.userId) { ConcurrentLinkedQueue() }.add(message)
-        if (!ensureAwake(agent.userId)) {
-            // Nothing could be woken (machine offline, out of attempts). The message stays queued:
-            // if the machine comes back and the screen reports ready, it is delivered then.
-            logger.warn(
-                "agent {} could not be woken; {} message(s) queued",
-                agent.userId,
-                pending[agent.userId]?.size,
-            )
+        queueOf(agent.userId).let { q -> synchronized(q) { q.add(Say(id, text, messageId)) } }
+        deliver(agent)
+    }
+
+    /** The machine said hello again: whatever waits for its agents can go out now. */
+    fun deliverOn(machineId: String) {
+        for (agent in agentRegistry.screenAgents().filter { it.machineId == machineId }) {
+            deliver(agent)
         }
     }
 
+    private fun queueOf(agentUserId: IdType): MutableList<Say> =
+        outstanding.computeIfAbsent(agentUserId) { ArrayList() }
+
+    /** Send every waiting message if the program can take it; otherwise make sure it is woken. */
+    private fun deliver(agent: ScreenAgent) {
+        val q = outstanding[agent.userId] ?: return
+        if (!isAwake(agent.userId)) {
+            if (synchronized(q) { q.any { it.messageId != null } }) ensureAwake(agent.userId)
+            return
+        }
+        val screen = hub.screen(agent.sid) ?: return
+        val generation = screen.generation.get()
+        synchronized(q) {
+            q.filter { it.generation == null }.forEach { send(agent, q, it, generation) }
+        }
+    }
+
+    /** Called holding [q]. */
+    private fun send(agent: ScreenAgent, q: MutableList<Say>, say: Say, generation: Long) {
+        say.generation = generation
+        val call = ++say.call
+        hub.callScreen(agent.machineId, agent.sid, "say", listOf(say.text)).whenCompleteAsync {
+            value,
+            e ->
+            answered(agent, q, say, call, value, e)
+        }
+    }
+
+    /** The applet's rpc.result to one send of [say], or the end of the connection it went on. */
+    private fun answered(
+        agent: ScreenAgent,
+        q: MutableList<Say>,
+        say: Say,
+        call: Int,
+        value: Any?,
+        e: Throwable?,
+    ) {
+        val cause = (e as? CompletionException)?.cause ?: e
+        val resend =
+            synchronized(q) {
+                if (say.call != call || say !in q) return
+                when {
+                    cause == null && value == false -> {
+                        q.remove(say)
+                        failed(agent.userId, say, "the agent's program could not take it")
+                        false
+                    }
+                    cause == null -> {
+                        q.remove(say)
+                        delivered(agent.userId, say)
+                        false
+                    }
+                    cause is LinkClosedException -> {
+                        say.generation = null
+                        true
+                    }
+                    else -> {
+                        q.remove(say)
+                        failed(
+                            agent.userId,
+                            say,
+                            "the agent's program refused it: ${cause.message}",
+                        )
+                        false
+                    }
+                }
+            }
+        if (resend) deliver(agent)
+    }
+
     /**
-     * A human is opening the live screen on [sid]: make sure there is something live to look at,
-     * rebuilding whatever is missing, and if that cannot be done say so at ERROR — every failure
-     * downstream of here looks like the same blank terminal, so the log is the only place they can
-     * be told apart.
-     *
-     * Everything an agent screen needs can be rebuilt from its persisted row, and this asks for all
-     * of it rather than assuming any earlier step ran:
-     * 1. the row itself — without one there is no agent behind this sid and nothing to ensure;
-     * 2. its registration in the hub, so the machine layer can route to it at all;
-     * 3. its registration as an agent, so chat can reach it and the wake-up can find it;
-     * 4. a running program, probed and woken if the machine has nothing behind the screen.
+     * A freshly loaded applet holds nothing sent before the session.create that loaded it, so those
+     * sends go again; ones sent since reached this applet already.
+     */
+    private fun appletRestarted(agent: ScreenAgent, generation: Long) {
+        val q = outstanding[agent.userId] ?: return
+        synchronized(q) {
+            for (say in q) {
+                val sent = say.generation ?: continue
+                if (sent < generation) {
+                    say.generation = null
+                    say.call++
+                }
+            }
+        }
+        deliver(agent)
+    }
+
+    /**
+     * A death is worth a wake when somebody needs the agent: a message waits for it, or a person
+     * opening its screen asked about it. A person who merely stays on a screen whose program dies
+     * sees it dead until a message or the next opening wakes it. A keepalive owed to a dead program
+     * is pointless and is dropped.
+     */
+    private fun onDeath(agent: ScreenAgent) {
+        val q = outstanding[agent.userId]
+        val waiting =
+            q != null &&
+                synchronized(q) {
+                    q.removeAll { it.messageId == null }
+                    q.isNotEmpty()
+                }
+        val asked = askedByViewer.remove(agent.userId)
+        if (waiting || asked) ensureAwake(agent.userId)
+    }
+
+    /** Called holding the agent's queue, after removing [say] from it. */
+    private fun delivered(agentUserId: IdType, say: Say) {
+        logger.debug("agent {}: {} delivered", agentUserId, say.id)
+        settle(agentUserId, say, null)
+    }
+
+    /** Called holding the agent's queue, after removing [say] from it. */
+    private fun failed(agentUserId: IdType, say: Say, reason: String) {
+        logger.warn("agent {}: {} not delivered: {}", agentUserId, say.id, reason)
+        settle(agentUserId, say, reason)
+    }
+
+    /** Record [say]'s outcome: no longer pending, and undelivered when [reason] says why. */
+    private fun settle(agentUserId: IdType, say: Say, reason: String?) {
+        val messageId = say.messageId ?: return
+        // Off this thread: it may be the machine's receive thread, which must not wait on the DB.
+        CompletableFuture.runAsync {
+            try {
+                if (reason != null) messageService.markUndelivered(messageId, agentUserId, reason)
+                pendingMessages.deleteByMessageIdAndAgentUserId(messageId, agentUserId)
+            } catch (e: Exception) {
+                logger.error("recording the outcome of message {} failed", messageId, e)
+            }
+        }
+    }
+
+    private fun failAll(agentUserId: IdType, reason: String) {
+        val q = outstanding[agentUserId] ?: return
+        synchronized(q) {
+            q.forEach { failed(agentUserId, it, reason) }
+            q.clear()
+        }
+    }
+
+    // -- the live screen ----------------------------------------------------------
+
+    /**
+     * A human is opening the live screen on [sid]: make sure there is something to look at,
+     * rebuilding whatever is missing from the persisted row, and waking a program known dead. It
+     * never waits on the machine — whether the program is there is reported by the machine itself
+     * (session.error) and by the applet's status. If something cannot be done it says so at ERROR,
+     * because every failure downstream looks like the same blank terminal.
      *
      * Returns the sid to attach to: the same one in the normal case, since waking respawns in
      * place; a different one only where the screen had to be reopened from scratch.
@@ -199,8 +440,7 @@ class AgentWakeup(
         val row = agentScreenRepository.findById(sid).orElse(null)
         if (row == null) {
             // No agent owns this sid. A live screen of some other kind is fine (a shared shell is
-            // nobody's agent); nothing at all is a viewer that will open onto blackness, and the
-            // sid it was given is the only clue as to why.
+            // nobody's agent); nothing at all is a viewer that will open onto blackness.
             if (hub.screen(sid) == null) {
                 logger.error(
                     "live screen: screen {} has neither an agent row nor a live screen — nothing to show",
@@ -209,10 +449,8 @@ class AgentWakeup(
             }
             return sid
         }
-        // (2)+(3) Everything that follows from the row: its registration in the hub, so the
-        // machine layer can route to it, and its registration as an agent, so chat can reach it
-        // and the wake-up can find it. A server that never re-adopted this screen has neither, and
-        // an agent missing from the registry would show offline while its row says otherwise.
+        // Its registration in the hub (so the machine layer can route to it) and as an agent (so
+        // chat can reach it and the wake-up can find it) both follow from the row.
         val known = hub.screen(row.sid) != null && agentRegistry.get(row.agentUserId) != null
         if (!known) {
             logger.warn(
@@ -231,9 +469,18 @@ class AgentWakeup(
             )
             return sid
         }
-        // (4) Finally the program. The probe is what catches a screen the server believes is alive
-        // while the machine has nothing behind it — the case that reports itself no other way.
-        probe(row.sid)
+        // A screen this server had forgotten is asked about the same way a reconnect asks: the
+        // adopt makes the machine report a session that is gone (session.error), without waiting.
+        val driver = agentScreens.getObject().driverOf(row)
+        if (!known && driver != null && hub.isOnline(row.machineId)) {
+            askedByViewer.add(row.agentUserId)
+            hub.readoptScreen(
+                machineId = row.machineId,
+                sid = row.sid,
+                command = emptyList(),
+                appletSource = driver.appletSource,
+            )
+        }
         if (!isAwake(row.agentUserId) && !ensureAwake(row.agentUserId)) {
             logger.error(
                 "live screen: agent {} on screen {} is not running and could not be woken (machine {} " +
@@ -247,47 +494,13 @@ class AgentWakeup(
         return (agentRegistry.get(row.agentUserId) as? ScreenAgent)?.sid ?: row.sid
     }
 
-    // -- mechanics -----------------------------------------------------------
-
-    /**
-     * Ask the applet for a screenful, purely to find out whether anything answers. Every death
-     * signal we get for free is *reported* — the applet noticing a dead pane, the machine refusing
-     * an adopt — and one case reports nothing at all: a tmux session that vanished while the
-     * machine stayed connected (killed by hand, an OOM reaper, a `tmux kill-server`). Nobody is
-     * left to say so, and no variable ever changes again, so the screen would look alive forever. A
-     * call that goes unanswered is that case: the host silently drops an rpc for a session it no
-     * longer has.
-     *
-     * Only silence counts as death — an empty snapshot does not, since a program that is merely
-     * still starting paints nothing either. Reserved for the live screen, where a stale screen is
-     * what the human is staring at and a second of latency is affordable; the message path relies
-     * on the reported signals instead of probing on every message.
-     *
-     * Silence is evidence only about the connection the question went out on. A machine whose CLI
-     * re-execs for an update connects again while its old connection is still open on this side,
-     * and a question sent on the old one is never answered although the screen is fine; reading
-     * that as death would respawn, and so kill, the program that just survived the update. So a
-     * machine that connected again while we waited proves nothing either way.
-     */
-    private fun probe(sid: String) {
-        val screen = hub.screen(sid) ?: return
-        // Only worth asking where we would otherwise assume the best: a screen already known dead
-        // needs no confirming, and one that is starting has not had time to answer yet.
-        if (screen.state == ScreenState.DEAD || screen.state == ScreenState.STARTING) return
-        if (!hub.isOnline(screen.machineId)) return
-        val connectedAt = hub.connectedAtOf(screen.machineId)
-        val answer = hub.callScreenAwait(screen.machineId, sid, "snapshot", timeoutSeconds = 2)
-        if (answer == null && hub.connectedAtOf(screen.machineId) == connectedAt) {
-            hub.markScreen(sid, ScreenState.DEAD, "the applet did not answer")
-        }
-    }
+    // -- waking -------------------------------------------------------------------
 
     /**
      * Whether this agent can be typed at right now. A screen we have never heard from counts: the
-     * applet speaks only when something changes, so silence is not evidence of death and refusing
-     * to talk to a quiet agent would be worse than the rare message typed at one that just died —
-     * which its next variable push corrects anyway. STARTING deliberately does not count: a program
-     * still painting its first frames swallows what is typed at it.
+     * applet speaks only when something changes, so silence is not evidence of death, and a send to
+     * a screen that turns out gone is sent again once it is back. STARTING deliberately does not
+     * count: a program still painting its first frames swallows what is typed at it.
      */
     fun isAwake(agentUserId: IdType): Boolean {
         val agent = agentRegistry.get(agentUserId) as? ScreenAgent ?: return false
@@ -304,14 +517,19 @@ class AgentWakeup(
 
     /**
      * Make sure the agent's program is running, waking it if not. Returns whether it is (or has
-     * just been asked to be) awake. Idempotent and safe to call from anywhere: concurrent callers
-     * serialise on the agent's lock, and a caller that finds the wake already in progress simply
-     * reports success rather than queueing a second one behind it.
+     * just been asked to be) awake. Concurrent callers serialise on the agent's lock, and a caller
+     * that finds the wake already in progress reports success rather than queueing a second one.
+     * Giving up on a program that keeps dying fails every message still owed to it.
      */
     fun ensureAwake(agentUserId: IdType): Boolean {
         if (isAwake(agentUserId) || isStarting(agentUserId)) return true
         val lock = locks.computeIfAbsent(agentUserId) { ReentrantLock() }
-        if (!lock.tryLock()) return true // another thread is already waking it
+        if (!lock.tryLock()) {
+            // Another thread is waking it; it looks again when it is done, so a death that lands
+            // meanwhile is not lost.
+            lookAgain.add(agentUserId)
+            return true
+        }
         try {
             if (isAwake(agentUserId) || isStarting(agentUserId)) return true
             val row = agentScreenRepository.findByAgentUserId(agentUserId).firstOrNull()
@@ -324,10 +542,14 @@ class AgentWakeup(
                     agentUserId,
                     attempt.count,
                 )
+                failAll(agentUserId, "the agent's program keeps exiting, so it was not restarted")
                 return false
             }
-            val wait = backoff[attempt.count]
-            if (Duration.between(attempt.last, Instant.now()) < wait) return false
+            val left = backoff[attempt.count] - Duration.between(attempt.last, Instant.now())
+            if (left > Duration.ZERO) {
+                retryWake(agentUserId, left)
+                return false
+            }
             attempt.count++
             attempt.last = Instant.now()
             return try {
@@ -338,21 +560,36 @@ class AgentWakeup(
             }
         } finally {
             lock.unlock()
+            if (lookAgain.remove(agentUserId)) ensureAwake(agentUserId)
         }
     }
 
-    /** Type everything that piled up while the program was down, oldest first. */
-    private fun flush(agent: ScreenAgent) {
-        val queue = pending[agent.userId] ?: return
-        while (true) {
-            val message = queue.poll() ?: break
-            agent.say(message)
+    /** Try [agentUserId]'s wake again once the back-off allows, unless a retry is already due. */
+    private fun retryWake(agentUserId: IdType, after: Duration) {
+        retries.computeIfAbsent(agentUserId) {
+            logger.info(
+                "agent {}: waking it again in {} s (back-off)",
+                agentUserId,
+                after.toSeconds() + 1,
+            )
+            timer.schedule(
+                {
+                    retries.remove(agentUserId)
+                    ensureAwake(agentUserId)
+                },
+                after.toMillis(),
+                TimeUnit.MILLISECONDS,
+            )
         }
     }
 
-    /** Drop an agent's bookkeeping when it is closed for good. */
+    /** The agent was closed for good: what it still owed fails, and its bookkeeping goes. */
     fun forget(agentUserId: IdType) {
-        pending.remove(agentUserId)
+        retries.remove(agentUserId)?.cancel(false)
+        lookAgain.remove(agentUserId)
+        failAll(agentUserId, "the agent was closed")
+        outstanding.remove(agentUserId)
+        askedByViewer.remove(agentUserId)
         attempts.remove(agentUserId)
         locks.remove(agentUserId)
     }

@@ -1,18 +1,50 @@
 /*
- *  Description: The live-screen viewer WebSocket — the browser end of watching an
- *               agent's Claude Code terminal. It speaks the SAME wire the reference
- *               misc/web-claude client speaks, so that client is reused verbatim: the
- *               machine's raw screen bytes go to the browser as binary frames; the browser
- *               sends raw input bytes (binary) and JSON control — {type:"control",level},
- *               {type:"resize",cols,rows}, {type:"compact"}, {type:"scroll",dir} — nothing is
- *               base64-wrapped. `scroll` pages the pane's tmux history (copy-mode), since the
- *               full-screen program keeps no scrollback of its own.
- *               A viewer is authenticated by its ?token= JWT and authorized to a screen only
- *               if it shares the screen's team or a chat group with the agent.
+ *  Description: The live-screen viewer WebSocket — the browser end of watching a screen. It is
+ *               reached at `/machine/screen/{sid}?token=JWT&cols=C&rows=R`, authenticated by the
+ *               JWT and authorized (ViewerHandshakeInterceptor) before this handler sees it. Each
+ *               connection is one viewer with its own viewer id ("v" + 8 hex), and is subscribed
+ *               at once at the size it asked for — nothing waits on a round trip to the machine.
  *
- *               Outbound screen bytes do not go straight onto the socket: each viewer owns a
- *               ViewerPump, because the hub fans data out on the MACHINE's receive thread and a
- *               browser that cannot keep up must never be allowed to park it.
+ *               Client -> server:
+ *                 binary                                  input bytes (keys, pastes, mouse)
+ *                 {"type":"reply","data":"<base64>"}      the terminal's automatic answers to
+ *                                                         tmux's queries (device attributes,
+ *                                                         cursor position); not typing, so they
+ *                                                         need no lease
+ *                 {"type":"resize","cols":C,"rows":R}     the room the viewer has
+ *                 {"type":"ack","n":N}                    N more bytes of screen data rendered
+ *                 {"type":"lease","op":"take"|"renew"|"release"}
+ *                 {"type":"capture","id":"..."}           ask for the screen's text
+ *                 {"type":"command","id":"...","name":N}  call applet function N, one of the
+ *                                                         names the `commands` frame listed
+ *                 anything else is ignored, except that on a protocol 1 machine the older client's
+ *                 {"type":"control","level"} and {"type":"scroll","dir"} are still honoured, and
+ *                 {"type":"compact"} is honoured on both when compact is listed.
+ *
+ *               Server -> client, all through the viewer's one ViewerPump so nothing overtakes:
+ *                 {"type":"commands","names":[...]}       first: the applet functions this
+ *                                                         screen offers a viewer
+ *                 binary                                  screen bytes for this viewer
+ *                 {"type":"size","cols":C,"rows":R}       the terminal's size from now on
+ *                 {"type":"lease","holder":"free"|"self"|"driver"|"other","name":..,"refused":b}
+ *                 {"type":"capture","id","text","error"}
+ *                 {"type":"command","id","error"}
+ *                 {"type":"error","error"}
+ *
+ *               A connection without cols/rows is an older client: it is subscribed at 120x32,
+ *               which is logged, and since it never acknowledges, the server acknowledges each
+ *               chunk on its behalf as the pump writes it to the socket.
+ *
+ *               "refused" is how a viewer learns its input or take was turned down. The connector
+ *               answers a refused input or take with the lease state, unchanged, to that viewer
+ *               alone; so a lease state is a refusal exactly when it answers input or a take this
+ *               viewer sent since its last lease state, names somebody else, and that holder is
+ *               the one it already knew. A repeat that follows a resubscribe answers nothing.
+ *
+ *               ScreenAttachPreflight  beforeAttach(sid) -> the sid to attach to (see below).
+ *               ScreenCommands         commandsOf(sid) -> the applet functions a viewer may call.
+ *               ViewerHandler(hub, objectMapper, profiles, preflight?, commands?) — registered by
+ *               ConnectorWebSocketConfig; Spring calls its WebSocket callbacks.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -21,9 +53,18 @@
 
 package app.microteams.machine.screen
 
+import app.microteams.machine.link.HubViewer
 import app.microteams.machine.link.MachineHub
-import app.microteams.machine.link.ViewerTransport
+import app.microteams.machine.link.ViewerSink
+import app.microteams.user.UserProfileRepository
+import java.nio.ByteBuffer
+import java.util.Base64
+import java.util.UUID
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import org.rucca.cheese.common.persistent.IdType
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.BinaryMessage
 import org.springframework.web.socket.CloseStatus
@@ -35,65 +76,133 @@ import tools.jackson.databind.ObjectMapper
 /**
  * Asked, just before a viewer attaches, whether anything needs doing to the screen first — the
  * machine layer has no idea what runs on one, so what "needs doing" means belongs to the module
- * that opened it (for agents: waking a program that has died, so the live screen opens onto a live
- * terminal rather than the frozen last frame of a crash). It returns the sid to actually attach to,
- * which is normally the one passed in.
+ * that opened it (for agents: waking a program known dead). It must not wait on the machine. It
+ * returns the sid to actually attach to, which is normally the one passed in.
  */
 fun interface ScreenAttachPreflight {
     fun beforeAttach(sid: String): String
 }
 
+/**
+ * Which applet functions a viewer of a screen may call. The machine layer does not know what runs
+ * on a screen, so the module that opened it answers; a screen nobody answers for offers none.
+ */
+fun interface ScreenCommands {
+    fun commandsOf(sid: String): List<String>
+}
+
+/** The room an older client that says nothing about its size is given. */
+private const val LEGACY_COLS = 120
+private const val LEGACY_ROWS = 32
+
+/** How long a command call waits for the applet before the viewer is told it failed. */
+private const val COMMAND_TIMEOUT_SECONDS = 10L
+
 class ViewerHandler(
     private val hub: MachineHub,
     private val objectMapper: ObjectMapper,
+    private val profiles: UserProfileRepository,
     private val preflight: ScreenAttachPreflight? = null,
+    private val screenCommands: ScreenCommands? = null,
 ) : AbstractWebSocketHandler() {
     private val logger = LoggerFactory.getLogger(ViewerHandler::class.java)
 
-    private class ViewerState(
-        val machineId: String,
+    private inner class Viewer(
         val sid: String,
-        val transport: ViewerTransport,
+        val id: String,
         val pump: ViewerPump,
-    )
+        val commands: List<String>,
+    ) : ViewerSink {
+        /** The lease holder this viewer was last told. */
+        @Volatile var lastHolder: String? = null
 
-    private val states = ConcurrentHashMap<String, ViewerState>()
+        /** Input or a take sent since the last lease state, which that state may be refusing. */
+        @Volatile var asked = false
+
+        fun text(frame: Map<String, Any?>) {
+            pump.offer(ViewerFrame.Text(objectMapper.writeValueAsString(frame)))
+        }
+
+        override fun bytes(data: ByteArray) {
+            pump.offer(ViewerFrame.Bytes(data))
+        }
+
+        override fun size(cols: Int, rows: Int) =
+            text(mapOf("type" to "size", "cols" to cols, "rows" to rows))
+
+        override fun lease(holder: String) {
+            val refused = asked && holder != "" && holder != id && holder == lastHolder
+            asked = false
+            lastHolder = holder
+            val (kind, name) =
+                when (holder) {
+                    "" -> "free" to null
+                    "driver" -> "driver" to null
+                    id -> "self" to null
+                    else -> "other" to nicknames[holder]
+                }
+            text(mapOf("type" to "lease", "holder" to kind, "name" to name, "refused" to refused))
+        }
+
+        override fun capture(id: String, text: String?, error: String?) =
+            text(mapOf("type" to "capture", "id" to id, "text" to text, "error" to error))
+
+        override fun error(text: String) = text(mapOf("type" to "error", "error" to text))
+
+        override fun resubscribed() {
+            asked = false
+        }
+    }
+
+    /** session id -> its viewer. */
+    private val viewers = ConcurrentHashMap<String, Viewer>()
+
+    /** viewer id -> the nickname of the person behind it, for "who is typing". */
+    private val nicknames = ConcurrentHashMap<String, String>()
 
     override fun afterConnectionEstablished(session: WebSocketSession) {
         // The handshake authorized this human against the sid they asked for; the preflight may
-        // hand back a different one, but only ever another screen of the SAME agent (it resolves
-        // the agent from this sid and reports where that agent lives now), so the authorization
-        // that was granted still covers what we attach to.
+        // hand back a different one, but only ever another screen of the SAME owner, so the
+        // authorization that was granted still covers what we attach to.
         val asked = session.attributes["sid"] as? String
         val sid = asked?.let { preflight?.beforeAttach(it) ?: it }
         val screen = sid?.let { hub.screen(it) }
         if (screen == null) {
-            // The viewer sees an empty terminal either way; only this line says why. Whoever owns
-            // the screen was already asked to ensure it exists (the preflight), so reaching here
-            // means that could not be done.
             logger.error("live screen: no screen '{}' to attach to (asked for '{}')", sid, asked)
             session.close(CloseStatus.POLICY_VIOLATION.withReason("screen not found"))
             return
         }
         session.binaryMessageSizeLimit = 1 shl 20
         session.textMessageSizeLimit = 1 shl 20
-        // Raw machine bytes -> a binary frame to the browser (web-claude writes it straight
-        // into xterm), by way of this viewer's own queue and thread.
-        //
-        // The queue is not an optimisation. The hub fans screen data out on the machine's
-        // control-channel receive thread, so writing to the browser here used to mean a viewer on a
-        // slow relay could park that thread — freezing everything the machine was saying, on every
-        // screen, until the socket drained. See ViewerPump for the whole story.
+        val cols = session.attributes["cols"] as? Int
+        val rows = session.attributes["rows"] as? Int
+        val acks = cols != null && rows != null
+        if (!acks) {
+            logger.info(
+                "live screen: viewer {} of {} sent no size (an older client); {}x{}, acknowledged by the server",
+                session.id,
+                screen.sid,
+                LEGACY_COLS,
+                LEGACY_ROWS,
+            )
+        }
+        val id = "v" + UUID.randomUUID().toString().replace("-", "").take(8)
+        // Every frame goes through this viewer's own queue and thread: the hub calls the sink on
+        // the machine's receive thread, which must never wait on a browser (see ViewerPump).
         val pump =
             ViewerPump(
                 label = session.id,
-                write = { raw ->
-                    // Still serialized, because the pump is not the only writer: control replies
-                    // reach the same session from the request thread.
+                write = { frame ->
                     synchronized(session) {
-                        if (session.isOpen)
-                            session.sendMessage(BinaryMessage(java.nio.ByteBuffer.wrap(raw)))
+                        if (!session.isOpen) return@synchronized
+                        when (frame) {
+                            is ViewerFrame.Bytes ->
+                                session.sendMessage(BinaryMessage(ByteBuffer.wrap(frame.data)))
+                            is ViewerFrame.Text -> session.sendMessage(TextMessage(frame.json))
+                        }
                     }
+                    if (!acks && frame is ViewerFrame.Bytes)
+                        hub.viewerAck(screen.sid, id, frame.size)
                 },
                 giveUp = {
                     logger.warn("live screen: closing viewer {} — it could not keep up", session.id)
@@ -108,48 +217,96 @@ class ViewerHandler(
                     }
                 },
             )
-        val transport = ViewerTransport { raw -> pump.offer(raw) }
-        val state = ViewerState(screen.machineId, screen.sid, transport, pump)
-        states[session.id] = state
-        hub.attachViewer(screen.machineId, screen.sid, transport)
+        val viewer = Viewer(screen.sid, id, pump, screenCommands?.commandsOf(screen.sid).orEmpty())
+        viewers[session.id] = viewer
+        (session.attributes["userId"] as? IdType)?.let { nicknames[id] = nicknameOf(it) }
+        hub.attachViewer(
+            screen.sid,
+            HubViewer(id, viewer, cols ?: LEGACY_COLS, rows ?: LEGACY_ROWS),
+        )
+        viewer.text(mapOf("type" to "commands", "names" to viewer.commands))
     }
 
+    private fun nicknameOf(userId: IdType): String =
+        profiles.findByUserId(userId.toInt()).map { it.nickname }.orElse(null) ?: "user$userId"
+
     override fun handleBinaryMessage(session: WebSocketSession, message: BinaryMessage) {
-        val state = states[session.id] ?: return
+        val viewer = viewers[session.id] ?: return
         val buf = message.payload
         val data = ByteArray(buf.remaining()).also { buf.get(it) }
-        // Raw keystrokes typed into the terminal (web-claude sends these only in 'full' mode).
-        hub.viewerInput(state.machineId, state.sid, data)
+        viewer.asked = true
+        hub.viewerInput(viewer.sid, viewer.id, data)
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
-        val state = states[session.id] ?: return
+        val viewer = viewers[session.id] ?: return
         val msg =
             try {
                 objectMapper.readTree(message.payload)
             } catch (e: Exception) {
                 return
             }
+        val sid = viewer.sid
         when (msg.path("type").asText()) {
-            "control" ->
-                hub.viewerControl(state.machineId, state.sid, msg.path("level").asText("passive"))
             "resize" -> {
                 val cols = msg.path("cols").asInt(0)
                 val rows = msg.path("rows").asInt(0)
-                if (cols > 0 && rows > 0) hub.viewerResize(state.machineId, state.sid, cols, rows)
+                if (cols > 0 && rows > 0) hub.viewerResize(sid, viewer.id, cols, rows)
             }
-            "compact" -> hub.callScreen(state.machineId, state.sid, "compact", emptyList())
-            // Page through the pane's tmux scrollback (copy-mode) — see hub.viewerScroll.
-            "scroll" ->
-                hub.viewerScroll(state.machineId, state.sid, msg.path("dir").asText("bottom"))
+            "ack" -> hub.viewerAck(sid, viewer.id, msg.path("n").asInt(0))
+            "reply" -> {
+                val data =
+                    try {
+                        Base64.getDecoder().decode(msg.path("data").asText())
+                    } catch (e: IllegalArgumentException) {
+                        return viewer.error("reply data is not base64")
+                    }
+                hub.viewerReply(sid, viewer.id, data)
+            }
+            "lease" -> {
+                val op = msg.path("op").asText()
+                if (op == "take") viewer.asked = true
+                hub.viewerLease(sid, viewer.id, op)
+            }
+            "capture" -> hub.viewerCapture(sid, viewer.id, msg.path("id").asText())
+            "command" -> command(viewer, msg.path("id").asText(), msg.path("name").asText())
+            "compact" ->
+                if ("compact" in viewer.commands)
+                    hub.screen(sid)?.let {
+                        hub.callScreen(it.machineId, sid, "compact", emptyList())
+                    }
+            "control" -> hub.viewerControl(sid, msg.path("level").asText("passive"))
+            "scroll" -> hub.viewerScroll(sid, msg.path("dir").asText("bottom"))
         }
     }
 
+    /** Call an applet function for the viewer and tell it the outcome, without waiting here. */
+    private fun command(viewer: Viewer, id: String, name: String) {
+        fun reply(error: String?) =
+            viewer.text(mapOf("type" to "command", "id" to id, "error" to error))
+        val screen = hub.screen(viewer.sid)
+        if (name !in viewer.commands) return reply("this screen offers no command '$name'")
+        if (screen == null) return reply("the screen is gone")
+        hub.callScreen(screen.machineId, screen.sid, name, emptyList())
+            .orTimeout(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .whenCompleteAsync { _, e ->
+                val cause = (e as? CompletionException)?.cause ?: e
+                reply(
+                    when (cause) {
+                        null -> null
+                        is TimeoutException -> "the machine did not answer"
+                        else -> cause.message ?: cause.javaClass.simpleName
+                    },
+                )
+            }
+    }
+
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
-        val state = states.remove(session.id) ?: return
+        val viewer = viewers.remove(session.id) ?: return
         // Stop the pump first: with the socket already gone, anything still queued would only
         // produce write errors, and its thread must not outlive the viewer.
-        state.pump.close()
-        hub.detachViewer(state.machineId, state.sid, state.transport)
+        viewer.pump.close()
+        nicknames.remove(viewer.id)
+        hub.detachViewer(viewer.sid, viewer.id)
     }
 }

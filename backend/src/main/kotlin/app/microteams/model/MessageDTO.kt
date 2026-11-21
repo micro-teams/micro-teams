@@ -2,6 +2,7 @@ package app.microteams.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import io.swagger.v3.oas.annotations.media.Schema
+import javax.validation.Valid
 
 /**
  * A chat message in a thread
@@ -14,6 +15,8 @@ import io.swagger.v3.oas.annotations.media.Schema
  * @param editedAt
  * @param clientToken Echoed back when the caller supplied one, so a client can recognise its own
  *   pending message in the one returned (and in a later poll) rather than guessing by content.
+ * @param undelivered The recipients this message definitely did not reach (an agent whose program
+ *   could not take it), each with the reason. Absent or empty when nothing is known to have failed.
  */
 data class MessageDTO(
     @Schema(required = true, description = "")
@@ -47,4 +50,12 @@ data class MessageDTO(
     @param:JsonProperty("clientToken")
     @get:JsonProperty("clientToken")
     val clientToken: kotlin.String? = null,
+    @field:Valid
+    @Schema(
+        description =
+            "The recipients this message definitely did not reach (an agent whose program could not take it), each with the reason. Absent or empty when nothing is known to have failed. ",
+    )
+    @param:JsonProperty("undelivered")
+    @get:JsonProperty("undelivered")
+    val undelivered: kotlin.collections.List<UndeliveredDTO>? = null,
 ) {}

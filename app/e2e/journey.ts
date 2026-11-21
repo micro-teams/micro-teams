@@ -12,8 +12,8 @@
  *   approval page the CLI's link opens on the web; from outside on Android, where that link opens
  *   in a browser — waits for it to come online, opens an agent on it, says something to the agent
  *   and waits until the model on the machine has been given it (params.machine.heard), finds the
- *   same conversation a second time, watches the agent's live screen from the chat's
- *   roster (it draws, typing is a mode you choose, close puts it away), takes the agent out of the
+ *   same conversation a second time, uses the agent's live screen from the chat's roster
+ *   (terminal.ts: opening, the keyboard, the lease and the watch/operate switch, a message held back while the person operates, two viewers, scrolling, copy, commands), takes the agent out of the
  *   chat, renames it, sets its keepalive, and closes it.
  *   With the stack's lines (params.lines), it then opens the lines panel and finds the three lines
  *   up; kills one line silently and slows another, sees the dead one shown down within seconds and
@@ -36,10 +36,12 @@
  * Lines — fault(line, mode) gives line "b" or "c" a fault ("dead", "slow") or none ("pass");
  *   restartServer() restarts the multipath server and resolves once it is back; machineSession()
  *   is the id of the machine's live MultiPath session, or null.
- * outside(api, username, password) → { post(title, text), createTeam(name) → id, chatTitled(title)
- *   → id, approve(code, teamIds), agentNamed(teamId, name) → userId, untilIdle(teamId, userId) } —
- *   signs in over HTTP and acts as another client of the same person would; the ids are what the
- *   app's testIDs carry, and untilIdle waits for the agent's program to have finished starting.
+ * outside(api, username, password) → { post(title, text), postTo(chatId, text), createTeam(name) →
+ *   id, chatTitled(title) → id, chatWith(userId) → the id of the conversation of two with them, approve(code, teamIds), agentNamed(teamId, name) → userId, sidOf(teamId, userId) → the
+ *   agent's screen, viewer(sid, cols, rows) → a second viewer of it (terminal.ts's Viewer),
+ *   untilIdle(teamId, userId) } — signs in over HTTP and acts as another client of the same person
+ *   would; the ids are what the app's testIDs carry, and untilIdle waits for the agent's program to
+ *   have finished starting.
  * codeFromMail(mail, email) — the sign-up code cheese-auth mailed to that address.
  *
  * Example: await journey(new PlaywrightDriver("http://localhost/app/"), { server: null, api, mail, run, machine: null, lines: null });
@@ -47,6 +49,8 @@
  * Elements are found by testID, which react-native-web renders as data-testid and React Native on
  * Android as the view's resource-id: one name, both clients.
  */
+import { liveScreen, type Viewer } from "./terminal";
+
 
 export interface Driver {
   /** Start the client on its first screen. */
@@ -73,6 +77,31 @@ export interface Driver {
   /** The web only: the service worker controls the page, routes over the substrate, and keeps the
    * app openable offline (showing shownId); resolves with what it says about itself. */
   checkWorker?(shownId: string): Promise<unknown>;
+  /** The accessibility label of the element with this testID (aria-label, content-desc). */
+  label(id: string): Promise<string>;
+  /** Open or close the keyboard the person types into the live screen with: a phone's own
+   * keyboard, or on the web a page made shorter by as much as one would take. */
+  keyboard(open: boolean): Promise<void>;
+  /** Type into the live screen's terminal, as a person does. */
+  typeInTerminal(text: string): Promise<void>;
+  /** Scroll the live screen back: a wheel turn, or a finger dragged down on a touch screen. */
+  scrollTerminal(): Promise<void>;
+  /** The web only: start measuring, every frame, the terminal against its view; stopping returns
+   * how far its bottom edge (where the prompt is) ever went below the view, in px, and for how
+   * long its top was cut off, in ms (while a smaller size is on its way). */
+  watchOverflow?(on: boolean): Promise<{ below: number; clippedMs: number }>;
+  /** With the terminal focused, tap the key with this test id the way a finger does, and say
+   * whether the terminal still has the focus (on a phone, losing it closes the keyboard). */
+  keepsFocusOnTap?(id: string): Promise<boolean>;
+  /** Hold a finger still on the terminal long enough to start a selection, then drag it from
+   * near the top left to below the middle and lift it. */
+  selectByHold?(): Promise<void>;
+  /** The web only: the text the system clipboard holds. */
+  clipboard?(): Promise<string>;
+  /** The web only: the room around the terminal inside its view, in px, and a cell's height. */
+  terminalOffsets?(): Promise<{ left: number; right: number; top: number; bottom: number; cell: number }>;
+  /** The web only: what is wrong if the terminal has scrolled by itself or keeps lines above it. */
+  terminalScrolled?(): Promise<string | null>;
   /** What is on screen and what went wrong, for a failed run; also saves failure.png. */
   dump(): Promise<string>;
   close(): Promise<void>;
@@ -97,6 +126,7 @@ export interface Machine {
   code: string;
   driver: string;
   heard(text: string): Promise<void>;
+  pane(): Promise<{ inMode: boolean; mouse: boolean; alternate: boolean; text: string }>;
 }
 
 export async function codeFromMail(mail: string, email: string): Promise<string> {
@@ -138,6 +168,13 @@ export async function outside(api: string, username: string, password: string) {
   };
   return {
     post: async (title: string, text: string) => void (await send(`/chat/${await chatTitled(title)}/messages`, { content: text })),
+    postTo: async (chatId: number, text: string) => void (await send(`/chat/${chatId}/messages`, { content: text })),
+    chatWith: async (userId: number) => {
+      const { chats } = await get<{ chats: { id: number; members: { userId: number }[] }[] }>("/chat?page_size=50");
+      const chat = chats.find((c) => c.members.length === 2 && c.members.some((m) => m.userId === userId));
+      if (!chat) throw new Error(`no conversation of two with user ${userId}`);
+      return chat.id;
+    },
     createTeam: async (name: string) => (await send("/team", { name })).id,
     chatTitled,
     approve: async (code: string, teamIds: number[]) => void (await send("/machine/enroll/approve", { code, teamIds })),
@@ -147,6 +184,13 @@ export async function outside(api: string, username: string, password: string) {
       if (!agent) throw new Error(`no agent named "${name}" in team ${teamId}`);
       return agent.userId;
     },
+    sidOf: async (teamId: number, userId: number) => {
+      const { agents } = await get<{ agents: { userId: number; sid?: string }[] }>(`/agent?teamId=${teamId}`);
+      const sid = agents.find((a) => a.userId === userId)?.sid;
+      if (!sid) throw new Error(`agent ${userId} has no screen`);
+      return sid;
+    },
+    viewer: (sid: string, cols: number, rows: number) => watch(api, token, sid, cols, rows),
     untilIdle: async (teamId: number, userId: number) => {
       const deadline = Date.now() + 180_000;
       while (Date.now() < deadline) {
@@ -157,6 +201,34 @@ export async function outside(api: string, username: string, password: string) {
       throw new Error(`agent ${userId}'s program did not finish starting within three minutes`);
     },
   };
+}
+
+/** The User-Agent of the journey's own viewer, which carried.sh tells from the app's sockets. */
+const OUTSIDE_VIEWER = "e2e-outside-viewer";
+
+/** A second viewer of a live screen over a plain WebSocket, acknowledging all it is sent. */
+function watch(api: string, token: string, sid: string, cols: number, rows: number): Promise<Viewer> {
+  const url = `${api.replace(/^http/, "ws")}/mt/machine/screen/${encodeURIComponent(sid)}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}`;
+  // Named, because it is not the app's own socket, which carried.sh requires to ride the lines.
+  // (Node's WebSocket takes headers; the DOM typings it is declared with do not say so.)
+  const ws = new WebSocket(url, { headers: { "User-Agent": OUTSIDE_VIEWER } } as unknown as string[]);
+  ws.binaryType = "arraybuffer";
+  const v: Viewer = {
+    sizes: [],
+    leases: [],
+    type: (text) => ws.send(new TextEncoder().encode(text)),
+    close: () => ws.close(),
+  };
+  ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer) return ws.send(JSON.stringify({ type: "ack", n: e.data.byteLength }));
+    const m = JSON.parse(String(e.data)) as { type: string; cols: number; rows: number; holder: string; refused: boolean };
+    if (m.type === "size") v.sizes.push({ cols: m.cols, rows: m.rows });
+    else if (m.type === "lease") v.leases.push({ holder: m.holder, refused: m.refused });
+  };
+  return new Promise((resolve, reject) => {
+    ws.onopen = () => resolve(v);
+    ws.onerror = () => reject(new Error(`a second viewer could not open ${sid}`));
+  });
 }
 
 async function signUp(d: Driver, p: Params, who: string) {
@@ -317,7 +389,7 @@ async function withAMachine(
   { run, teamId, elsewhere, lap }: { run: string; teamId: number; elsewhere: Awaited<ReturnType<typeof outside>>; lap: (step: string) => void },
 ) {
   if (d.go) {
-    // `microteams link auto-connect` prints a link for a person to open; opening it is this.
+    // `microteams enable` prints a link for a person to open; opening it is this.
     await d.go(`connect?code=${machine.code}`);
     await d.tap(`connect-team-${teamId}`);
     await d.tap("connect-approve");
@@ -366,16 +438,18 @@ async function withAMachine(
   lap("chat with the agent, twice");
 
   await d.tap("chat-info");
-  await d.tap(`agent-avatar-${agentId}`);
-  await d.waitFor("screen", 15_000);
-  // What the machine prints has arrived and is drawn: a live screen, not an empty rectangle.
-  await d.waitGone("screen-connecting", 60_000);
-  await d.tap("screen-typing");
-  await d.waitForText("the agent is not driving");
-  await d.tap("screen-watching");
-  await d.tap("screen-close");
-  await d.waitGone("screen");
-  lap("its live screen");
+  const sid = await elsewhere.sidOf(teamId, agentId);
+  const chatWithAgent = await elsewhere.chatWith(agentId);
+  await liveScreen(d, {
+    agentId,
+    marker,
+    driver: machine.driver,
+    viewer: (cols, rows) => elsewhere.viewer(sid, cols, rows),
+    pane: machine.pane,
+    tell: (text) => elsewhere.postTo(chatWithAgent, text),
+    heard: machine.heard,
+    lap,
+  });
 
   await d.tap(`remove-${agentId}`);
   await d.tap("confirm");

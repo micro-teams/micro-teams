@@ -7,13 +7,13 @@
 # beside it and a private, static tmux — from the same origin it was fetched from, so a
 # fresh machine needs nothing pre-installed.
 # It carries NO secrets and NO business logic: it only drops a binary and records the
-# server URL. Enrollment still happens through the device flow (`microteams link
-# auto-connect` → approve in the browser), so piping this to a shell never grants
+# server URL. Enrollment still happens through the device flow (`microteams enable`
+# → approve in the browser), so piping this to a shell never grants
 # access by itself.
 #
 # Recommended: run as a NORMAL user — `curl … | sh`, no sudo. The binary goes in your
-# ~/.local/bin and config/tmux in your home, and the next step, `microteams link
-# auto-connect`, installs a boot service that runs *as you* (User=<you>), so the
+# ~/.local/bin and config/tmux in your home, and the next step, `microteams
+# enable`, installs a boot service that runs *as you* (User=<you>), so the
 # connector — and every agent it launches — runs under your account.
 #
 # Do NOT run the connector as root. Claude Code refuses `--dangerously-skip-permissions`
@@ -46,7 +46,7 @@ printf "\n${B}microteams connector${Z} ${DIM}· installer${Z}\n\n"
 
 # --- privilege + install locations ------------------------------------------
 # Config + the private tmux always live in the *invoking* user's home and are owned by
-# them, because `microteams link auto-connect` installs a system service that runs as
+# them, because `microteams enable` installs a system service that runs as
 # that user (User=…) and must read them. The binary goes on PATH. Works `| sh` or
 # `| sudo sh`.
 if [ "$(id -u)" = 0 ]; then
@@ -220,6 +220,6 @@ fi
 # One command connects: it logs this machine in (approve in the browser) and installs
 # the boot service — elevating to root for a system-wide service if needed.
 printf "\n${G}Installed.${Z} One more command to go online:\n\n"
-printf "    ${B}microteams link auto-connect${Z}\n\n"
+printf "    ${B}microteams enable${Z}\n\n"
 printf "${DIM}It prints an approve link — open it while logged in to bind this machine.\n"
-printf "Manage later:  microteams status · microteams link connect · microteams uninstall${Z}\n\n"
+printf "Manage later:  microteams status · microteams restart · microteams uninstall${Z}\n\n"

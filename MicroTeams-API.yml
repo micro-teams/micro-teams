@@ -1449,6 +1449,27 @@ components:
           description: >
             Echoed back when the caller supplied one, so a client can recognise its own pending
             message in the one returned (and in a later poll) rather than guessing by content.
+        undelivered:
+          type: array
+          description: >
+            The recipients this message definitely did not reach (an agent whose program could
+            not take it), each with the reason. Absent or empty when nothing is known to have
+            failed.
+          items:
+            $ref: '#/components/schemas/Undelivered'
+
+    Undelivered:
+      type: object
+      description: One recipient a message did not reach, and why.
+      required:
+        - userId
+        - reason
+      properties:
+        userId:
+          type: integer
+          format: int64
+        reason:
+          type: string
 
     # -- Request bodies ----------------------------------------------------
 
