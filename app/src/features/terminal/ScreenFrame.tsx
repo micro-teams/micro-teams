@@ -96,19 +96,16 @@ export function ScreenFrame() {
     repeat.current = {};
   };
   useEffect(() => stopRepeat, []);
-  // On the web a tap moves the focus to what was tapped, which closes the keyboard; the key rows
-  // refuse the tap's default so the terminal keeps it.
+  // On the web the mouse press a tap ends with moves the focus away from the terminal, which closes
+  // the keyboard; the key rows refuse that press's default so the terminal keeps it. (Refusing the
+  // touch's own end instead would also stop the press reaching the keys.)
   const keyRows = useRef<ElementRef<typeof View>>(null);
   useEffect(() => {
     if (!isWeb || !keyRows.current) return;
     const el = keyRows.current as unknown as HTMLElement;
     const keep = (e: Event) => e.preventDefault();
     el.addEventListener("mousedown", keep);
-    el.addEventListener("touchend", keep);
-    return () => {
-      el.removeEventListener("mousedown", keep);
-      el.removeEventListener("touchend", keep);
-    };
+    return () => el.removeEventListener("mousedown", keep);
   }, []);
   const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -268,8 +265,6 @@ export function ScreenFrame() {
               <View key={i} style={styles.keys}>
                 {row.map((k) => {
                   const armed = (k.mod === "ctrl" && ctrl) || (k.mod === "alt" && alt);
-                  // Acting on the finger lifting rather than on the click: on the web the key rows
-                  // refuse the tap's default to keep the focus, and with it the click.
                   const press = () => (k.mod === "ctrl" ? setCtrl(!ctrl) : k.mod === "alt" ? setAlt(!alt) : !k.repeats && send(k.seq ?? ""));
                   const down = () => {
                     if (!k.repeats) return;
