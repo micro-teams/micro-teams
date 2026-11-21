@@ -15,8 +15,10 @@
  *     Esc  /    -    Home ↑  End PgUp
  *     Tab  Ctrl Alt  ←    ↓  →   PgDn
  *
- *   Ctrl and Alt apply to the next key, typed or tapped. Tapping a key never takes the focus from
- *   the terminal, so an open keyboard stays open.
+ *   As in Termux the keys have no borders, light up while pressed and tick in the hand when let
+ *   go; Ctrl and Alt turn blue while they apply to the next key, typed or tapped; the arrows and
+ *   the paging keys repeat while held. Tapping a key never takes the focus from the terminal, so
+ *   an open keyboard stays open.
  *
  *   Nothing that comes and goes changes the terminal's room: the connecting and reconnecting notes
  *   lie over the terminal, the key row is always there where it is shown at all, and the keyboard
@@ -33,6 +35,7 @@ import { useLiveScreen, type ScreenState } from "../../data/screen";
 import { useFrame, useNav } from "../../nav/NavProvider";
 import { hasTouchKeyboard, keyboardInsetKnown, useKeyboardInset } from "../../platform/keyboardInset";
 import { TerminalView, type TerminalViewHandle } from "../../platform/terminal/TerminalView";
+import { tick } from "../../platform/haptics";
 import { isWeb } from "../../platform/platform";
 import { Txt } from "../../ui/kit";
 import { withMods } from "./keys";
@@ -43,12 +46,17 @@ const NOTE_MS = 4_000;
 
 type Icon = keyof typeof MaterialIcons.glyphMap;
 
-type Key = { label: string; testID: string; seq?: string; mod?: "ctrl" | "alt" };
-const key = (label: string, name: string, seq?: string, mod?: Key["mod"]): Key => ({ label, testID: `screen-key-${name}`, seq, mod });
+type Key = { label: string; testID: string; seq?: string; mod?: "ctrl" | "alt"; repeats?: boolean };
+const key = (label: string, name: string, seq?: string, more: Partial<Key> = {}): Key => ({ label, testID: `screen-key-${name}`, seq, ...more });
+const R = { repeats: true };
 const KEY_ROWS: Key[][] = [
-  [key("Esc", "esc", "\x1b"), key("/", "slash", "/"), key("-", "dash", "-"), key("Home", "home", "\x1b[H"), key("↑", "up", "\x1b[A"), key("End", "end", "\x1b[F"), key("PgUp", "pgup", "\x1b[5~")],
-  [key("Tab", "tab", "\t"), key("Ctrl", "ctrl", undefined, "ctrl"), key("Alt", "alt", undefined, "alt"), key("←", "left", "\x1b[D"), key("↓", "down", "\x1b[B"), key("→", "right", "\x1b[C"), key("PgDn", "pgdn", "\x1b[6~")],
+  [key("Esc", "esc", "\x1b"), key("/", "slash", "/"), key("-", "dash", "-"), key("Home", "home", "\x1b[H"), key("↑", "up", "\x1b[A", R), key("End", "end", "\x1b[F"), key("PgUp", "pgup", "\x1b[5~", R)],
+  [key("Tab", "tab", "\t"), key("Ctrl", "ctrl", undefined, { mod: "ctrl" }), key("Alt", "alt", undefined, { mod: "alt" }), key("←", "left", "\x1b[D", R), key("↓", "down", "\x1b[B", R), key("→", "right", "\x1b[C", R), key("PgDn", "pgdn", "\x1b[6~", R)],
 ];
+// A held arrow or paging key types again after REPEAT_DELAY_MS, then every REPEAT_MS, as a
+// keyboard's own keys do.
+const REPEAT_DELAY_MS = 400;
+const REPEAT_MS = 60;
 
 function Small({ icon, label, onPress, testID }: { icon: Icon; label: string; onPress: () => void; testID: string }) {
   return (
@@ -81,6 +89,13 @@ export function ScreenFrame() {
   const { state, screen } = useLiveScreen(sessionId);
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
+  const repeat = useRef<{ delay?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setInterval> }>({});
+  const stopRepeat = () => {
+    if (repeat.current.delay) clearTimeout(repeat.current.delay);
+    if (repeat.current.every) clearInterval(repeat.current.every);
+    repeat.current = {};
+  };
+  useEffect(() => stopRepeat, []);
   // On the web a tap moves the focus to what was tapped, which closes the keyboard; the key rows
   // refuse the tap's default so the terminal keeps it.
   const keyRows = useRef<ElementRef<typeof View>>(null);
@@ -253,10 +268,35 @@ export function ScreenFrame() {
               <View key={i} style={styles.keys}>
                 {row.map((k) => {
                   const armed = (k.mod === "ctrl" && ctrl) || (k.mod === "alt" && alt);
-                  const press = () => (k.mod === "ctrl" ? setCtrl(!ctrl) : k.mod === "alt" ? setAlt(!alt) : send(k.seq ?? ""));
+                  const press = () => (k.mod === "ctrl" ? setCtrl(!ctrl) : k.mod === "alt" ? setAlt(!alt) : !k.repeats && send(k.seq ?? ""));
+                  const down = () => {
+                    if (!k.repeats) return;
+                    stopRepeat();
+                    // Every repeat carries the modifiers the first press had.
+                    const seq = withMods(k.seq ?? "", ctrl, alt);
+                    screen.input(seq);
+                    if (ctrl) setCtrl(false);
+                    if (alt) setAlt(false);
+                    repeat.current.delay = setTimeout(() => {
+                      repeat.current.every = setInterval(() => screen.input(seq), REPEAT_MS);
+                    }, REPEAT_DELAY_MS);
+                  };
+                  const up = () => {
+                    stopRepeat();
+                    tick();
+                  };
                   return (
-                    <Pressable key={k.testID} testID={k.testID} onPress={press} style={[styles.key, armed && styles.armed]}>
-                      <Txt variant="label">{k.label}</Txt>
+                    <Pressable
+                      key={k.testID}
+                      testID={k.testID}
+                      onPress={press}
+                      onPressIn={down}
+                      onPressOut={up}
+                      style={({ pressed }) => [styles.key, pressed && styles.keyDown]}
+                    >
+                      <Txt variant="label" style={armed ? styles.armed : undefined}>
+                        {k.label}
+                      </Txt>
                     </Pressable>
                   );
                 })}
@@ -320,8 +360,9 @@ const styles = StyleSheet.create({
   bannerText: { flex: 1 },
   keyRows: { backgroundColor: colors.raised, paddingHorizontal: 2, paddingVertical: 2, gap: 2 },
   keys: { flexDirection: "row", gap: 3 },
-  key: { flex: 1, height: 30, minWidth: 0, paddingHorizontal: 6, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
-  armed: { backgroundColor: colors.brand },
+  key: { flex: 1, height: 30, minWidth: 0, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  keyDown: { backgroundColor: colors.keyDown },
+  armed: { color: colors.keyArmed },
   sheet: { ...StyleSheet.absoluteFill, backgroundColor: colors.page },
   sheetBody: { padding: 8 },
   copyText: { fontFamily: fonts.mono, fontSize: 12, lineHeight: 16, color: colors.ink },

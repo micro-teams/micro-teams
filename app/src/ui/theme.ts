@@ -22,6 +22,10 @@ export const colors = {
   card: "#0A0A0A",
   raised: "#141414",
   hover: "#1B1B1B",
+  /** A terminal key while a finger is on it. */
+  keyDown: "#3A3A3A",
+  /** The label of a terminal modifier (Ctrl, Alt) that applies to the next key. */
+  keyArmed: "#4FA3FF",
   /** A button that cannot be pressed yet, and the quieter "tonal" button beside a field. */
   disabled: "#262626",
   line: "#242424",
