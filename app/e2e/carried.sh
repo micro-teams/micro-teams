@@ -6,7 +6,9 @@
 # lines doing nothing, and only this asks.
 #
 # Usage: carried.sh [at least]   — fails unless nginx served at least that many /mt/ and /api/
-#                                  requests from the multipath server (default 20); unless the
+#                                  requests from the multipath server (default 10: reads ride the
+#                                  one live socket, so what nginx counts is mostly writes and
+#                                  pictures); unless the
 #                                  app's two WebSockets — the live socket and a live screen —
 #                                  were each opened over the lines and never directly (a viewer
 #                                  the journey opens from outside the app, named by its User-Agent,
@@ -18,7 +20,7 @@
 # The stack must be up (stack.sh), as project e2e.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WANT="${1:-20}"
+WANT="${1:-10}"
 ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1" 2>/dev/null || true; }
 MP_IP="$(ip e2e-multipath-1)" MACHINE_IP="$(ip e2e-machine)"
 LOG="$(docker logs e2e-nginx-1 2>/dev/null)"
