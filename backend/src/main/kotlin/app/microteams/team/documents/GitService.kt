@@ -5,12 +5,19 @@
  *               blobs straight from the bare repo (no worktree); writes go through a
  *               throwaway worktree clone. Concurrency is per team via a ReentrantLock.
  *
+ *               A team's tree is a source for live requests (common/live/Sources.kt), named by
+ *               gitSource(teamId): every read through the bare repo records it, and every write
+ *               that reaches the bare repo publishes it (pushes over smart HTTP are published by
+ *               DocumentGitHttpConfig).
+ *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
  */
 
 package app.microteams.team.documents
 
+import app.microteams.common.live.ChangeBus
+import app.microteams.common.live.ReadSources
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -41,8 +48,11 @@ data class CommitInfo(
 
 data class TreeEntry(val path: String, val mode: String, val type: String, val commitSha: String)
 
+/** The source name (common/live/Sources.kt) of team [teamId]'s document tree. */
+fun gitSource(teamId: Long): String = "git:$teamId"
+
 @Service
-class GitService {
+class GitService(private val bus: ChangeBus = ChangeBus()) {
 
     private val logger = LoggerFactory.getLogger(GitService::class.java)
     private val locks = ConcurrentHashMap<Long, ReentrantLock>()
@@ -268,6 +278,7 @@ class GitService {
 
     /** Opens the bare repo directly — read-only ops (content, log, diff, tree-walk). */
     private fun openBare(teamId: Long): Git {
+        ReadSources.touch(gitSource(teamId))
         val bareDir = bareRepoPath(teamId).toFile()
         require(bareDir.resolve("HEAD").isFile) { "bare repo does not exist for team $teamId" }
         return Git.open(bareDir)
@@ -288,6 +299,7 @@ class GitService {
                 val result = block(git)
                 if (git.remoteList().call().any { it.name == "origin" }) {
                     git.push().setRemote("origin").setPushAll().call()
+                    bus.publish(gitSource(teamId))
                 }
                 return result
             }

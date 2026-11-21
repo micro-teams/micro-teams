@@ -3,7 +3,7 @@
 
 import type { ChatSummary } from '../api'
 import { call } from '../runtime'
-import { JSON_FLAG, clip, done, int, limit, moreHint, need, role, wantsJson } from './util'
+import { JSON_FLAG, clip, done, int, limit, moreHint, need, wantsJson } from './util'
 
 const THREAD: CommandFlag = { name: 'thread-id', type: 'int', required: true, help: 'the group (thread) id' }
 const USER: CommandFlag = { name: 'user-id', type: 'int', required: true, help: 'the member\'s user id' }
@@ -60,7 +60,8 @@ const messages: CommandSpec = {
 
     for (const m of messages) {
       const who = nameById[m.senderId] ?? `#${m.senderId}`
-      microteams.print(`${m.createdAt} ${who}：${m.content}`)
+      if (m.kind === 'TEXT') microteams.print(`${m.createdAt} ${who}：${m.content}`)
+      else microteams.print(`${m.createdAt} (${who} ${m.kind === 'JOINED' ? 'joined' : 'left'})`)
     }
 
     // Page is snake_case on the wire; the generated models keep wire names (modelPropertyNaming=original).
@@ -83,11 +84,6 @@ const list: CommandSpec = {
   name: 'list',
   short: "List the group chats you're in, most recently active first",
   flags: [
-    {
-      name: 'thread-id',
-      type: 'int',
-      help: 'deprecated: use `chat show --thread-id N`',
-    },
     { name: 'limit', type: 'int', help: 'how many groups to list (default 20, max 100)' },
     {
       name: 'page-start',
@@ -98,13 +94,6 @@ const list: CommandSpec = {
     { name: 'json', type: 'bool', help: 'output the raw JSON instead of text lines' },
   ],
   run: (ctx) => {
-    // One group in detail. Without this an agent sees only whoever has spoken lately and cannot
-    // learn who else is in the room — the full membership never appears in the messages it is fed.
-    if (ctx.flags['thread-id'] != null) {
-      chatDetail(Number(ctx.flags['thread-id']), wantsJson(ctx))
-      return
-    }
-
     const resp = call('listChats', { page_size: limit(ctx, 20), page_start: int(ctx, 'page-start') })
 
     if (wantsJson(ctx)) {
@@ -137,7 +126,8 @@ function chatDetail(threadId: number, asJson: boolean) {
   const thread = detail.thread
   const members = detail.members ?? []
   const title = thread?.title || members.map((m) => m.nickname).join('、') || `thread #${threadId}`
-  microteams.print(`#${threadId} ${title}`)
+  microteams.print(`#${threadId} ${title}${detail.isMember ? '' : ' (not joined: `chat join` to speak)'}`)
+  microteams.print(detail.teams.length ? `in teams: ${detail.teams.map((t) => `#${t.id} ${t.name}`).join(', ')}` : 'in no team')
   if (thread?.createdAt) microteams.print(`created ${thread.createdAt}`)
   // NOT thread.updatedAt: on a real thread that is the row's own update time, which a new message
   // does not touch — printing it as "last activity" claimed a group had been silent since the day
@@ -153,12 +143,7 @@ function chatDetail(threadId: number, asJson: boolean) {
     microteams.print('no messages yet')
   }
   microteams.print(`${members.length} member(s):`)
-  for (const m of members) {
-    const name = m.nickname ?? `#${m.userId}`
-    // Only an unusual role is worth printing; everyone being a "MEMBER" is noise.
-    const role = m.role && m.role !== 'MEMBER' ? ` ${m.role}` : ''
-    microteams.print(`  ${name} (#${m.userId})${role}`)
-  }
+  for (const m of members) microteams.print(`  ${m.nickname ?? `#${m.userId}`} (#${m.userId})`)
 }
 
 // One group as one line: id first (an id is what `--thread-id` wants), then title, size, and the
@@ -183,14 +168,14 @@ function chatLine(c: ChatSummary, withMembers: boolean): string {
 
 const show: CommandSpec = {
   name: 'show',
-  short: "One group in detail: its title, last message, and every member with their role",
+  short: "One group in detail: its title, its teams, last message, and every member",
   flags: [THREAD, JSON_FLAG],
   run: (ctx) => chatDetail(Number(need(ctx, 'thread-id')), wantsJson(ctx)),
 }
 
 const create: CommandSpec = {
   name: 'create',
-  short: 'Start a new group chat (you become its owner)',
+  short: 'Start a new group chat in no team (only its members can read it); `team add-chat` starts one in a team',
   flags: [
     { name: 'title', type: 'string', required: true, help: 'the group\'s title' },
     { name: 'members', type: 'string', help: 'comma-separated user ids to add besides yourself' },
@@ -231,23 +216,23 @@ const dissolve: CommandSpec = {
 
 const members: CommandSpec = {
   name: 'members',
-  short: "List a group's members with their roles",
+  short: "List a group's members",
   flags: [THREAD, JSON_FLAG],
   run: (ctx) => {
     const ms = call('listThreadMembers', { id: Number(need(ctx, 'thread-id')) })
     if (wantsJson(ctx)) return microteams.print(JSON.stringify(ms))
-    for (const m of ms) microteams.print(`#${m.userId} ${m.nickname ?? ''} ${m.role}`)
+    for (const m of ms) microteams.print(`#${m.userId} ${m.nickname ?? ''}`)
   },
 }
 
 const addMember: CommandSpec = {
   name: 'add-member',
   short: 'Add someone to a group',
-  flags: [THREAD, USER, { name: 'role', type: 'string', help: 'OWNER, ADMIN or MEMBER (default MEMBER)' }],
+  flags: [THREAD, USER],
   run: (ctx) => {
     const id = Number(need(ctx, 'thread-id'))
     const userId = Number(need(ctx, 'user-id'))
-    call('addThreadMember', { id, AddMemberRequest: { userId, role: role(String(ctx.flags['role'] ?? 'MEMBER')) } })
+    call('addThreadMember', { id, AddMemberRequest: { userId } })
     done(`added #${userId} to group #${id}`)
   },
 }
@@ -264,37 +249,19 @@ const removeMember: CommandSpec = {
   },
 }
 
-const setRole: CommandSpec = {
-  name: 'set-role',
-  short: "Change a member's role in a group",
-  flags: [THREAD, USER, { name: 'role', type: 'string', required: true, help: 'OWNER, ADMIN or MEMBER' }],
+const join: CommandSpec = {
+  name: 'join',
+  short: 'Join a group you can read through one of its teams (members speak; readers only read)',
+  flags: [THREAD],
   run: (ctx) => {
     const id = Number(need(ctx, 'thread-id'))
-    const userId = Number(need(ctx, 'user-id'))
-    const r = role(need(ctx, 'role'))
-    call('changeThreadMemberRole', { id, userId, ChangeRoleRequest: { role: r } })
-    done(`#${userId} is now ${r} in group #${id}`)
+    call('joinThread', { id })
+    done(`joined group #${id}`)
   },
 }
 
 microteams.command({
   name: 'chat',
-  short: 'Group chats: list, read, create, rename, dissolve, and manage members',
-  commands: [list, show, messages, create, rename, dissolve, members, addMember, removeMember, setRole],
+  short: 'Group chats: list, read, create, rename, dissolve, join, and manage members',
+  commands: [list, show, messages, create, rename, dissolve, members, addMember, removeMember, join],
 })
-
-// The pre-0.1.20 spellings. Kept for one release so an agent mid-session does not lose its tools,
-// each saying where the command went; delete them in the release after.
-function deprecated(spec: CommandSpec, old: string, now: string): CommandSpec {
-  return {
-    ...spec,
-    name: old,
-    short: `(deprecated: use \`${now}\`) ${spec.short ?? ''}`,
-    run: (ctx) => {
-      spec.run!(ctx)
-      microteams.print(`(note: \`microteams api ${old}\` is now \`microteams api ${now}\`; the old name goes away next release)`)
-    },
-  }
-}
-microteams.command(deprecated(list, 'chats', 'chat list'))
-microteams.command(deprecated(messages, 'messages', 'chat messages'))

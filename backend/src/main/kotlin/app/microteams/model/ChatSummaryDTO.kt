@@ -10,6 +10,7 @@ import javax.validation.Valid
  * @param members
  * @param updatedAt Last activity (last message time, else the chat's creation time)
  * @param lastMessage
+ * @param isMember Whether the caller is a member; a team's chat list also shows the others.
  */
 data class ChatSummaryDTO(
     @Schema(required = true, description = "")
@@ -37,4 +38,10 @@ data class ChatSummaryDTO(
     @param:JsonProperty("lastMessage")
     @get:JsonProperty("lastMessage")
     val lastMessage: ChatLastMessageDTO? = null,
+    @Schema(
+        description = "Whether the caller is a member; a team's chat list also shows the others.",
+    )
+    @param:JsonProperty("isMember")
+    @get:JsonProperty("isMember")
+    val isMember: kotlin.Boolean? = null,
 ) {}

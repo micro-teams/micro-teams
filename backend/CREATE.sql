@@ -65,6 +65,11 @@ START WITH
     1 INCREMENT BY 50;
 
 CREATE
+    SEQUENCE microteams.team_chat_seq
+START WITH
+    1 INCREMENT BY 50;
+
+CREATE
     SEQUENCE microteams.team_machine_seq
 START WITH
     1 INCREMENT BY 50;
@@ -76,6 +81,11 @@ START WITH
 
 CREATE
     SEQUENCE microteams.team_seq
+START WITH
+    1 INCREMENT BY 50;
+
+CREATE
+    SEQUENCE microteams.team_subteam_seq
 START WITH
     1 INCREMENT BY 50;
 
@@ -133,7 +143,6 @@ CREATE
         microteams.agent_screen(
             agent_user_id BIGINT NOT NULL,
             created_at TIMESTAMP(6) NOT NULL,
-            team_id BIGINT,
             driver VARCHAR(32) NOT NULL,
             sid VARCHAR(32) NOT NULL,
             machine_id VARCHAR(64) NOT NULL,
@@ -167,6 +176,37 @@ CREATE
 
 CREATE
     TABLE
+        microteams.machine_link(
+            connected_at TIMESTAMP(6) NOT NULL,
+            machine_id VARCHAR(64) NOT NULL,
+            origin VARCHAR(255),
+            PRIMARY KEY(machine_id)
+        );
+
+CREATE
+    TABLE
+        microteams.machine_terminal(
+            exit_code INTEGER,
+            created_at TIMESTAMP(6) NOT NULL,
+            opened_by BIGINT NOT NULL,
+            sid VARCHAR(32) NOT NULL,
+            machine_id VARCHAR(64) NOT NULL,
+            token VARCHAR(64) NOT NULL,
+            command TEXT,
+            cwd TEXT,
+            kind VARCHAR(255) NOT NULL CHECK(
+                (
+                    kind IN(
+                        'TERMINAL',
+                        'COMMAND'
+                    )
+                )
+            ),
+            PRIMARY KEY(sid)
+        );
+
+CREATE
+    TABLE
         microteams.message(
             created_at TIMESTAMP(6) NOT NULL,
             deleted_at TIMESTAMP(6),
@@ -177,6 +217,15 @@ CREATE
             updated_at TIMESTAMP(6) NOT NULL,
             client_token VARCHAR(64),
             content TEXT NOT NULL,
+            kind VARCHAR(255) NOT NULL CHECK(
+                (
+                    kind IN(
+                        'TEXT',
+                        'JOINED',
+                        'LEFT'
+                    )
+                )
+            ),
             PRIMARY KEY(id),
             CONSTRAINT uq_message_client_token UNIQUE(
                 thread_id,
@@ -215,6 +264,22 @@ CREATE
 
 CREATE
     TABLE
+        microteams.team_chat(
+            created_at TIMESTAMP(6) NOT NULL,
+            deleted_at TIMESTAMP(6),
+            id BIGINT NOT NULL,
+            team_id BIGINT NOT NULL,
+            thread_id BIGINT NOT NULL,
+            updated_at TIMESTAMP(6) NOT NULL,
+            PRIMARY KEY(id),
+            UNIQUE(
+                team_id,
+                thread_id
+            )
+        );
+
+CREATE
+    TABLE
         microteams.team_machine(
             created_at TIMESTAMP(6) NOT NULL,
             deleted_at TIMESTAMP(6),
@@ -238,16 +303,23 @@ CREATE
             team_id BIGINT NOT NULL,
             updated_at TIMESTAMP(6) NOT NULL,
             user_id BIGINT NOT NULL,
-            ROLE VARCHAR(255) NOT NULL CHECK(
-                (
-                    ROLE IN(
-                        'OWNER',
-                        'ADMIN',
-                        'MEMBER'
-                    )
-                )
-            ),
             PRIMARY KEY(id)
+        );
+
+CREATE
+    TABLE
+        microteams.team_subteam(
+            child_id BIGINT NOT NULL,
+            created_at TIMESTAMP(6) NOT NULL,
+            deleted_at TIMESTAMP(6),
+            id BIGINT NOT NULL,
+            parent_id BIGINT NOT NULL,
+            updated_at TIMESTAMP(6) NOT NULL,
+            PRIMARY KEY(id),
+            UNIQUE(
+                parent_id,
+                child_id
+            )
         );
 
 CREATE
@@ -270,15 +342,6 @@ CREATE
             thread_id BIGINT NOT NULL,
             updated_at TIMESTAMP(6) NOT NULL,
             user_id BIGINT NOT NULL,
-            ROLE VARCHAR(255) NOT NULL CHECK(
-                (
-                    ROLE IN(
-                        'MEMBER',
-                        'ADMIN',
-                        'OWNER'
-                    )
-                )
-            ),
             PRIMARY KEY(id),
             UNIQUE(
                 thread_id,
@@ -302,6 +365,10 @@ CREATE
     microteams.agent_screen(agent_user_id);
 
 CREATE
+    INDEX IDXbs9gpk887sf82um0lm8meowhd ON
+    microteams.machine_terminal(machine_id);
+
+CREATE
     INDEX idx_message_thread_created ON
     microteams.message(
         thread_id,
@@ -315,6 +382,14 @@ CREATE
 CREATE
     INDEX IDXg2l9qqsoeuynt4r5ofdt1x2td ON
     microteams.team(name);
+
+CREATE
+    INDEX IDXivsqb6qgeixdvhst8jhnujg35 ON
+    microteams.team_chat(team_id);
+
+CREATE
+    INDEX IDXnifkej201d22ulitfrx0q3vay ON
+    microteams.team_chat(thread_id);
 
 CREATE
     INDEX IDXa6y5tmsgcryqujws87w8i5dj9 ON
@@ -331,6 +406,14 @@ CREATE
 CREATE
     INDEX IDX5cxwd5p05k1umbxdo1t50xhfy ON
     microteams.team_member(user_id);
+
+CREATE
+    INDEX IDX1dsu5f5n1y8le5a2cv7yuj3ck ON
+    microteams.team_subteam(parent_id);
+
+CREATE
+    INDEX IDX5ltxuws63gbod716doe26iuwi ON
+    microteams.team_subteam(child_id);
 
 ALTER TABLE
     IF EXISTS public.user_profile ADD CONSTRAINT FKo5dcemd97atrmjapi9x4s1j32 FOREIGN KEY(avatar_id) REFERENCES public.avatar;

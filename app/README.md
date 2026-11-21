@@ -56,7 +56,7 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
     src/
       api/        the two servers: cheese-auth (auth.ts) and the backend (client.ts, typed from
                   the generated schema.d.ts)
-      transport/  the MultiPath client every request rides when a session is up, and the updates socket
+      transport/  the MultiPath client every request rides when a session is up, and the live socket
       data/       the session, and every query and action a screen can use
       nav/        the display stack (stack.ts), its React binding, the links from outside
                   (links.ts) and the shell that draws it

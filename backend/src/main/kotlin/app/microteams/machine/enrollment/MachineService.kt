@@ -196,13 +196,12 @@ class MachineService(
     }
 
     /**
-     * Remove a team's binding (its own or another's — symmetric). If that was the last one the
-     * machine is orphaned and nobody could ever reach it again, so it is forgotten outright.
+     * Take the machine out of a team; refused when it would break an invariant
+     * (TeamMachineService).
      */
     fun unbindFromTeam(machineId: String, teamId: IdType) {
         machine(machineId)
         teamMachineService.unbind(machineId, teamId)
-        if (teamMachineService.isOrphaned(machineId)) forgetInternal(machineId)
     }
 
     // -- token resolution --------------------------------------------------

@@ -53,7 +53,7 @@ function Command({ text }: { text: string }) {
 
 export function AddDevice({ team, done }: { team: number; done: (machineId: string | null) => void }) {
   const { origin } = useSession();
-  const spare = useAllMachines().filter((m) => !m.teamIds.includes(team));
+  const spare = useAllMachines().filter((m) => !m.teams.some((t) => t.id === team));
   return (
     <View style={styles.form}>
       {spare.length > 0 && (

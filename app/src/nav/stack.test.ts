@@ -20,13 +20,13 @@ test("back at a section's root has nothing to pop", () => {
 });
 
 test("something opened from another section comes back to where it was opened", () => {
-  let nav = switchSection(initialNav(), "agents");
+  let nav = switchSection(initialNav(), "teams");
   nav = switchTeam(nav, 1);
   nav = push(nav, frame("agent", "detail", { id: 7 }));
   nav = push(nav, frame("thread", "detail", { id: 9 }));
   nav = pop(nav)!;
   expect(top(nav).route).toBe("agent");
-  expect(nav.section).toBe("agents");
+  expect(nav.section).toBe("teams");
 });
 
 test("each section keeps its own place", () => {
@@ -52,12 +52,12 @@ test("each team keeps its own stack in a team-scoped section", () => {
 });
 
 test("a link opened before any team is known is still open once a team is picked", () => {
-  let nav = push(switchSection(initialNav(), "agents"), frame("connect", "detail", { code: "c" }));
+  let nav = push(switchSection(initialNav(), "teams"), frame("connect", "detail", { code: "c" }));
   nav = switchTeam(nav, 3);
-  expect(routes(nav)).toEqual(["agents", "connect"]);
+  expect(routes(nav)).toEqual(["teams", "connect"]);
   expect(stackOf(nav)[0].params).toEqual({ team: 3 });
   nav = switchTeam(nav, 4);
-  expect(routes(nav)).toEqual(["agents"]);
+  expect(routes(nav)).toEqual(["teams"]);
 });
 
 test("a team that is gone takes its stacks with it", () => {

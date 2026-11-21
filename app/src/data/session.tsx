@@ -8,9 +8,8 @@
  *   Every action throws the server's own message. setServer returns the new server's Connection,
  *   so a sign-in right after it goes to the server just chosen.
  * Connection — the same, outside React: one per server, holding the session, the clients and the
- *   updates socket. subscribe(listener) and current() let React read the session; updates is the
- *   UpdatesStore topics are watched in; presence is the registry avatars ask whether they are
- *   agents; close() ends its substrate when another server replaces it.
+ *   live socket. subscribe(listener) and current() let React read the session; live is the
+ *   LiveClient every screen reads through (data/live.ts); close() ends its substrate when another server replaces it.
  *   The socket runs while somebody is signed in and is dialled again when the app comes back to
  *   the foreground. The substrate dials the server's lines as soon as the Connection exists for a
  *   server somebody chose (the page's own, the one stored, or one with a stored session), and for
@@ -34,11 +33,10 @@ import { AppState } from "react-native";
 import * as auth from "../api/auth";
 import { createMtClient, type MtClient } from "../api/client";
 import { pageOrigin } from "../platform/platform";
-import { Presence } from "./presence";
 import { storage } from "../platform/storage";
 import { Substrate } from "../transport/substrate";
-import { UpdatesSocket } from "../transport/updates/socket";
-import { UpdatesStore } from "../transport/updates/store";
+import { LiveClient } from "../transport/live/client";
+import { LiveSocket } from "../transport/live/socket";
 
 export const defaultServer = process.env.EXPO_PUBLIC_DEFAULT_SERVER || "https://microteams.app";
 
@@ -50,10 +48,9 @@ type SignUpForm = { username: string; nickname: string; password: string; email:
 export class Connection {
   readonly substrate: Substrate;
   readonly mt: MtClient;
-  readonly updates = new UpdatesStore();
+  readonly live = new LiveClient(storage);
   readonly token = () => this.session?.accessToken ?? null;
-  readonly presence = new Presence(() => (this.session ? this.mt : null));
-  private socket: UpdatesSocket | null = null;
+  private socket: LiveSocket | null = null;
   private session: auth.Session | null = storage.getJson<auth.Session>(SESSION_KEY);
   private readonly listeners = new Set<() => void>();
 
@@ -93,7 +90,10 @@ export class Connection {
   current = () => this.session;
 
   private adopt(next: auth.Session | null) {
-    if (next?.user.id !== this.session?.user.id) this.queries.clear();
+    if (next?.user.id !== this.session?.user.id) {
+      this.queries.clear();
+      this.live.clear();
+    }
     if (next) storage.setJson(SESSION_KEY, next);
     else storage.remove(SESSION_KEY);
     this.session = next;
@@ -102,10 +102,14 @@ export class Connection {
 
   startSocket() {
     if (this.socket || !this.session) return;
-    this.socket = new UpdatesSocket({
-      store: this.updates,
-      path: () => `/mt/updates?token=${encodeURIComponent(this.session?.accessToken ?? "")}`,
+    this.socket = new LiveSocket({
+      path: () => `/mt/live?token=${encodeURIComponent(this.session?.accessToken ?? "")}`,
       open: this.substrate.openSocket,
+      onOpen: (send) => this.live.connected(send),
+      onFrame: (text) => {
+        this.live.handle(text);
+        if (this.live.unauthorized) void this.reauthorizeLive();
+      },
     });
     this.socket.start();
   }
@@ -113,6 +117,23 @@ export class Connection {
   stopSocket() {
     this.socket?.close();
     this.socket = null;
+    this.live.disconnected();
+  }
+
+  private refreshing = false;
+
+  /** The token ran out under the live socket: refresh it as any request would, and say so. */
+  private async reauthorizeLive() {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    try {
+      // Any request refreshes an expired token (the mt client's reauthorize); this one is cheap.
+      await this.mt.GET("/ping", {});
+      const token = this.session?.accessToken;
+      if (token) this.live.reauthorized(token);
+    } finally {
+      this.refreshing = false;
+    }
   }
 
   /** The app came back to the foreground: the socket may be silently dead. The substrate needs
@@ -164,8 +185,7 @@ export class Connection {
 
 type Value = {
   origin: string;
-  updates: UpdatesStore;
-  presence: Presence;
+  live: LiveClient;
   user: auth.AuthUser | null;
   mt: MtClient | null;
   substrate: Substrate;
@@ -207,8 +227,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const value: Value = {
     origin: conn.origin,
-    updates: conn.updates,
-    presence: conn.presence,
+    live: conn.live,
     user: session?.user ?? null,
     mt: session ? conn.mt : null,
     substrate: conn.substrate,

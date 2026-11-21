@@ -21,7 +21,7 @@ done with tests, not by starting the jar and calling it with curl. See _Testing_
   generated `.kt` file(s) by hand.
 - Same trap one level down: `target/classes` keeps `.class` files for sources that were moved or
   deleted, and the compiler resolves against them. A moved package then produces impossible
-  errors such as "actual type is `team.membership.TeamMemberRole` but `team.TeamMemberRole` was
+  errors such as "actual type is `team.membership.TeamService` but `team.TeamService` was
   expected", and a deleted test class keeps running. **After moving, renaming or deleting
   anything, run `./mvnw clean`.**
 - Controllers implement the generated `XxxApi` interface. Match the generated method
@@ -48,7 +48,8 @@ chat/       ChatController       thread/ message/            (+ WebSocketConfig:
 team/       TeamController       membership/ documents/ machine/
 machine/    MachineController    enrollment/ link/ screen/   (+ MachineWebSocketConfig: raw WS)
 agent/      AgentController      screen/ driver/             (+ AgentAppletController, see §1)
-updates/    UpdatesWebSocketConfig   synced queries pushed to clients (map/ holds one file per topic)
+live/       LiveConfig           /live: any GET held open and answered again when it would change
+common/live/                     what a request read (ReadSources, SqlSourceInspector), what changed (ChangeBus)
 connector/  ConnectorController  install.sh and the connector binaries, at the origin root
 ops/        the operator surface, on the management port only
 user/       read-only mirrors of cheese-auth's tables + RolePermissionService (§5)
@@ -76,13 +77,17 @@ Why the machine/agent split has three layers:
   this" and calls back. **Chat never imports agent**, so group-membership semantics stay inside
   chat.
 
-**`updates/` listens; nobody calls it.** Each topic in `updates/map/` subscribes to events the
-owning module already publishes. No business method notifies the push layer, so a feature never
-has to remember to.
+**Nobody announces a write.** A live request (the `live/` module) is an ordinary GET run again
+through this server's own HTTP port whenever something it read changed. What it read is recorded
+where reads happen (`common/live/SqlSourceInspector` sees every SQL statement; the git layer and the
+machine hub record theirs), and what changed comes from the database itself: at startup
+`live/TableChanges` installs a statement-level trigger on every mapped table that NOTIFYs the table's
+name after commit. Chat delivery to agents follows the same changes (`chat/ChatSubscriptions`). So no
+business method calls into any of this, and a new feature cannot forget to.
 
 Dependency direction is the invariant. It stays exactly:
-`chat → (nothing)`, `team/machine → team`, `machine → team`, `agent → machine, chat, team`,
-`updates → chat, team, machine, agent`.
+`chat → (nothing)`, `team → chat`, `team/machine → team`, `machine → team`, `agent → machine, chat, team`,
+`live → machine`, and everything may use `common/live`.
 
 ## 3. Entities & persistence
 
@@ -135,7 +140,7 @@ Dependency direction is the invariant. It stays exactly:
 
 - **Services return DTOs; controllers are thin.** Do not map entities→DTOs inside controllers.
 - DTO mapping is a **top-level extension function in the service file**:
-  `fun Team.toTeamDTO() = TeamDTO(...)`. Enum conversions: `fun TeamMemberRole.convert() = ...`.
+  `fun Team.toTeamDTO() = TeamDTO(...)`. Enum conversions: `fun MessageKind.toDTO() = ...`.
 - **Auth registration goes in the controller's `@PostConstruct`** (`ownerIds.register(...)` +
   `customAuthLogics.register(...)`), not a separate initializer bean.
 - **Errors: throw `BaseError` subclasses** (`NotFoundError(type, id)`, `BadRequestError(msg)`).

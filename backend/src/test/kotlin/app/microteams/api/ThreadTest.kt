@@ -1,8 +1,8 @@
 /*
- *  Description: Integration test for the chat feature. Drives the /chat and
- *               /chat/{id}/messages endpoints through the full stack — thread
- *               CRUD, membership, messages, pagination and the auth gates — with
- *               real users created via cheese-auth.
+ *  Description: Integration test for chats: a thread in no team is its members' alone; a thread
+ *               in a team is readable by whoever can access the team, who may join it; speaking
+ *               needs membership; members have no roles; joining and leaving are written into the
+ *               thread as JOINED and LEFT lines.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -11,7 +11,6 @@
 
 package app.microteams.api
 
-import org.hamcrest.Matchers.greaterThanOrEqualTo
 import org.json.JSONObject
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
@@ -24,10 +23,13 @@ import org.rucca.cheese.utils.UserCreatorService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
-import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.MockHttpServletRequestDsl
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import org.springframework.test.web.servlet.ResultActionsDsl
+import org.springframework.test.web.servlet.delete
+import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
+import org.springframework.test.web.servlet.post
 
 @SpringBootTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -36,259 +38,163 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class ThreadTest
 @Autowired
 constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCreatorService) {
-
-    lateinit var owner: UserCreatorService.CreateUserResponse
-    lateinit var ownerToken: String
-    lateinit var member: UserCreatorService.CreateUserResponse
-    lateinit var memberToken: String
-    lateinit var stranger: UserCreatorService.CreateUserResponse
-    lateinit var strangerToken: String
-
-    private var threadId: IdType = -1
+    private lateinit var ann: String
+    private lateinit var bob: String
+    private lateinit var cat: String
+    private var bobId: IdType = -1
+    private var catId: IdType = -1
+    private var direct: IdType = -1
+    private var teamId: IdType = -1
+    private var teamChat: IdType = -1
 
     @BeforeAll
     fun prepare() {
-        owner = userCreatorService.createUser()
-        ownerToken = userCreatorService.login(owner.username, owner.password)
-        member = userCreatorService.createUser()
-        memberToken = userCreatorService.login(member.username, member.password)
-        stranger = userCreatorService.createUser()
-        strangerToken = userCreatorService.login(stranger.username, stranger.password)
+        val a = userCreatorService.createUser()
+        val b = userCreatorService.createUser()
+        val c = userCreatorService.createUser()
+        ann = userCreatorService.login(a.username, a.password)
+        bob = userCreatorService.login(b.username, b.password)
+        cat = userCreatorService.login(c.username, c.password)
+        bobId = b.userId
+        catId = c.userId
     }
+
+    private fun MockHttpServletRequestDsl.auth(token: String, body: String? = null) {
+        header("Authorization", "Bearer $token")
+        if (body != null) {
+            contentType = org.springframework.http.MediaType.APPLICATION_JSON
+            content = body
+        }
+    }
+
+    private fun json(r: ResultActionsDsl) = JSONObject(r.andReturn().response.contentAsString)
 
     @Test
     @Order(10)
-    fun createThread() {
-        val response =
-            mockMvc
-                .perform(
-                    post("/chat")
-                        .header("Authorization", "Bearer $ownerToken")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""{"title":"Design chat"}"""),
+    fun aThreadInNoTeamIsItsMembersAlone() {
+        direct =
+            json(
+                    mockMvc
+                        .post("/chat") { auth(ann, """{"title":"direct","memberIds":[$bobId]}""") }
+                        .andExpect { status { isCreated() } },
                 )
-                .andExpect(status().isCreated)
-                .andExpect(jsonPath("$.id").isNumber)
-                .andExpect(jsonPath("$.title").value("Design chat"))
-                .andReturn()
-        threadId = JSONObject(response.response.contentAsString).getLong("id")
-    }
-
-    @Test
-    @Order(11)
-    fun createThreadRejectsUnknownMemberId() {
-        // A memberId that refers to no existing user must be rejected (400), not silently
-        // added as a phantom member. 999999999 is far beyond any id cheese-auth issues.
+                .getLong("id")
         mockMvc
-            .perform(
-                post("/chat")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"bogus","memberIds":[999999999]}"""),
-            )
-            .andExpect(status().isBadRequest)
+            .get("/chat/$direct") { auth(bob) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.isMember") { value(true) }
+            }
+        mockMvc.get("/chat/$direct") { auth(cat) }.andExpect { status { isForbidden() } }
+        mockMvc.get("/chat/$direct/messages") { auth(cat) }.andExpect { status { isForbidden() } }
+        mockMvc.post("/chat/$direct/join") { auth(cat) }.andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(20)
-    fun getThreadShowsOwnerMembership() {
+    fun everyMemberMaySpeakRenameAndAdd() {
         mockMvc
-            .perform(get("/chat/$threadId").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.thread.id").value(threadId))
-            .andExpect(jsonPath("$.members[0].userId").value(owner.userId))
-            .andExpect(jsonPath("$.members[0].role").value("OWNER"))
+            .post("/chat/$direct/messages") { auth(bob, """{"content":"hello"}""") }
+            .andExpect { status { isCreated() } }
+        mockMvc
+            .patch("/chat/$direct") { auth(bob, """{"title":"renamed by bob"}""") }
+            .andExpect { status { isOk() } }
+        mockMvc
+            .post("/chat/$direct/members") { auth(bob, """{"userId":$catId}""") }
+            .andExpect { status { isNoContent() } }
+        mockMvc
+            .get("/chat/$direct/messages") { auth(cat) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.messages[0].kind") { value("TEXT") }
+                jsonPath("$.messages[0].content") { value("hello") }
+                jsonPath("$.messages[1].kind") { value("JOINED") }
+                jsonPath("$.messages[1].senderId") { value(catId) }
+            }
     }
 
     @Test
-    @Order(21)
-    fun listThreadsIsPaginated() {
+    @Order(30)
+    fun leavingIsWrittenIntoTheThread() {
         mockMvc
-            .perform(get("/chat").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.chats[0].id").value(threadId))
-            .andExpect(jsonPath("$.page.page_size").value(1))
-            .andExpect(jsonPath("$.page.has_more").value(false))
-    }
-
-    // strangerCannotReadThread lived here. The journey asks it the way a person would: a second
-    // person signs up, goes to the first person's conversation by its address, and is given
-    // nothing. That covers more than this did — it caught the app painting the previous account's
-    // messages while the server was correctly refusing every request behind them with a 403.
-
-    @Test
-    @Order(31)
-    fun anonymousIsUnauthorized() {
-        mockMvc.perform(get("/chat/$threadId")).andExpect(status().isUnauthorized)
+            .delete("/chat/$direct/members/$catId") { auth(cat) }
+            .andExpect { status { isNoContent() } }
+        mockMvc
+            .get("/chat/$direct/messages") { auth(ann) }
+            .andExpect { jsonPath("$.messages[2].kind") { value("LEFT") } }
+        mockMvc
+            .post("/chat/$direct/messages") { auth(cat, """{"content":"still here?"}""") }
+            .andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(40)
-    fun ownerAddsMember() {
+    fun aTeamsThreadIsReadableByTheTeamAndJoinable() {
+        teamId =
+            json(
+                    mockMvc
+                        .post("/team") { auth(ann, """{"name":"chat team"}""") }
+                        .andExpect { status { isCreated() } },
+                )
+                .getLong("id")
         mockMvc
-            .perform(
-                post("/chat/$threadId/members")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"userId":${member.userId},"role":"MEMBER"}"""),
-            )
-            .andExpect(status().isNoContent)
-        mockMvc
-            .perform(get("/chat/$threadId/members").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.length()").value(2))
-    }
+            .post("/team/$teamId/members") { auth(ann, """{"userId":$catId}""") }
+            .andExpect { status { isNoContent() } }
+        teamChat =
+            json(
+                    mockMvc
+                        .post("/team/$teamId/chats") { auth(ann, """{"title":"general"}""") }
+                        .andExpect { status { isOk() } },
+                )
+                .getLong("id")
 
-    @Test
-    @Order(41)
-    fun memberCanReadThread() {
+        // Cat can access the team, so reads the thread without being a member, and is told so.
         mockMvc
-            .perform(get("/chat/$threadId").header("Authorization", "Bearer $memberToken"))
-            .andExpect(status().isOk)
+            .get("/chat/$teamChat") { auth(cat) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.isMember") { value(false) }
+                jsonPath("$.teams[0].id") { value(teamId) }
+            }
+        mockMvc
+            .get("/team/$teamId/chats") { auth(cat) }
+            .andExpect {
+                jsonPath("$.chats[0].id") { value(teamChat) }
+                jsonPath("$.chats[0].isMember") { value(false) }
+            }
+        // Reading is not speaking.
+        mockMvc
+            .post("/chat/$teamChat/messages") { auth(cat, """{"content":"hi"}""") }
+            .andExpect { status { isForbidden() } }
+        mockMvc.post("/chat/$teamChat/join") { auth(cat) }.andExpect { status { isNoContent() } }
+        mockMvc
+            .post("/chat/$teamChat/messages") { auth(cat, """{"content":"hi"}""") }
+            .andExpect { status { isCreated() } }
+        // Bob is outside the team: nothing to read, nothing to join.
+        mockMvc.get("/chat/$teamChat") { auth(bob) }.andExpect { status { isForbidden() } }
+        mockMvc.post("/chat/$teamChat/join") { auth(bob) }.andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(50)
-    fun ordinaryMemberCannotAddMembers() {
+    fun aThreadIsPutIntoATeamOnlyByWhoeverCanReadIt() {
+        // Cat can access the team but cannot read the direct thread (she left it).
         mockMvc
-            .perform(
-                post("/chat/$threadId/members")
-                    .header("Authorization", "Bearer $memberToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
-            )
-            .andExpect(status().isForbidden)
+            .post("/team/$teamId/chats") { auth(cat, """{"threadId":$direct}""") }
+            .andExpect { status { isForbidden() } }
+        mockMvc
+            .post("/team/$teamId/chats") { auth(ann, """{"threadId":$direct}""") }
+            .andExpect { status { isOk() } }
+        mockMvc.get("/chat/$direct") { auth(cat) }.andExpect { status { isOk() } }
+        mockMvc
+            .delete("/team/$teamId/chats/$direct") { auth(cat) }
+            .andExpect { status { isNoContent() } }
+        mockMvc.get("/chat/$direct") { auth(cat) }.andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(60)
-    fun memberPostsMessage() {
-        mockMvc
-            .perform(
-                post("/chat/$threadId/messages")
-                    .header("Authorization", "Bearer $memberToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"content":"hello team"}"""),
-            )
-            .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.content").value("hello team"))
-            .andExpect(jsonPath("$.senderId").value(member.userId))
-    }
-
-    @Test
-    @Order(61)
-    fun listMessagesIsPaginated() {
-        mockMvc
-            .perform(get("/chat/$threadId/messages").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.messages[0].content").value("hello team"))
-            .andExpect(jsonPath("$.page.page_size", greaterThanOrEqualTo(1)))
-    }
-
-    @Test
-    @Order(63)
-    fun listMessagesReturnsTheNewestPageNotTheOldest() {
-        // Post four messages, then ask for a page of 3: the response must be the three NEWEST
-        // (pg-b, pg-c, pg-d) in ascending order — not the oldest — so a thread longer than the
-        // page always opens on its latest messages. Robust to any messages posted before this.
-        for (c in listOf("pg-a", "pg-b", "pg-c", "pg-d")) {
-            mockMvc
-                .perform(
-                    post("/chat/$threadId/messages")
-                        .header("Authorization", "Bearer $ownerToken")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""{"content":"$c"}"""),
-                )
-                .andExpect(status().isCreated)
-        }
-        mockMvc
-            .perform(
-                get("/chat/$threadId/messages")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .param("page_size", "3"),
-            )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.messages.length()").value(3))
-            // ascending within the page, newest last
-            .andExpect(jsonPath("$.messages[0].content").value("pg-b"))
-            .andExpect(jsonPath("$.messages[2].content").value("pg-d"))
-    }
-
-    @Test
-    @Order(62)
-    fun strangerCannotPostMessage() {
-        mockMvc
-            .perform(
-                post("/chat/$threadId/messages")
-                    .header("Authorization", "Bearer $strangerToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"content":"intruder"}"""),
-            )
-            .andExpect(status().isForbidden)
-    }
-
-    @Test
-    @Order(70)
-    fun ordinaryMemberCannotRename() {
-        mockMvc
-            .perform(
-                patch("/chat/$threadId")
-                    .header("Authorization", "Bearer $memberToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"nope"}"""),
-            )
-            .andExpect(status().isForbidden)
-    }
-
-    @Test
-    @Order(71)
-    fun ownerRenamesThread() {
-        mockMvc
-            .perform(
-                patch("/chat/$threadId")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"Design chat (renamed)"}"""),
-            )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.title").value("Design chat (renamed)"))
-    }
-
-    @Test
-    @Order(80)
-    fun promotedAdminCanRename() {
-        mockMvc
-            .perform(
-                patch("/chat/$threadId/members/${member.userId}")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"role":"ADMIN"}"""),
-            )
-            .andExpect(status().isNoContent)
-        mockMvc
-            .perform(
-                patch("/chat/$threadId")
-                    .header("Authorization", "Bearer $memberToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"title":"Design chat (by admin)"}"""),
-            )
-            .andExpect(status().isOk)
-    }
-
-    @Test
-    @Order(85)
-    fun adminCannotDissolveThread() {
-        // dissolve is owner-only ("owned"); the member is an admin now.
-        mockMvc
-            .perform(delete("/chat/$threadId").header("Authorization", "Bearer $memberToken"))
-            .andExpect(status().isForbidden)
-    }
-
-    @Test
-    @Order(90)
-    fun ownerDissolvesThread() {
-        mockMvc
-            .perform(delete("/chat/$threadId").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isNoContent)
+    fun anyMemberMayDeleteTheThread() {
+        mockMvc.delete("/chat/$teamChat") { auth(cat) }.andExpect { status { isNoContent() } }
     }
 }

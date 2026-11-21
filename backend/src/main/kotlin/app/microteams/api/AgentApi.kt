@@ -101,7 +101,15 @@ interface AgentApi {
         value = [PATH_GET_GIT_WORKSPACE],
         produces = ["application/json"],
     )
-    fun getGitWorkspace(): ResponseEntity<AgentGitWorkspaceDTO> {
+    fun getGitWorkspace(
+        @Parameter(
+            description =
+                "Which of the agent's teams; may be omitted when the agent is in exactly one.",
+        )
+        @Valid
+        @RequestParam(value = "teamId", required = false)
+        teamId: kotlin.Long?,
+    ): ResponseEntity<AgentGitWorkspaceDTO> {
         return ResponseEntity(HttpStatus.NOT_IMPLEMENTED)
     }
 

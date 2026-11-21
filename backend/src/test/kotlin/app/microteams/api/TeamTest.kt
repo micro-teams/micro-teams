@@ -1,7 +1,9 @@
 /*
- *  Description: Integration test for the team feature. Drives the /teams
- *               endpoints through the full servlet + auth + JPA stack, with
- *               real users created via cheese-auth.
+ *  Description: Integration test for teams as trust groups: members have no roles, anyone who
+ *               can access a team may add and remove people in it, anyone may leave, a team inside
+ *               another is accessible to the outer team's members (transitively) without their
+ *               being members, nesting needs access to both teams and refuses cycles, and the team
+ *               picker (GET /team) lists only memberships.
  *
  *  Author(s):
  *      Nictheboy Li    <nictheboy@outlook.com>
@@ -10,7 +12,6 @@
 
 package app.microteams.api
 
-import kotlin.math.floor
 import org.json.JSONObject
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
@@ -23,9 +24,14 @@ import org.rucca.cheese.utils.UserCreatorService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.MockHttpServletRequestDsl
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import org.springframework.test.web.servlet.ResultActionsDsl
+import org.springframework.test.web.servlet.delete
+import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
+import org.springframework.test.web.servlet.post
 
 @SpringBootTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -34,224 +40,157 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class TeamTest
 @Autowired
 constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCreatorService) {
-
-    lateinit var owner: UserCreatorService.CreateUserResponse
-    lateinit var ownerToken: String
-    lateinit var member: UserCreatorService.CreateUserResponse
-    lateinit var memberToken: String
-    lateinit var stranger: UserCreatorService.CreateUserResponse
-    lateinit var strangerToken: String
-
-    private val teamName = "Test Team ${floor(Math.random() * 1e10).toLong()}"
-    private var teamId: IdType = -1
+    private lateinit var ann: String
+    private lateinit var bob: String
+    private lateinit var cat: String
+    private var annId: IdType = -1
+    private var bobId: IdType = -1
+    private var catId: IdType = -1
+    private var root: IdType = -1
+    private var task: IdType = -1
+    private var leaf: IdType = -1
+    private var bobs: IdType = -1
 
     @BeforeAll
     fun prepare() {
-        owner = userCreatorService.createUser()
-        ownerToken = userCreatorService.login(owner.username, owner.password)
-        member = userCreatorService.createUser()
-        memberToken = userCreatorService.login(member.username, member.password)
-        stranger = userCreatorService.createUser()
-        strangerToken = userCreatorService.login(stranger.username, stranger.password)
+        val a = userCreatorService.createUser()
+        val b = userCreatorService.createUser()
+        val c = userCreatorService.createUser()
+        ann = userCreatorService.login(a.username, a.password)
+        bob = userCreatorService.login(b.username, b.password)
+        cat = userCreatorService.login(c.username, c.password)
+        annId = a.userId
+        bobId = b.userId
+        catId = c.userId
     }
+
+    private fun MockHttpServletRequestDsl.auth(token: String, body: String? = null) {
+        header("Authorization", "Bearer $token")
+        if (body != null) {
+            contentType = MediaType.APPLICATION_JSON
+            content = body
+        }
+    }
+
+    private fun id(r: ResultActionsDsl) =
+        JSONObject(r.andReturn().response.contentAsString).getLong("id")
 
     @Test
     @Order(10)
-    fun createTeam() {
-        val response =
-            mockMvc
-                .perform(
-                    post("/team")
-                        .header("Authorization", "Bearer $ownerToken")
-                        .contentType("application/json")
-                        .content("""{"name":"$teamName"}"""),
-                )
-                .andExpect(status().isCreated)
-                .andExpect(jsonPath("$.id").isNumber)
-                .andExpect(jsonPath("$.name").value(teamName))
-                .andReturn()
-        teamId = JSONObject(response.response.contentAsString).getLong("id")
+    fun theCreatorIsTheFirstMember() {
+        root =
+            id(
+                mockMvc
+                    .post("/team") { auth(ann, """{"name":"root"}""") }
+                    .andExpect { status { isCreated() } },
+            )
+        mockMvc
+            .get("/team/$root") { auth(ann) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.members[0].userId") { value(annId) }
+                jsonPath("$.isMember") { value(true) }
+            }
+        mockMvc.get("/team/$root") { auth(bob) }.andExpect { status { isForbidden() } }
+        mockMvc.get("/team/$root") {}.andExpect { status { isUnauthorized() } }
     }
 
     @Test
     @Order(20)
-    fun getTeamShowsOwnerMembership() {
+    fun anyMemberAddsAndRemovesAndAnyoneLeaves() {
         mockMvc
-            .perform(get("/team/$teamId").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.team.id").value(teamId))
-            .andExpect(jsonPath("$.team.name").value(teamName))
-            .andExpect(jsonPath("$.members[0].userId").value(owner.userId))
-            .andExpect(jsonPath("$.members[0].role").value("OWNER"))
-    }
-
-    @Test
-    @Order(21)
-    fun listMyTeamsIsPaginated() {
-        // A freshly-created user owns exactly this one team.
+            .post("/team/$root/members") { auth(ann, """{"userId":$bobId}""") }
+            .andExpect { status { isNoContent() } }
+        // Bob has no role, and needs none to add Cat.
         mockMvc
-            .perform(get("/team").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.teams[0].id").value(teamId))
-            .andExpect(jsonPath("$.teams[0].name").value(teamName))
-            .andExpect(jsonPath("$.page.page_size").value(1))
-            .andExpect(jsonPath("$.page.has_more").value(false))
-    }
-
-    @Test
-    @Order(22)
-    fun listMyTeamsFiltersByRole() {
-        // caller is OWNER of the team → OWNER filter keeps it, MEMBER filter drops it.
+            .post("/team/$root/members") { auth(bob, """{"userId":$catId}""") }
+            .andExpect { status { isNoContent() } }
         mockMvc
-            .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "OWNER"),
-            )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.teams[0].id").value(teamId))
+            .patch("/team/$root") { auth(cat, """{"name":"root renamed"}""") }
+            .andExpect { status { isOk() } }
         mockMvc
-            .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "MEMBER"),
-            )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.teams.length()").value(0))
+            .delete("/team/$root/members/$catId") { auth(cat) }
+            .andExpect { status { isNoContent() } }
+        mockMvc.get("/team/$root") { auth(cat) }.andExpect { status { isForbidden() } }
+        // Cat, outside, cannot remove anyone.
         mockMvc
-            .perform(
-                get("/team").header("Authorization", "Bearer $ownerToken").param("role", "BOGUS"),
-            )
-            .andExpect(status().isBadRequest)
+            .delete("/team/$root/members/$bobId") { auth(cat) }
+            .andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(30)
-    fun strangerCannotReadTeam() {
+    fun aTeamInsideAnotherIsAccessibleToTheOuterTeamTransitively() {
+        task =
+            id(
+                mockMvc
+                    .post("/team") { auth(ann, """{"name":"task","parentId":$root}""") }
+                    .andExpect { status { isCreated() } },
+            )
         mockMvc
-            .perform(get("/team/$teamId").header("Authorization", "Bearer $strangerToken"))
-            .andExpect(status().isForbidden)
-    }
+            .post("/team/$task/members") { auth(ann, """{"userId":$catId}""") }
+            .andExpect { status { isNoContent() } }
+        leaf =
+            id(
+                mockMvc
+                    .post("/team") { auth(cat, """{"name":"leaf","parentId":$task}""") }
+                    .andExpect { status { isCreated() } },
+            )
 
-    @Test
-    @Order(31)
-    fun anonymousIsUnauthorized() {
-        mockMvc.perform(get("/team/$teamId")).andExpect(status().isUnauthorized)
+        // Bob is a member of root only, and reaches the leaf two levels down without joining it.
+        mockMvc
+            .get("/team/$leaf") { auth(bob) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.isMember") { value(false) }
+                jsonPath("$.parents[0].id") { value(task) }
+            }
+        mockMvc
+            .get("/team/$root") { auth(bob) }
+            .andExpect { jsonPath("$.subteams[0].id") { value(task) } }
+        // Trust goes down, not up: Cat, in task, cannot see root.
+        mockMvc.get("/team/$root") { auth(cat) }.andExpect { status { isForbidden() } }
+        // The picker lists memberships only.
+        mockMvc.get("/team") { auth(bob) }.andExpect { jsonPath("$.teams.length()") { value(1) } }
     }
 
     @Test
     @Order(40)
-    fun ownerAddsMember() {
-        mockMvc
-            .perform(
-                post("/team/$teamId/members")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType("application/json")
-                    .content("""{"userId":${member.userId},"role":"MEMBER"}"""),
+    fun nestingNeedsBothTeamsAndRefusesCycles() {
+        bobs =
+            id(
+                mockMvc
+                    .post("/team") { auth(bob, """{"name":"bob's"}""") }
+                    .andExpect { status { isCreated() } },
             )
-            .andExpect(status().isNoContent)
+        // Cat can access leaf but not bob's team: she cannot nest one in the other either way.
         mockMvc
-            .perform(get("/team/$teamId/members").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.length()").value(2))
-    }
-
-    @Test
-    @Order(41)
-    fun memberCanNowReadTeam() {
+            .post("/team/$leaf/subteams") { auth(cat, """{"teamId":$bobs}""") }
+            .andExpect { status { isForbidden() } }
         mockMvc
-            .perform(get("/team/$teamId").header("Authorization", "Bearer $memberToken"))
-            .andExpect(status().isOk)
+            .post("/team/$bobs/subteams") { auth(cat, """{"teamId":$leaf}""") }
+            .andExpect { status { isForbidden() } }
+        // Bob can access both.
+        mockMvc
+            .post("/team/$bobs/subteams") { auth(bob, """{"teamId":$leaf}""") }
+            .andExpect { status { isNoContent() } }
+        // Root contains leaf; putting root inside leaf would make a cycle.
+        mockMvc
+            .post("/team/$leaf/subteams") { auth(bob, """{"teamId":$root}""") }
+            .andExpect { status { isBadRequest() } }
+        // A subteam cannot take itself out of its parent: the edge is the parent's.
+        mockMvc
+            .delete("/team/$task/subteams/$leaf") { auth(bob) }
+            .andExpect { status { isNoContent() } }
+        mockMvc
+            .delete("/team/$bobs/subteams/$leaf") { auth(cat) }
+            .andExpect { status { isForbidden() } }
     }
 
     @Test
     @Order(50)
-    fun ordinaryMemberCannotAddMembers() {
-        // update on team requires admin+.
-        mockMvc
-            .perform(
-                post("/team/$teamId/members")
-                    .header("Authorization", "Bearer $memberToken")
-                    .contentType("application/json")
-                    .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
-            )
-            .andExpect(status().isForbidden)
-    }
-
-    @Test
-    @Order(51)
-    fun ownerPromotesMemberToAdmin() {
-        mockMvc
-            .perform(
-                patch("/team/$teamId/members/${member.userId}")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType("application/json")
-                    .content("""{"role":"ADMIN"}"""),
-            )
-            .andExpect(status().isNoContent)
-    }
-
-    @Test
-    @Order(52)
-    fun adminCanAddAndRemoveMembersCleanly() {
-        fun addStranger() =
-            mockMvc
-                .perform(
-                    post("/team/$teamId/members")
-                        .header("Authorization", "Bearer $memberToken")
-                        .contentType("application/json")
-                        .content("""{"userId":${stranger.userId},"role":"MEMBER"}"""),
-                )
-                .andExpect(status().isNoContent)
-        fun removeStranger() =
-            mockMvc
-                .perform(
-                    delete("/team/$teamId/members/${stranger.userId}")
-                        .header("Authorization", "Bearer $ownerToken"),
-                )
-                .andExpect(status().isNoContent)
-        fun memberCount(expected: Int) =
-            mockMvc
-                .perform(get("/team/$teamId/members").header("Authorization", "Bearer $ownerToken"))
-                .andExpect(jsonPath("$.length()").value(expected))
-
-        // admin (the promoted member) can add; owner + member + stranger = 3.
-        addStranger()
-        memberCount(3)
-        // hard delete → back to 2.
-        removeStranger()
-        memberCount(2)
-        // re-adding after a remove must be clean: 3 again, not 4 (no stale row).
-        addStranger()
-        memberCount(3)
-        removeStranger()
-        memberCount(2)
-    }
-
-    @Test
-    @Order(60)
-    fun renameTeam() {
-        mockMvc
-            .perform(
-                patch("/team/$teamId")
-                    .header("Authorization", "Bearer $ownerToken")
-                    .contentType("application/json")
-                    .content("""{"name":"$teamName (renamed)"}"""),
-            )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.name").value("$teamName (renamed)"))
-    }
-
-    @Test
-    @Order(70)
-    fun adminCannotDeleteTeam() {
-        // delete is owner-only ("owned" predicate); the member is an admin now.
-        mockMvc
-            .perform(delete("/team/$teamId").header("Authorization", "Bearer $memberToken"))
-            .andExpect(status().isForbidden)
-    }
-
-    @Test
-    @Order(90)
-    fun ownerDeletesTeam() {
-        mockMvc
-            .perform(delete("/team/$teamId").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isNoContent)
+    fun anyoneWhoCanAccessATeamMayDeleteIt() {
+        mockMvc.delete("/team/$bobs") { auth(bob) }.andExpect { status { isNoContent() } }
+        mockMvc.get("/team/$leaf") { auth(bob) }.andExpect { status { isForbidden() } }
     }
 }

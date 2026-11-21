@@ -14,7 +14,8 @@ import javax.validation.Valid
  * @param avatarId
  * @param machineId
  * @param sid The live screen id -- present only if the caller may watch it
- * @param teamId
+ * @param teams The teams the agent is in.
+ * @param chats The chats the agent is a member of.
  * @param driver Which driver runs it (claude, codex, ...)
  * @param vars Whatever the driver mirrors up about the live screen (e.g. elapsed, tokens). Opaque
  *   to the machine layer; the UI reads what it recognises.
@@ -46,10 +47,16 @@ data class AgentDTO(
     @param:JsonProperty("sid")
     @get:JsonProperty("sid")
     val sid: kotlin.String? = null,
-    @Schema(description = "")
-    @param:JsonProperty("teamId")
-    @get:JsonProperty("teamId")
-    val teamId: kotlin.Long? = null,
+    @field:Valid
+    @Schema(description = "The teams the agent is in.")
+    @param:JsonProperty("teams")
+    @get:JsonProperty("teams")
+    val teams: kotlin.collections.List<TeamDTO>? = null,
+    @field:Valid
+    @Schema(description = "The chats the agent is a member of.")
+    @param:JsonProperty("chats")
+    @get:JsonProperty("chats")
+    val chats: kotlin.collections.List<ThreadDTO>? = null,
     @Schema(description = "Which driver runs it (claude, codex, ...)")
     @param:JsonProperty("driver")
     @get:JsonProperty("driver")

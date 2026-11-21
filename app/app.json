@@ -2,7 +2,7 @@
   "expo": {
     "name": "MicroTeams",
     "slug": "microteams",
-    "version": "0.1.19",
+    "version": "0.2.0",
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
