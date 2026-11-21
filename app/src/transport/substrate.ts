@@ -19,6 +19,11 @@
  *   socket's and the live screen's open(); directly, logged and counted, when no session is live
  *   (waiting for one as fetch does: at most FALLBACK_AFTER after the start, or while a session is
  *   being replaced) or the stream has not opened within REQUEST_WAIT.
+ * substrate.quickestLine() → { origin, id } — where to fetch one large file from: of the lines that
+ *   are up and answer (not soft down), the one with the smallest round trip the session measures.
+ *   A large file goes to the system's own downloader over that one line rather than over every
+ *   line at once, which would cost each line the whole file. Before any line is measured (or before
+ *   the client starts) it is this server's origin with id null, which the caller shows.
  * substrate.diagnostics() → Diagnostics — everything the lines panel shows and copies: the client's
  *   stats (session, every line, every stream), the fallbacks with their reasons, and the latest
  *   events (lines up and down, sessions started and ended).
@@ -31,7 +36,8 @@
  * cheese-auth (api/auth.ts) — signing in rides the httpOnly refresh cookie, which a browser attaches
  * only to its own requests, never to bytes a script sends over another transport, and a picture is
  * posted as the platform's own file upload — and an installer download (one large file for the
- * system to fetch). The page's own files ride the lines through the service worker (worker/sw.ts).
+ * system to fetch, from quickestLine()). The page's own files ride the lines through the service
+ * worker (worker/sw.ts).
  */
 import { Client, createLineRouter, type ClientEvent, type ClientStats, type LineRouter, type StoredLines } from "@micro-teams/multipath";
 import { isWeb } from "../platform/platform";
@@ -190,6 +196,12 @@ export class Substrate {
     })();
     return wire;
   };
+
+  quickestLine(): { origin: string; id: string | null } {
+    const lines = this.started?.client.stats().lines ?? [];
+    const best = lines.filter((l) => l.state === "up" && !l.soft && l.rttMs > 0).sort((a, b) => a.rttMs - b.rttMs)[0];
+    return best ? { origin: best.url, id: best.id } : { origin: this.origin, id: null };
+  }
 
   diagnostics(): Diagnostics {
     return {

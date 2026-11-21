@@ -6,7 +6,7 @@
  *   plain download link. onStart is called on the tap, on both: a download shows nothing until the
  *   server answers, so the caller can say that it is on its way.
  *
- * Example: <DownloadLink url={`${origin}${p.url}`} label="download android" onStart={tell}><Icon /></DownloadLink>
+ * Example: <DownloadLink url={`${from.origin}${p.url}`} label="download android" onStart={tell}><Icon /></DownloadLink>
  */
 import type { ReactNode } from "react";
 import { Linking, Pressable, type StyleProp, type ViewStyle } from "react-native";

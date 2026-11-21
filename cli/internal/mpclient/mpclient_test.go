@@ -1,7 +1,9 @@
 // The supervisor against the real thing: the multipath-client binary built from the pinned module,
 // a MultiPath server in this process, and a plain HTTP target behind it. A request sent through
-// Transport must reach the target, the client must keep the line list in its cache file, a client
-// that dies must be started again, and Fetch must refuse a download that does not run.
+// Transport must reach the target, the client must keep the line list in its cache file and name
+// its quickest line once it has measured it, a client that dies must be started again, and Fetch
+// must refuse a download that does not run. quickest picks the answering line with the smallest
+// round trip.
 package mpclient
 
 import (
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/micro-teams/micro-connector/cli/update"
+	"github.com/micro-teams/multipath/go/client"
 	"github.com/micro-teams/multipath/go/protocol"
 	"github.com/micro-teams/multipath/go/server"
 
@@ -110,6 +113,17 @@ func TestRequestsGoThroughASupervisedClientThatIsStartedAgainWhenItDies(t *testi
 	if err != nil {
 		t.Fatalf("Lookup of a live client: %v", err)
 	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		if l, ok := s.Quickest(); ok {
+			if l.URL != origin {
+				t.Fatalf("the quickest line is %+v, want the deployment's only line %s", l, origin)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the client never measured its line")
+		}
+	}
 	c := &http.Client{Transport: Transport(addr), Timeout: 10 * time.Second}
 	resp, err := c.Get("https://api.example/mt/ping")
 	if err != nil {
@@ -186,5 +200,21 @@ func TestFetchInstallsARunnableClientAndRefusesAnythingElse(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(filepath.Dir(dest), ".*"))
 	if len(left) != 0 {
 		t.Errorf("a refused download left files behind: %v", left)
+	}
+}
+
+func TestQuickestIsTheAnsweringLineWithTheSmallestRoundTrip(t *testing.T) {
+	st := client.Status{Lines: []client.LineStatus{
+		{ID: "origin", State: "up", RTTMs: 900},
+		{ID: "late", State: "up", Soft: true, RTTMs: 40},
+		{ID: "gone", State: "down", RTTMs: 30},
+		{ID: "unmeasured", State: "up"},
+		{ID: "direct", State: "up", RTTMs: 120},
+	}}
+	if l, ok := quickest(st); !ok || l.ID != "direct" {
+		t.Fatalf("quickest is %+v, %v; want direct", l, ok)
+	}
+	if _, ok := quickest(client.Status{Lines: []client.LineStatus{{ID: "unmeasured", State: "up"}}}); ok {
+		t.Fatal("a line without a round trip was taken as measured")
 	}
 }
