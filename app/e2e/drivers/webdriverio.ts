@@ -129,7 +129,14 @@ export class WebdriverioDriver implements Driver {
   }
 
   async waitGone(id: string, timeoutMs = 15_000) {
-    await (await this.byId(id)).waitForDisplayed({ timeout: timeoutMs, reverse: true });
+    // Looked for afresh each time, never through an element found before: UiAutomator2 answers a
+    // question about an element that has since gone only after waiting its waitForSelectorTimeout
+    // (10 s) for it to come back, and waitForDisplayed asks twice, so whatever went away between two
+    // looks took 22 s more to be seen gone. A search that finds nothing answers at once.
+    await this.browser.waitUntil(
+      async () => (await this.browser.findElements("-android uiautomator", `new UiSelector().resourceId("${id}")`)).length === 0,
+      { timeout: timeoutMs, interval: 100, timeoutMsg: `${id} still there after ${timeoutMs} ms` },
+    );
   }
 
   async label(id: string) {
