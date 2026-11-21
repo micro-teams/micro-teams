@@ -52,6 +52,16 @@ function alsoIn(teams: readonly Team[] | undefined, here: number): string {
   return others.length ? `also in ${others.join(", ")}` : "";
 }
 
+function Empty({ text, depth }: { text: string; depth: number }) {
+  return (
+    <View style={[styles.empty, { marginLeft: 16 + depth * 20 }]}>
+      <Txt variant="small" muted>
+        {text}
+      </Txt>
+    </View>
+  );
+}
+
 function Icon({ name }: { name: keyof typeof MaterialIcons.glyphMap }) {
   return (
     <View style={styles.icon}>
@@ -161,6 +171,7 @@ function TeamContents({ teamId, depth }: { teamId: number; depth: number }) {
           />
         </View>
       ))}
+      {fleet.loaded && !fleet.machines.length ? <Empty depth={depth} text="no machines in this team" /> : null}
       <Heading depth={depth} text="people and agents" action="open agent" testID={depth === 0 ? "open-agent" : `open-agent-${teamId}`} onAction={openAgent} />
       <View style={[styles.minor, { paddingLeft: 16 + depth * 20 }]}>
         <Pressy testID={depth === 0 ? "add-member" : `add-member-${teamId}`} onPress={addMember}>
@@ -199,6 +210,7 @@ function TeamContents({ teamId, depth }: { teamId: number; depth: number }) {
           </View>
         );
       })}
+      {fleet.loaded && !fleet.agents.length ? <Empty depth={depth} text="no agents running" /> : null}
       <Heading depth={depth} text="chats" action="new chat" testID={depth === 0 ? "new-team-chat" : `new-team-chat-${teamId}`} onAction={newChat} />
       {chats.map((c) => (
         <View key={c.id} style={indent}>
@@ -228,11 +240,7 @@ export function TeamsSection() {
     <View style={styles.root}>
       <Header title="teams" actions={<TeamPicker />} />
       {scoped === null || team === null ? (
-        <View style={styles.empty}>
-          <Txt variant="small" muted>
-            you are not in any team yet
-          </Txt>
-        </View>
+        <Empty depth={0} text="you are not in any team yet" />
       ) : (
         <ScrollView contentContainerStyle={styles.column}>
           <TeamContents teamId={team} depth={0} />
@@ -248,7 +256,7 @@ const styles = StyleSheet.create({
   heading: { flexDirection: "row", alignItems: "center", paddingRight: 16, paddingTop: 20, paddingBottom: 8 },
   minor: { paddingRight: 16, paddingBottom: 6 },
   grow: { flex: 1 },
-  empty: { marginHorizontal: 16, marginVertical: 4, padding: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 8 },
+  empty: { marginRight: 16, marginVertical: 4, padding: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 8 },
   icon: {
     width: 44,
     height: 44,
