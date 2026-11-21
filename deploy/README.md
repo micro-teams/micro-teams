@@ -11,6 +11,7 @@ docker-compose.yml     the five services (nginx, multipath, backend, cheese-auth
 nginx.conf             the domain-independent gateway (SPA + /api + /mt + /multipath/v3/)
 gen-env.sh             generates .env with fresh random secrets
 init/                  postgres first-init SQL (creates the "microteams" schema)
+migration/             what to run by hand when upgrading to a version (vX.Y.Z.md), before and after its first start
 CREATE.sql             the full table structure this build expects (reference only — see Upgrading)
 backend/backend.jar    the backend
 multipath/             multipath-server (shipped, linux/amd64), the far end of every line: clients
