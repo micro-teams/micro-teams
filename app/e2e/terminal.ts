@@ -6,7 +6,8 @@
  *   - opening: the time from the tap to the first drawn screen (the regression number, which must
  *     stay under OPEN_LIMIT_MS), and that the first size drawn is the size it keeps: no resize after
  *     the first paint, so the connecting note going away changed nothing;
- *   - the key rows: tapping one keeps the terminal's focus, so a phone's keyboard stays open;
+ *   - the key rows: tapping one keeps the terminal's focus, so a phone's keyboard stays open, and
+ *     the keys type: "-/-" tapped reaches the program, and Ctrl applies to the next typed key;
  *   - the keyboard: opening it shrinks the terminal in one step and closing it grows it back in one,
  *     and (on the web) the terminal's bottom, where the prompt is, never leaves its view meanwhile
  *     (until the smaller size arrives, the terminal keeps its bottom edge in view and its top is
@@ -110,7 +111,14 @@ export async function liveScreen(d: Driver, ctx: ScreenCtx) {
     for (const k of ["screen-key-ctrl", "screen-key-ctrl", "screen-key-pgdn"]) {
       if (!(await d.keepsFocusOnTap(k))) throw new Error(`tapping ${k} took the focus from the terminal, which closes a phone's keyboard`);
     }
-    console.log("  live screen: the key rows keep the terminal's focus");
+    // And they type: "-/-" tapped on the key row reaches the program's input, then Ctrl applied to
+    // a typed u clears it (Ctrl+U).
+    for (const k of ["screen-key-dash", "screen-key-slash", "screen-key-dash"]) await d.keepsFocusOnTap(k);
+    await until("-/- tapped on the key row in the program's input", async () => (await ctx.pane()).text.includes("-/-"), 10_000);
+    await d.keepsFocusOnTap("screen-key-ctrl");
+    await d.typeInTerminal("u");
+    await until("Ctrl from the key row applied to a typed key (Ctrl+U clears the input)", async () => !(await ctx.pane()).text.includes("-/-"), 10_000);
+    console.log("  live screen: the key rows keep the terminal's focus, type, and apply Ctrl");
     ctx.lap("live screen: the key rows keep the keyboard");
   }
 

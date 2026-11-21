@@ -268,6 +268,8 @@ export function ScreenFrame() {
               <View key={i} style={styles.keys}>
                 {row.map((k) => {
                   const armed = (k.mod === "ctrl" && ctrl) || (k.mod === "alt" && alt);
+                  // Acting on the finger lifting rather than on the click: on the web the key rows
+                  // refuse the tap's default to keep the focus, and with it the click.
                   const press = () => (k.mod === "ctrl" ? setCtrl(!ctrl) : k.mod === "alt" ? setAlt(!alt) : !k.repeats && send(k.seq ?? ""));
                   const down = () => {
                     if (!k.repeats) return;
@@ -283,13 +285,13 @@ export function ScreenFrame() {
                   };
                   const up = () => {
                     stopRepeat();
+                    press();
                     tick();
                   };
                   return (
                     <Pressable
                       key={k.testID}
                       testID={k.testID}
-                      onPress={press}
                       onPressIn={down}
                       onPressOut={up}
                       style={({ pressed }) => [styles.key, pressed && styles.keyDown]}
