@@ -8,6 +8,7 @@
  *   the fresh one is fetched, so a slow or unreachable origin delays nothing when a line works. On
  *   React Native each answer is read whole and none is compressed: the platform has neither a
  *   streaming Response nor DecompressionStream.
+ *   How a line is dialled, by its url or at its address, is the platform's (platform/lineSockets).
  * substrate.start() — starts the client if it has not started; for a server somebody just chose.
  * substrate.fetch(input, init) — fetch() over the lines. It goes to the network instead, logged
  *   with the reason and counted, when no session is live (waiting for one at most FALLBACK_AFTER
@@ -40,6 +41,7 @@
  * worker (worker/sw.ts).
  */
 import { Client, createLineRouter, type ClientEvent, type ClientStats, type LineRouter, type StoredLines } from "@micro-teams/multipath";
+import { lineSockets } from "../platform/lineSockets";
 import { isWeb } from "../platform/platform";
 import { storage } from "../platform/storage";
 import type { Wire } from "./updates/socket";
@@ -113,6 +115,7 @@ export class Substrate {
       compression: !native,
       buffered: native,
       onEvent,
+      ...lineSockets,
     });
     const router = createLineRouter({
       entry: this.origin,
