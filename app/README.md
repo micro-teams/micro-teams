@@ -74,6 +74,9 @@ The version itself is the repository's `VERSION`; `../scripts/version.sh` is wha
                   runs), the fonts, the icons, and unregister.html, the way out of a stuck cache
     assets/       the mark (logo.svg) and the launcher icons tool/icons.sh renders from it
     plugins/      the Expo config plugin that signs the release APK
+    modules/      the app's own native modules, autolinked: line-names, the hostname verifier
+                  that lets a line dialled at its IP address be verified against its name
+                  (src/platform/lineSockets.android.ts)
     tool/         the build steps above, the terminal page's generator, the icons and the
                   Chinese face
     e2e/          the journey (see below)
