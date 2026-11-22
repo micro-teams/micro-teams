@@ -15,7 +15,8 @@
  *               TerminalService (a Spring bean):
  *                 list(machineId) -> TerminalDTOs, oldest first.
  *                 open(machineId, userId, command?, cwd?) -> TerminalDTO — a terminal, or a command.
- *                 detail(machineId, sid) -> TerminalDetailDTO — with output when the machine is online.
+ *                 detail(machineId, sid) -> TerminalDetailDTO — with output when the machine is online:
+ *                   the screen's text, less the exit marker, tmux's end-of-pane note and empty rows.
  *                 close(machineId, sid) — ends the program and forgets the row.
  *               EXIT_MARKER — the text a command's wrapper prints before its exit code.
  *
@@ -93,9 +94,9 @@ class TerminalService(
 
     fun detail(machineId: String, sid: String): TerminalDetailDTO {
         val row = row(machineId, sid)
-        val output = if (hub.isOnline(machineId) && hub.screen(sid) != null) capture(sid) else null
-        if (row.kind == TerminalKind.COMMAND && row.exitCode == null && output != null) {
-            exitCodeIn(output)?.let {
+        val screen = if (hub.isOnline(machineId) && hub.screen(sid) != null) capture(sid) else null
+        if (row.kind == TerminalKind.COMMAND && row.exitCode == null && screen != null) {
+            exitCodeIn(screen)?.let {
                 row.exitCode = it
                 terminals.save(row)
             }
@@ -103,7 +104,7 @@ class TerminalService(
         return TerminalDetailDTO(
             terminal = row.toDTO(),
             finished = row.kind == TerminalKind.COMMAND && row.exitCode != null,
-            output = output,
+            output = screen?.let { readable(it) },
         )
     }
 
@@ -150,6 +151,17 @@ class TerminalService(
 
     private fun env(cwd: String?): Map<String, String> =
         cwd?.let { mapOf("MICROTEAMS_CWD" to it) } ?: emptyMap()
+
+    /**
+     * What a person reads: the screen without the wrapper's exit marker, tmux's note that the pane
+     * ended, and the empty rows below the last line (the capture is the whole 200-row window).
+     */
+    private fun readable(screen: String): String =
+        screen
+            .lineSequence()
+            .filterNot { it.startsWith(EXIT_MARKER) || it.startsWith("Pane is dead") }
+            .joinToString("\n")
+            .trimEnd()
 
     private fun exitCodeIn(output: String): Int? =
         output

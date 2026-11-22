@@ -612,7 +612,7 @@
       if (wantsJson(ctx)) return microteams.print(JSON.stringify(history));
       if (history.length === 0) return microteams.print("(no history)");
       for (const c of history.slice(0, (_c = int(ctx, "limit")) != null ? _c : 20)) {
-        const when = new Date(c.timestamp * 1e3).toISOString();
+        const when = new Date(c.timestamp).toISOString();
         microteams.print(`${c.sha.slice(0, 7)} ${when} ${c.author}\uFF1A${c.message}`);
       }
     }
