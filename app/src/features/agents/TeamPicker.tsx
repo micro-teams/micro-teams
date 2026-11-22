@@ -38,7 +38,7 @@ export function TeamPicker() {
   const current = teams.find((t) => t.id === nav.team);
   if (!teams.length) {
     return (
-      <Pressy testID="team-picker" onPress={() => push("teams", "detail")} style={styles.button}>
+      <Pressy testID="team-picker" onPress={() => push("teamList", "detail")} style={styles.button}>
         <Txt style={{ color: colors.brand }}>new team</Txt>
       </Pressy>
     );
@@ -52,7 +52,7 @@ export function TeamPicker() {
         "divider",
         { value: "manage", label: "manage teams", testID: "manage-teams" },
       ]}
-      onSelected={(id) => (id === "manage" ? push("teams", "detail") : switchTeam(id))}
+      onSelected={(id) => (id === "manage" ? push("teamList", "detail") : switchTeam(id))}
       style={styles.button}
     >
       <Txt numberOfLines={1} style={styles.name}>

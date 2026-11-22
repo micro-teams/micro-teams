@@ -1,6 +1,7 @@
 /*
- *  Description: Integration test for the machine enrollment flow and the symmetric,
- *               owner-less ownership model. Drives /machine and /team/{id}/machine through
+ *  Description: Integration test for the machine enrollment flow and the machine's place
+ *               in teams: anyone who can access one of its teams may use it, and it stays in at
+ *               least one team. Drives /machine and /team/{id}/machine through
  *               the full stack
  *               with real users created via cheese-auth.
  *
@@ -133,7 +134,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
                 .andExpect(status().isOk)
                 .andExpect(jsonPath("$.id").isNotEmpty)
                 .andExpect(jsonPath("$.name").value("my-laptop"))
-                .andExpect(jsonPath("$.teamIds[0]").value(team1))
+                .andExpect(jsonPath("$.teams[0].id").value(team1))
                 .andReturn()
         machineId = JSONObject(res.response.contentAsString).getString("id")
     }
@@ -210,7 +211,7 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
         mockMvc
             .perform(get("/machine/$machineId").header("Authorization", "Bearer $ownerToken"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.teamIds.length()").value(2))
+            .andExpect(jsonPath("$.teams.length()").value(2))
         mockMvc
             .perform(get("/machine?teamId=$team2").header("Authorization", "Bearer $ownerToken"))
             .andExpect(status().isOk)
@@ -233,26 +234,31 @@ constructor(private val mockMvc: MockMvc, private val userCreatorService: UserCr
         mockMvc
             .perform(get("/machine/$machineId").header("Authorization", "Bearer $ownerToken"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.teamIds[0]").value(team2))
+            .andExpect(jsonPath("$.teams[0].id").value(team2))
     }
 
-    /**
-     * Note the 403 rather than a 404: once the machine is forgotten nobody may access it, and the
-     * permission matrix answers before the handler ever looks it up. That is a consequence of
-     * authorization living entirely in the matrix, and a welcome one — it leaves no oracle for
-     * probing which machine ids exist.
-     */
+    /** A machine stays in at least one team: taking it out of its last one is refused. */
     @Test
     @Order(110)
-    fun unbindingLastTeamForgetsMachine() {
+    fun unbindingLastTeamIsRefused() {
         mockMvc
             .perform(
                 delete("/team/$team2/machine/$machineId")
                     .header("Authorization", "Bearer $ownerToken"),
             )
-            .andExpect(status().isNoContent)
+            .andExpect(status().isBadRequest)
         mockMvc
             .perform(get("/machine/$machineId").header("Authorization", "Bearer $ownerToken"))
-            .andExpect(status().isForbidden)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.teams[0].id").value(team2))
+    }
+
+    /** A team holding a machine that is in no other team cannot be deleted. */
+    @Test
+    @Order(120)
+    fun deletingTheLastTeamOfAMachineIsRefused() {
+        mockMvc
+            .perform(delete("/team/$team2").header("Authorization", "Bearer $ownerToken"))
+            .andExpect(status().isBadRequest)
     }
 }

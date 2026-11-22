@@ -4,11 +4,12 @@
  * Run with `npm test`. post() is a fake that answers as the server would; storage is the test
  * build of MMKV, so a second Outbox for the same conversation reads what the first one saved.
  */
-import type { Message } from "./merge";
+import type { Message } from "./chats";
 import { isStuck, Outbox } from "./outbox";
 
 const stored = (content: string, clientToken: string): Message => ({
   id: 1,
+  kind: "TEXT",
   threadId: 9,
   senderId: 1,
   content,

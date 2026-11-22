@@ -18,6 +18,7 @@
 
 package app.microteams.team.documents
 
+import app.microteams.common.live.ChangeBus
 import jakarta.servlet.Filter
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ServletRequest
@@ -47,6 +48,7 @@ private const val GIT_PREFIX = "/git"
 class DocumentGitHttpConfig(
     private val gitService: GitService,
     private val authorizationService: AuthorizationService,
+    private val bus: ChangeBus,
 ) {
 
     @Bean
@@ -56,7 +58,16 @@ class DocumentGitHttpConfig(
         // Both directions are enabled unconditionally; whether THIS caller may fetch or push is
         // decided by DocumentGitAuthFilter before a request ever reaches the servlet.
         servlet.setUploadPackFactory { _, db -> UploadPack(db) }
-        servlet.setReceivePackFactory { _, db -> ReceivePack(db) }
+        // A push changes the team's tree: published once the refs moved, like any other write.
+        servlet.setReceivePackFactory { _, db ->
+            ReceivePack(db).apply {
+                setPostReceiveHook { _, _ ->
+                    db.directory.name.removeSuffix(".git").toLongOrNull()?.let {
+                        bus.publish(gitSource(it))
+                    }
+                }
+            }
+        }
         val reg = ServletRegistrationBean(servlet, "$GIT_PREFIX/*")
         reg.setName("teamGitServlet")
         return reg

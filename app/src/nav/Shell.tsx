@@ -34,7 +34,7 @@ type Icon = keyof typeof MaterialIcons.glyphMap;
 export const SECTIONS: { section: Section; label: string; icon: Icon }[] = [
   { section: "chats", label: "chats", icon: "forum" },
   { section: "docs", label: "docs", icon: "snippet-folder" },
-  { section: "agents", label: "agents", icon: "smart-toy" },
+  { section: "teams", label: "teams", icon: "groups" },
   { section: "me", label: "me", icon: "person" },
 ];
 

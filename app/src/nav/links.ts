@@ -19,7 +19,7 @@ import { frame, initialNav, push, switchSection, type Nav } from "./stack";
 export function navFromLink(path: string, query: Record<string, string>): Nav | null {
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "connect") {
-    return push(switchSection(initialNav(), "agents"), frame("connect", "detail", { code: query.code ?? "" }));
+    return push(switchSection(initialNav(), "teams"), frame("connect", "detail", { code: query.code ?? "" }));
   }
   if (parts[0] === "screen" && parts[1]) return push(initialNav(), frame("screen", "overlay", { sessionId: parts[1] }));
   if (parts[0] === "chats" && /^\d+$/.test(parts[1] ?? "")) return push(initialNav(), frame("thread", "detail", { id: Number(parts[1]) }));

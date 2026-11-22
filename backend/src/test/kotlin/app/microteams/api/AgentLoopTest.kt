@@ -184,6 +184,29 @@ constructor(
             teamService.isTeamMember(teamId, agentUserId),
             "an opened agent must be a member of its team",
         )
+        // …and it has a chat of its own name in that team, with the person who opened it.
+        val teamChats =
+            JSONObject(
+                    mockMvc
+                        .perform(
+                            get("/team/$teamId/chats")
+                                .header("Authorization", "Bearer $humanToken"),
+                        )
+                        .andReturn()
+                        .response
+                        .contentAsString,
+                )
+                .getJSONArray("chats")
+        assertTrue(
+            (0 until teamChats.length()).any { i ->
+                val c = teamChats.getJSONObject(i)
+                c.getString("title") == "Rin" &&
+                    (0 until c.getJSONArray("members").length()).any {
+                        c.getJSONArray("members").getJSONObject(it).getLong("userId") == agentUserId
+                    }
+            },
+            "an opened agent must have a chat of its own name in its team",
+        )
         val create =
             awaitFrameFor(collector, "session.create", sidOf(openRes.response.contentAsString))
         val screenToken = create.getString("screen")
@@ -202,8 +225,9 @@ constructor(
         // the server's configured fallback — so a machine reached via any endpoint calls back on
         // one that works for it.
         assertEquals(reportedOrigin, create.getJSONObject("env").getString("MICROTEAMS_API"))
-        // The agent's team travels in the env too, so the applet's `docs` commands know which tree.
-        assertEquals(teamId.toString(), create.getJSONObject("env").getString("MICROTEAMS_TEAM"))
+        // No team travels in the env: an agent may be in several, and its `docs` commands ask the
+        // server for the tree of the team they are given.
+        assertTrue(!create.getJSONObject("env").has("MICROTEAMS_TEAM"))
 
         // A real applet announces itself once it is driving the program; until then the screen is
         // still starting and nothing may be typed at it. The fake machine must say so too.

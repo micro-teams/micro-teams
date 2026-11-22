@@ -1,10 +1,10 @@
 /*
  * A conversation's members and settings: drawn for a "threadInfo" frame with { id, threadKey }.
  *
- * <ThreadInfoScreen /> — the title, everybody in the conversation as a grid of faces (owners
- *   first), and what the caller may do: an owner or admin adds people by id, removes anybody but
- *   an owner and themselves, and renames; an owner deletes the conversation, which closes this
- *   frame and the conversation under it (popTo threadKey) rather than jumping anywhere.
+ * <ThreadInfoScreen /> — the title, the teams it is in (whose people can read it and join), everybody
+ *   in it as a grid of faces, and what a member may do — every member alike: add people by id,
+ *   remove anybody, rename, leave, and delete the conversation, which closes this frame and the
+ *   conversation under it (popTo threadKey) rather than jumping anywhere.
  *
  * A side page: in a wide window it sits at the right of the conversation, which stays in view, and
  * closes with a cross; in a narrow one it is a page with a back arrow.
@@ -36,10 +36,9 @@ export function ThreadInfoScreen() {
   const info = useThreadInfo(id);
   const ask = useAsk();
   const toast = useToast();
-  const myRole = info.roleOf(user?.id);
-  const canManage = myRole === "OWNER" || myRole === "ADMIN";
+  const canManage = info.isMember;
 
-  const guard = async (action: () => Promise<void>) => {
+  const guard = async (action: () => Promise<unknown>) => {
     try {
       await action();
       return true;
@@ -97,10 +96,13 @@ export function ThreadInfoScreen() {
       />
       <ScrollView contentContainerStyle={styles.body}>
         <Txt variant="title">{info.storedTitle || "untitled"}</Txt>
+        <Txt variant="small" muted testID="chat-teams">
+          {info.teams.length ? `in ${info.teams.map((t) => t.name).join(", ")}: their people can read it and join` : "in no team: only its members can read it"}
+        </Txt>
         <View style={styles.grid}>
           {info.members.map((m) => {
             const name = m.nickname?.trim() || `user ${m.userId}`;
-            const removable = canManage && m.role !== "OWNER" && m.userId !== user?.id;
+            const removable = canManage && m.userId !== user?.id;
             return (
               <View key={m.userId} style={styles.member} testID={`member-${m.userId}`}>
                 <View>
@@ -130,7 +132,13 @@ export function ThreadInfoScreen() {
         </View>
         <View style={styles.actions}>
           {canManage && <Button kind="outlined" icon="edit" testID="rename-chat" label="Rename chat" onPress={rename} />}
-          {myRole === "OWNER" && <Button kind="text" danger icon="delete-outline" testID="delete-chat" label="Delete this chat" onPress={dissolve} />}
+          {canManage && user && (
+            <Button kind="text" icon="logout" testID="leave-chat" label="Leave this chat" onPress={() => guard(async () => {
+              await info.leave(user.id);
+              popTo(threadKey);
+            })} />
+          )}
+          {canManage && <Button kind="text" danger icon="delete-outline" testID="delete-chat" label="Delete this chat" onPress={dissolve} />}
         </View>
       </ScrollView>
     </View>

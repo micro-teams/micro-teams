@@ -48,7 +48,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
-import type { Wire } from "../transport/updates/socket";
+import type { Wire } from "../transport/live/socket";
 import { useSession } from "./session";
 
 export type Lease = { holder: "free" | "self" | "driver" | "other"; name: string | null };

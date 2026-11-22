@@ -349,7 +349,7 @@ jobs:
           STAGE=microteams-deploy
           mkdir -p "$STAGE/backend" "$STAGE/frontend" "$STAGE/applets" "$STAGE/multipath"
           cp deploy/docker-compose.yml deploy/nginx.conf deploy/gen-env.sh deploy/README.md "$STAGE/"
-          cp -r deploy/init "$STAGE/"
+          cp -r deploy/init deploy/migration "$STAGE/"
           # Ship the JPA-generated schema at the bundle root. The stack still creates/updates its own
           # tables (ddl-auto=update), so this file is NOT applied automatically — it's a reference for
           # ops: it shows the full table structure this build expects, and diffing it against the

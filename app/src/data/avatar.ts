@@ -10,7 +10,6 @@
  *
  * Example: const { change, changing } = useChangePicture(); await change(agent.userId);
  */
-import { useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import * as auth from "../api/auth";
@@ -18,8 +17,7 @@ import { isWeb } from "../platform/platform";
 import { useSession } from "./session";
 
 export function useChangePicture() {
-  const { origin, token, user, mt, presence, setMyAvatar } = useSession();
-  const queries = useQueryClient();
+  const { origin, token, user, mt, setMyAvatar } = useSession();
   const [changing, setChanging] = useState<"me" | number | null>(null);
 
   const change = async (whose: "me" | number): Promise<boolean> => {
@@ -43,8 +41,6 @@ export function useChangePicture() {
         setMyAvatar(avatarId);
       } else {
         await mt!.PUT("/agent/{userId}/avatar", { params: { path: { userId: whose } }, body: { avatarId } });
-        await queries.invalidateQueries({ queryKey: ["fleet"] });
-        presence.refresh();
       }
       return true;
     } finally {

@@ -32,7 +32,6 @@ class AgentScreen(
     // The screen token (a secret injected as MICROTEAMS_SCREEN); paired with the machine
     // token it attributes a tool call to this agent.
     @Column(nullable = false, length = 64) var token: String = "",
-    @Column(name = "team_id") var teamId: IdType? = null,
     @Column(name = "agent_user_id", nullable = false) var agentUserId: IdType = 0,
     // The session id we minted for the driven program, so a resume continues its transcript.
     @Column(name = "session_id", length = 64) var sessionId: String? = null,

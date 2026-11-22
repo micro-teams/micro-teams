@@ -5,8 +5,8 @@
  * journey(driver, params) — signs up (reading the code from the mail sink), starts a chat, says
  *   something in it, sees it stored, says a word longer than a line (a key) and sees it wrap
  *   within the screen, sees a message posted from outside the app arrive without
- *   touching anything (the updates socket), renames the chat from its info page and comes back to
- *   find the conversation under the new name, finds a team made elsewhere in the agents section,
+ *   touching anything (a live request), renames the chat from its info page and comes back to
+ *   find the conversation under the new name, finds a team made elsewhere in the teams section,
  *   and writes a document in that team's docs and finds its commit in the history.
  *   With a machine (params.machine), it then approves that machine for the team — through the
  *   approval page the CLI's link opens on the web; from outside on Android, where that link opens
@@ -298,7 +298,7 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   if (!(await d.fits(unbroken))) throw new Error("a message with a long unbroken word runs off the screen");
   lap("long word wraps");
 
-  // Nothing polls: this appears only because the updates socket said the conversation moved.
+  // Nothing polls: this appears only because the live request answered again.
   const fromOutside = `outsidé ✓ ${p.run}`;
   const elsewhere = await outside(p.api, username, password);
   await elsewhere.post(title, fromOutside);
@@ -317,11 +317,11 @@ export async function journey(d: Driver, p: Params): Promise<Record<string, numb
   const chatId = await elsewhere.chatTitled(renamed);
   lap("rename from info");
 
-  // A team made elsewhere is the one the agents section looks at: the only one there is.
+  // A team made elsewhere is the one the teams section looks at: the only one there is.
   const team = `team ${p.run}`;
   const teamId = await elsewhere.createTeam(team);
   await d.back();
-  await d.tap("destination-agents");
+  await d.tap("destination-teams");
   await d.waitForText(team, 15_000);
   await d.waitForText("no agents running", 15_000);
   lap("agents of a team");
@@ -397,7 +397,7 @@ async function withAMachine(
     await d.tap("connect-done");
   } else {
     await elsewhere.approve(machine.code, [teamId]);
-    await d.tap("destination-agents");
+    await d.tap("destination-teams");
   }
   // Enrolled is not connected: the connector polls for its token and dials in, on another host.
   await d.waitForText("e2e-machine", 120_000);

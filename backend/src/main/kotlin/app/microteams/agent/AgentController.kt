@@ -28,9 +28,13 @@ import app.microteams.agent.screen.AgentService
 import app.microteams.agent.screen.ScreenAgent
 import app.microteams.api.AgentApi
 import app.microteams.chat.thread.ThreadMemberRepository
+import app.microteams.chat.thread.ThreadRepository
+import app.microteams.chat.thread.toDTO
 import app.microteams.machine.link.MachineHub
+import app.microteams.machine.link.MachinePresence
 import app.microteams.model.*
 import app.microteams.team.machine.TeamMachineService
+import app.microteams.team.membership.TeamAccess
 import app.microteams.team.membership.TeamService
 import app.microteams.user.UserProfileRepository
 import jakarta.annotation.PostConstruct
@@ -63,7 +67,10 @@ class AgentController(
     private val threadMemberRepository: ThreadMemberRepository,
     private val userProfileRepository: UserProfileRepository,
     private val hub: MachineHub,
+    private val presence: MachinePresence,
     private val teamService: TeamService,
+    private val teamAccess: TeamAccess,
+    private val threadRepository: ThreadRepository,
     private val teamMachineService: TeamMachineService,
     private val authorizationService: AuthorizationService,
     private val authenticationService: AuthenticationService,
@@ -72,27 +79,6 @@ class AgentController(
 
     @PostConstruct
     fun initialize() {
-        /**
-         * The screen being watched is an agent's, and the caller shares a group with it. False for
-         * a screen that is not an agent's — which is how this widens access to our own screens
-         * without touching anyone else's.
-         */
-        register("shares-group-with-screen-agent") { userId, authInfo ->
-            val sid = authInfo["sid"] as? String
-            // Whose screen this is, is a fact about the AgentScreen row — not about what this
-            // server happens to be holding in memory. Resolving it from the registry alone made a
-            // screen the server had forgotten (one no readopt reached) UNWATCHABLE: the handshake
-            // was refused before anything could rebuild it, so the human got a live screen that
-            // would not
-            // open and no way to ask for it to be fixed. The row outlives every restart, so ask it
-            // when the registry is empty.
-            val agentUserId = sid?.let { s ->
-                agentRegistry.bySid(s)?.userId
-                    ?: agentScreenRepository.findById(s).orElse(null)?.agentUserId
-            }
-            agentUserId != null && sharesGroup(userId, agentUserId)
-        }
-
         /**
          * The screen being watched is an agent's, and the caller may use the machine that agent
          * runs on — resolved from its persisted row, so the right survives a server that has
@@ -107,10 +93,10 @@ class AgentController(
             row != null && teamMachineService.mayAccess(userId, row.machineId)
         }
 
-        /** The caller belongs to the team the agent being opened will work for. */
-        register("is-member-of-target-team") { userId, authInfo ->
+        /** The caller can access the team the agent being opened will join. */
+        register("can-access-target-team") { userId, authInfo ->
             val req = authInfo["open"] as? OpenAgentRequestDTO
-            req != null && teamService.isTeamMember(req.teamId, userId)
+            req != null && teamAccess.mayAccess(userId, req.teamId)
         }
 
         /** The caller may use the machine the agent being opened will run on. */
@@ -119,50 +105,59 @@ class AgentController(
             req != null && teamMachineService.mayAccess(userId, req.machineId)
         }
 
-        /** The caller belongs to the team the agent in question works for. */
-        register("is-member-of-agent-team") { userId, authInfo ->
+        /** The caller can access the agent in question (see mayAccessAgent). */
+        register("can-access-agent") { userId, authInfo ->
             val agentUserId = authInfo["agentUserId"] as? Long ?: return@register false
-            val rows = agentScreenRepository.findByAgentUserId(agentUserId)
-            rows.isNotEmpty() &&
-                rows.all { it.teamId != null && teamService.isTeamMember(it.teamId!!, userId) }
+            mayAccessAgent(userId, agentUserId)
         }
 
-        // The two rules below stop anyone from pulling a team's agent into a group they run.
-        // They are registered here, in the agent module, because only it knows what an agent is
-        // and which team it serves; chat's permission rows reference them by name, so chat still
-        // never imports agent (exactly as the `watch` row references
-        // shares-group-with-screen-agent).
+        // The two rules below are the placement rule for agents: putting an agent somewhere (a
+        // thread, a team) needs access to the agent. They are registered here, in the agent
+        // module, because only it knows what an agent is; chat's and team's permission rows
+        // reference them by name, so neither imports agent.
 
         /**
-         * The single user being added to a thread (POST /chat/{id}/members) is not an agent the
-         * caller is foreign to — either not an agent (an ordinary member add, unrestricted), or an
-         * agent every one of whose teams the caller belongs to (same rule as open/close/reboot).
+         * The single user being added to a thread or a team is a person, or an agent the caller can
+         * access.
          */
-        register("added-user-not-a-foreign-agent") { userId, authInfo ->
-            val dto = authInfo["addMember"] as? AddMemberRequestDTO ?: return@register true
-            mayPullInUser(userId, dto.userId)
+        register("added-user-is-accessible") { userId, authInfo ->
+            val target =
+                (authInfo["addMember"] as? AddMemberRequestDTO)?.userId
+                    ?: (authInfo["addTeamMember"] as? AddTeamMemberRequestDTO)?.userId
+                    ?: return@register true
+            mayPlaceUser(userId, target)
         }
 
         /**
-         * No member listed on a thread being created (POST /chat carries an initial memberIds list
-         * that ThreadService adds directly) is an agent the caller is foreign to. Same rule as
-         * added-user-not-a-foreign-agent, applied to every listed id.
+         * Every member listed on a thread being created is a person or an agent the caller can
+         * access.
          */
-        register("no-foreign-agent-in-created-thread") { userId, authInfo ->
-            val dto = authInfo["createThread"] as? CreateThreadRequestDTO ?: return@register true
-            (dto.memberIds ?: emptyList()).all { mayPullInUser(userId, it) }
+        register("initial-members-are-accessible") { userId, authInfo ->
+            val ids =
+                (authInfo["createThread"] as? CreateThreadRequestDTO)?.memberIds
+                    ?: (authInfo["teamChat"] as? TeamChatRequestDTO)?.memberIds
+                    ?: emptyList()
+            ids.all { mayPlaceUser(userId, it) }
         }
     }
 
     /**
-     * True when [targetUserId] may be pulled into a group by [callerId]: not an agent (an ordinary
-     * user), or an agent every one of whose teams the caller belongs to.
+     * Whether [callerId] can access agent [agentUserId]: it is in a team the caller can access, or
+     * it runs on a machine the caller may use. The two coincide while every agent's machine is in
+     * all of its teams; the second keeps an agent that is in no team reachable from its machine.
      */
-    private fun mayPullInUser(callerId: IdType, targetUserId: IdType): Boolean {
-        val rows = agentScreenRepository.findByAgentUserId(targetUserId)
-        if (rows.isEmpty()) return true
-        return rows.all { it.teamId != null && teamService.isTeamMember(it.teamId!!, callerId) }
+    private fun mayAccessAgent(callerId: IdType, agentUserId: IdType): Boolean {
+        val rows = agentScreenRepository.findByAgentUserId(agentUserId)
+        if (rows.isEmpty()) return false
+        val mine = teamAccess.accessibleTeamIds(callerId)
+        if (teamAccess.memberTeamIds(agentUserId).any { it in mine }) return true
+        return rows.any { teamMachineService.mayAccess(callerId, it.machineId) }
     }
+
+    /** A person may be placed anywhere; an agent only by someone who can access it. */
+    private fun mayPlaceUser(callerId: IdType, targetUserId: IdType): Boolean =
+        agentScreenRepository.findByAgentUserId(targetUserId).isEmpty() ||
+            mayAccessAgent(callerId, targetUserId)
 
     /** Registers one atomic fact, hiding the seven-parameter handler shape. */
     private fun register(name: String, fact: (IdType, Map<String, Any>) -> Boolean) {
@@ -179,16 +174,6 @@ class AgentController(
     }
 
     private fun currentUserId(): IdType = authenticationService.getCurrentUserId()
-
-    private fun sharesGroup(userId: IdType, agentUserId: IdType): Boolean {
-        val agentThreads =
-            threadMemberRepository.findByUserId(agentUserId).mapNotNull { it.threadId }.toSet()
-        if (agentThreads.isEmpty()) return false
-        return threadMemberRepository
-            .findByUserId(userId)
-            .mapNotNull { it.threadId }
-            .any { it in agentThreads }
-    }
 
     // -- enumeration --------------------------------------------------------
 
@@ -221,8 +206,8 @@ class AgentController(
             candidates = candidates.filter { it in members }.toSet()
         }
         teamId?.let { t ->
-            candidates =
-                candidates.filter { (live[it]?.teamId ?: rows[it]?.first()?.teamId) == t }.toSet()
+            val members = teamService.listMembers(t).map { it.userId }.toSet()
+            candidates = candidates.filter { it in members }.toSet()
         }
         machineId?.let { m ->
             candidates =
@@ -259,7 +244,7 @@ class AgentController(
     // machine outlive its link (they wait to be re-adopted) and would otherwise keep an agent
     // online on a machine that is gone.
     private fun reachable(machineId: String?): Boolean =
-        machineId != null && hub.isOnline(machineId)
+        machineId != null && presence.isOnline(machineId)
 
     private fun toDTO(
         uid: IdType,
@@ -294,7 +279,13 @@ class AgentController(
             online = reachable(machineId),
             machineId = machineId,
             sid = if (watchable) sid else null,
-            teamId = agent?.teamId ?: row?.teamId,
+            teams = teamService.teamsByIds(teamAccess.memberTeamIds(uid)),
+            chats =
+                threadMemberRepository
+                    .findByUserId(uid)
+                    .mapNotNull { it.threadId }
+                    .mapNotNull { threadRepository.findById(it).orElse(null)?.toDTO() }
+                    .sortedBy { it.id },
             driver = agent?.driver?.name ?: row?.driver,
             // The live screen's mirrored variables (status/elapsed/tokens/question/choices/
             // compact/…) so the live-screen gatebar can show the same hints web-claude does.
@@ -337,6 +328,7 @@ class AgentController(
     ): ResponseEntity<OpenedAgentDTO> {
         val opened =
             agentService.openAgent(
+                openedBy = currentUserId(),
                 machineId = openAgentRequestDTO.machineId,
                 teamId = openAgentRequestDTO.teamId,
                 nickname = openAgentRequestDTO.nickname,
@@ -351,9 +343,9 @@ class AgentController(
 
     /**
      * Reboot the agent: swap its backing screen for a fresh one resuming the same session. Guarded
-     * exactly like closeAgent (`reboot-agent` needs `is-member-of-agent-team`, the same predicate)
-     * — it is a lifecycle action on an existing agent, not opening a new one, so the agent user and
-     * its memberships stay put.
+     * exactly like closeAgent (`reboot-agent` needs `can-access-agent`, the same predicate) — it is
+     * a lifecycle action on an existing agent, not opening a new one, so the agent user and its
+     * memberships stay put.
      */
     @Guard("reboot-agent", "agent")
     override fun rebootAgent(
@@ -497,16 +489,25 @@ class AgentController(
      * subprocess, so the connector binary never needs to know any git.
      */
     @NoAuth
-    override fun getGitWorkspace(): ResponseEntity<AgentGitWorkspaceDTO> {
+    override fun getGitWorkspace(teamId: Long?): ResponseEntity<AgentGitWorkspaceDTO> {
         val request =
             (RequestContextHolder.currentRequestAttributes() as ServletRequestAttributes).request
         val auth = authorizationService.verify(request.getHeader("Authorization"))
-        val (gitUrl, teamId) =
-            agentService.gitWorkspaceUrl(auth.userId)
+        val teams = teamAccess.accessibleTeamIds(auth.userId)
+        val team =
+            teamId?.also {
+                if (it !in teams) throw BadRequestError("this agent cannot access team $it")
+            }
+                ?: teamAccess.memberTeamIds(auth.userId).singleOrNull()
+                ?: throw BadRequestError(
+                    "say which team (teamId): this agent is in ${teams.size} teams",
+                )
+        val gitUrl =
+            agentService.gitWorkspaceUrl(auth.userId, team)
                 ?: throw BadRequestError("caller is not an active agent")
         val minted = agentTokenService.mint(auth.userId)
         return ResponseEntity.ok(
-            AgentGitWorkspaceDTO(gitUrl = gitUrl, token = minted.token, teamId = teamId),
+            AgentGitWorkspaceDTO(gitUrl = gitUrl, token = minted.token, teamId = team),
         )
     }
 }

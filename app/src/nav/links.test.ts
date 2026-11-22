@@ -13,9 +13,9 @@ const routes = (path: string, query: Record<string, string> = {}) => {
 
 test("the CLI's connect link opens approval on the agents root", () => {
   expect(routes("connect", { code: "AB12" })).toEqual({
-    section: "agents",
+    section: "teams",
     stack: [
-      ["agents", { team: null }],
+      ["teams", { team: null }],
       ["connect", { code: "AB12" }],
     ],
   });
