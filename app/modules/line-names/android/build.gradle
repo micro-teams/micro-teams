@@ -1,0 +1,22 @@
+// The line-names module (see LineNamesModule.kt): an Expo module of the app's own, autolinked from
+// modules/. It builds against React Native's WebSocketModule and OkHttp, which the app already ships.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.microteams'
+version = '1.0.0'
+
+android {
+  namespace "app.microteams.linenames"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation 'com.squareup.okhttp3:okhttp'
+}
