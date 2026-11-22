@@ -29,7 +29,12 @@
 //     unless grace has passed since the client started or last lost its session (so a session
 //     being replaced after a server restart is waited for, and a server that never answers is
 //     not), and returns at once when ctx is done; Why() is why there is none; Info() is what the state file records; Stop() ends it and
-//     returns once it has exited.
+//     returns once it has exited. Quickest() is the line to download one large file from: of the
+//     lines that are up and answer (not soft down), the one with the smallest round trip the
+//     session measures, as of the last poll; false while no line has been measured. A large file
+//     goes over that one line by plain HTTPS rather than through the client, which would carry it
+//     over every line at once and cost each of them the whole file; every line leads to the same
+//     nginx, which serves /connector/.
 //
 //   - Lookup(c) checks a client recorded in the state file the way a short command needs: its
 //     /status answers and its session is live. It returns the stream address, or why not.
@@ -175,7 +180,8 @@ type Supervisor struct {
 	live    bool
 	why     string
 	session string
-	changed chan struct{} // closed and replaced whenever live changes
+	quick   client.LineStatus // the quickest answering line at the last poll; zero when none
+	changed chan struct{}     // closed and replaced whenever live changes
 }
 
 // NewSupervisor returns a Supervisor for cfg; Run starts it.
@@ -296,7 +302,32 @@ func (s *Supervisor) poll(pid int, listen, status string) {
 	if st.Session != nil {
 		id = st.Session.ID
 	}
+	quick, _ := quickest(st)
+	s.mu.Lock()
+	s.quick = quick
+	s.mu.Unlock()
 	s.set(info, live, why, id)
+}
+
+// quickest is the line of a status that answers with the smallest round trip.
+func quickest(st client.Status) (client.LineStatus, bool) {
+	var best client.LineStatus
+	for _, l := range st.Lines {
+		if l.State == "up" && !l.Soft && l.RTTMs > 0 && (best.RTTMs == 0 || l.RTTMs < best.RTTMs) {
+			best = l
+		}
+	}
+	return best, best.RTTMs > 0
+}
+
+// Quickest is the answering line with the smallest round trip at the last poll.
+func (s *Supervisor) Quickest() (client.LineStatus, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.live {
+		return client.LineStatus{}, false
+	}
+	return s.quick, s.quick.RTTMs > 0
 }
 
 // isLive reports whether a status has a live session with a line up, and if not, why.

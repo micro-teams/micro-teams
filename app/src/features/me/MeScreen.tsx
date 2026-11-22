@@ -3,12 +3,13 @@
  *
  * <MeScreen /> — the "me" section's root frame: a card with your face, nickname and username; your
  *   user id and intro; this client's version (tap: everything about the client in one block to
- *   copy into a bug report, the lines panel, and the apps this deployment offers to download); and
+ *   copy into a bug report, the lines panel, and the apps this deployment offers to download, each
+ *   from the line that answers fastest, which the download dialog names); and
  *   "log out", which asks first — a mis-tap that ends a session on a phone costs a password and a
  *   mailed code to undo.
  * <LinesScreen /> — drawn for a "lines" frame (from the client block, or at the address __lines):
- *   the MultiPath session (id, state, age), every line (state, time since its last byte,
- *   reconnects, last reason), the open streams, the fallbacks to the network with the last reason,
+ *   the MultiPath session (id, state, age), every line (state, whether it is soft down, its round
+ *   trip, time since its last byte, reconnects, last reason), the open streams, the fallbacks to the network with the last reason,
  *   and on the web the service worker's own session and counts; refreshed each second, with a
  *   button that copies all of it as JSON. Redundancy hides its own failures — a deployment can lose
  *   all but one of its paths with nobody seeing an error — so this is where they show.
@@ -122,6 +123,8 @@ export function LinesScreen() {
                 </View>
                 <Txt variant="small" muted selectable>
                   {[
+                    l.soft ? "soft down: late, no new data on it" : "",
+                    l.rttMs > 0 ? `round trip ${l.rttMs} ms` : "",
                     l.state === "up" ? `last byte ${seconds(l.lastByteAgoMs)} ago` : "",
                     `${l.reconnects} reconnects`,
                     `${l.bytesIn} B in, ${l.bytesOut} B out`,
@@ -162,18 +165,22 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
   const toast = useToast();
   const ask = useAsk();
   const { push } = useNav();
+  // The quickest line changes as the session measures the lines; the links follow it.
+  useEverySecond();
+  const { packages, loaded, from } = useClientPackages();
   // A download says nothing until the server answers, which can take seconds: said here instead.
   const coming = () =>
     void ask<boolean>("downloading", (ok) => (
       <>
         <Txt>The download will start in a few seconds. Please wait.</Txt>
+        <Txt variant="small" muted testID="download-from">
+          {from.id ? `from line ${from.id}, the quickest now` : "from the server itself: no line has answered yet"}
+        </Txt>
         <DialogActions>
           <Button kind="text" testID="download-ok" label="ok" onPress={() => ok(true)} />
         </DialogActions>
       </>
     ));
-  const { origin } = useSession();
-  const { packages, loaded } = useClientPackages();
   return (
     <>
       <View style={styles.report}>
@@ -213,7 +220,7 @@ function ClientInfo({ report, done }: { report: string; done: (v: boolean) => vo
               {[p.bytes > 0 ? `${(p.bytes / 1048576).toFixed(1)} MB` : "", p.signed === "debug" ? "debug-signed" : ""].filter(Boolean).join(" · ")}
             </Txt>
           </View>
-          <DownloadLink testID={`download-${p.platform}`} label={`download ${p.platform}`} url={`${origin}${p.url}`} onStart={coming} style={styles.download}>
+          <DownloadLink testID={`download-${p.platform}`} label={`download ${p.platform}`} url={`${from.origin}${p.url}`} onStart={coming} style={styles.download}>
             <MaterialIcons name="download" size={22} color={colors.brand} />
           </DownloadLink>
         </View>

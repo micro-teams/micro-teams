@@ -3,8 +3,10 @@ package daemoncmd
 // `update` and `uninstall`: the binary itself.
 //
 // Update with a running service only signals it (SIGUSR2): the update happens inside that process,
-// which replaces the binaries and hands off to the new one with syscall.Exec, so nothing it hosts
-// notices. With no service running there is nothing to keep, and the files are replaced directly.
+// which downloads from the quickest line its multipath client measures, replaces the binaries and
+// hands off to the new one with syscall.Exec, so nothing it hosts notices. With no service running
+// there is nothing to keep and no line measured: the files come from the server's origin, as the
+// command says, and are replaced directly.
 //
 // Uninstall is the one command that ends the sessions on this machine, and it says so before it
 // does: it removes the service, makes sure the connector process is gone, ends the tmux server, and
@@ -50,7 +52,7 @@ func updateCmd(cfgPath *string, withConfig func(*cobra.Command) *cobra.Command) 
 			if err != nil || cfg.Base == "" {
 				return fmt.Errorf("no server configured — run `microteams login` first")
 			}
-			fmt.Println("Downloading the latest microteams and multipath client…")
+			fmt.Println("Downloading the latest microteams and multipath client from the server's origin (no service is running, so no line has been measured)…")
 			tmp, err := update.Fetch(context.Background(), cfg.Base, brand.Current.Name)
 			if err != nil {
 				return err
